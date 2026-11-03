@@ -1,0 +1,287 @@
+//! Adopt existing work without touching its files, input, or provider attachment.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::durable::TaskId;
+use crate::git::worktrees::{PlacementPlan, PlacementStrategy};
+use crate::ops::human_session::{checkout_scope, SessionTarget};
+use crate::ops::{OpsResult, WorkSelection};
+use crate::session::{LfSession, PrimaryScope};
+use crate::store::{PlanningLocks, SharedStore};
+use crate::work::task::{NewTask, Task};
+
+use super::{task_error, TaskPlacement};
+
+#[derive(Debug, Clone, Default)]
+pub struct TaskPromotionOptions {
+    pub session: Option<String>,
+    pub worktree: Option<PathBuf>,
+    /// File independent backlog work, without adopting a checkout or Session.
+    pub new: bool,
+}
+
+#[derive(Debug)]
+pub(super) struct Source {
+    pub task: Option<Task>,
+    checkout: Option<PathBuf>,
+    session: Option<LfSession>,
+    // Serialize source resolution and the local commit, including concurrent retries.
+    _admission: Vec<Arc<std::fs::File>>,
+}
+
+pub(super) async fn resolve_source(
+    store: &SharedStore,
+    repo: &Path,
+    options: &TaskPromotionOptions,
+) -> OpsResult<Source> {
+    let mut source = Source {
+        task: None,
+        checkout: None,
+        session: None,
+        _admission: Vec::new(),
+    };
+    if options.new {
+        if options.session.is_some() || options.worktree.is_some() {
+            return Err(task_error("--new cannot select existing work"));
+        }
+        return Ok(source);
+    }
+    let main = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
+    let mut selected = match &options.session {
+        Some(id) => Some(
+            crate::ops::human_session::session_by_id(store, id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error(format!("Session {id} was not found on this Machine")))?,
+        ),
+        None => None,
+    };
+    let cwd = options
+        .worktree
+        .as_deref()
+        .or_else(|| selected.as_ref().map(|session| session.cwd.as_path()))
+        .unwrap_or(repo);
+    let root = crate::git::worktree_root(cwd).map_err(task_error)?;
+    if crate::repository::CanonicalRepo::discover(&root).map_err(task_error)? != main {
+        return Err(task_error(
+            "The selected work belongs to another repository; run promotion there",
+        ));
+    }
+    if let Some(session) = &selected {
+        let session_root = crate::git::worktree_root(&session.cwd).map_err(task_error)?;
+        if session_root != root {
+            return Err(task_error("The Session and worktree are different checkouts; select the Session's existing checkout"));
+        }
+        if !session.interactive || session.completed_at.is_some() {
+            return Err(task_error(
+                "Select an unfinished interactive Session to become the Task conversation",
+            ));
+        }
+        if matches!(
+            store
+                .sqlite
+                .primary_scope(&session.id)
+                .map_err(task_error)?,
+            Some(PrimaryScope::Repository(_) | PrimaryScope::Wave(_))
+        ) {
+            return Err(task_error("A repository or Wave primary Session retains its scope; select an ordinary Session"));
+        }
+    }
+    source._admission = store
+        .lock_checkout_roots(vec![root.clone()])
+        .await
+        .map_err(task_error)?;
+    if let Some(session) = &selected {
+        // A bind can have completed while checkout admission was being acquired.
+        let current = store
+            .session(&session.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Session disappeared before promotion"))?;
+        if current.cwd != session.cwd {
+            return Err(task_error(
+                "Session workspace changed before promotion; retry",
+            ));
+        }
+        selected = Some(current);
+    }
+    let scope = checkout_scope(store, &root, SessionTarget::Context)
+        .await
+        .map_err(task_error)?;
+    match scope {
+        Some(PrimaryScope::Task(id)) => {
+            source.task = store.get_task(&id).await.map_err(task_error)?;
+            source.checkout = Some(root.clone());
+        }
+        None => {
+            source.checkout = Some(root.clone());
+            if selected.is_none() {
+                selected = select_checkout_conversation(store, &root).await?;
+            }
+        }
+        Some(PrimaryScope::Repository(_) | PrimaryScope::Wave(_)) => {
+            if options.worktree.is_some() {
+                return Err(task_error("This checkout is shared by its repository or Wave; select a Session without --worktree, or use an unassociated linked checkout"));
+            }
+        }
+    }
+    source.session = selected;
+    if let Some(session) = &source.session {
+        if let Some(id) = &session.task_id {
+            let task = store
+                .get_task(id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("The Session's Task is unavailable"))?;
+            if source
+                .task
+                .as_ref()
+                .is_some_and(|existing| existing.id != task.id)
+            {
+                return Err(task_error("The Session and checkout belong to different Tasks; permanent bindings are unchanged"));
+            }
+            source.task = Some(task);
+        }
+    }
+    Ok(source)
+}
+
+async fn select_checkout_conversation(
+    store: &SharedStore,
+    root: &Path,
+) -> OpsResult<Option<LfSession>> {
+    if let Some(caller) = crate::journal::agent_caller() {
+        let session = store
+            .session(&caller.session_id)
+            .await
+            .map_err(task_error)?
+            .filter(|session| {
+                session.interactive
+                    && session.completed_at.is_none()
+                    && crate::git::worktree_root(&session.cwd).ok().as_deref() == Some(root)
+            });
+        if session.is_some() {
+            return Ok(session);
+        }
+    }
+    store.sqlite.checkout_conversation(root).map_err(task_error)
+}
+
+pub(super) async fn save(
+    store: &SharedStore,
+    main: &Path,
+    id: TaskId,
+    creation: Option<NewTask>,
+    source: Source,
+    acquisition: Option<Arc<PlanningLocks>>,
+) -> OpsResult<Task> {
+    if source.checkout.is_none() && source.session.is_none() {
+        if let Some(creation) = creation.as_ref() {
+            return store
+                .create_task(creation, acquisition)
+                .await
+                .map_err(task_error);
+        }
+    }
+    if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
+        return Err(task_error(format!(
+            "The selected work already belongs to {}; ownership is unchanged",
+            task.identifier
+        )));
+    }
+    let existing = store.get_task(&id).await.map_err(task_error)?;
+    if let Some(task) = &existing {
+        if super::repository_for_task(store, task)? != main {
+            return Err(task_error(
+                "The Task belongs to another repository; its ownership is unchanged",
+            ));
+        }
+        if let Some(checkout) = &source.checkout {
+            if task.worktree.as_ref().is_some_and(|path| path != checkout) {
+                return Err(task_error(format!(
+                    "{} already has a different checkout; its work is unchanged",
+                    task.identifier
+                )));
+            }
+        }
+    }
+    let placement = match (
+        &source.checkout,
+        existing.as_ref().and_then(|task| task.worktree.as_ref()),
+    ) {
+        (Some(root), None) => {
+            let prepared = prepare(main, root)?;
+            Some((root.clone(), prepared.pr(&id)))
+        }
+        _ => None,
+    };
+    // No checkout restoration here: the selected files and branch already exist.
+    let task = store
+        .promote_task(&id, creation, placement, source.session, acquisition)
+        .await
+        .map_err(task_error)?;
+    drop(source._admission);
+    Ok(task)
+}
+
+fn prepare(main: &Path, root: &Path) -> OpsResult<TaskPlacement> {
+    let branch = crate::git::current_branch(root)?.ok_or_else(|| {
+        task_error("Promotion needs a named branch; create a branch at the current commit first")
+    })?;
+    let plan = PlacementPlan {
+        base_ref: crate::git::get_default_branch(main)?,
+        branch,
+        worktree_path: root.to_path_buf(),
+        strategy: PlacementStrategy::UseExistingWorktree,
+    };
+    let slug = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| task_error("Worktree has no UTF-8 name"))?
+        .to_owned();
+    super::prepare_placement(
+        main,
+        plan,
+        slug,
+        None,
+        crate::git::worktrees::github_repo_nwo(main).is_some(),
+    )
+}
+
+/// Associate an existing Task with work already in progress; never launch work.
+pub fn task_promote(repo: &Path, issue: &str, options: TaskPromotionOptions) -> OpsResult<Task> {
+    super::block_on_task(async {
+        let store = Arc::new(crate::ops::planning_sync::planning_store().await?);
+        let selected = crate::ops::run::select_work(
+            &store,
+            repo,
+            WorkSelection {
+                task: Some(issue),
+                wave: None,
+            },
+        )
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task is unavailable"))?;
+        let task = selected.task.expect("explicit Task selection");
+        let source = resolve_source(&store, repo, &options).await?;
+        if source.checkout.is_none() && source.session.is_none() {
+            return Err(task_error(
+                "Select an existing linked worktree or --session SESSION to promote",
+            ));
+        }
+        let main = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
+        let acquisition = match super::owning_wave(&store, &task).await? {
+            Some(wave) => Some(crate::ops::planning_sync::lock_wave_planning(&wave).await?),
+            None => None,
+        };
+        let task = save(&store, main.as_path(), task.id, None, source, acquisition).await?;
+        crate::ops::planning_sync::sync_after_save(&store, &main.to_string()).await;
+        store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Promoted Task is unavailable"))
+    })
+}

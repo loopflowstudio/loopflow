@@ -165,6 +165,7 @@ struct SessionBindingDraft: Equatable {
     let sessionId: String
     let title: String
     var selector = ""
+    var taskTitle = ""
     var preview: SessionBindingPreview?
     var submitting = false
     var error: String?

@@ -2537,3 +2537,409 @@ fn pi_managed_graph_routes_one_branch_and_nested_lf_retains_task_and_checkout() 
         .unwrap();
     assert_eq!(wrong_owners, 0);
 }
+
+// Promotion exercises the real CLI against a disposable Machine and native
+// provider stand-in. No configured account or live checkout participates.
+#[test]
+fn promotion_preserves_live_conversation_and_existing_work() {
+    for existing in [false, true] {
+        let fixture = Fixture::new(true);
+        let root = fixture.repo.create_named_worktree("prototype");
+        let root = root.canonicalize().unwrap();
+        let path = root.to_str().unwrap();
+        std::fs::write(root.join("README.md"), "unfinished research\n").unwrap();
+        std::fs::write(root.join("prototype.txt"), "untracked draft\n").unwrap();
+        let (child, capture) = fixture.attach(&[
+            "--repo",
+            path,
+            "-i",
+            "--agent",
+            "opencode",
+            ":",
+            "Keep researching",
+        ]);
+        // Always release the fixture provider, including when an assertion fails.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let id = fixture.session_row(&capture).0;
+            let before = fixture
+                .sessions()
+                .into_iter()
+                .find(|session| session["id"] == id)
+                .unwrap();
+            assert_eq!(before["cwd"], path);
+            let input_attachment = || -> String {
+                fixture.db().query_row(
+                "SELECT json_array(s.current_capture,s.input_published,p.agent_session_id,p.attached_lf_process_id,p.attachment_token)
+                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+                [&id], |row| row.get(0),
+            ).unwrap()
+            };
+            let attachment = input_attachment();
+            let captures = fixture.captures();
+            let history = fixture.run_parents(&capture);
+            let created = if existing {
+                let filed = fixture.json(&[
+                    "task",
+                    "create",
+                    "--new",
+                    "--title",
+                    "Research prototype",
+                    "--json",
+                ]);
+                let promoted = fixture.json(&[
+                    "task",
+                    "promote",
+                    filed["id"].as_str().unwrap(),
+                    "--session",
+                    &id,
+                    "--worktree",
+                    path,
+                    "--json",
+                ]);
+                assert_eq!(promoted["id"], filed["id"]);
+                promoted
+            } else {
+                fixture.json(&[
+                    "--repo",
+                    path,
+                    "task",
+                    "create",
+                    "--title",
+                    "Research prototype",
+                    "--json",
+                ])
+            };
+            let task = created["id"].as_str().unwrap();
+            assert_eq!(created["worktree"], path);
+            assert_eq!(created["branch"], "prototype");
+            let after = fixture
+                .sessions()
+                .into_iter()
+                .find(|session| session["id"] == id)
+                .unwrap();
+            for field in ["id", "cwd", "agent_process_id", "provider"] {
+                assert_eq!(before[field], after[field], "{field}");
+            }
+            assert_eq!(after["task_primary"], true);
+            assert_eq!(input_attachment(), attachment);
+            assert_eq!(fixture.captures(), captures);
+            assert_eq!(fixture.run_parents(&capture), history);
+            assert_eq!(fixture.launches().len(), 1);
+            assert_eq!(fixture.count("task_graphs"), 0);
+            let repeated = fixture.json(&[
+                "--repo",
+                path,
+                "task",
+                "create",
+                "--title",
+                "Research prototype",
+                "--json",
+            ]);
+            assert_eq!(repeated["id"], task);
+            let promoted = fixture.json(&["task", "promote", task, "--session", &id, "--json"]);
+            assert_eq!(promoted["id"], task);
+            assert_eq!(fixture.count("tasks"), 1);
+            let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
+            assert_eq!(primary["id"], id);
+            let status = fixture.json(&["task", "status", task, "--json"]);
+            assert_eq!(status["sessions"][0]["id"], id);
+            let opened = fixture.json(&["open", "--task", task, "--link", "--json"]);
+            assert_eq!(opened[0]["target"]["task_id"], task);
+            assert_eq!(
+                fixture.launches().len(),
+                1,
+                "opening a link launches no provider"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("README.md")).unwrap(),
+                "unfinished research\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("prototype.txt")).unwrap(),
+                "untracked draft\n"
+            );
+            assert_eq!(
+                loopflow::git::current_branch(&root).unwrap().as_deref(),
+                Some("prototype")
+            );
+            (task.to_owned(), id)
+        }));
+        fixture.release(child);
+        let (task, id) = match result {
+            Ok(value) => value,
+            Err(error) => std::panic::resume_unwind(error),
+        };
+        std::fs::write(
+            fixture.home.path().join("bin/opencode"),
+            include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+        )
+        .unwrap();
+        let continued = fixture.run(&["resume", "--task", &task]);
+        assert!(continued.status.success(), "{continued:?}");
+        assert_eq!(
+            fixture.session_row(fixture.launches().last().unwrap()).0,
+            id
+        );
+        let cwd: String = fixture
+            .db()
+            .query_row("SELECT cwd FROM agent_sessions WHERE id=?1", [&id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cwd, path);
+    }
+}
+
+#[test]
+fn promotion_worktree_only_records_pr_and_rejects_conflicting_owner() {
+    let fixture = Fixture::new(false);
+    let root = fixture
+        .repo
+        .create_named_worktree("prototype")
+        .canonicalize()
+        .unwrap();
+    let origin = Command::new("git")
+        .args(["config", "--get", "remote.origin.url"])
+        .current_dir(fixture.repo.path())
+        .output()
+        .unwrap();
+    let origin = String::from_utf8(origin.stdout).unwrap();
+    for args in [
+        vec![
+            "config".to_owned(),
+            format!("url.{}.insteadOf", origin.trim()),
+            "https://github.com/test/repo".into(),
+        ],
+        vec![
+            "remote".into(),
+            "set-url".into(),
+            "origin".into(),
+            "https://github.com/test/repo".into(),
+        ],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(fixture.repo.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    let gh = fixture.home.path().join("bin/gh");
+    std::fs::write(&gh, format!("#!/bin/sh\ncat <<'JSON'\n[{{\"number\":42,\"url\":\"https://github.com/test/repo/pull/42\",\"state\":\"OPEN\",\"isDraft\":true,\"mergeCommit\":null,\"headRefOid\":\"{}\"}}]\nJSON\n", fixture.repo.head_sha())).unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let first = fixture.json(&[
+        "task",
+        "create",
+        "--title",
+        "Existing prototype",
+        "--worktree",
+        root.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(first["worktree"], root.to_str().unwrap());
+    assert_eq!(fixture.count("agent_sessions"), 0);
+    assert_eq!(fixture.count("task_graphs"), 0);
+    let publication: String = fixture
+        .db()
+        .query_row(
+            "SELECT github_url FROM task_prs WHERE task_id=?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(publication, "https://github.com/test/repo/pull/42");
+    let second = fixture.json(&[
+        "task",
+        "create",
+        "--new",
+        "--title",
+        "Independent",
+        "--json",
+    ]);
+    let refused = fixture.run(&[
+        "task",
+        "promote",
+        second["id"].as_str().unwrap(),
+        "--worktree",
+        root.to_str().unwrap(),
+    ]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("already belongs"));
+    assert_eq!(fixture.count("tasks"), 2);
+    let owner: String = fixture
+        .db()
+        .query_row(
+            "SELECT id FROM tasks WHERE worktree=?1",
+            [root.to_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owner, first["id"]);
+}
+
+#[test]
+fn promotion_session_only_keeps_main_cwd_and_permanent_binding() {
+    let fixture = Fixture::new(true);
+    let (child, capture) = fixture.attach(&LAUNCH);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let id = fixture.session_row(&capture).0;
+        let before = fixture
+            .sessions()
+            .into_iter()
+            .find(|session| session["id"] == id)
+            .unwrap();
+        let created = fixture.json(&[
+            "task",
+            "create",
+            "--session",
+            &id,
+            "--title",
+            "Keep conversation",
+            "--json",
+        ]);
+        assert!(created["worktree"].is_null());
+        let task = created["id"].as_str().unwrap();
+        let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
+        assert_eq!(primary["id"], id);
+        assert_eq!(primary["cwd"], before["cwd"]);
+        let repeated = fixture.json(&[
+            "task",
+            "create",
+            "--session",
+            &id,
+            "--title",
+            "Keep conversation",
+            "--json",
+        ]);
+        assert_eq!(repeated["id"], task);
+        let other = fixture.json(&["task", "create", "--new", "--title", "Another", "--json"]);
+        let refused = fixture.run(&[
+            "task",
+            "promote",
+            other["id"].as_str().unwrap(),
+            "--session",
+            &id,
+        ]);
+        assert!(!refused.status.success());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("already belongs"));
+        assert_eq!(fixture.count("tasks"), 2);
+        assert_eq!(fixture.count("task_graphs"), 0);
+        assert_eq!(fixture.launches().len(), 1);
+        (task.to_owned(), id)
+    }));
+    fixture.release(child);
+    let (task, id) = match result {
+        Ok(value) => value,
+        Err(error) => std::panic::resume_unwind(error),
+    };
+    std::fs::write(
+        fixture.home.path().join("bin/opencode"),
+        include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+    )
+    .unwrap();
+    // Continuing the same native conversation after promotion keeps its Session.
+    let continued = fixture.run(&["resume", "--task", &task]);
+    assert!(continued.status.success(), "{continued:?}");
+    assert_eq!(
+        fixture.session_row(fixture.launches().last().unwrap()).0,
+        id
+    );
+}
+
+#[test]
+fn promotion_failed_reservation_leaves_no_task_and_retry_succeeds() {
+    let fixture = Fixture::new(false);
+    let root = fixture
+        .repo
+        .create_named_worktree("prototype")
+        .canonicalize()
+        .unwrap();
+    // Empty repository-local identity overrides any Machine/global identity.
+    let git = |email: &str| {
+        assert!(Command::new("git")
+            .args(["config", "user.email", email])
+            .current_dir(&root)
+            .status()
+            .unwrap()
+            .success());
+    };
+    git("");
+    let args = [
+        "task",
+        "create",
+        "--worktree",
+        root.to_str().unwrap(),
+        "--title",
+        "Keep prototype",
+        "--json",
+    ];
+    let failed = fixture.run(&args);
+    assert!(!failed.status.success(), "{failed:?}");
+    assert_eq!(fixture.count("tasks"), 0);
+    git("test@example.com");
+    let created = fixture.json(&args);
+    assert_eq!(fixture.count("tasks"), 1);
+    let again = fixture.json(&args);
+    assert_eq!(again["id"], created["id"]);
+    assert_eq!(fixture.count("tasks"), 1);
+    assert_eq!(fixture.count("task_graphs"), 0);
+    let ready: String = fixture.db().query_row(
+        "SELECT json_extract(kind_json,'$.kind') FROM task_events WHERE task_id=?1 ORDER BY rowid DESC LIMIT 1",
+        [created["id"].as_str().unwrap()], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(ready, "checkout_ready");
+}
+
+#[test]
+fn promotion_continuation_keeps_a_recorded_session_subdirectory() {
+    let fixture = Fixture::new(false);
+    let output = fixture.run(&LAUNCH);
+    assert!(output.status.success(), "{output:?}");
+    let original = fixture.session_row(&fixture.launches()[0]).0;
+    let root = fixture
+        .repo
+        .create_named_worktree("prototype")
+        .canonicalize()
+        .unwrap();
+    let research = root.join("research");
+    std::fs::create_dir(&research).unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    // Desktop/import admission can record a more specific cwd than the CLI's
+    // --repo selector, which normalizes its initial launch to the checkout root.
+    let session = runtime.block_on(async {
+        let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
+            path: fixture.home.path().join("loopflow.db"),
+        })
+        .await
+        .unwrap();
+        let mut session = store.session(&original).await.unwrap().unwrap();
+        session.id = uuid::Uuid::new_v4().simple().to_string().into();
+        session.cwd = research.clone();
+        session.captured = None;
+        session.artifact_key = None;
+        session.caller_artifact_key = None;
+        session.input_published = false;
+        session.completed_at = None;
+        store.create_session(session).await.unwrap()
+    });
+    let task = fixture.json(&[
+        "task",
+        "create",
+        "--session",
+        session.id.as_str(),
+        "--title",
+        "Research",
+        "--json",
+    ]);
+    let primary = fixture.json(&[
+        "resume",
+        "--task",
+        task["id"].as_str().unwrap(),
+        "--prepare",
+        "--json",
+    ]);
+    assert_eq!(primary["id"], session.id.as_str());
+    assert_eq!(primary["cwd"], research.to_str().unwrap());
+    assert_eq!(task["worktree"], root.to_str().unwrap());
+    assert_eq!(fixture.launches().len(), 1);
+}

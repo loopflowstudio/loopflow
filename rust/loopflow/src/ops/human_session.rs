@@ -119,7 +119,7 @@ pub(super) fn unassociated_checkout(cwd: &Path) -> Result<anyhow::Error> {
 }
 
 /// The scope that owns this checkout, or `None` for an unassociated linked one.
-pub(super) async fn checkout_scope(
+pub(crate) async fn checkout_scope(
     store: &SharedStore,
     cwd: &Path,
     target: SessionTarget<'_>,

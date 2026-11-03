@@ -75,7 +75,7 @@ lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --json
 
 Only after Project creation succeeds, reconcile candidate notes against the exact
 resulting Project IDs. Confirm each Wave still selects the intended destination.
-Use `lf task create --wave <wave> --title <title> --notes <description>` for accepted
+Use `lf task create --new --wave <wave> --title <title> --notes <description>` for accepted
 candidates. Record returned issue IDs alongside candidate keys. Before retrying
 an uncertain creation, inspect provider issues and recover its existing identity;
 do not blindly create again. Leave ambiguous matches unresolved.

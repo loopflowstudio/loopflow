@@ -69,7 +69,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
      Future plan authoring needs an available Linear writer; `update-plan`
      cannot write a Planned Project. Report missing access rather than inventing
      a command or starting Tasks without a current plan.
-   - File new Tasks with `lf task create --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in comments; keep current blockers and dependencies in the description even when comments are collapsed.
+   - File new Tasks with `lf task create --new --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in comments; keep current blockers and dependencies in the description even when comments are collapsed.
    - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
 5. Retire the parent's future planning

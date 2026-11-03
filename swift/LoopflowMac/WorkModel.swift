@@ -2382,7 +2382,7 @@ final class WorkModel {
 
     func beginSessionBinding(_ record: SessionRecord) {
         guard navigation.binding == nil else { return }
-        navigation.binding = SessionBindingDraft(sessionId: record.id, title: record.title)
+        navigation.binding = SessionBindingDraft(sessionId: record.id, title: record.title, taskTitle: record.title)
     }
 
     func previewSessionBinding() async {
@@ -2415,6 +2415,28 @@ final class WorkModel {
             supersedeSessions()
             replaceSession(record, key: key)
             if owner.selectedSessionId == record.id { owner.selection = record.work }
+            if owner.binding?.id == draft.id { owner.binding = nil }
+        } catch {
+            guard owner.binding?.id == draft.id else { return }
+            owner.binding?.submitting = false
+            owner.binding?.error = error.localizedDescription
+        }
+    }
+
+    func promoteSessionToTask() async {
+        guard let repo = repoPath, let draft = navigation.binding, !draft.submitting else { return }
+        let owner = navigation
+        owner.binding?.submitting = true
+        owner.binding?.error = nil
+        do {
+            let task = try await query.promoteSession(
+                id: draft.sessionId, task: draft.preview?.taskId,
+                title: draft.taskTitle, cwd: repo)
+            // Keep the selected Session, its retained terminal and composer.
+            // Promotion changes its Work address, never its input attachment.
+            supersedeSessions()
+            await refreshSessions()
+            if owner.selectedSessionId == draft.sessionId { owner.selection = .task(id: task.id) }
             if owner.binding?.id == draft.id { owner.binding = nil }
         } catch {
             guard owner.binding?.id == draft.id else { return }

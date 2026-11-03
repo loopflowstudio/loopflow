@@ -69,6 +69,32 @@ import Testing
         #expect(model.navigation.binding == nil)
         #expect(model.sessions.value?.first { $0.id == "interactive" }?.work == .task(id: "task-exact"))
     }
+    @Test("Promotion keeps the selected conversation and changes its Work without launching")
+    func promoteExistingConversation() async throws {
+        for existing in [false, true] {
+            let source = try ControlsSource()
+            let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+            await model.refreshSessions()
+            model.navigation.selectedSessionId = "interactive"
+            let session = try #require(model.sessions.value?.first { $0.id == "interactive" })
+            model.beginSessionBinding(session)
+            if existing {
+                model.navigation.binding?.selector = "INF-123"
+                await model.previewSessionBinding()
+            }
+            await model.promoteSessionToTask()
+            #expect(model.navigation.binding == nil)
+            #expect(model.navigation.selectedSessionId == session.id)
+            #expect(model.selection == .task(id: "task-exact"))
+            let promoted = try #require(model.sessions.value?.first { $0.id == session.id })
+            #expect(promoted.work == .task(id: "task-exact"))
+            #expect(promoted.cwd == session.cwd)
+            #expect(promoted.agentProcessId == session.agentProcessId)
+            #expect(promoted.taskPrimary)
+            #expect(await source.bindCount == 0)
+        }
+    }
+
 }
 
 private actor ControlsSource {
@@ -100,6 +126,13 @@ private actor ControlsSource {
                 await withCheckedContinuation { pending = $0; waiter?.resume(); waiter = nil }
             }
             return String(decoding: snapshot, as: UTF8.self)
+        }
+        if args.starts(with: ["task", "create"]) || args.starts(with: ["task", "promote"]) {
+            #expect(args.contains("--session"))
+            #expect(!args.contains("--run"))
+            record["work"] = ["kind": "task", "id": "task-exact"]
+            record["task_primary"] = true
+            return #"{"id":"task-exact","identifier":"INF-123","title":"Conversation"}"#
         }
         if args.contains("--dry-run") {
             return #"{"session_id":"interactive","task_id":"task-exact","identifier":"INF-123","title":"Completed off-roadmap Task"}"#

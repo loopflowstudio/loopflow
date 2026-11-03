@@ -1114,7 +1114,8 @@ impl TaskCommand {
             | Self::Delete { .. }
             | Self::Edit { .. }
             | Self::Move { .. }
-            | Self::Interrupt { .. } => true,
+            | Self::Interrupt { .. }
+            | Self::Promote { .. } => true,
         }
     }
 }
@@ -1944,6 +1945,21 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Make an existing worktree or Session this Task's home without starting work
+    #[command(
+        after_help = "Defaults to this checkout. --session uses that conversation's cwd and makes it the Task's primary. Shared main/Wave checkouts are never adopted. Remote calls select paths and Sessions on the target Machine; they never transfer live work."
+    )]
+    Promote {
+        issue: String,
+        /// Existing conversation; preserves its provider, input and attachment
+        #[arg(long, id = "promote_session")]
+        session: Option<String>,
+        /// Existing linked worktree; defaults to the Session's cwd or this checkout
+        #[arg(long)]
+        worktree: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Run the Task's Graph in its worktree until the next interactive step;
     /// returns once it runs (`-b` runs every step headless to `end`, approving Auto-Ship)
     #[command(
@@ -1994,8 +2010,20 @@ until `lf ship`."
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Create a planning Task; with --run, start it and open its conversation
+    /// Create a Task from existing work; with --run, also start its Graph
+    #[command(
+        after_help = "An unassociated linked checkout becomes the Task's home, preserving its branch and files. Its current conversation becomes primary. Repeating creation there returns the same Task; use --new to file separate backlog work. Main and Wave checkouts stay shared. --session selects an existing conversation without restarting it. Promotion alone never starts a Graph or approves Auto-Ship. Remote calls use sources on the selected Machine."
+    )]
     Create {
+        /// Existing conversation to promote without replaying its input
+        #[arg(long, id = "create_session", conflicts_with = "new")]
+        session: Option<String>,
+        /// Existing linked checkout to adopt
+        #[arg(long, conflicts_with = "new")]
+        worktree: Option<PathBuf>,
+        /// File separate backlog work without adopting this checkout or Session
+        #[arg(long)]
+        new: bool,
         /// What you want, in your words: the Task's notes, its first line the title.
         /// With --run, also the first turn of its conversation
         #[arg(conflicts_with = "notes")]
@@ -2231,7 +2259,8 @@ impl TaskCommand {
             | Self::Edit { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. }
+            | Self::Promote { issue, .. } => Some(issue),
         }
     }
 
@@ -2259,7 +2288,8 @@ impl TaskCommand {
             | Self::Edit { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. }
+            | Self::Promote { issue, .. } => Some(issue),
         }
     }
 }

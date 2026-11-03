@@ -30,7 +30,7 @@ struct SessionActionSheet: View {
     private var bindingForm: some View {
         if let draft = model.navigation.binding {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Bind “\(draft.title)” to a Task").font(Typography.textStrong)
+                Text("Assign “\(draft.title)” to a Task").font(Typography.textStrong)
                 if let preview = draft.preview {
                     Text("\(preview.identifier) · \(preview.title)")
                     Text("This assignment is permanent. This Session cannot be moved to another Task or unbound.")
@@ -40,7 +40,24 @@ struct SessionActionSheet: View {
                             .accessibilityIdentifier("session-bind-confirm")
                     }
                     .disabled(draft.submitting)
+                    Button("Use Session and checkout as Task home") {
+                        Task { await model.promoteSessionToTask() }
+                    }
+                    .disabled(draft.submitting)
+                    .accessibilityIdentifier("session-promote-existing")
                 } else {
+                    TextField("New Task title", text: Binding(
+                        get: { model.navigation.binding?.taskTitle ?? "" },
+                        set: { model.navigation.binding?.taskTitle = $0 }))
+                        .disabled(draft.submitting)
+                        .accessibilityIdentifier("session-promote-title")
+                    Button("Create Task from this Session") {
+                        Task { await model.promoteSessionToTask() }
+                    }
+                    .disabled(draft.submitting || draft.taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("session-promote-create")
+                    Text("Keeps this conversation and its work in place. Starts no workflow.")
+                    Divider()
                     TextField("Task identifier or stable ID", text: Binding(
                         get: { model.navigation.binding?.selector ?? "" },
                         set: { model.navigation.binding?.selector = $0 }))

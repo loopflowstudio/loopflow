@@ -192,6 +192,13 @@ pub(crate) async fn admit_workspace(
                 .get_task(task)
                 .await?
                 .ok_or_else(|| anyhow!("primary Task is unavailable"))?;
+            if session.work_source == Some(WorkSource::Bound)
+                && task.worktree.as_ref().is_none_or(|cwd| {
+                    crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(cwd)
+                })
+            {
+                return Ok(session);
+            }
             if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
                 cwd
             } else {

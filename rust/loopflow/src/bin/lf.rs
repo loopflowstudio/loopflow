@@ -1069,7 +1069,32 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             println!("{issue}: completed");
             Ok(())
         }
+        TaskCommand::Promote {
+            issue,
+            session,
+            worktree,
+            json,
+        } => {
+            let task = loopflow::ops::task::task_promote(
+                repo,
+                issue,
+                loopflow::ops::task::TaskPromotionOptions {
+                    session: session.clone(),
+                    worktree: worktree.clone(),
+                    new: false,
+                },
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&task)?);
+            } else {
+                println!("{} · {}", task.title, task.identifier);
+            }
+            Ok(())
+        }
         TaskCommand::Create {
+            session,
+            worktree,
+            new,
             request,
             no_wave,
             wave,
@@ -1094,6 +1119,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 title.clone(),
                 report,
                 regressed_in_arg(regressed_in),
+                loopflow::ops::task::TaskPromotionOptions {
+                    session: session.clone(),
+                    worktree: worktree.clone(),
+                    new: *new,
+                },
             )?;
             match (*json, *run) {
                 (false, _) => println!("{} · {}", issue.title, issue.identifier),

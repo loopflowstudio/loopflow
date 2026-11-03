@@ -129,3 +129,17 @@ Desktop consumes the same plans in native Dashboards and `desktop view --plan`.
 `desktop view EXPRESSION` routes through the repository window; `desktop state`
 includes its selected view and actual geometry. Native Task workspaces own
 revision-checked pane/draft saves. Saved shell intent never authorizes a launch.
+
+## Promote existing work
+
+```sh
+lf task create --title "Finish prototype"
+lf task promote LOO-12 --session SESSION
+```
+
+Creation adopts an unassociated linked checkout and its current conversation.
+Promotion gives an existing Task that work. Both preserve files, branch, native
+history and live input; neither starts a Graph. Repeating creation in the adopted
+checkout returns its Task. Use `lf task create --new` for separate backlog work.
+Shared main/Wave checkouts stay shared; an ordinary Session there can bind without
+moving. See [Work](../../../../docs/work.md#keep-work-already-in-progress).

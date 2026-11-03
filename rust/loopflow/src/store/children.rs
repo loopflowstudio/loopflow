@@ -25,6 +25,26 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn promote_task(
+        &self,
+        task_id: &TaskId,
+        creation: Option<crate::work::task::NewTask>,
+        placement: Option<(std::path::PathBuf, TaskPr)>,
+        session: Option<crate::session::LfSession>,
+        acquisition: Option<Arc<super::PlanningLocks>>,
+    ) -> StoreResult<Task> {
+        let task_id = task_id.clone();
+        run_planning_write(&self.sqlite, acquisition, move |store| {
+            store.promote_task(
+                &task_id,
+                creation.as_ref(),
+                placement.as_ref(),
+                session.as_ref(),
+            )
+        })
+        .await
+    }
+
     pub async fn edit_task(
         &self,
         id: &TaskId,

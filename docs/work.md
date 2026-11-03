@@ -8,19 +8,45 @@ Waves.
 ## Hand off more than one
 
 ```bash
-pbpaste | lf task create                     # first line is the title, the rest its notes
+pbpaste | lf task create --new               # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
 lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before it merges
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
 
-Each Task gets its own worktree beside your repository, its own branch and at
+A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
 most one pull request. A stacked Task forks from its parent's PR; `lf sync`
 carries the child through the parent's updates and squash merge.
 
 Every agent that works on a Task starts from the same place: the Task's notes
 and comments, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
+
+## Keep work already in progress
+
+```bash
+lf task create --title "Finish the prototype"    # adopt this linked checkout
+lf task create --session SESSION --title "Finish the prototype"
+lf task promote LOO-12 --session SESSION         # use work for an existing Task
+lf task promote LOO-12 --worktree ../prototype   # checkout without a conversation
+```
+
+Promotion preserves the branch, dirty and untracked files, and the Session's
+provider history and live attachment. The selected Session becomes the Task's
+primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
+Promotion starts no Graph and approves no Auto-Ship. Repeating it keeps the same
+Task; conflicting Task ownership fails without moving either person's work.
+Use `--new` when filing independent backlog work from an existing Task checkout.
+
+Main and Wave checkouts remain shared. An ordinary Session there can become a
+Task conversation without moving its cwd; an explicit later `lf task checkout`
+gives the Task a separate home. Repository and Wave primary conversations keep
+their scope. A remote command uses the selected Machine's existing paths and
+Sessions; it does not transfer local live work.
+
+Desktop offers **Create Task from this Session** in the Session's Task-assignment
+action. Selecting an existing Task also offers **Use Session and checkout as Task
+home**. The current terminal and composer stay in place.
 
 ## Steer it while it runs
 

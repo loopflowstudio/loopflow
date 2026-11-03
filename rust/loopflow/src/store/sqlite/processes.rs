@@ -324,6 +324,20 @@ pub(super) fn attach_in(
             attached.token
         ],
     )?;
+    if let Some(previous) = current.filter(|_| !replace_provider) {
+        // The provider and its pending requests survive attachment handoff.
+        // Only its current reading follows; stale writers retain their old fence.
+        tx.execute(
+            "UPDATE session_activity SET attachment_token=?3
+             WHERE session_id=?1 AND agent_process_id=?2 AND attachment_token=?4",
+            params![
+                session,
+                attached.agent_process_id,
+                attached.token,
+                previous.token
+            ],
+        )?;
+    }
     Ok(attached)
 }
 

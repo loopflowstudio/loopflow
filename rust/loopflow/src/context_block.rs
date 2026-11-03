@@ -249,7 +249,8 @@ impl ContextDelivery {
             quote(&self.home),
             quote(&executable),
         );
-        // Steer boundaries start lf only when a steer is newer than the last seen.
+        // Tool boundaries start lf only for new steering. Prompt boundaries
+        // always run: they also record native turn activity.
         let steer = format!(
             // dash's -nt is false when the second file is missing, so test existence first.
             "[ -n \"${seen}\" ] || exit 0; [ -e \"${seen}\" ] && {{ [ ! -e {latest} ] || [ \"${seen}\" -nt {latest} ]; }} && exit 0; {command} tool",
@@ -260,7 +261,7 @@ impl ContextDelivery {
             "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
                 {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
-            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
+            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "SessionStart": [
             {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}, {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}

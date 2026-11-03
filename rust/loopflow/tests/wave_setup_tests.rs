@@ -232,7 +232,7 @@ fn a_wave_file_rejects_repository_settings() {
     );
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("`release` belongs to the repository"),
+        String::from_utf8_lossy(&output.stderr).contains("release describes repository setup"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

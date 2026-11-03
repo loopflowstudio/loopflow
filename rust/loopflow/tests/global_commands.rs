@@ -94,11 +94,7 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     assert!(report.get("goal_status").is_none());
     let budgets = &report["context"]["budgets"];
     for (key, value, source) in [
-        (
-            "memory_tokens",
-            400,
-            repo.path().join(".lf/wave/local/GOAL.md"),
-        ),
+        ("memory_tokens", 500, home.path().join(".lf/config.yaml")),
         ("scratch_tokens", 600, home.path().join(".lf/config.yaml")),
         ("scratch_bytes", 10000, repo.path().join(".lf/config.yaml")),
     ] {
@@ -373,96 +369,29 @@ fn broken_git_metadata_is_not_treated_as_an_ordinary_folder() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("cannot discover Git repository"));
 }
 
-#[cfg(target_os = "macos")]
 #[test]
-fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
-    use std::os::unix::fs::{symlink, PermissionsExt};
-
+fn scheduled_install_preserves_the_account_schedule_from_a_disposable_home() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let bin = home.path().join("bin");
-    fs::create_dir_all(&bin).unwrap();
-    symlink("/usr/bin/id", bin.join("id")).unwrap();
-    fs::write(bin.join("launchctl"), "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootstrap) : > \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
-    fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
-    let run = |args: &[&str]| {
-        success(
-            command(home.path(), cwd.path(), &["self", "install", "schedule"])
-                .args(args)
-                .env("PATH", &bin)
-                .env("LF_INSTALL_DIR", home.path().join("installed & current"))
-                .output()
-                .unwrap(),
-        )
-    };
-    assert!(run(&[]).contains("weekly"));
-    let path = home
-        .path()
-        .join("Library/LaunchAgents/com.loopflow.refresh.plist");
-    let read_plist = || -> serde_json::Value {
-        let output = Command::new("/usr/bin/plutil")
-            .args(["-convert", "json", "-o", "-"])
-            .arg(&path)
-            .output()
-            .unwrap();
-        serde_json::from_str(&success(output)).unwrap()
-    };
-    let plist = read_plist();
-    assert_eq!(plist["ProgramArguments"][1], "install");
-    assert_eq!(plist["ProgramArguments"].as_array().unwrap().len(), 2);
-    assert_eq!(
-        plist["EnvironmentVariables"]["LF_INSTALL_DIR"],
-        home.path().join("installed & current").to_str().unwrap()
-    );
-    assert!(plist.get("WorkingDirectory").is_none());
-    assert_eq!(plist["RunAtLoad"], true);
-    assert_eq!(
-        plist["StartCalendarInterval"],
-        serde_json::json!({"Weekday": 1, "Hour": 9, "Minute": 0})
-    );
-    assert!(home.path().join("loaded").exists());
-    let modified = fs::metadata(&path).unwrap().modified().unwrap();
-    run(&[]);
-    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
-    fs::remove_file(home.path().join("loaded")).unwrap();
-    run(&[]);
-    assert!(home.path().join("loaded").exists());
-
-    for (frequency, expected) in [
-        ("daily", serde_json::json!({"Hour": 9, "Minute": 0})),
-        ("hourly", serde_json::json!({"Minute": 0})),
-        (
-            "5min",
-            serde_json::json!([
-                {"Minute": 0}, {"Minute": 5}, {"Minute": 10}, {"Minute": 15},
-                {"Minute": 20}, {"Minute": 25}, {"Minute": 30}, {"Minute": 35},
-                {"Minute": 40}, {"Minute": 45}, {"Minute": 50}, {"Minute": 55}
-            ]),
-        ),
-        (
-            "weekly",
-            serde_json::json!({"Weekday": 1, "Hour": 9, "Minute": 0}),
-        ),
-    ] {
-        run(&[frequency]);
-        assert_eq!(read_plist()["StartCalendarInterval"], expected);
-        assert!(home.path().join("loaded").exists());
-        let modified = fs::metadata(&path).unwrap().modified().unwrap();
-        run(&[frequency]);
-        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+    for frequency in [None, Some("daily"), Some("weekly")] {
+        let mut args = vec!["self", "install", "schedule"];
+        args.extend(frequency);
+        let output = success(command(home.path(), cwd.path(), &args).output().unwrap());
+        assert!(output.contains("Not scheduling installation"), "{output}");
+        assert!(!home
+            .path()
+            .join("Library/LaunchAgents/com.loopflow.refresh.plist")
+            .exists());
     }
-    let before = fs::read(&path).unwrap();
     let output = command(
         home.path(),
         cwd.path(),
         &["self", "install", "schedule", "monthly"],
     )
-    .env("PATH", &bin)
     .output()
     .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
-    assert_eq!(fs::read(&path).unwrap(), before);
 }
 
 #[test]

@@ -56,6 +56,19 @@ pub struct BudgetLimit {
 pub struct ContextBudgets(BTreeMap<BudgetKey, BudgetLimit>);
 
 impl ContextBudgets {
+    pub fn load(repo: &std::path::Path, wave: Option<&str>) -> Result<Self, CoreError> {
+        let mut layers = crate::config::config_layers(Some(repo), wave)?;
+        // Measuring authored documents needs their budgets, not a valid provider
+        // selection or the documents a future launch would request.
+        for layer in &mut layers {
+            if let Some(values) = layer.value.as_mapping_mut() {
+                values.retain(|key, _| key.as_str() == Some("context_budgets"));
+            }
+        }
+        let resolved = crate::config::settings::resolve_layers(&layers, None)?;
+        Self::resolve(&resolved.config)
+    }
+
     pub fn resolve(config: &Config) -> Result<Self, CoreError> {
         let limits: BTreeMap<_, _> = BudgetKey::ALL
             .into_iter()

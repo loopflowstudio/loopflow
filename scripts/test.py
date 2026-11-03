@@ -326,6 +326,28 @@ def _python_commands(changed: list[str]) -> list[Command]:
             "python",
         ),
     ]
+    if platform.system() == "Darwin" and (
+        not test_files or touches_source or "python/tests/test_disk_cleanup.py" in test_files
+    ):
+        # The cleanup proof builds lf under network isolation. Fetch native
+        # archives and Cargo dependencies before entering that boundary.
+        commands.insert(
+            1,
+            Command(
+                [
+                    "cargo",
+                    "build",
+                    "-p",
+                    "loopflow",
+                    "--bin",
+                    "lf",
+                    "--jobs",
+                    str(MAX_PARALLEL_JOBS),
+                ],
+                REPO_ROOT,
+                "python-cli",
+            ),
+        )
     # macOS refuses nested Seatbelt profiles. This fixture installs its own
     # network-denying, read-only policy around the observed subprocesses.
     if platform.system() == "Darwin" and (
@@ -655,19 +677,22 @@ SUITES: list[Suite] = [
     Suite(
         name="swift",
         slow=False,
-        trigger_desc="swift/ (headless app build and view tests)",
+        trigger_desc="swift/ or Desktop native build inputs (headless app build and view tests)",
         match=lambda c: (
             _touches(
                 c,
                 "swift/",
                 "rust/loopflow/src/store/sqlite/sessions.rs",
                 "rust/loopflow/src/naming.rs",
+                "rust/loopflow/ghostty-vt",
             )
             or _touches_exact(
                 c,
                 "scripts/test_desktop.sh",
                 "scripts/swift_test_limit.py",
                 "scripts/desktop-headless.sb",
+                "scripts/loopflow-dev.py",
+                "rust/loopflow/build.rs",
             )
         ),
         build=_swift_commands,
@@ -688,10 +713,12 @@ SUITES: list[Suite] = [
     Suite(
         name="loopflow",
         slow=True,
-        trigger_desc="Loopflow app/UI (swift/Loopflow, project.yml)",
+        trigger_desc="Loopflow app/UI or Desktop native build inputs",
         match=lambda c: (
-            _touches(c, "swift/LoopflowMac/", "swift/LoopflowUITests/")
-            or _touches_exact(c, "swift/project.yml")
+            _touches(c, "swift/LoopflowMac/", "swift/LoopflowUITests/", "rust/loopflow/ghostty-vt")
+            or _touches_exact(
+                c, "swift/project.yml", "scripts/loopflow-dev.py", "rust/loopflow/build.rs"
+            )
         ),
         build=_loopflow_commands,
         proves=(

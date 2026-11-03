@@ -621,6 +621,22 @@ def test_deleted_python_test_falls_back_to_the_full_suite():
     assert command.argv[-5:] == ["uv", "run", "--no-sync", "pytest", "python/tests/"]
 
 
+def test_macos_cleanup_proof_builds_before_network_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    for changed in (["scripts/loopflow-dev.py"], ["python/tests/test_disk_cleanup.py"]):
+        commands = gate._python_commands(changed)
+        build = next(i for i, command in enumerate(commands) if command.label == "python-cli")
+        isolated = next(i for i, command in enumerate(commands) if command.label == "python")
+        assert build < isolated
+        assert commands[build].argv[:6] == ["cargo", "build", "-p", "loopflow", "--bin", "lf"]
+    assert all(
+        command.label != "python-cli"
+        for command in gate._python_commands(["python/tests/test_gate_bounded.py"])
+    )
+
+
 def test_python_verifier_change_runs_the_full_python_suite():
     changed = ["scripts/resource_envelope.py", "python/tests/test_resource_envelope.py"]
 
@@ -829,16 +845,26 @@ def test_ui_host_suite_serializes_and_checks_machine_state():
     assert ui.postcheck is gate._ui_host_postcheck
 
 
-def test_desktop_changes_select_headless_checks_without_host_automation():
-    plans = gate.build_plan(
-        changed=["swift/LoopflowMac/Views/WorkSurfaceView.swift"], run_all=False, forced=set()
-    )
+@pytest.mark.parametrize(
+    "path",
+    [
+        "swift/LoopflowMac/Views/WorkSurfaceView.swift",
+        "scripts/loopflow-dev.py",
+        "rust/loopflow/build.rs",
+        "rust/loopflow/ghostty-vt.json",
+        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+    ],
+)
+def test_desktop_changes_select_headless_checks_without_host_automation(path: str) -> None:
+    plans = gate.build_plan(changed=[path], run_all=False, forced=set())
     selected = {plan.suite.name: plan for plan in plans if plan.run}
     assert "swift" in selected
     assert "ui-host" not in selected
     commands = selected["swift"].commands
     assert any(command.argv[0] == "scripts/test_desktop.sh" for command in commands)
     assert not any("scripts/prove_wave_surface_states.sh" in command.argv for command in commands)
+    # The slower Xcode compile remains explicit, but must recognize these inputs.
+    assert next(s for s in gate.SUITES if s.name == "loopflow").match([path])
 
 
 def test_recovery_has_time_beyond_read_only_inventory(tmp_path, monkeypatch):

@@ -1,33 +1,41 @@
 //! When a Session owner ends itself.
 //!
-//! An owner whose lf executable is removed or replaced (a worktree deleted, a
-//! build relinked, Dev.app rebuilt) ends as soon as its Sessions wait for a
-//! person, viewers notwithstanding: it would otherwise run a vanished build
-//! indefinitely. Its attached viewers are told why and how to return. An owner
-//! nobody has viewed for `session.end_detached_after` ends the same way.
-//! Ending stops its agent and records its exit, so
-//! `lf resume` reopens the conversation from provider history and
-//! `lf resume --all` leaves it alone.
+//! An owner whose lf executable is removed, replaced or superseded (a worktree
+//! deleted, a build relinked, Dev.app rebuilt, `lf install` selecting another
+//! build) ends as soon as its Sessions wait for a person, viewers
+//! notwithstanding: it would otherwise run a vanished or outdated build
+//! indefinitely. Its attached viewers are told why and sent the `lf resume`
+//! that reopens the conversation through the entry, and they run it. An owner nobody has viewed for
+//! `session.end_detached_after` ends the same way. Ending stops its agent and
+//! records its exit, so `lf resume` reopens the conversation from provider
+//! history and `lf resume --all` leaves it alone.
 
+use std::io::Write;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
+use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 
 /// The longest `recheck` pause.
 const LONGEST_PAUSE: Duration = Duration::from_secs(5 * 60);
-/// How often an owner looks at its executable.
+/// How often an owner looks at its executable and the entry.
 const EXECUTABLE_PAUSE: Duration = Duration::from_secs(2);
 
 /// Record viewer changes sent on the first channel. Once the executable is gone
-/// or the owner has gone unviewed past its limit, send the second channel what
-/// to tell attached viewers; the serve loop delivers it and ends the owner.
-pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<Option<String>>) {
+/// or superseded, or the owner has gone unviewed past its limit, send the second
+/// channel the `Event::Control` for attached viewers; the serve loop delivers
+/// it and ends the owner.
+pub(super) fn spawn(
+    owner: LfProcessId,
+    waker: UnixStream,
+) -> (mpsc::Sender<bool>, mpsc::Receiver<Event>) {
     let executable = Executable::current();
     let (viewers, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
@@ -35,6 +43,8 @@ pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<O
         if let Err(error) = watch(&owner, executable.as_ref(), &changes, &end) {
             tracing::warn!(%error, %owner, "Session owner policy stopped");
         }
+        // The serve loop sleeps on descriptors; tell it the policy has spoken.
+        let _ = (&waker).write_all(&[1]);
     });
     (viewers, ending)
 }
@@ -43,7 +53,7 @@ fn watch(
     owner: &LfProcessId,
     executable: Option<&Executable>,
     changes: &mpsc::Receiver<bool>,
-    end: &mpsc::Sender<Option<String>>,
+    end: &mpsc::Sender<Event>,
 ) -> Result<()> {
     let store = crate::journal::process_ledger()?;
     let repo = store.process(owner)?.and_then(|process| process.repo);
@@ -74,28 +84,62 @@ fn watch(
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
                 let expired = due.is_some_and(|due| due <= now);
-                let gone = executable
-                    .and_then(|executable| executable.gone().map(|how| (executable, how)));
-                if (gone.is_some() || expired) && store.owner_waits_for_person(owner)? {
-                    let hint = match gone {
-                        Some((executable, how)) => {
+                let change = executable.and_then(Executable::change);
+                if change.is_none() && !expired {
+                    continue;
+                }
+                // A store a newer lf has advanced may refuse this read too;
+                // the owner judges again next time rather than running on.
+                let waits = match store.owner_waits_for_person(owner) {
+                    Ok(waits) => waits,
+                    Err(error) => {
+                        tracing::warn!(%error, %owner, "cannot tell whether the Session waits for a person");
+                        false
+                    }
+                };
+                if waits {
+                    let moved = match change {
+                        Some(change) => {
                             tracing::warn!(
                                 %owner,
-                                path = %executable.path.display(),
-                                "ending a Session whose lf executable was {how}"
+                                path = ?executable.map(|executable| &executable.path),
+                                "ending a Session whose lf was {change}"
                             );
-                            store.owner_sessions(owner)?.first().map(|session| {
-                                format!(
-                                    "This Session's lf build was {how}; `lf resume {session}` reopens it."
-                                )
-                            })
+                            // The notice names the command viewers run through
+                            // the entry, so it survives a failed follow.
+                            let session = store
+                                .owner_sessions(owner)?
+                                .into_iter()
+                                .next()
+                                .expect("an owner waiting for a person has a Session");
+                            let successor =
+                                crate::os_process::resolve_lf_binary().ok().map(|entry| {
+                                    vec![
+                                        entry.to_string_lossy().into_owned(),
+                                        "session".into(),
+                                        "resume".into(),
+                                        session.clone(),
+                                    ]
+                                });
+                            let notice = format!(
+                                "This Session's lf was {change}; reopening it as `lf resume {session}`"
+                            );
+                            Event::Control {
+                                held: false,
+                                notice: Some(notice),
+                                successor,
+                            }
                         }
                         None => {
                             tracing::info!(%owner, "ending a Session nobody has viewed");
-                            None
+                            Event::Control {
+                                held: false,
+                                notice: None,
+                                successor: None,
+                            }
                         }
                     };
-                    if end.send(hint).is_err() {
+                    if end.send(moved).is_err() {
                         crate::platform::kill_process(std::process::id());
                     }
                     return Ok(());
@@ -116,12 +160,31 @@ struct Executable {
     identity: (u64, u64, u64, i64, i64),
 }
 
+/// What became of the owner's executable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    Removed,
+    Replaced,
+    /// The entry now dispatches to another build.
+    Superseded,
+}
+
+impl std::fmt::Display for Change {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Change::Removed => "removed",
+            Change::Replaced => "replaced",
+            Change::Superseded => "superseded",
+        })
+    }
+}
+
 impl Executable {
     /// `None` when the running executable cannot be read; that owner keeps only
     /// the detached limit.
     fn current() -> Option<Self> {
         let read = || -> std::io::Result<Self> {
-            let path = std::fs::canonicalize(std::env::current_exe()?)?;
+            let path = crate::journal::current_executable()?;
             let identity = identity(&std::fs::metadata(&path)?);
             Ok(Self { path, identity })
         };
@@ -132,14 +195,19 @@ impl Executable {
             .ok()
     }
 
-    /// `removed` or `replaced` once the file at the path is no longer this one.
-    /// Any other read error is transient and judged again next time.
-    fn gone(&self) -> Option<&'static str> {
+    /// Removed or replaced once the file at the path is no longer this one;
+    /// superseded once the entry dispatches to another build. Any other read
+    /// error is transient and judged again next time.
+    fn change(&self) -> Option<Change> {
         match std::fs::metadata(&self.path) {
-            Ok(metadata) => (identity(&metadata) != self.identity).then_some("replaced"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some("removed"),
-            Err(_) => None,
+            Ok(metadata) if identity(&metadata) != self.identity => return Some(Change::Replaced),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Some(Change::Removed)
+            }
+            Err(_) => return None,
         }
+        crate::installation::superseded(&self.path).then_some(Change::Superseded)
     }
 }
 

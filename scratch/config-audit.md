@@ -1,51 +1,28 @@
-# LOO-714 configuration audit — 2026-11-02
+# LOO-714 configuration audit — November 2–3, 2026
 
-Nonsecret preference audit for Jack Heart. Selection implementation must preserve
-native defaults/account order; values below are observations, not new repo policy.
+Nonsecret observations for Jack Heart, not new policy. Complete original audit:
+`04bdec77e3:scratch/config-audit.md`. settings-scope.md owns the accepted inventory.
 
-- Personal ~/.lf/config.yaml had harness: codex, no agent/skill_agents/skills/graphs
-  selection. Current code recognizes agent, not harness. Corrected to agent: codex
-  with all other parsed values preserved. Jack chose Codex temporarily because
-  Claude usage is exhausted. No new per-skill preference was invented.
-- Personal repos entry for /Users/jack/src/loopflow had no agent/model override.
-- scope_settings had no agent or skill_agents.* rows at any scope.
-- LOO-714 still has legacy tasks.agent=claude. The first PR removes this implicit
-  future authority; do not patch live Task/history rows directly. This run explicitly
-  selects Codex. Other Tasks' saved values are migration inputs, not user policy.
-- Native Codex default: gpt-6-astra, reasoning effort high. Native Claude default:
-  opus. Neither changed; managed account homes may have their own native defaults.
-- No agent/model settings were found in inspected Loopflow/manabot repo/Wave/graph
-  YAML. Jack's uncommitted removal of manabot's agent: codex is preserved.
-- November 3: Jack Heart moved explore/kickoff/prompt/realign's Claude choices and
-  xor-route's Claude Sonnet choice from builtins into this repository's config.
-  Builtin skills now recommend no harness. No cost/quality measurement supports
-  changing these choices; bare harnesses retain native model defaults.
-- Account route IDs (not credentials): default Claude loopflow, primary; default
-  Codex jack-42d1021d3f2d, engineering, manabot-eng, jackstah-1066ea9c99d1. Loopflow
-  repo Claude loopflow, primary; Codex manabot-eng. Preserve their order.
+- Personal `harness: codex` was unrecognized and corrected to `agent: codex`, with
+  other values preserved. Jack selected Codex temporarily after Claude exhaustion;
+  no permanent/per-skill policy was invented. No personal repo agent override or
+  DB agent/skill_agents rows were found. Legacy tasks.agent=claude is migration
+  input, not future authority; live Task/history rows were not patched.
+- Native defaults were Codex gpt-6-astra/high and Claude opus. They stayed unchanged;
+  managed homes may differ. Inspected Loopflow/manabot repo/Wave/Graph YAML had no
+  agent/model choice; Jack's removal of manabot's agent was preserved.
+- November 3: Jack moved explore/kickoff/prompt/realign's Claude choices and
+  xor-route's Claude Sonnet choice from builtins into repository config.
+- Ordered routes: Claude default/repo loopflow, primary; Codex default
+  jack-42d1021d3f2d, engineering, manabot-eng, jackstah-1066ea9c99d1; Loopflow repo
+  Codex manabot-eng. These are account IDs, not credentials; preserve order.
 
-The branch CLI's read-only inspection, with inherited LF_* removed, resolves
-implement, explore, kickoff, prompt, realign and xor-route to `codex` in both
-Loopflow and manabot. Each winning candidate is the general personal
-`~/.lf/config.yaml` preference. No model suffix is added, preserving the native
-Codex default noted above. These are current selections, not evidence that Codex
-is the cheapest or best model for each skill. No comparative cost/quality run was
-performed; recorded account-limit evidence remains in weekly-limit-2026-11-02.md.
-The complete setting-family inventory is in settings-scope.md.
+Branch inspection with inherited LF variables removed selected personal-general
+Codex for implement/explore/kickoff/prompt/realign/xor-route in both repositories,
+without adding a model suffix. No comparative cost/quality run supports these
+choices. Limit evidence remains in weekly-limit-2026-11-02.md.
 
-## Overlapping open work
-
-Observed before launch. Preserve upstream changes during refresh; these PRs do
-not decide LOO-714's setting targets or failure recovery contract.
-
-- [Idle unviewed agents · LOO-709 / #1804](https://github.com/loopflowstudio/loopflow/pull/1804)
-  changes config/session timeout and docs. Do not restore an old timeout default.
-- [Wave lifecycle · LOO-500 / #1803](https://github.com/loopflowstudio/loopflow/pull/1803)
-  changes graph, Task, CLI and DTO surfaces.
-- [Release regressions · LOO-691 / #1780](https://github.com/loopflowstudio/loopflow/pull/1780)
-  changes config, Task/CLI and provider auth.
-- [Mac setup · LOO-312 / #1656](https://github.com/loopflowstudio/loopflow/pull/1656)
-  changes config, agent launch and provider auth.
-
-Unrelated loopflow-critique.* artifacts belong to another contribution; preserve
-but do not include them in the settings PR.
+Prelaunch overlaps: LOO-709/#1804 (timeout), LOO-500/#1803 (Graph/Task/DTO),
+LOO-691/#1780 (release/config/auth), LOO-312/#1656 (setup/launch/auth). These are dated
+observations, not current PR status or recovery decisions. Preserve their changes.
+Separate loopflow-critique artifacts remain another contribution, outside this PR.

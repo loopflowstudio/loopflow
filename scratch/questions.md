@@ -1,5 +1,15 @@
 # Open questions and assumptions
 
+## Settings catalogue design review — 2026-11-03
+
+Jack Heart requested a catalogue design while the approved choice-before-fallback
+pursue continues. Draft: `settings-catalog.md`. Proposed keystone unifies definition
+policy, discovery and explanation while retaining storage/domain owners. Review
+whether dedicated-action bindings are sufficient initially for theme, portfolio,
+accounts and machine movement. Editor generation, launch snapshots and distribution
+remain later outcomes. These are review decisions for the catalogue draft, not
+blockers or new instructions for the active pursue.
+
 ## Duplicate implement run stopped (2026-11-02 14:25)
 
 A second `code` Graph (process 768383a6, `lf graph code`) was launched in this

@@ -1,37 +1,24 @@
 # Consistent settings and personal graph-step overrides — LOO-714
 
-Jack Heart approved this direction and requested implementation on 2026-11-02
-(“lg2m”, “lets build it”). Placement: Infrastructure. This is the authoritative
-first-PR design, superseding storage-model.md, route-design.md and the selection
-questions in design-questions.md. Preserve the separate recovery outcome below.
+Accepted by Jack Heart on November 2, revised November 3, 2026. Infrastructure.
+This is PR1's authoritative design; earlier storage/route/tier proposals are
+superseded. Delivery is review-only PR #1805 with Auto-Ship stopped. No merge or
+whole-Task completion: automatic limit recovery remains PR2. Catalogue, portability
+and critique drafts are separate contributions, not scope expansion.
 
-## Current pursue contract — approved 2026-11-03
+## Accepted resolution
 
-Jack Heart approved applicable agent choices before all default_agent fallbacks,
-then source > scope > target within each class. Preserve explicit Graph forcing,
-Session-only selection, native metadata/history and existing non-agent semantics.
-The five builtin recommendations now live in this repository's configuration.
-
-Finish this revision and PR #1805's known CI repairs, then publish for review through
-the authored Graph. Use Codex; keep Auto-Ship stopped. No merge or Task completion;
-limit recovery stays PR2. Preserve the separate critique and portability review;
-no per-skill accounts or settings synchronization is authorized here.
-
-## Accepted outcome
-
-One settings model across CLI, environment, lfdb, personal config, repository/Wave
-config, skill files and graph-step files, with personal overrides for particular
-Graph occurrences and explanations of effective values. Jack explicitly means
-**everything settable anywhere**, not only agent strings.
-
-This PR is the coherent settings/resolution cut. Recovery is the second PR.
-No tiers, permanent Codex-only policy or account transcript-sharing scheme was
-accepted. Publish for Jack's review; do not ship or complete the whole Task.
-
-## The demo
+Every applicable `agent` choice beats every `default_agent` fallback. Within
+either class: CLI > explicit environment > lfdb > personal files > repository/Wave
+files > builtins; within a source, Wave > repository > global; within a scope,
+graph-step > skill > general. Resolve each setting independently. Thus personal
+implement choice beats repository occurrence choice, while personal implement
+fallback yields even to repository general choice. Builtin skills recommend no
+harness; five recommendations moved to this repository's configuration. Bare
+harnesses retain native model defaults; `harness:model` selects a model.
 
 ```yaml
-# ~/.lf/config.yaml
+# Personal config
 agent: claude
 skills:
   implement:
@@ -43,201 +30,145 @@ graphs:
         agent: claude
 ```
 
-```yaml
-# Shared release graph
-- step:
-    name: implement
-    id: write-code
-```
-
-Ordinary launches prefer Claude; implement prefers Codex; write-code in release
-prefers Claude. Personal preferences change no shared graph file. Two occurrences
-of implement can differ. Eligible settings use the same names/types in each block,
-not separate skill_agents/skill_docs/skill_yolo maps. Agent remains harness[:model];
-a bare harness preserves its native model default. Resolve each setting separately.
-
-Implemented matching CLI:
-
 ```sh
 lf set --global skills.implement.agent codex
 lf set --global graphs.release.steps.write-code.agent claude
 lf unset --global graphs.release.steps.write-code.agent
+lf config show --graph release --step write-code --json
 ```
 
-Retain repository/Wave DB scopes too. Unset exposes the next applicable layer.
-`lf config show --skill implement --json` and `lf config show --graph release
---step write-code --json` expose effective values and candidate provenance through
-the shared CLI/Desktop read operation. Agreement with provider launches remains
-part of acceptance. Diagnostics contain no credential values.
+Occurrence targeting uses the defining Graph's canonical name and authored local
+ID, never offsets or flattened/process IDs. Composition, repeated children and
+loop iterations retain that origin. Other Graphs' same-named IDs do not match;
+duplicates within one definition fail. Anonymous steps use skill/general values.
+Preferences for absent Graphs remain valid and can appear unmatched in inspection.
 
-## Resolution and propagation
+Session/resume `-a` selects only that conversation; neither history nor a resolved
+default persists Task policy or escapes into unrelated agent-created Tasks.
+Explicit Graph/Task execution selection reaches all steps, composition and routers.
+CLI beats environment within its class; explicit user environment follows children.
+Internal LF identity plumbing is not a preference. Resume's implemented assumption:
+a fallback may refresh a same-provider model but cannot request cross-provider
+import; native history retains its provider. This is recorded in questions.md,
+not a further decision attributed to Jack.
 
-Agent selection revised by Jack Heart on 2026-11-03: an applicable explicit
-`agent` choice beats every `default_agent` fallback, regardless of source or
-target specificity. Only when no explicit choice applies are defaults considered.
-Within either class, retain source order: explicit CLI > explicit environment >
-lfdb > personal config > repo/Wave config > built-ins. Within a source, Wave >
-repo > global; within one scope, graph-step > skill > general. Builtin skills
-declare no agent recommendations. The application's general fallback is a default.
+## Full coverage and semantics
 
-Thus personal implement `agent: codex` beats repository occurrence `agent: claude`,
-but personal implement `default_agent: codex` loses even to repository general
-`agent: claude`. This supersedes the proposed target-first alternative. Preserve
-source, scope, target and choice/default identity until resolution. The resolver retains both authored keys through selection; inspection's effective
-agent lists fallback candidates before explicit choices. Non-agent settings retain
-their existing resolution until their default semantics are explicitly designed.
+Jack explicitly selected everything settable anywhere, including non-agent
+preferences. Consistent names/types apply wherever meaningful; restricted or
+separately owned settings must be explained, not silently ignored.
 
-Graph-step selectors name the defining graph and its authored local step ID.
-Composition retains origin: release/write-code matches when release is composed
-into another graph. Reusing that graph applies its preference to each instance;
-loop iterations retain the same target. Other graphs using write-code do not match.
-Use no list offsets or process IDs. Anonymous steps still run using skill/general
-preferences; authored IDs enable occurrence targeting. Duplicate IDs within a
-single definition cannot silently select an occurrence. A global preference for a
-graph absent from the current repo remains valid; inspection can show it unmatched.
-No arbitrary cross-graph selector language is needed.
+| Preference family | Accepted scope, semantics and owner |
+| --- | --- |
+| agent, default_agent | All layers; general/skill/occurrence; choice before fallback. LF-owned metadata only; native Claude agent names remain native. |
+| yolo, chrome, isolate, diff, diff_files, paste | Launch targets; explicit false replaces. Native resume preserves account-home identity. |
+| docs, context, exclude | Launch targets; additive lists, explicit [] clears. Keyed maps merge; omission/unset reveals lower layers. |
+| summaries, summary_tokens | Existing parsing/merging retained; no runtime summarization consumer was found. Activation requires separately specified behavior. |
+| context_budgets, supported_harnesses, automation.retries, graph | General preferences; positive keyed budgets, additive harness list, unsigned retries, replace Graph name. Task takes up its Graph once. |
+| planning, release, land, merge_method, pr | General repository operations, no Wave/skill/occurrence targets. Typed planning unit replaces; repository team identity survives personal transport selection. |
+| session.terminal, session.end_detached_after, user.name, repo_root | Personal general; terminal, duration/off, name (empty uses Git), absolute/home-relative path. Display name never grants ownership. |
+| theme, stream, logs.linear_requests, portfolio | Personal file/dedicated owners: Appearance Apply/Cancel, bootstrap installation, pre-store Machine diagnostics, registered navigation collection. No DB/step parity invented. |
+| machine.tasks, machine.session | Dedicated set/unset and Machine APIs, repository/Wave DB scopes; movement/registration remain effects. |
+| account.claude, account.codex | Ordered registered routes replace lists; dedicated DB/API plus explicit CLI/env restriction. Preserve ordering and recorded-account resume; no per-skill accounts. |
+| invocation controls, LF_HOME/LF_BIN, provider homes/credentials | Execution/bootstrap ownership, not inherited scalar preferences. No credential output. |
+| skill action_style/native metadata, Graph topology/interactive/returns, Desktop view state | Authored behavior or local UI owners, not generic launch preferences. |
 
-Session `-a claude`, including lf resume, selects that conversation only. Its Task
-work still honors implement=Codex. Neither the Session selection nor a resolved
-default becomes an inherited override or a saved Task agent preference.
-Explicit `lf -a codex graph ...` (and explicit Task execution) applies to all its
-agent steps, including composition, routers and loops. Carry this as Graph execution
-intent, not an ambient policy escaping into unrelated Tasks created by an agent.
-Explicit CLI beats env. Document propagation of user-supplied environment settings;
-internal LF_* identity plumbing is not another preference layer.
+The shared resolver preserves source/scope/target and authored choice/default key
+through preparation and inspection. CLI/Desktop reads expose effective values and
+candidate provenance, including list contributions. Parsing, DB set/unset and
+execution share typed validation; false, empty, omitted and unset remain distinct.
+One resolver replaces old paths. No permanent Codex-only policy, account sharing,
+file-only preference model, tiers or settings synchronization was accepted.
 
-## Coverage and implementation
+## Implementation and evidence — November 3
 
-The inventory below covers Config fields, personal-only readers, CLI, public
-environment, lf set, machine/account preferences, Desktop/API, skill metadata and
-Graph metadata. Semantic restrictions remain explicit: UI theme/terminal are
-personal; planning and release describe repository work; graph topology is authored
-structure; lifecycle commands, registrations, credentials and usage observations
-are not scalar settings. An inventory entry alone does not establish launch proof.
+InvocationSettings owns CLI intent; SkillInvocation retains Graph origin. Runtime
+captures retain exact bodies; exported recipes retain occurrence metadata but load
+the named skill in the launch repository, preserving repository overrides. Sync
+owns generated captures and prunes only unchanged generated contents. Authored
+settings no longer become CLI overrides. TaskProcessOptions.agent, prompt-only
+selection and duplicate scope/merge/inspection paths were removed.
 
-Each preference has a canonical key/type, valid sources/scopes/targets, default,
-merge/reset rule, propagation boundary and reader/writer. Share typed semantics
-between parsing, set/unset, resolution and inspection. Reuse Config/Skill/Graph
-structures where possible; preserve provenance. Core operations collect applicable
-candidates, resolve a setting with explanation, and apply it to the existing consumer.
-Do not add a new resolver while retaining old execution paths.
+The single settings_authority.sql migration removes Task agent policy and converts
+legacy skill keys while preserving history/routes. The released workflow alias
+remains for LOO-637. No additional migration accompanied the November 3 revision.
 
-Preserve intentional additive docs/context/exclude/summaries and keyed-map merging;
-ordered account routes replace as ordered lists. Make false, empty, omitted and
-unset explicit. File and DB values must share types/validation. Generic typed CLI
-overrides can cover eligible nested settings instead of creating a flag or env name
-for every leaf; existing flags remain syntax over the same semantics. Audit boolean
-negation and collection replacement as well as scalar precedence.
+Choice/fallback resolution, captures and provenance are implemented. The eight
+original CI regressions passed locally: personal-only name scope, Linear transport
+versus repository team identity, help text, duplicate review IDs and four empty
+config expectations. Config inspection's misleading agent warning is repaired.
+The November 3 reconciliation inspected resolver, resume and stand-in assertions;
+no bounded implementation mismatch was found.
 
-Native provider metadata remains native: Claude agent: Explore is not an lf
-harness. Only Loopflow-owned metadata participates.
+Refresh integrated main's viewer wire (#1800) alongside earlier owner/snapshot
+changes. Transport improvements establish no limit recovery. PR #1805 is open at
+`04bdec77e3`, auto-merge off; hosted Rust and aggregate checks are skipped, so this
+head has no hosted test pass. Prior Task projection confirmed Auto-Ship stopped;
+this reconciliation changes no shipping control. The earlier demo remains dated
+evidence, not acceptance of the revision.
 
-## Existing implementation
+Acceptance still requires stand-in proof of source/scope/target precedence,
+composition/repetition/routers/loops, Session and resume isolation from Tasks,
+forced Graph execution, native history, non-agent values, false/empty/unset/merge,
+and inspection/execution/export parity. Resolver, wave_setup_tests,
+settings_launch_tests and session_launch_contract cover these boundaries;
+passing syntax alone is insufficient. config-audit.md records actual builtins,
+Loopflow and manabot selections, native defaults and ordered routes. No comparative
+cost/quality conclusion is established.
 
-The shared resolver retains source layers through prompt preparation, config
-inspection and Wave setup. InvocationSettings owns CLI intent; captured
-SkillInvocation retains Graph origin. One settings_authority.sql migration removes
-Task agent policy and converts legacy skill preference keys. History and account
-routes remain. Released config compatibility retains the workflow alias (LOO-637).
+Remaining: gate's affected suites and Clippy, final review-only publication and
+review/demo acceptance. Catalogue/portability proposals remain undecided and are
+not blockers for this revision. No code test rerun is justified by this prose pass.
 
-## Acceptance boundaries
+## Concept review — November 3
 
-config-audit.md records Jack Heart's nonsecret settings; preserve native model
-defaults, account order and unrelated contributions. No cost/quality optimization
-is established. Resolver tests prove source/scope/target and collection semantics;
-wave_setup_tests proves DB set/inspect/unset and defining-Graph target identity.
-settings_launch_tests proves runtime/exported recipes, repeated composition,
-routers/loops, Session/resume-to-Task isolation, false/empty and launch parity.
-Native resume tests preserve provider history. Stand-ins need no paid provider.
-Gate owns affected suites; installed acceptance and recovery remain distinct.
+Outcome: no design change and no unresolved product choice for PR1. This reviews
+Jack Heart's accepted revision against the branch, not installed behavior or demo
+acceptance. The catalogue and portability drafts remain proposals outside this run.
 
-## Second PR: recovery
+The concrete interaction is to set `skills.implement.agent=codex`, inspect a named
+Graph occurrence, then launch it. A repository occurrence's Claude choice loses
+to that personal choice. Changing the personal key to `default_agent` deliberately
+lets the repository choice win. Removing the DB preference reveals the file
+preference; clearing a list instead deliberately suppresses earlier contributions.
+These are useful distinctions, not interchangeable spellings of “default.”
 
-Retain both original outcomes: interactive Sessions avoid separate manual limit
-repairs; headless steps continue on eligible accounts/models with work and history,
-and wait/report reset when none can continue. See limit-failures.md and
-weekly-limit-2026-11-02.md. Retry and routing share one decision; never bind an old
-provider thread to an account that did not run it. Exact fallback/wait/continuity
-mechanisms need the second design. Do not delete retry invariants or symlink native
-transcripts based on the superseded Route draft. This PR leaves recovery open.
+The model needs declarations with source/scope/target and choice strength, an
+authored occurrence identity, and a derived resolution. `set`/`unset` own preference
+writes; inspection and preparation share resolution; Graph execution carries only
+its explicit invocation choices to its steps. Session history records execution
+and preserves provider/account continuity. It does not need a second Task agent
+policy or a persisted copy of the effective preference. No additional state or
+lifecycle is required by this review.
 
-## Implementation inventory — 2026-11-02
+Failure and recovery remain distinct: an invalid targeted value is corrected or
+unset before launch; it must not silently become a different valid preference.
+A resumed conversation keeps its native provider/account unless an explicit
+supported switch is requested. Exhaustion during a turn remains PR2's failure:
+changing a fallback is neither an account retry nor automatic recovery, and must
+not rewrite the original thread's attribution.
 
-| Canonical preference | Type / merge | Sources and targets / owning consumer |
-| --- | --- | --- |
-| agent, default_agent | harness[:model], choice before fallback | all precedence layers; general, skill, authored occurrence; prompt/Session launch |
-| yolo, chrome, diff, diff_files, paste | bool, explicit false replaces | all layers and launch targets; permission/browser/context preparation |
-| docs, context, exclude | string list, additive; explicit [] clears | all layers and launch targets; document preparation |
-| summaries; summary_tokens | summary records; unsigned integer | Existing schema has no runtime consumer outside config tests. Preserve parsing/merging; activation would require a separately specified summarization operation, not an implicit paid launch. |
-| context_budgets | BudgetKey → positive integer, merge by key | all general layers; authored memory/scratch targets, not per-turn instructions; context accounting; existing defaults retained |
-| isolate | bool, replace | launch preference; native resume retains recorded home identity |
-| graph | graph name, replace | general global/repository/Wave preferences; Task takes its graph up once, never rewrites an existing graph |
-| supported_harnesses | string list, additive | general; selection UI catalog; not a per-step instruction |
-| automation.retries | unsigned integer | general; retry operation policy; not an instruction to a skill |
-| planning | tagged provider config; replace as a unit | repository transport/identity; no skill/occurrence target; team association remains repository-owned |
-| release, land, merge_method, pr | typed release map, strategy, enum, bool | repository delivery operations; no skill/occurrence target |
-| session.terminal, session.end_detached_after | terminal name, duration/off | personal general; terminal presentation and detached lifetime |
-| user.name | string; empty uses Git | personal general and LF_USER_NAME; participant display, never ownership |
-| repo_root | absolute or home-relative path | personal general; local repository lookup |
-| theme | Ghostty theme selection string | personal file and Appearance UI; AppearanceStore synchronously loads, previews and watches these files independently of Work/store availability; Apply/Cancel owns persistence, so no database or agent-step target |
-| stream | stable/preview/dev | installation command and personal file; selects installation before the selected store can be opened |
-| portfolio | repository path selection | portfolio add/remove/reset operations and personal file; a registered navigation collection, not a launch preference |
-| logs.linear_requests | bool, default false | Machine config; diagnostic opt-in must work before store/schema access |
-| machine.tasks, machine.session | registered Machine/capacity reference | existing set/unset and Machine APIs, repository/Wave DB scopes; registration and Session movement are effects, not scalar writes |
-| account.claude, account.codex | ordered registered account IDs, replace | existing set/unset route API + explicit CLI/env selection; preserves provider_routes, validation, ordering, and recorded-account resume |
-| verbose, interactive/batch, account restriction, cwd/repo/task/wave, forward-agent | invocation flags/selectors | invocation/control inputs; not inherited work preferences |
-| LF_HOME, LF_BIN, provider homes and credentials | execution/bootstrap context | Machine/provider ownership; not scalar settings; diagnostics never dump the environment |
-| skill action_style, native metadata; Graph topology, interactive, returns | authored behavior | definition files only; personal overrides select execution preferences without rewriting instructions/topology |
-| Desktop autosave/history filter/render diagnostics | local view preferences | UserDefaults; no repository, Wave, or agent-step meaning |
+Preserve these counterexamples in the next proof: a high-source fallback cannot
+defeat a lower-source choice; a parent Graph's same-named ID cannot target its
+child; an exported occurrence cannot promote authored settings to CLI authority;
+a Session's `-a` cannot select a Task worker; explicit `false`, `[]` and unset
+cannot collapse together. Existing usage docs express the accepted interaction;
+no new skill instruction is needed. The refreshed `concept-review.html` removes
+the stale “resolver has not yet been changed” claim. Gate and demo retain the
+remaining proof already listed above; this read-only code review reruns no tests.
 
-## Delete — do not maintain
+## PR2 remains unimplemented
 
-- Removed `config.rs::validate_wave_keys` and the separate repository presentation
-  key check. The shared resolver validates file and database scopes; Wave files
-  still reject unknown keys and accept the released `workflow` alias. Diagnostics
-  retain the source path. Effective Config values now derive once from the final
-  provenance map, avoiding parallel merging state. Skill loading parses `docs`
-  once and preserves explicit empty-list resets.
-- Removed `commands/config.rs::inspect`'s compiled-local-ID filter. Targeted reads
-  now match the loaded definition's canonical name and `OccurrenceSettings.id`;
-  whole-Graph traversal still includes repeated children and routers. The CLI
-  composition regression preserves coverage on this single inspection path.
-- Removed `graph/instructions.rs::headless_command`'s authored-agent-to-`-a`
-  promotion, direct-skill export and separate command-collision resolver. Captured
-  `SkillInvocation` commands explicitly select `skill --`; conversational steps,
-  native controls and exact shell-safe names remain.
-- Removed the unused `TaskProcessOptions.agent` and its construction sites; Task
-  placement carries no execution preference. Graph execution retains the CLI.
-- Removed unused `Cli::{chrome_setting,diff_files_setting,diff_setting}` readers.
-  `setting_values` and the shared resolver own these preferences. No exclusive
-  tests or fixtures remain for these removed paths; no deletion target is open.
-- Removed `ProcessPromptInput::{agent,yolo_mode}`, the prompt-only `resolve_agent`
-  wrapper and the unused Task/conversation override parameters. InvocationSettings
-  and the shared resolver own launch selection; the existing provider-policy tests
-  now exercise that path. Settings owns agent validation. Resume reads its winner
-  once; CLI booleans share one conversion. No exclusive fixtures remain.
-- No new settings authority or migration is required. Sync owns the captures in
-  each generated bundle; content-addressed files are listed in its frontmatter,
-  refreshed before recipe publication and pruned only while their contents match.
-  A recipe captures a named skill reference plus occurrence metadata. It must load
-  the skill in the launch repository: a global builtin recipe cannot freeze out a
-  repository's skill override. Runtime Graph captures retain their exact bodies;
-  both paths use `SkillInvocation` and the shared settings resolver.
+Both outcomes remain: interactive Sessions recover without individual manual
+switches; headless Graph steps continue on eligible accounts/models, or truthfully
+wait for reset and resume automatically when none can continue. Preserve work,
+Session continuity and original provider-thread/account attribution. Routing and
+retry must share one decision; failed preparation cannot bind an old thread to an
+account that never ran it. Exact fallback/wait/continuity mechanisms need PR2's
+design. limit-failures.md and weekly-limit-2026-11-02.md retain the reproduction;
+no retry-invariant deletion or transcript symlinking is accepted.
 
-## Remaining delivery — November 3
+Historical full inventory/deletion rationale: `04bdec77e3:scratch/settings-scope.md`;
+earlier design/review blob `6ae574bd76b7b34afb61f96249f910492da8ef3d`.
 
-Choice-before-fallback is implemented, including resume: a fallback refreshes a
-same-provider model without requesting a cross-provider import. The eight known
-CI failures passed locally before compression; the saved evidence below retains
-those commands. Linear connection keeps repository identity while personal
-transport retains precedence. No migration was added.
-
-Gate owns affected suites and Clippy; the authored Graph owns review-only
-publication. Auto-Ship is stopped (`ship_approval` null, `ship_stop` present).
-No merge or Task completion; recovery remains PR2. Preserve the separate
-portability review and critique.
-
-Historical design/review evidence is retained in local Git blob
-`6ae574bd76b7b34afb61f96249f910492da8ef3d`; use `git show` with that hash.
-
-Check: `cargo nextest run -p loopflow --lib -E 'test(config::settings::tests::) | test(prompt::process::tests::)'` — 37 passed; settings-launch/resume matrix — 18 passed; `cargo fmt`, `git diff --check`, `lf context` passed. One earlier nextest output-handle leak did not recur; no surviving child from this checkout was found. Gate owns Clippy/broader checks. Prior implementation commands/design: Git blob `a9f13d18bf8f32b2012fb346bcbb269f1978f13c`.
+Check: `git diff --check` and `lf context` — passed; reused prior `cargo nextest run -p loopflow --lib -E 'test(config::settings::tests::) | test(prompt::process::tests::)'` (37 passed) and launch/resume matrix (18 passed); gate owns broader validation. Exact earlier commands: Git blob `a9f13d18bf8f32b2012fb346bcbb269f1978f13c`. One earlier nextest output-handle leak did not recur; cause unknown.

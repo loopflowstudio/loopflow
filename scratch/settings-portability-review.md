@@ -7,6 +7,10 @@ This is a separate design discussion, not authorization to expand the running
 implementation into settings synchronization or per-skill accounts. Source paths
 below describe the branch at inspection; `default_agent` support is in progress.
 
+The catalogue portion is now developed into the draft `settings-catalog.md`, with
+`settings-catalog.html` as its review page. This audit remains the supporting
+inventory and portability evidence; it is not a second implementation plan.
+
 ## What can be set where
 
 The shared resolver already covers much of the matrix. “All sources” below means

@@ -1,0 +1,264 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-714 · One settings catalogue</title><style>*{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;background:#f7f6f1;color:#27302c;font:17px/1.65 system-ui,sans-serif}main{max-width:1000px;margin:auto;padding:48px 30px 90px}header,figcaption,.muted{color:#647269}header,figcaption{font-size:13px}h1{font-size:clamp(34px,5vw,48px);letter-spacing:-.035em;line-height:1.15}h2{font-size:27px;line-height:1.3;margin-top:50px}a{color:#176f5d;text-underline-offset:3px}p{margin:17px 0}code{font:0.87em ui-monospace,monospace;background:#e5ece3;padding:2px 5px;border-radius:3px}pre{background:#e5ece3;padding:18px;overflow:auto;font:14px/1.6 ui-monospace,monospace}pre code{padding:0}.table{overflow:auto}table{width:100%;min-width:650px;border-collapse:collapse;font-size:14px;line-height:1.5;margin:20px 0}th,td{text-align:left;vertical-align:top;padding:13px 10px;border-bottom:1px solid #cdd9ce}.flow{display:grid;gap:10px;text-align:center}.flow div{padding:20px;background:#e5ece3;border-radius:4px}.flow small,.flow strong,.flow span{display:block}.flow small{letter-spacing:.13em;font-size:11px}.flow strong{font-size:20px}.flow span{font-size:14px}figure{margin:28px 0}figcaption{margin-top:14px}select{width:100%;padding:12px;background:transparent;color:inherit;font:inherit;border:1px solid #789282;border-radius:4px}label{display:block;font-weight:600;margin:12px 0}li{margin:9px 0}section{padding-bottom:20px;border-bottom:1px solid #cdd9ce}@media(prefers-color-scheme:dark){body{background:#171e19;color:#e6eee7}header,figcaption,.muted{color:#abb9ae}a{color:#89d1b6}code,pre,.flow div{background:#2b3b30}th,td,section{border-color:#445d4c}}@media(max-width:600px){main{padding:26px 16px 60px}h2{font-size:24px}table{font-size:13px}}</style></head><body><main><header>LOO-714 · design draft · November 3, 2026<br>Built from settings-catalog.md, settings-portability-review.md and linked source files</header><h1>One settings catalogue</h1>
+<p>Draft for Jack Heart · LOO-714 / infrastructure · 2026-11-03</p>
+<p>Build one executable definition of every LF-owned setting, so its accepted values,
+supported locations, editing path and explanation agree across CLI, files, DB and
+Desktop. This develops the existing settings-portability-review.md audit. It is a
+design for review, separate from the running choice-before-fallback implementation.
+No catalogue implementation or synchronization is approved by this draft.</p>
+<p>Jack's request: “designing a single settings catalog and explaining and clarifying
+what exists today versus what would need to change.” Preserve the accepted agent
+rule: choice before fallback, then source &gt; scope &gt; target. No built-in skill
+recommendations or per-skill accounts.</p>
+<h2>Current system → proposed system</h2>
+<p>“Current” means the working branch, including the active revision, not the installed
+release. The revision now carries <code>default_agent</code> and authored candidate keys;
+its full validation is ongoing. These observations do not claim shipped behavior.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Exists today</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Types and defaults</td>
+<td><code>Config</code>, nested Rust types, serde annotations and <code>Default</code> implementations</td>
+<td>Attach setting policy to these definitions; derive catalogue/schema from the same declarations.</td>
+</tr>
+<tr>
+<td>Eligible locations</td>
+<td><code>LAUNCH_KEYS</code>, <code>REPO_ONLY_KEYS</code>, <code>validate_scope</code>, special path handling</td>
+<td>One applicability policy per definition, used by every input surface.</td>
+</tr>
+<tr>
+<td>Value validation</td>
+<td>CLI/DB share <code>parse_value</code>; files/metadata use related validation, partly by serializing <code>Config::default()</code></td>
+<td>Parse through the definition's existing typed codec and semantic validator, without using a default value as a schema.</td>
+</tr>
+<tr>
+<td>Combining values</td>
+<td>One resolver; additive-key list and agent-specific strength handling</td>
+<td>Keep the resolver; select merge/resolution behavior from definitions.</td>
+</tr>
+<tr>
+<td>CLI convenience flags</td>
+<td><code>Cli::setting_values</code> translates flags into preference values</td>
+<td>Keep flags; register their bindings to the same definitions, including multi-key flags such as <code>--diff</code>.</td>
+</tr>
+<tr>
+<td>Set/unset</td>
+<td>Generic preferences plus separate account/machine parsing and dispatch</td>
+<td>Resolve one catalogue entry, then call its storage/domain adapter. Preserve domain effects.</td>
+</tr>
+<tr>
+<td>Inspection</td>
+<td>Runtime and <code>config show</code> share resolution; candidates include source, scope, target, value and authored key</td>
+<td>Add catalogue discovery and structured explanations; show contributions, clearing, fallbacks and unavailable sources.</td>
+</tr>
+<tr>
+<td>Special settings</td>
+<td>Theme, stream, portfolio and logs have other readers/writers; account/machine choices have domain stores</td>
+<td>Include them in discovery through adapters, with explicit capabilities. Do not force them into <code>Config</code> or the DB.</td>
+</tr>
+<tr>
+<td>Portability</td>
+<td>No common setting-level classification</td>
+<td>Describe portable declarations and machine dependencies; implementing sync remains later work.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Evidence: <a href="../rust/loopflow/src/config.rs">Config</a>,
+<a href="../rust/loopflow/src/config/settings.rs">resolver and validation</a>,
+<a href="../rust/loopflow/src/lf/mod.rs">CLI bindings</a>,
+<a href="../rust/loopflow/src/lf/commands/setting.rs">writers</a>,
+<a href="../rust/loopflow/src/lf/commands/config.rs">inspector</a>,
+<a href="../rust/loopflow/src/work/wave/setup.rs">Wave projection</a>,
+<a href="../swift/LoopflowMac/Design/AppearanceStore.swift">appearance owner</a>.</p>
+<h2>What one definition says</h2>
+<p>A definition describes a setting, not a configured value. Sources continue to
+hold declarations; resolution continues to produce values for a particular context.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Definition field</th>
+<th>Example: <code>docs</code></th>
+<th>Example: <code>agent</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Value and validation</td>
+<td>List of path/glob strings</td>
+<td>Harness/model string with existing validation</td>
+</tr>
+<tr>
+<td>Default</td>
+<td>Empty list</td>
+<td>No authored choice; application fallback is separately identified</td>
+</tr>
+<tr>
+<td>Applicability</td>
+<td>Launch settings at general/skill/occurrence targets</td>
+<td>Same targets; LF-owned metadata only</td>
+</tr>
+<tr>
+<td>Combination</td>
+<td>Append; explicit empty list clears prior contributions</td>
+<td>Choice/fallback resolution group with <code>default_agent</code></td>
+</tr>
+<tr>
+<td>Persistence binding</td>
+<td>Files or DB preferences according to the requested source</td>
+<td>Same</td>
+</tr>
+<tr>
+<td>Lifecycle</td>
+<td>New context assembly</td>
+<td>New launch; resume has an explicit continuity operation</td>
+</tr>
+<tr>
+<td>Portability/dependencies</td>
+<td>Relative repo paths portable; absolute paths need local mapping</td>
+<td>Declaration portable; selected harness/model must be available</td>
+</tr>
+<tr>
+<td>Description</td>
+<td>Additional documents included in context</td>
+<td>Agent to use for applicable work</td>
+</tr>
+</tbody>
+</table></div>
+<p>Applicability is a rule over <strong>source × scope × target</strong>, not three independent
+checkbox lists whose cross-product accidentally permits invalid combinations.
+For example, session presentation is personal-global; account routes allow
+personal global/repo/Wave scope but no skill target.</p>
+<p>Dynamic paths are declared patterns with typed selectors: <code>release.targets.&lt;name&gt;</code>
+and its supported fields, or a validated context-budget category. <code>skills</code> and
+<code>graphs</code> are target selectors around a setting, not independent setting definitions.
+Planning remains a tagged unit; a generic editor cannot splice together fields
+from different planning providers.</p>
+<h2>Ownership and data flow</h2><figure><div class="flow"><div><small>DEFINE ONCE</small><strong>Typed setting + policy + owner</strong><span>Catalogue · validation · schema · discovery</span></div><b aria-hidden="true">↓</b><div><small>DECLARE VALUES</small><strong>CLI · environment · files · DB · domain adapters</strong><span>Preserve source, scope, target and choice/default</span></div><b aria-hidden="true">↓</b><div><small>RESOLVE ONCE</small><strong>Effective value + contribution trace</strong><span>Execution · CLI inspection · Desktop</span></div></div><figcaption>Proposed. Existing sources and resolver remain; the catalogue replaces scattered policy definitions.</figcaption></figure>
+<p>Use Rust as the authority. For core Config fields, a small declarative field list
+can emit the typed fields, defaults and descriptors together. Retain existing
+domain types/codecs; derive value schemas from them rather than hand-writing a
+parallel string/bool/list schema. Settings owned elsewhere register descriptors
+bound to their existing typed domain operations. Export the catalogue as a typed
+DTO for Desktop/help/editor consumers. No separately maintained Swift key list
+or external schema file becomes another authority.</p>
+<p>The exact macro spelling is implementation detail. The requirement is that adding
+a Config preference also requires its policy definition, while internal fields
+such as retained source layers never become public settings. Type validators and
+default constructors remain single-owned even when reused by domain code.</p>
+<p>Four concepts are sufficient:</p>
+<ul>
+<li><strong>Definition:</strong> key/pattern, typed codec/default, applicability, resolution policy,
+adapter, lifecycle, portability and description.</li>
+<li><strong>Address:</strong> setting plus scope and optional skill/graph-occurrence target.</li>
+<li><strong>Declaration:</strong> address, authored value and source locator. Choice versus fallback
+comes from the declaration key's definition, not a UI guess.</li>
+<li><strong>Resolution:</strong> effective value, each declaration's contribution/status, comparison
+reason and source diagnostics. This extends current <code>EffectiveSetting</code>/candidates.</li>
+</ul>
+<p>Core operations, names illustrative:</p>
+<pre><code class="language-text">describe_settings(filter) -&gt; definitions
+parse_setting(address, input, source) -&gt; validated declaration
+write_setting(declaration) / unset_setting(address, source) -&gt; adapter result
+resolve_settings(context, declarations) -&gt; values + explanation
+</code></pre>
+<p>The resolver owns both the decision and its explanation. Reasons identify the
+actual comparison: explicit choice, higher source, narrower scope, more specific
+target, additive contribution or clearing. A reset can clear earlier items while
+later declarations append; there need not be one winning list declaration.</p>
+<p>Read each source as present, absent or unavailable. The existing fallback on an
+unreadable DB can remain usable, but inspection reports incomplete evidence.
+Bootstrap readers request only sources available at that stage; listing settings,
+loading a theme and reporting a store-version problem must not require a working DB.</p>
+<h2>Domain settings remain domain settings</h2>
+<p>Account routes expose their ordered preference and existing read/write operation,
+not credentials. Machine/session selection exposes its existing operation,
+including movement/copy semantics; generic writes must not bypass those effects.
+Theme keeps its draft/Apply/Cancel behavior and file writer. Installation settings
+retain bootstrap access. Portfolio remains a managed collection.</p>
+<p>The catalogue advertises whether an entry supports generic assignment or needs
+a domain action. Unsupported source/target combinations include the reason and
+the supported action. Inclusion does not automatically add every field to every
+surface. Native provider configuration is identified as delegated, not reimplemented.
+Unknown LF keys are diagnosed after dispatching all known owners; native skill
+frontmatter and recognized non-setting structure are not treated as unknown LF keys.</p>
+<section aria-labelledby="examples-title"><h2 id="examples-title">What the shared explanation buys us</h2><p>Illustrative design examples, not live configuration.</p><label for="example">Example</label><select id="example"></select><pre id="inputs"></pre><p><strong>Result: <span id="value"></span></strong></p><p id="explanation" aria-live="polite"></p><p id="change" class="muted"></p></section><h2>The demo</h2>
+<p>Command spelling is provisional; these are additions to the PR's inspector:</p>
+<pre><code class="language-text">lf config list
+  agent          launch preference   general / skill / occurrence
+  docs           launch preference   append; [] clears
+  theme          personal file       appearance editor / Apply
+  account.codex  account route        global / repo / Wave; no skill target
+
+lf config show --skill implement --key agent --explain
+  agent = claude
+  selected: repo .lf/config.yaml · agent: claude
+  fallback: ~/.lf/config.yaml · skills.implement.default_agent: codex
+  reason: an explicit agent beats a default, regardless of source or specificity
+</code></pre>
+<p>The same query and structured explanation serve CLI and Desktop. With a personal
+implement <code>agent: codex</code>, the result changes to Codex because personal source wins
+among explicit choices. With <code>docs</code>, the explanation instead lists contributions
+and resets. A “where can I set this?” view comes directly from applicability policy.</p>
+<h2>Delete — do not maintain</h2>
+<ul>
+<li><code>LAUNCH_KEYS</code>, <code>REPO_ONLY_KEYS</code>, <code>ADDITIVE_KEYS</code> and hand-maintained eligibility
+branches, once their consumers read descriptor policy in the same change.</li>
+<li>Schema discovery by serializing <code>Config::default()</code> in <code>preference_path</code> and
+validation; retain the actual typed parsers and semantic validators.</li>
+<li>Separate account/machine <em>key discovery</em> in <code>parse_key</code>; keep their domain APIs,
+storage, validation and effects behind catalogue bindings.</li>
+<li>The inspector's assumption that the last candidate alone is selected and all
+others are merely earlier. Render resolver-provided dispositions instead.</li>
+<li>Any new duplicated catalogue in Swift, docs or JSON. Generate those projections.</li>
+</ul>
+<p>Preserve existing behavioral tests for precedence, identity, native metadata,
+unset, false/empty values, propagation and launched-provider agreement. Adjust
+tests tied solely to deleted discovery helpers; do not retain obsolete helpers
+just to keep their tests green. Dormant summary preferences must be identified as
+inactive rather than advertised as working; removing them needs a consumer audit.</p>
+<h2>Delivery shape and acceptance</h2>
+<p><strong>Additive series. Keystone:</strong> replace scattered catalogue policy and wire discovery,
+validation, writers and explanation to it in one coherent PR. Include all existing
+LF-owned settings in discovery, with correct adapter capabilities. No new storage
+layer or database migration is required for the catalogue itself.</p>
+<p>Internal sequence: (1) co-locate definitions and cut over validation/eligibility,
+removing the old lists; (2) bind special owners and CLI adapters; (3) expose catalogue
+and resolver explanations through shared DTOs and inspection. These are internal
+slices, not separately maintained old/new implementations.</p>
+<p><strong>Later outcomes:</strong> generated config-editor schema/completion; historical launch
+snapshots; cross-machine comparison and profile distribution. Catalogue metadata
+prepares them but does not implement synchronization, credential distribution or
+new history persistence. Preserve source and strength when exporting declarations;
+a resolved snapshot is not a portable preference profile.</p>
+<p>Headless acceptance proves:</p>
+<ul>
+<li>Every LF-owned persisted preference is discoverable, or explicitly classified as
+delegated/inactive; private Config fields and operational commands are excluded.</li>
+<li>Applicable file/DB/CLI/env declarations produce the same values and explanations
+through real launch preparation; restrictions agree across those surfaces.</li>
+<li>Choice/default precedence, list append/clear and unset explanations match execution.</li>
+<li>Catalogue and bootstrap reads work with no DB; unavailable sources remain visible.</li>
+<li>Special-setting adapters preserve existing domain behavior and do not expose secrets.</li>
+<li>Exported DTO fixtures agree across Rust/Swift if the Desktop boundary changes.</li>
+</ul>
+<p>Gate: <code>uv run python scripts/test.py --reuse-passing --rust-filter 'test(config::) | test(settings_launch_tests::) | test(wave_setup_tests::)'</code>, with inherited LF
+variables cleared as required by scripts/testing.md; add affected adapter suites
+identified by the final diff. Formatting/Clippy and relevant DTO checks are part of
+that gate. No display, live provider or paid launch is required.</p>
+<h2>Review decisions</h2>
+<ol>
+<li>Approve the keystone boundary: one authoritative catalogue plus discovery and
+explanations, preserving existing storage owners and applicability?</li>
+<li>Is catalogue visibility with an explicit domain-action binding sufficient for
+theme, portfolio, account routes and machine movement initially, rather than
+requiring every operation to become a plain assignment?</li>
+</ol>
+<p>Check: source audit only; no catalogue code or new tests executed. The active
+choice-before-fallback pursue continues independently; this draft is not its directive.</p>
+</main><script>const examples=[{"label": "Skill fallback versus repo choice", "inputs": "Personal: skills.implement.default_agent = codex\nRepository: agent = claude", "value": "claude", "explanation": "The repository declaration is an explicit choice. The personal skill declaration is a fallback, so source and specificity do not overturn the choice.", "change": "Current branch records authored candidate keys. Proposed: the resolver also returns this decision reason as structured data."}, {"label": "Personal skill choice versus repo occurrence", "inputs": "Personal: skills.implement.agent = codex\nRepository: release/write-code.agent = claude", "value": "codex", "explanation": "Both declarations are explicit choices. Personal source outranks repository source before target specificity is considered.", "change": "Existing precedence survives. Proposed: CLI and Desktop render the same comparison reason."}, {"label": "Documents appended after a reset", "inputs": "Repository: docs = [README.md]\nPersonal general: docs = []\nPersonal implement: docs = [notes.md]", "value": "[notes.md]", "explanation": "The empty personal declaration clears earlier contributions. The later skill declaration adds notes.md. Reporting only one selected source would hide the reset.", "change": "Existing append/clear behavior survives. Proposed: contribution and clearing events replace the generic selected/earlier labels."}, {"label": "Theme remains an appearance operation", "inputs": "Personal file: theme = chosen theme\nEditor: draft preview, then Apply or Cancel", "value": "Owned by appearance settings", "explanation": "The catalogue describes the setting and directs edits to its existing owner. Appearance keeps preview/Apply/Cancel and its file dependencies.", "change": "Current theme handling is outside Config. Proposed: catalogue visibility and a typed adapter, without moving the preference into the DB."}];const select=document.getElementById('example');examples.forEach((e,i)=>{const o=document.createElement('option');o.value=i;o.textContent=e.label;select.appendChild(o)});function show(){const e=examples[Number(select.value)];for(const key of ['inputs','value','explanation','change'])document.getElementById(key).textContent=e[key]}select.addEventListener('change',show);show();</script></body></html>

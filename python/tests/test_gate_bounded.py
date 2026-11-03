@@ -845,16 +845,26 @@ def test_ui_host_suite_serializes_and_checks_machine_state():
     assert ui.postcheck is gate._ui_host_postcheck
 
 
-def test_desktop_changes_select_headless_checks_without_host_automation():
-    plans = gate.build_plan(
-        changed=["swift/LoopflowMac/Views/WorkSurfaceView.swift"], run_all=False, forced=set()
-    )
+@pytest.mark.parametrize(
+    "path",
+    [
+        "swift/LoopflowMac/Views/WorkSurfaceView.swift",
+        "scripts/loopflow-dev.py",
+        "rust/loopflow/build.rs",
+        "rust/loopflow/ghostty-vt.json",
+        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+    ],
+)
+def test_desktop_changes_select_headless_checks_without_host_automation(path: str) -> None:
+    plans = gate.build_plan(changed=[path], run_all=False, forced=set())
     selected = {plan.suite.name: plan for plan in plans if plan.run}
     assert "swift" in selected
     assert "ui-host" not in selected
     commands = selected["swift"].commands
     assert any(command.argv[0] == "scripts/test_desktop.sh" for command in commands)
     assert not any("scripts/prove_wave_surface_states.sh" in command.argv for command in commands)
+    # The slower Xcode compile remains explicit, but must recognize these inputs.
+    assert next(s for s in gate.SUITES if s.name == "loopflow").match([path])
 
 
 def test_recovery_has_time_beyond_read_only_inventory(tmp_path, monkeypatch):

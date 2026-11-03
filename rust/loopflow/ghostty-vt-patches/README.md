@@ -48,3 +48,11 @@ theme for every untouched color. HTML palette output is unchanged. The build run
 and the full Kitty keyboard stack. A later mode pop preserves the program's
 previous flags. The build runs the cursor/stack round trip, pin-map check, and
 existing terminal/keyboard formatter tests before publishing archives.
+
+`0004-vt-darwin-runtime.patch`: the ReleaseFast Darwin archive omits bundled
+UBSan handlers and the memset override, avoiding duplicate runtime symbols when
+Desktop links GhosttyKit and `loopflow-ffi` together. libSystem supplies memset;
+the compiler intrinsics remain bundled. Linux archives keep their runtime.
+After changing the archive, verify both `scripts/test_desktop.sh` and
+`uv run python scripts/test.py --loopflow`: CLI linking alone cannot catch
+collisions with GhosttyKit or failures in Xcode's build phases.

@@ -1,11 +1,11 @@
 {
   "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0",
-  "artifact": "lf6",
+  "artifact": "lf7",
   "base_url": "https://bin.loopflow.studio",
   "sha256": {
-    "aarch64-apple-darwin": "64e829ab56a8e4c45f6dc87937cb9276d4b166d407dc07cdd3c97cee557c7efa",
-    "x86_64-apple-darwin": "9eac849ad9a50b0e1bcb06beca50daa388efecf74995749e392f36275ccc7798",
-    "x86_64-unknown-linux-gnu": "82b42a9925ecf8c19241512db6541c9cd13d3a42b073554171b622e14ed68682",
-    "aarch64-unknown-linux-gnu": "5603149b16c55c867b522cb3193b54650f21a8f920bff74008387b1dc8f4bf82"
+    "aarch64-apple-darwin": "9c9668b67a8ec0fced6ac150eb011034da49ed4b979ac348ca4abefffd64a80a",
+    "x86_64-apple-darwin": "f4075b7bacf765a7d206d5c08b3e8a206ffcb036efa8fd59e94d135d42b2b482",
+    "x86_64-unknown-linux-gnu": "9701d18a1ea04240cc25d7d901f796262cfff3b56f2a95303324f0907d772e79",
+    "aarch64-unknown-linux-gnu": "3ed1f454d07d8a74da12b091ce9b8f06f400306179efb73cbb9f2eea06feb9c8"
   }
 }

@@ -44,7 +44,9 @@ A filtered run covers `-p loopflow` only: run `cargo test -p loopflow-ffi`
 separately when the app's library changed. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
 `local_planning`) and can exhaust the Rust phase's 1200 s budget; name modules.
-Changes to `swift/project.yml` reach the Xcode build: run `--loopflow`.
+Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
+pin/build reach both Desktop link paths: run `--swift --loopflow`. SwiftPM
+links GhosttyKit alongside the Rust archive; Xcode runs the build phases.
 The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
 with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
 and rerun.

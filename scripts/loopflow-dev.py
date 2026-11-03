@@ -10,6 +10,7 @@ Commands:
     install         Build and install without launching
     test            Build and run tests
     ghostty-build   Build the pinned patched GhosttyKit
+    ghostty-vt-build  Build the libghostty-vt archives lf links (--publish uploads)
     run             Build and launch the app
     run-debug       Build and run with stdout visible (--world <dir> opens an lf-world)
     release         Build release .app and .dmg (delegates to release-loopflow.py)
@@ -26,6 +27,8 @@ Streaming logs (long-running commands):
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import json
 import os
 import plistlib
@@ -37,6 +40,9 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
+
+import boto3
+import botocore.exceptions
 
 from app_bundle import install_app_executable
 
@@ -58,8 +64,18 @@ ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
-GHOSTTY_REVISION = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
+# One pin for the Ghostty revision Desktop's framework and lf's terminal library
+# are built from; build.rs reads the same file to fetch and link libghostty-vt.
+GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
+GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
 GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip"
+# Rust target → Zig target for the libghostty-vt archives `lf` links.
+GHOSTTY_VT_TARGETS = {
+    "aarch64-apple-darwin": "aarch64-macos",
+    "x86_64-apple-darwin": "x86_64-macos",
+    "x86_64-unknown-linux-gnu": "x86_64-linux-gnu",
+    "aarch64-unknown-linux-gnu": "aarch64-linux-gnu",
+}
 
 
 def _app_environment(repo: Path, world: Path | None = None) -> dict[str, str]:
@@ -224,33 +240,12 @@ def _normalize_ghostty_library(framework: Path) -> None:
 def cmd_ghostty_build() -> int:
     """Build the pinned GhosttyKit with Loopflow's small embedder patch."""
     build_root = SWIFT_DIR / ".build" / "ghostty-kit"
-    source = build_root / f"ghostty-{GHOSTTY_REVISION}"
-    archive = build_root / "source.tar.gz"
     local_framework = SWIFT_DIR / ".build" / "local" / "GhosttyKit.xcframework"
     artifact = SWIFT_DIR / ".build" / "artifacts" / GHOSTTY_ARTIFACT
+    source = _download_ghostty_source(build_root)
 
-    if build_root.exists():
-        shutil.rmtree(build_root)
-    build_root.mkdir(parents=True)
-
-    url = f"https://github.com/ghostty-org/ghostty/archive/{GHOSTTY_REVISION}.tar.gz"
-    print(f"Downloading Ghostty {GHOSTTY_REVISION}...")
-    with urllib.request.urlopen(url) as response, archive.open("wb") as output:
-        shutil.copyfileobj(response, output)
-    with tarfile.open(archive) as source_archive:
-        source_archive.extractall(build_root, filter="data")
-
-    for patch in sorted((SWIFT_DIR / "GhosttyKitPatches").glob("*.patch")):
-        print(f"Applying {patch.name}...")
-        with patch.open("rb") as patch_input:
-            result = subprocess.run(
-                ["patch", "--batch", "--forward", "-p1"],
-                cwd=source,
-                stdin=patch_input,
-                check=False,
-            )
-        if result.returncode != 0:
-            return result.returncode
+    if (code := _apply_patches(source, SWIFT_DIR / "GhosttyKitPatches")) != 0:
+        return code
 
     # Patch behavior, the protocol parser it consumes, and the exported action ABI.
     result = run(
@@ -340,6 +335,185 @@ def cmd_ghostty_build() -> int:
     print(f"Artifact: {artifact}")
     print(f"SwiftPM checksum: {checksum.stdout.strip()}")
     return 0
+
+
+def _download_ghostty_source(build_root: Path) -> Path:
+    """Extract the pinned upstream Ghostty revision under build_root."""
+    source = build_root / f"ghostty-{GHOSTTY_REVISION}"
+    archive = build_root / "source.tar.gz"
+    if build_root.exists():
+        shutil.rmtree(build_root)
+    build_root.mkdir(parents=True)
+    url = f"https://github.com/ghostty-org/ghostty/archive/{GHOSTTY_REVISION}.tar.gz"
+    print(f"Downloading Ghostty {GHOSTTY_REVISION}...")
+    with urllib.request.urlopen(url) as response, archive.open("wb") as output:
+        shutil.copyfileobj(response, output)
+    with tarfile.open(archive) as source_archive:
+        source_archive.extractall(build_root, filter="data")
+    return source
+
+
+def _apply_patches(source: Path, patches: Path) -> int:
+    for patch in sorted(patches.glob("*.patch")):
+        print(f"Applying {patch.name}...")
+        with patch.open("rb") as patch_input:
+            result = subprocess.run(
+                ["patch", "--batch", "--forward", "-p1"],
+                cwd=source,
+                stdin=patch_input,
+                check=False,
+            )
+        if result.returncode != 0:
+            return result.returncode
+    return 0
+
+
+def _zig_0_16() -> str:
+    """The Zig the pinned Ghostty revision builds with: `LOOPFLOW_ZIG` or `zig` on PATH."""
+    zig = os.environ.get("LOOPFLOW_ZIG") or shutil.which("zig")
+    if not zig:
+        raise SystemExit("zig 0.16 is required: install it and set LOOPFLOW_ZIG or PATH")
+    version = run_capture([zig, "version"]).stdout.strip()
+    if not version.startswith("0.16."):
+        raise SystemExit(f"{zig} is Zig {version}; the pinned Ghostty needs 0.16.x")
+    return zig
+
+
+def cmd_ghostty_vt_build(publish: bool = False) -> int:
+    """Cross-compile the libghostty-vt archives `lf` links, one per release target."""
+    pin = json.loads(GHOSTTY_VT_PIN.read_text())
+    zig = _zig_0_16()
+    build_root = SWIFT_DIR / ".build" / "ghostty-vt"
+    source = _download_ghostty_source(build_root)
+    if (code := _apply_patches(source, GHOSTTY_VT_PIN.parent / "ghostty-vt-patches")) != 0:
+        return code
+    # Prove each formatter patch before producing archives.
+    for test_filter in (
+        "hyperlink",
+        "TerminalFormatter vt with palette",
+        "Screen vt with kitty",
+        "Terminal vt with",
+    ):
+        result = run(
+            [
+                zig,
+                "build",
+                "test-lib-vt",
+                "-Demit-lib-vt=true",
+                "-Dsimd=false",
+                f"-Dtest-filter={test_filter}",
+            ],
+            cwd=source,
+            check=False,
+        )
+        if result.returncode != 0:
+            return result.returncode
+    artifacts = SWIFT_DIR / ".build" / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    for rust_target, zig_target in GHOSTTY_VT_TARGETS.items():
+        prefix = build_root / "out" / rust_target
+        print(f"Building libghostty-vt for {rust_target}...")
+        result = run(
+            [
+                zig,
+                "build",
+                "-Demit-lib-vt=true",
+                "-Demit-xcframework=false",
+                "-Dsimd=false",
+                "-Dcpu=baseline",
+                "-Dstrip=true",
+                # The owner needs the terminal, its snapshot codec and the VT
+                # formatter; a selection restricts the formatter to a row range.
+                "-Dvt-features=-all,+snapshot,+formatter,+selection",
+                "-Doptimize=ReleaseFast",
+                f"-Dtarget={zig_target}",
+                "--prefix",
+                str(prefix),
+            ],
+            cwd=source,
+            check=False,
+        )
+        if result.returncode != 0:
+            return result.returncode
+        name = f"libghostty-vt-{pin['revision'][:7]}-{pin['artifact']}-{rust_target}.tar.gz"
+        archive = artifacts / name
+        _write_ghostty_vt_archive(archive, prefix, source)
+        pin["sha256"][rust_target] = hashlib.sha256(archive.read_bytes()).hexdigest()
+        print(f"Artifact: {archive}\nSHA-256: {pin['sha256'][rust_target]}")
+        if publish:
+            pin["sha256"][rust_target] = _publish_ghostty_vt_archive(
+                archive, name, pin["sha256"][rust_target], pin["base_url"]
+            )
+    GHOSTTY_VT_PIN.write_text(json.dumps(pin, indent=2) + "\n")
+    print(f"Pinned checksums in {GHOSTTY_VT_PIN}")
+    return 0
+
+
+def _write_ghostty_vt_archive(archive: Path, prefix: Path, source: Path) -> None:
+    """Normalize archive metadata; Zig output itself is not byte-reproducible."""
+
+    def _normalize(info: tarfile.TarInfo) -> tarfile.TarInfo:
+        info.mtime = 0
+        info.uid = info.gid = 0
+        info.uname = info.gname = ""
+        return info
+
+    with (
+        archive.open("wb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as output,
+    ):
+        output.add(prefix / "lib" / "libghostty-vt.a", arcname="libghostty-vt.a", filter=_normalize)
+        output.add(prefix / "include" / "ghostty", arcname="include/ghostty", filter=_normalize)
+        output.add(source / "LICENSE", arcname="LICENSE", filter=_normalize)
+
+
+def _publish_ghostty_vt_archive(archive: Path, name: str, sha256: str, base_url: str) -> str:
+    """Publish an immutable archive, retaining an existing name's checksum."""
+    # Check the bucket directly: the edge caches misses for four hours and
+    # published names for a year. Changed patches or flags need a new artifact.
+    bucket = boto3.client(
+        "s3",
+        endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com",
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"].strip(),
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"].strip(),
+        region_name="auto",
+    )
+    try:
+        stored = bucket.head_object(Bucket="bin", Key=name)["Metadata"].get("sha256")
+    except botocore.exceptions.ClientError as error:
+        if error.response["Error"]["Code"] != "404":
+            raise
+        stored = None
+    else:
+        stored = (
+            stored
+            or hashlib.sha256(bucket.get_object(Bucket="bin", Key=name)["Body"].read()).hexdigest()
+        )
+    if stored is not None:
+        print(f"Already published {base_url}/{name}; keeping its SHA-256 {stored}")
+        return stored
+    print(f"Uploading {name} to R2...")
+    bucket.upload_file(
+        str(archive),
+        "bin",
+        name,
+        ExtraArgs={
+            "ContentType": "application/gzip",
+            "CacheControl": "public, max-age=31536000, immutable",
+            "Metadata": {"sha256": sha256},
+        },
+    )
+    # A query string keeps the read-back off the edge cache; the bucket ignores it.
+    request = urllib.request.Request(
+        f"{base_url}/{name}?sha256={sha256}", headers={"User-Agent": "loopflow-dev"}
+    )
+    with urllib.request.urlopen(request) as response:
+        published = hashlib.sha256(response.read()).hexdigest()
+    if published != sha256:
+        raise SystemExit(f"{name} read back with SHA-256 {published}, built {sha256}")
+    print(f"Published {base_url}/{name}")
+    return sha256
 
 
 def cmd_run() -> int:
@@ -705,6 +879,7 @@ COMMANDS = {
     "install": (cmd_install, "Build and install without launching"),
     "test": (cmd_test, "Build and run tests"),
     "ghostty-build": (cmd_ghostty_build, "Build the pinned patched GhosttyKit"),
+    "ghostty-vt-build": (cmd_ghostty_vt_build, "Build the libghostty-vt archives lf links"),
     "run": (cmd_run, "Build and launch the app"),
     "run-debug": (cmd_run_debug, "Build and run with stdout visible"),
     "release": (cmd_release, "Build release .app and .dmg"),
@@ -740,6 +915,12 @@ def main() -> int:
                 "--world",
                 type=lambda p: Path(p).expanduser().resolve(),
                 help="lf-world directory: open its repo with its LF_HOME and provider homes",
+            )
+        if name == "ghostty-vt-build":
+            sub.add_argument(
+                "--publish",
+                action="store_true",
+                help="upload each archive to bin.loopflow.studio (R2 credentials from Doppler)",
             )
         if name == "setup":
             sub.add_argument(
@@ -778,6 +959,8 @@ def main() -> int:
         return func(output=args.output)
     if args.command == "ffi":
         return func(release=args.release)
+    if args.command == "ghostty-vt-build":
+        return func(publish=args.publish)
     return func()
 
 

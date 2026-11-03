@@ -183,6 +183,16 @@ pub(super) enum Request {
     },
     /// Whether some viewer holds input control, asked before opening another.
     Controlled,
+    /// Transfer the direct child's exit recording to its owner before exec.
+    ExitRecord {
+        key: String,
+        pid: u32,
+        record: Box<crate::harness::native_exit::NativeExit>,
+    },
+    /// Cancel that transfer when exec fails.
+    DropExitRecord {
+        key: String,
+    },
 }
 
 /// A dropped viewer's connection asking to continue from byte `received`.
@@ -226,6 +236,7 @@ pub(super) enum Reply {
         held: bool,
     },
     NativeEnded,
+    Accepted,
 }
 
 // ---------------------------------------------------------------------------

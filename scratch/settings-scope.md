@@ -231,16 +231,14 @@ transcripts based on the superseded Route draft. This PR leaves recovery open.
 
 ## Remaining first-PR work — 2026-11-02
 
-The supplied iteration feedback predates the current export and stand-in launch
-changes. Source inspection at `d7561a4512` confirms those implementation gaps are
-closed: `headless_command` uses `--skill-input` without promoting authored agents
-to CLI authority; the captures retain occurrence values, source, Graph and ID.
-The launch tests exercise the requested precedence, non-agent and Session/Task
-cases. No further product decision or bounded code repair emerged in reconciliation.
+The supplied iteration feedback's inspection defect is repaired in `62b385e1eb`.
+Targeted reads match the loaded Graph's canonical name and original authored ID;
+whole-Graph reads retain every composed occurrence and router. Regression coverage
+includes aliases, repeated composition, conflicting parent/child preferences and
+child-only IDs. Export and Session/Task launch proofs remain applicable. This
+reconciliation changes prose and memory only; no further bounded repair or
+first-PR product decision emerged.
 
-The subsequent concept review below found one bounded inspection correction,
-now implemented with regression coverage for canonical aliases, repeated
-composition, conflicting parent/child preferences and child-only IDs.
 Graph review and gate own the affected architecture, Rust, website and Swift
 suites, followed by the concrete settings demo and publication for Jack's review.
 Auto-Ship remains stopped; no merge or Task completion is authorized. Recovery
@@ -248,9 +246,10 @@ remains the second PR, with its exact mechanisms still unselected.
 
 ## Concept review — 2026-11-02
 
-Outcome: **design clarified; inspection correction implemented**. Jack Heart's accepted
-defining-Graph/local-ID target must mean the same thing in inspection and writes.
-No new product choice is needed for this first-PR correction.
+Outcome after reviewing `62b385e1eb`: **nothing further to change; no open
+first-PR product choice**. Jack Heart's accepted defining-Graph/local-ID target
+now means the same thing in inspection and writes. The prior correction is
+implemented; this review adds no implement direction or approval.
 
 The normal interaction remains: set a personal preference for `outer/work`,
 inspect that target, launch it, and unset the preference to expose the next
@@ -258,16 +257,16 @@ layer. A Session's explicit agent remains conversation-local; an explicit Graph
 agent reaches that execution's steps. Source precedes specificity, collections
 retain their declared merging rules, and history never becomes Task policy.
 
-Counterexample: `outer` composes `inner` twice and declares its own `work` step;
+Reproduced before `62b385e1eb`: `outer` composes `inner` twice and declares its own `work` step;
 `inner` also declares `work`. Personal settings select `claude:inner` for
 `inner/work` and `codex:outer` for `outer/work`. The branch binary's
-`config show --graph outer --step work --json` returns all three occurrences,
+`config show --graph outer --step work --json` returned all three occurrences,
 although `graphs.outer.steps.work.agent` changes only the outer occurrence.
-`commands/config.rs::inspect` filters the flattened steps by local ID alone.
-The resolver already retains and matches both parts of `OccurrenceSettings`.
-This creates two meanings for the target precisely when composition is reused.
+`commands/config.rs::inspect` filtered flattened steps by local ID alone.
+The resolver already retained and matched both parts of `OccurrenceSettings`.
+Inspection therefore gave the same target a different meaning under composition.
 
-Proposed usage clarification for `docs/config.md`:
+Implemented usage clarification in `docs/config.md`:
 
 ```sh
 lf config show --graph outer --json              # every composed agent step
@@ -275,13 +274,12 @@ lf config show --graph outer --step work --json  # only authored outer/work
 lf config show --graph inner --step work --json  # authored inner/work
 ```
 
-With `--step`, inspection must select by the loaded definition's canonical name
+With `--step`, inspection now selects by the loaded definition's canonical name
 and the original authored ID in `OccurrenceSettings`; a child's same-named ID
-must not satisfy a missing parent target. Preserve whole-Graph inspection of
-composed steps and routers when `--step` is absent. Do not add an instance selector,
-new persisted identity, or alternate resolver. CLI and Desktop's existing
-`Read::Settings` share this operation, so the correction belongs there. Existing
-skill guidance needs no change.
+does not satisfy a missing parent target. Whole-Graph inspection retains composed
+steps and routers when `--step` is absent. CLI and Desktop's `Read::Settings`
+share the corrected operation. No instance selector, persisted identity, alternate
+resolver or skill-guidance change was needed.
 
 Failure and recovery: a mismatched target must report no matching step; inspect
 the defining child Graph to find its value. Unset continues to reveal the next
@@ -297,6 +295,16 @@ Repeated interactive steps exercise original IDs after navigation renaming; a
 composed XOR path preserves router and child inspection. `docs/config.md` explains
 the target and missing-parent behavior. Existing launch parity tests continue to
 own provider selection; gate and demo remain pending.
+
+The current review traced set → inspect → launch → unset through the typed
+writer, `OccurrenceSettings`, shared resolver and captured `SkillInvocation`.
+The same-ID counterexample above remains the regression boundary. Native exports
+retain occurrence authority while loading current repository skills; Session
+selection remains invocation-local, and the migration removes Task agent policy
+without replacing provider history. No additional lifecycle record, resolver or
+skill instruction is needed. The next proof remains gate and the concrete demo,
+not another implementation iteration. Recovery's unselected mechanisms belong
+to the accepted second PR and do not block this settings review.
 
 ## Export and launch proof
 
@@ -354,7 +362,7 @@ The selection/child-launch proof moved from the library fixture module to the
 `settings_launch_tests` integration module, using Cargo’s fixture binary.
 The replaced assertion was removed; the remaining library fixtures retain their coverage.
 
-Upstream reconciliation: fetched `origin/main` remains `ece53eec1b`, already merged
+Upstream reconciliation (2026-11-02): a fresh fetch leaves `origin/main` at `ece53eec1b`, already merged
 in `d6d7057d97`. The Session screen/mode restoration, owner/viewer reduction and
 installed-entry resume changes are present. The native exit caller repair above
 completes their integration with the settings authority change.
@@ -362,4 +370,8 @@ Infrastructure and its immediate Release child's goal/memory were read. Release'
 entry-point lesson applies directly: runtime Graph proof cannot establish exported
 recipe behavior. Broader live/installed recovery is not established by either.
 
-Check result: with inherited `LF_*` unset and null stdin, `cargo test -p loopflow --lib config::` (45), `cargo test -p loopflow --lib skills::catalog::` (8), `cargo test -p loopflow --test integration settings_launch_tests::runtime_and_exported_occurrences_resolve_live_preferences_at_the_same_authority` (1), and `cargo test -p loopflow --test integration wave_setup_tests::setting_targets_inspect` (2) PASS; `cargo fmt`, `git diff --check`, and `lf context` PASS. The test linker warns about its oversized unwind table. Prior launch/Session evidence remains applicable outside these reductions. Gate owns broader suites and Clippy; demo and review-only publication remain pending. Auto-Ship remains stopped per the prior `lf desktop task LOO-714 --json` read.
+The recorded test linker warning concerns its oversized unwind table. Gate owns
+broader suites and Clippy; demo and review-only publication remain pending.
+Auto-Ship remains stopped per the prior `lf desktop task LOO-714 --json` read.
+
+Check result: reused `62b385e1eb`'s recorded PASS with inherited `LF_*` unset and null stdin: `cargo test -p loopflow --lib config::` (45), `cargo test -p loopflow --lib skills::catalog::` (8), `cargo test -p loopflow --test integration settings_launch_tests::runtime_and_exported_occurrences_resolve_live_preferences_at_the_same_authority` (1), `cargo test -p loopflow --test integration wave_setup_tests::setting_targets_inspect` (2), and `cargo fmt`; prose-only reconciliation: `git diff --check` and `lf context` PASS.

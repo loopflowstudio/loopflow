@@ -33,14 +33,16 @@
   <code>scratch/limit-failures.md</code>, <code>docs/config.md</code>,
   <code>rust/loopflow/src/config/settings.rs</code>,
   <code>rust/loopflow/src/lf/commands/config.rs</code>, and
-  <code>rust/loopflow/tests/settings_launch_tests.rs</code>.
+  <code>rust/loopflow/tests/{settings_launch_tests,wave_setup_tests}.rs</code>.
+  Reviewed implementation: <code>62b385e1eb</code>.
 </header>
 <h1>Inspect the same step that the preference changes.</h1>
-<p class="decision"><strong>Design clarified: one implementation correction.</strong>
-  Jack Heart already selected a defining Graph plus authored step ID as the target.
-  Apply that meaning to inspection too. No new product approval is needed.</p>
+<p class="decision"><strong>No further design change or open first-PR choice.</strong>
+  Jack Heart selected a defining Graph plus authored step ID as the target.
+  Inspection now uses that same target. The earlier correction is implemented;
+  gate and the concrete demo remain pending.</p>
 
-<h2>Existing behavior: one name reaches three steps</h2>
+<h2>Before the correction: one name reached three steps</h2>
 <pre>inner:  work
 outer:  inner → inner → work
 
@@ -52,36 +54,37 @@ lf config show --graph outer --step work --json
 → inner/work  claude:inner
 → inner/work  claude:inner
 → outer/work  codex:outer</pre>
-<p>Saving <code>graphs.outer.steps.work.agent</code> affects only the last step.
-  Inspection matches the local ID across the entire composition. A successful read
-  can therefore explain a different target from the one being edited.</p>
-<p><small>Reproduced with the existing branch binary in a disposable repository and
-  LF_HOME, with inherited LF_* removed. No provider launched. The source filter
-  compares the local step ID alone.</small></p>
+<p>Saving <code>graphs.outer.steps.work.agent</code> affected only the last step.
+  Inspection matched the local ID across the composition and could explain a
+  different target from the one being edited. This was the consequential mismatch.</p>
+<p><small>Preserved counterexample from the prior review; corrected in
+  <code>62b385e1eb</code>. No new provider run was needed for this review.</small></p>
 
-<h2>Proposed correction: one target across actions</h2>
+<h2>Implemented: one target across actions</h2>
 <table>
   <thead><tr><th>Action</th><th>Concept</th><th>API / owner</th></tr></thead>
   <tbody>
-    <tr><td>Set or unset <code>graphs.outer.steps.work.agent</code></td><td>Personal preference for <code>outer/work</code></td><td>Existing typed setting writer and scoped DB values</td></tr>
-    <tr><td>Inspect <code>--graph outer --step work</code></td><td>The same authored occurrence</td><td><strong>Change:</strong> shared <code>inspect</code> matches <code>OccurrenceSettings.graph + id</code></td></tr>
-    <tr><td>Launch the Graph</td><td>Source-ranked settings for each occurrence</td><td>Existing resolver → captured invocation → provider launch</td></tr>
+    <tr><td>Set <code>graphs.outer.steps.work.agent</code></td><td>Personal preference for <code>outer/work</code></td><td>Typed setting writer → scoped DB value</td></tr>
+    <tr><td>Inspect <code>--graph outer --step work</code></td><td>The same authored occurrence</td><td><code>Read::Settings</code> → shared <code>inspect</code> → defining Graph + original ID</td></tr>
+    <tr><td>Launch the Graph</td><td>Preferences resolved by source, scope, target</td><td>Shared resolver → <code>SkillInvocation</code> → provider launch</td></tr>
+    <tr><td>Unset the preference</td><td>Expose the next source</td><td>Scoped DB deletion → same resolver</td></tr>
   </tbody>
 </table>
-<pre># Proposed targeted inspection
+<pre># Implemented targeted inspection
 lf config show --graph outer --step work --json
 → outer/work  codex:outer
 
-# Existing whole-Graph inspection stays complete
+# Whole-Graph inspection stays complete
 lf config show --graph outer --json
 → inner/work, inner/work, outer/work</pre>
-<p>The CLI and Desktop share <code>Read::Settings</code>. Use the loaded Graph's
-  canonical name and the occurrence's original ID. Add no stored identity,
-  instance selector or resolver.</p>
+<p>Canonical names and original IDs survive composition and navigation renaming.
+  Repeated children share their authored preference; they need no new instance
+  selector or stored identity. Exported recipes retain the same target and source
+  authority while loading current repository skills.</p>
 
 <h2>Failure and recovery</h2>
 <p>If only the child defines <code>work</code>, inspecting <code>outer/work</code>
-  must report no matching step. Inspect <code>inner/work</code> to find that child's
+  reports no matching step. Inspect <code>inner/work</code> to find that child's
   preference. Unsetting a preference reveals the next source and preserves shared
   definitions, occurrence origin, conversation history and account attribution.</p>
 <p>A conversation's explicit agent remains local to that conversation; an explicit
@@ -92,14 +95,16 @@ lf config show --graph outer --json
 <h2>Review questions, settled from the accepted design</h2>
 <ol>
   <li><strong>Which target does inspection name?</strong> The defining Graph and
-    authored ID, exactly as writes do. The proposed filter correction follows
+    authored ID, exactly as writes do. The implemented filter follows
     Jack Heart's accepted target contract.</li>
   <li><strong>What proves the correction?</strong> Repeated composition with
     conflicting parent/child values; a child-only ID rejected as a parent target;
-    whole-Graph inspection still returning every composed instance.</li>
+    whole-Graph inspection still returning every composed instance. Existing
+    regression tests cover these cases; their recorded passes remain applicable.</li>
   <li><strong>What remains open here?</strong> No first-PR product choice.
-    The working design records the correction for implement; loop-or-next decides
-    navigation. Publication remains review-only and recovery remains separate.</li>
+    No new implementation direction emerged. Gate and demo remain the next proof;
+    loop-or-next decides navigation. Publication remains review-only. Automatic
+    limit recovery remains accepted second-PR work; its mechanisms are unselected.</li>
 </ol>
 </main>
 </body>

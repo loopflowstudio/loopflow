@@ -109,27 +109,27 @@ Jack Heart authorized selective cleanup without retries or a five-minute CI clai
 ## Settings authority (LOO-714, 2026-11-02)
 
 Jack Heart selected CLI > environment > lfdb > personal files > repository/Wave
-files > builtins, with source before scope before graph-step/skill/general
-specificity. Personal graph-step overrides retain the defining Graph and authored
-ID through composition and repetition. This covers eligible non-agent preferences
-too; account routes remain ordered and native defaults are preserved.
+files > builtins; source precedes scope, then graph-step/skill/general specificity.
+Eligible non-agent preferences share this order; native defaults and account order stay.
+Targeted reads and writes match the defining Graph's canonical name and authored
+ID, never flattened navigation IDs. Repeated children keep their origin;
+whole-Graph inspection retains them all. Same-ID and child-only regressions prove
+this distinction, including aliases.
 
-Session/resume `-a` selects only that conversation. Explicit Graph execution
-selection reaches its steps, not unrelated Tasks or child invocations issued by
-an agent. History never becomes future Task policy. This supersedes LOO-440's
-broader inheritance; its dated proof and unresolved release-lock cause remain at
+Session/resume `-a` selects that conversation; explicit Graph selection reaches
+its steps, not unrelated Tasks or agent-issued children. History is not future
+policy. This supersedes LOO-440's inheritance; proof and unresolved lock cause:
 `d6d7057d97:.lf/wave/infrastructure/MEMORY.md`, Global agent override.
 
-Release's entry-point lesson applies: resolver proof alone cannot establish launch
-propagation. Exporting authored settings as CLI flags changes authority. Recipe
-captures retain occurrence authority and load current repository skills; runtime
-captures retain their bodies. Stand-ins prove recipe/inspection parity and
-Session/Task separation. Broader gate and demo remain open; publication is review only.
+Release's entry-point lesson applies: resolver proof cannot establish launch
+propagation. Exporting authored settings as CLI flags changes authority. Recipes
+retain occurrence authority and load repository skills; runtime captures retain
+bodies. Stand-ins prove recipe/inspection parity and Session/Task separation,
+not broader gate or demo acceptance. Publication is review only.
 
-Jack retained automatic limit recovery for interactive Sessions and headless steps
-as a second PR. Routing and retry must agree on account choice; failed preparation
-cannot attribute an old provider thread to a new account. The November 2 weekly
-rejection demonstrated that split; no recovery or installed acceptance is claimed.
+Jack retained automatic limit recovery for Sessions and headless steps as a second
+PR. Routing and retry must agree; failed preparation cannot attribute an old thread
+to a new account. November 2's weekly rejection demonstrated that split, not recovery.
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
 

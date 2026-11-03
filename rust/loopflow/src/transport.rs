@@ -18,13 +18,14 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::harness::native_exit::NativeExit;
 use crate::id::LfProcessId;
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
@@ -122,6 +123,17 @@ enum Request {
     },
     /// Whether some viewer holds input control, asked before opening another.
     Controlled,
+    /// The direct child is about to exec into its provider; the owner records
+    /// this when that provider exits. Acknowledged before the exec.
+    ExitRecord {
+        key: String,
+        pid: u32,
+        record: Box<NativeExit>,
+    },
+    /// The exec failed; the launcher records its own failure.
+    DropExitRecord {
+        key: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -160,6 +172,7 @@ enum Response {
     Controlled {
         held: bool,
     },
+    Accepted,
 }
 
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
@@ -177,32 +190,63 @@ pub(crate) fn current() -> Option<&'static LfProcessId> {
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 pub fn delegate_current(batch: bool) -> Result<bool> {
-    delegate_with_preview(batch, None)
+    delegate_session(batch, None, None)
 }
 
-pub(crate) fn delegate_with_preview(batch: bool, session: Option<&str>) -> Result<bool> {
+pub(crate) fn delegate_session(
+    batch: bool,
+    json_session: Option<&str>,
+    preview_session: Option<&str>,
+) -> Result<bool> {
+    let mut argv: Vec<String> = std::env::args().collect();
+    if json_session.is_some() {
+        // The viewer owns this continuation, including an early detach.
+        argv.retain(|arg| arg != "--json");
+    }
+    delegate(batch, json_session, preview_session, argv)
+}
+
+/// Open the resulting Session after a fork or thread replacement, without
+/// repeating the command that prepared it.
+pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
+    delegate(
+        false,
+        json.then_some(id),
+        Some(id),
+        vec![String::new(), "session".into(), "resume".into(), id.into()],
+    )
+}
+
+fn delegate(
+    batch: bool,
+    json_session: Option<&str>,
+    preview_session: Option<&str>,
+    mut argv: Vec<String>,
+) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
     }
     // Library tests do not execute the CLI entry point.
     #[cfg(test)]
     {
-        let _ = (batch, session);
+        let _ = (batch, json_session, preview_session, &mut argv);
         Ok(false)
     }
     #[cfg(not(test))]
     {
-        let mut argv: Vec<String> = std::env::args().collect();
-        crate::journal::admit_process(&std::env::current_dir()?, &argv);
+        crate::journal::admit_process(
+            &std::env::current_dir()?,
+            &std::env::args().collect::<Vec<_>>(),
+        );
         crate::journal::current_lf_process_id()
             .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
         // `lf -b … > file` typed at a terminal writes only the answer, never a
         // relayed screen; an interactive run keeps the terminal it reads from.
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
-        let preview = ViewerTerminal::preview(session)?;
+        let preview = ViewerTerminal::preview(preview_session)?;
         let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
-        attach_with_terminal(&owner, None, preview)?;
+        attach_with_preview(&owner, None, json_session, preview)?;
         Ok(true)
     }
 }
@@ -500,8 +544,21 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
-    let (viewing, ending) = lifetime::spawn(id.clone());
+    // The lifetime policy and a blocking child wait wake the descriptor loop.
+    // Keep SIGCHLD available to runtimes used by the owner's background work.
+    let (wake, waker) = UnixStream::pair()?;
+    wake.set_nonblocking(true)?;
+    waker.set_nonblocking(true)?;
+    let (viewing, ending) = lifetime::spawn(id.clone(), waker.try_clone()?);
+    let child_pid = child.id();
+    let (finished, child_exit) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = finished.send(child.wait());
+        let _ = (&waker).write_all(&[1]);
+    });
     let mut viewed = None;
+    let mut exit_record: Option<Box<NativeExit>> = None;
+    let mut planning = None;
     loop {
         let mut replaced = None;
         while let Ok((socket, _)) = listener.accept() {
@@ -550,6 +607,30 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             viewer.queue(&Response::Controlled {
                                 held: control.is_some(),
                             })?;
+                        }
+                        Request::ExitRecord { key, pid, record } if key == control_key => {
+                            // Graph steps share this terminal, but their Graph
+                            // still owns their wait. Only our child can hand it off.
+                            if pid != child_pid {
+                                viewer.queue(&Response::Busy)?;
+                                continue;
+                            }
+                            // The launcher kept its repository's planning in
+                            // sync while it waited; that wait is now ours.
+                            planning = crate::ops::planning_sync::PlanningSync::start_for_directory(
+                                &record.cwd,
+                            )
+                            .inspect_err(|error| {
+                                tracing::warn!(%error, "planning sync unavailable to this owner")
+                            })
+                            .ok();
+                            exit_record = Some(record);
+                            viewer.queue(&Response::Accepted)?;
+                        }
+                        Request::DropExitRecord { key } if key == control_key => {
+                            exit_record = None;
+                            planning = None;
+                            viewer.queue(&Response::Accepted)?;
                         }
                         Request::Attach {
                             control: wants_control,
@@ -694,6 +775,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 });
             }
         }
+        drain(&wake);
         if let Ok(moved) = ending.try_recv() {
             for viewer in viewers.iter_mut().filter(|v| v.attached) {
                 let _ = viewer.queue(&moved);
@@ -782,34 +864,18 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 detached,
             );
         }
-        // The client has exited and its parent waits for acknowledgement, so
-        // everything it printed is already readable.
-        if viewers.iter().any(|viewer| viewer.ending) {
-            if let Some(mut ended) = client.take() {
-                for (stream, reader) in &mut readers {
-                    let mut bytes = [0; 16384];
-                    for _ in 0..LIMIT / bytes.len() {
-                        let Ok(n @ 1..) = reader.read(&mut bytes) else {
-                            break;
-                        };
-                        let ready = ended.accept(reader.as_raw_fd(), &bytes[..n]);
-                        deliver(
-                            &mut output,
-                            &mut viewers,
-                            &mut pending_input,
-                            *stream,
-                            &ready,
-                            detached,
-                        );
-                    }
-                }
-                let exit = ended.finish();
-                deliver(
+        // The child wait reports once. A returning launcher announces its
+        // client's end; an exec'd launcher leaves that announcement to our wait.
+        let status = child_exit.try_recv().ok().transpose()?;
+        if viewers.iter().any(|viewer| viewer.ending) || (status.is_some() && exit_record.is_some())
+        {
+            if let Some(ended) = client.take() {
+                finish_client(
+                    ended,
+                    &mut readers,
                     &mut output,
                     &mut viewers,
                     &mut pending_input,
-                    1,
-                    &exit,
                     detached,
                 );
             }
@@ -819,14 +885,53 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 let _ = viewer.flush();
             }
         }
-        if exit.is_none() {
-            if let Some(status) = child.try_wait()? {
-                use std::os::unix::process::ExitStatusExt;
-                let code = status
-                    .code()
-                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(1))
-                    as u8;
-                exit = Some((code, Instant::now()));
+        if let Some(status) = status {
+            let code = if let Some(record) = exit_record.take() {
+                let settled = match crate::harness::native_exit::settle(&record, status) {
+                    Ok(settled) => settled,
+                    Err(error) => {
+                        tracing::warn!(%error, session = %record.session, "provider exit was not recorded");
+                        crate::harness::native_exit::Settled {
+                            code: 1,
+                            lines: vec![format!("Loopflow could not record this exit: {error:#}")],
+                        }
+                    }
+                };
+                for line in &settled.lines {
+                    deliver(
+                        &mut output,
+                        &mut viewers,
+                        &mut pending_input,
+                        1,
+                        format!("\r\n{line}\r\n").as_bytes(),
+                        detached,
+                    );
+                }
+                let process = format!(
+                    "lf/{}",
+                    record
+                        .attachment
+                        .provider_lf_process_id
+                        .as_str()
+                        .replace('-', "")
+                );
+                output.report(
+                    format!("{process}/step"),
+                    crate::program_status::State::Clear,
+                    None,
+                );
+                output.report(
+                    process,
+                    match settled.code {
+                        0 => crate::program_status::State::Done,
+                        130 => crate::program_status::State::Idle,
+                        _ => crate::program_status::State::Error,
+                    },
+                    None,
+                );
+                planning = None;
+                settled.code
+            } else {
                 // A launch that died before reporting its client's end.
                 if let Some(held) = client.take().map(native::NativeClient::release) {
                     deliver(
@@ -838,7 +943,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         detached,
                     );
                 }
-            }
+                use std::os::unix::process::ExitStatusExt;
+                status
+                    .code()
+                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)) as u8
+            };
+            exit = Some((code, Instant::now()));
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
@@ -863,7 +973,90 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 };
             }
         }
-        std::thread::sleep(Duration::from_millis(5));
+        // Sleep until a descriptor has work; only held exit text and a
+        // pending exit announcement are timed.
+        let deadline = match exit {
+            Some((_, at)) if announced => Some(at + Duration::from_secs(2)),
+            Some((_, at)) if readers.is_empty() => Some(at + Duration::from_millis(50)),
+            _ => client.as_ref().and_then(native::NativeClient::expires_at),
+        };
+        wait_for_activity(
+            &listener,
+            &wake,
+            &viewers,
+            &readers,
+            input.as_ref().filter(|_| !pending_input.is_empty()),
+            deadline.map(|at| at.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
+/// Drain and deliver what a finished native client still held, then its exit line.
+fn finish_client(
+    mut ended: native::NativeClient,
+    readers: &mut [(u8, File)],
+    output: &mut output::Output,
+    viewers: &mut Vec<Viewer>,
+    pending_input: &mut VecDeque<u8>,
+    detached: bool,
+) {
+    for (stream, reader) in readers.iter_mut() {
+        let mut bytes = [0; 16384];
+        for _ in 0..LIMIT / bytes.len() {
+            let Ok(n @ 1..) = reader.read(&mut bytes) else {
+                break;
+            };
+            let ready = ended.accept(reader.as_raw_fd(), &bytes[..n]);
+            deliver(output, viewers, pending_input, *stream, &ready, detached);
+        }
+    }
+    let exit = ended.finish();
+    deliver(output, viewers, pending_input, 1, &exit, detached);
+}
+
+fn drain(wake: &UnixStream) {
+    let mut bytes = [0; 64];
+    while matches!((&*wake).read(&mut bytes), Ok(1..)) {}
+}
+
+/// Block until a viewer, the execution's output, the wake pipe or a writable
+/// input descriptor has work, or `timeout` passes.
+fn wait_for_activity(
+    listener: &UnixListener,
+    wake: &UnixStream,
+    viewers: &[Viewer],
+    readers: &[(u8, File)],
+    input: Option<&File>,
+    timeout: Option<Duration>,
+) {
+    let pollfd = |fd: RawFd, events: libc::c_short| libc::pollfd {
+        fd,
+        events,
+        revents: 0,
+    };
+    let mut fds = vec![
+        pollfd(listener.as_raw_fd(), libc::POLLIN),
+        pollfd(wake.as_raw_fd(), libc::POLLIN),
+    ];
+    for viewer in viewers {
+        let mut events = libc::POLLIN;
+        if !viewer.output.is_empty() {
+            events |= libc::POLLOUT;
+        }
+        fds.push(pollfd(viewer.socket.as_raw_fd(), events));
+    }
+    for (_, reader) in readers {
+        fds.push(pollfd(reader.as_raw_fd(), libc::POLLIN));
+    }
+    if let Some(input) = input {
+        fds.push(pollfd(input.as_raw_fd(), libc::POLLOUT));
+    }
+    let timeout = timeout.map_or(-1, |timeout| {
+        libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX)
+    });
+    // SAFETY: poll reads a live array of exactly fds.len() descriptors.
+    unsafe {
+        libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout);
     }
 }
 
@@ -1053,8 +1246,103 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
 
 /// Attach this terminal with input control, taking it from any other viewer;
 /// that viewer prints `moved` as it leaves.
-pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
-    attach_with_terminal(id, moved, None)
+///
+/// The process that resolved the connection built it with a store, a command
+/// tree and often a runtime; none of that serves a relay. It carries its
+/// Process receipt into the relay, which opens no store until it returns.
+pub(crate) fn attach(
+    id: &LfProcessId,
+    moved: Option<String>,
+    json_session: Option<&str>,
+) -> Result<()> {
+    attach_with_preview(id, moved, json_session, None)
+}
+
+fn attach_with_preview(
+    id: &LfProcessId,
+    moved: Option<String>,
+    json_session: Option<&str>,
+    terminal: Option<ViewerTerminal>,
+) -> Result<()> {
+    let mut command = Command::new(std::env::current_exe()?);
+    if let Some(terminal) = &terminal {
+        let state = terminal
+            .state
+            .lock()
+            .expect("viewer terminal lock poisoned");
+        // Preview input is still cooked. Carry its display and original output
+        // descriptors into the relay without resetting the screen across exec.
+        state.output.configure_child(&mut command)?;
+        command.env(
+            RELAY_PREVIEW_ENV,
+            if state.alternate.entered {
+                "alternate"
+            } else {
+                "primary"
+            },
+        );
+    }
+    command.args([RELAY_COMMAND[0], RELAY_COMMAND[1], id.as_str()]);
+    if let Some(moved) = &moved {
+        command.args([RELAY_MOVED_FLAG, moved]);
+    }
+    if let Some(session) = json_session {
+        command.args([RELAY_JSON_FLAG, session]);
+    }
+    crate::journal::carry_across_exec(&mut command)?;
+    let error = command.exec();
+    tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
+    attach_with_terminal(id, moved, terminal)
+}
+
+const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
+const RELAY_COMMAND: [&str; 2] = ["session", "attach"];
+const RELAY_MOVED_FLAG: &str = "--moved";
+const RELAY_JSON_FLAG: &str = "--session-json";
+
+/// The owner and notice a relay invocation names: `lf session attach OWNER
+/// [--moved TEXT] [--session-json SESSION]`. Recognized before command parsing.
+pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>, Option<String>)> {
+    let [_, command, subcommand, owner, rest @ ..] = args else {
+        return None;
+    };
+    if command != RELAY_COMMAND[0] || subcommand != RELAY_COMMAND[1] {
+        return None;
+    }
+    let owner = LfProcessId::parse(owner).ok()?;
+    let mut moved = None;
+    let mut json_session = None;
+    for pair in rest.chunks(2) {
+        match pair {
+            [flag, value] if flag == RELAY_MOVED_FLAG && moved.is_none() => {
+                moved = Some(value.clone());
+            }
+            [flag, value] if flag == RELAY_JSON_FLAG && json_session.is_none() => {
+                json_session = Some(value.clone());
+            }
+            _ => return None,
+        }
+    }
+    Some((owner, moved, json_session))
+}
+
+/// Relay this terminal to the execution owner: socket in, terminal out.
+pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
+    let preview = std::env::var(RELAY_PREVIEW_ENV).ok();
+    std::env::remove_var(RELAY_PREVIEW_ENV);
+    let terminal = if let Some(screen) = preview {
+        let terminal = ViewerTerminal::enter()?;
+        terminal
+            .state
+            .lock()
+            .expect("viewer terminal lock poisoned")
+            .alternate
+            .entered = screen == "alternate";
+        Some(terminal)
+    } else {
+        None
+    };
+    attach_with_terminal(id, moved, terminal)
 }
 
 fn attach_with_terminal(
@@ -1108,8 +1396,11 @@ fn attach_with_terminal(
             },
         ];
         // SAFETY: poll receives a live array of exactly two descriptors.
-        if unsafe { libc::poll(fds.as_mut_ptr(), 2, 100) } < 0 {
-            return Err(io::Error::last_os_error().into());
+        if unsafe { libc::poll(fds.as_mut_ptr(), 2, 250) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error.into());
+            }
         }
         if fds[0].revents != 0 {
             let mut bytes = [0; 16384];
@@ -1138,23 +1429,10 @@ fn attach_with_terminal(
                             }
                             terminal.as_ref().expect("terminal entered").make_raw()?;
                         }
-                        if let Some(terminal) = &mut terminal {
-                            terminal.write(1, &bytes)?;
-                        } else {
-                            io::stdout().write_all(&bytes)?;
-                            io::stdout().flush()?;
-                        }
+                        write_output(&mut terminal, 1, &bytes)?;
                     }
                     Response::Output { stream, bytes } => {
-                        if let Some(terminal) = &mut terminal {
-                            terminal.write(stream, &bytes)?;
-                        } else if stream == 2 {
-                            io::stderr().write_all(&bytes)?;
-                            io::stderr().flush()?;
-                        } else {
-                            io::stdout().write_all(&bytes)?;
-                            io::stdout().flush()?;
-                        }
+                        write_output(&mut terminal, stream, &bytes)?;
                     }
                     Response::Exit { code } => {
                         return if code == 0 {
@@ -1176,7 +1454,7 @@ fn attach_with_terminal(
                     }
                     Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                     Response::Return { detach } => returning = Some(detach),
-                    Response::NativeEnded | Response::Controlled { .. } => {}
+                    Response::NativeEnded | Response::Controlled { .. } | Response::Accepted => {}
                     Response::InputHint { hint } => {
                         if let Some(terminal) = &mut terminal {
                             terminal.write(2, format!("\r\n{hint}\r\n").as_bytes())?;
@@ -1234,6 +1512,70 @@ fn attach_with_terminal(
                 )?;
             }
         }
+    }
+}
+
+fn write_output(terminal: &mut Option<ViewerTerminal>, stream: u8, bytes: &[u8]) -> io::Result<()> {
+    if let Some(terminal) = terminal {
+        terminal.write(stream, bytes)
+    } else if stream == 2 {
+        io::stderr().write_all(bytes)?;
+        io::stderr().flush()
+    } else {
+        io::stdout().write_all(bytes)?;
+        io::stdout().flush()
+    }
+}
+
+/// Hand the owner what to record when this process, about to exec into its
+/// provider, exits. A nested launcher keeps its own wait and returns false.
+pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
+    let handoff = HANDOFF
+        .get()
+        .context("this launch has no execution owner to hand its wait to")?;
+    let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    // A delayed reply does not undo the owner's acceptance. Wait for its
+    // decision or a closed connection before choosing who records the exit.
+    send(
+        &mut socket,
+        &Request::ExitRecord {
+            key: handoff.key.clone(),
+            pid: std::process::id(),
+            record: Box::new(record.clone()),
+        },
+    )?;
+    let mut line = String::new();
+    BufReader::new(socket).read_line(&mut line)?;
+    match serde_json::from_str(&line)? {
+        Response::Accepted => Ok(true),
+        Response::Busy => Ok(false),
+        other => bail!("owner refused the exit record: {other:?}"),
+    }
+}
+
+/// The exec failed; the launcher records its own failure.
+pub(crate) fn drop_exit_record() {
+    let dropped = (|| -> Result<()> {
+        let handoff = HANDOFF.get().context("no execution owner")?;
+        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+        send(
+            &mut socket,
+            &Request::DropExitRecord {
+                key: handoff.key.clone(),
+            },
+        )?;
+        // Do not let launcher exit overtake cancellation in the owner's loop.
+        let mut line = String::new();
+        BufReader::new(socket).read_line(&mut line)?;
+        match serde_json::from_str(&line)? {
+            Response::Accepted => Ok(()),
+            other => bail!("owner refused exit record cancellation: {other:?}"),
+        }
+    })();
+    if let Err(error) = dropped {
+        tracing::warn!(%error, "could not cancel the exit record for a failed exec");
     }
 }
 

@@ -46,6 +46,9 @@ Run this check when changing transport ownership or process journaling: every
 added CLI process pays connection and schema setup costs, including at exit.
 Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
 to preserve completion and interruption receipts after database contention.
+Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
+viewer's OS exit and its original command's recorded result must agree, including
+failed placement, failed shipping and a Graph held at landing.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

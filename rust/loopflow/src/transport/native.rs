@@ -63,12 +63,14 @@ impl NativeClient {
         Vec::new()
     }
 
+    /// When held output stops being a possible exit message.
+    pub fn expires_at(&self) -> Option<Instant> {
+        self.since.map(|since| since + EXIT_WINDOW)
+    }
+
     /// Held output that outlived the exit window.
     pub fn expire(&mut self) -> Vec<u8> {
-        if self
-            .since
-            .is_some_and(|since| since.elapsed() > EXIT_WINDOW)
-        {
+        if self.expires_at().is_some_and(|at| at <= Instant::now()) {
             self.since = None;
             return std::mem::take(&mut self.held);
         }

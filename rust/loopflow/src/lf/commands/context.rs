@@ -250,6 +250,39 @@ pub fn emit_block(
         return Ok(());
     }
     let delivery = load_delivery(delivery, &input)?;
+    #[cfg(unix)]
+    if moment == crate::context_block::ContextMoment::TaskUpdates {
+        if input["hook_event_name"] == "PiTaskUpdates" {
+            let adapter =
+                serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
+            let thread = input["session_id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Missing Pi Session"))?;
+            return crate::harness::task_updates::watch(
+                &delivery.home,
+                &input,
+                adapter,
+                thread,
+                |store, adapter, thread, update| {
+                    store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+                        if !store.record_task_update(
+                            &adapter.session,
+                            &update.key,
+                            "dispatched",
+                            &update.observation,
+                        )? {
+                            return Ok(());
+                        }
+                        let frame = serde_json::json!({"session":thread,"text":update.text});
+                        write_output(format!("{frame}\n").as_bytes()).map_err(|error| {
+                            crate::store::StoreError::InvalidData(error.to_string())
+                        })
+                    })
+                },
+            );
+        }
+        return crate::harness::claude_updates::watch(&delivery.home, &input);
+    }
     if moment == crate::context_block::ContextMoment::Stop {
         return acquire_planning(&delivery);
     }

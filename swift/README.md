@@ -102,6 +102,18 @@ its result before retrying.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
+Open a Task's **Graph processes** page to see its current position and readiness,
+then expand a run, loop position and step for recorded timing and exit evidence.
+Earlier runs stay collapsed. **Files** opens the diff; steps without a recorded
+summary show no invented summary. Local and remote run pages follow store changes.
+Open native Task Sessions also receive settled progress through their provider,
+without typing into the draft. Codex and Pi keep the incoming context hidden;
+Claude shows a collapsed peer message and OpenCode a brief worker-progress notice.
+The provider schedules delivery around active turns; uncertain delivery is retained
+instead of replayed after reconnect.
+Progress posts name the runs that changed, including an earlier run that finishes
+or fails while newer work is running.
+
 Task rows show reported program status, Task IDs, stored PR links and the recorded
 remote Machine. Task IDs link to the issue when its URL is recorded; otherwise they
 remain plain text. Qualified Session excerpts show their source age; stale output

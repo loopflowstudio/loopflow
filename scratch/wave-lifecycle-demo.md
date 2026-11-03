@@ -67,3 +67,19 @@ Keep the launch failure as review evidence; no additional Graph was started.
 base and head. Desktop and narrow browser layouts were inspected; code scrolls
 within its own pane without overflowing the page. No product code changed for
 these artifacts.
+
+## Relaunch requested — 2026-11-03
+
+Jack Heart requested another `lf sync` and Dev demo launch. Sync merged
+`2bc29a72e0` without conflicts, producing `f124694bab`. The earlier startup
+crash matches LOO-673's diagnosed Swift-worker stack exhaustion. Its existing
+two-file repair from `e6a8273bc6` was applied here: in-process library calls
+run on an 8 MB thread, with the existing regression test. This is a prerequisite
+for the demo, not a Wave lifecycle design change. The focused regression passed:
+`scripts/test_desktop.sh --filter LoopflowLibraryTests -Xswiftc -gnone < /dev/null`
+(1/1). The repaired executable was installed and signed, and the same private
+world launched successfully. Accessibility inspection confirmed the repository
+window, Archive/Desktop/Research Waves, and Task inventory. Native screenshot
+capture was unavailable. No Wave was added, renamed or removed in this pass;
+Jack Heart's hands-on acceptance remains pending. The earlier crash is retained
+as historical evidence, superseded for startup by this successful launch.

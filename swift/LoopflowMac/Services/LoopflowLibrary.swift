@@ -36,12 +36,22 @@ enum LoopflowLibrary {
         _ request: Data
     ) async throws -> String? {
         let json = String(decoding: request, as: UTF8.self)
-        return try await Task.detached(priority: .userInitiated) {
-            var error: UnsafeMutablePointer<CChar>?
-            let result = entry(json, &error)
-            if let error = take(error) { throw RegistryQueryError(error) }
-            return result.flatMap(take)
-        }.value
+        return try await withCheckedThrowingContinuation { continuation in
+            // The stack an `lf` process's main thread has: parsing its command
+            // line overflows a Swift task thread's 512 KB in a debug build.
+            let thread = Thread {
+                var error: UnsafeMutablePointer<CChar>?
+                let result = entry(json, &error)
+                if let error = take(error) {
+                    continuation.resume(throwing: RegistryQueryError(error))
+                } else {
+                    continuation.resume(returning: result.flatMap(take))
+                }
+            }
+            thread.stackSize = 8 << 20
+            thread.qualityOfService = .userInitiated
+            thread.start()
+        }
     }
 }
 

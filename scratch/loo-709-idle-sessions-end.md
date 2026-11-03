@@ -19,6 +19,12 @@ no shipping approval.
 
 ## Required behavior
 
+- Jack Heart accepted the Rex open-tab behavior on 2026-11-03: switching among
+  open `lf` Task Session tabs keeps their terminal viewers attached and their
+  agents resident. Idle ending applies after detachment or terminal closure,
+  once no protected work remains. Rex visibility-driven detach/resume is outside
+  this change. This accepts that UX boundary; the remaining demo and gate
+  evidence is still due, and no shipping approval was given.
 - `session.end_detached_after` defaults to `2m`, supports `off`, and measures
   wall time with `SystemTime`. Unreadable config uses the default. Viewer
   changes, command output and held work restart the detached grace.

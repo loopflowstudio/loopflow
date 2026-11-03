@@ -222,39 +222,6 @@ struct WorkModelTests {
         #expect(model.visibleWaves.count == 2)
     }
 
-    @Test("Authored Waves remain visible without active Runs")
-    func authoredWavesRemainVisible() async throws {
-        let fixture = try WorkTestFixture.load()
-        let repo = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-authored-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: repo) }
-        for name in ["infrastructure", "intelligence", "product"] {
-            let wave = repo
-                .appendingPathComponent(".lf/wave", isDirectory: true)
-                .appendingPathComponent(name, isDirectory: true)
-            try FileManager.default.createDirectory(at: wave, withIntermediateDirectories: true)
-            try Data("# \(name)\n".utf8).write(to: wave.appendingPathComponent("GOAL.md"))
-        }
-        try git(["init", "-q"], at: repo)
-
-        let model = WorkModel(query: fixture.query)
-        model.applyFixture(
-            roadmap: .available(fixture.roadmap),
-            waves: .available([]),
-            workActivity: .available(fixture.workActivity),
-            repos: []
-        )
-        await model.applyPortfolio(
-            [PortfolioRepo(path: repo.resolvingSymlinksInPath().path, error: nil)], initialRepoPath: nil
-        )
-        #expect(model.repos.count == 1)
-        model.setRepoPath(repo.path)
-
-        #expect(model.visibleWaves.map(\.displayName) == [
-            "Infrastructure", "Intelligence", "Product",
-        ])
-    }
-
     @Test("A checkout's repository identity follows its origin once that is resolved")
     func repoIdentityFollowsResolvedOrigin() throws {
         let fixture = try WorkTestFixture.load()

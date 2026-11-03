@@ -647,6 +647,82 @@ mod tests {
     }
 
     #[test]
+    fn registering_a_cloned_wave_preserves_its_shared_project() {
+        let home = tempfile::tempdir().unwrap();
+        let author = SqliteStore::open_ephemeral(&home.path().join("author")).unwrap();
+        let peer = SqliteStore::open_ephemeral(&home.path().join("peer")).unwrap();
+        let wave = Wave::new(WaveId::new(), "shared".into(), "/repo".into());
+        author.create_wave(&wave).unwrap();
+        let project = author.ensure_project(wave.id(), wave.slug()).unwrap();
+        let author_route = destination(&author, "/repo", "shared");
+        let original = author.export_peer_planning("/repo", &author_route).unwrap();
+
+        // The clone registers the authored identity before fetching planning.
+        peer.create_wave(&wave).unwrap();
+        let peer_route = destination(&peer, "/repo", "shared");
+        peer.import_peer_planning("/repo", &peer_route, "one", &original)
+            .unwrap();
+        assert_eq!(
+            peer.selected_project(wave.id()).unwrap().unwrap().id,
+            project
+        );
+        let returned = peer.export_peer_planning("/repo", &peer_route).unwrap();
+        author
+            .import_peer_planning("/repo", &author_route, "two", &returned)
+            .unwrap();
+        assert_eq!(
+            author.selected_project(wave.id()).unwrap().unwrap().id,
+            project
+        );
+    }
+
+    #[test]
+    fn a_removed_wave_reaches_a_peer_as_retired_and_live_waves_carry_no_retirement() {
+        let home = tempfile::tempdir().unwrap();
+        let author = SqliteStore::open_ephemeral(&home.path().join("author")).unwrap();
+        let peer = SqliteStore::open_ephemeral(&home.path().join("peer")).unwrap();
+        let live = Wave::new(WaveId::new(), "live".into(), "/repo".into());
+        let removed = Wave::new(WaveId::new(), "removed".into(), "/repo".into());
+        author.create_wave(&live).unwrap();
+        author.create_wave(&removed).unwrap();
+        let route = destination(&author, "/repo", "shared");
+        let before = author.export_peer_planning("/repo", &route).unwrap();
+        peer.import_peer_planning(
+            "/repo",
+            &destination(&peer, "/repo", "shared"),
+            "one",
+            &before,
+        )
+        .unwrap();
+        assert!(!peer.get_wave(removed.id()).unwrap().unwrap().is_retired());
+
+        author
+            .retire_waves(&[removed.id().clone()], "removed")
+            .unwrap();
+        let after = author.export_peer_planning("/repo", &route).unwrap();
+        let retired: Vec<_> = after
+            .changes
+            .values()
+            .filter(|change| matches!(change.edit.change, WorkValue::WaveRetired(_)))
+            .collect();
+        assert_eq!(
+            retired.len(),
+            1,
+            "only the removed Wave exchanges a retirement"
+        );
+        assert_eq!(retired[0].edit.target, removed.id().as_str());
+        peer.import_peer_planning(
+            "/repo",
+            &destination(&peer, "/repo", "shared"),
+            "two",
+            &after,
+        )
+        .unwrap();
+        assert!(peer.get_wave(removed.id()).unwrap().unwrap().is_retired());
+        assert!(!peer.get_wave(live.id()).unwrap().unwrap().is_retired());
+    }
+
+    #[test]
     fn rejected_orphan_import_retains_its_route_without_claiming_work() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();

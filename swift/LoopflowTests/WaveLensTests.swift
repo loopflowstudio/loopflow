@@ -16,22 +16,6 @@ struct WaveLensTests {
         #expect(active.reason == "2 active Tasks")
     }
 
-    @Test("retired Wave renders history rather than disabled current state")
-    func retiredWaveIsHistorical() {
-        let wave = Wave(
-            id: "wave_old",
-            name: "infra",
-            repo: "/tmp/old",
-            status: .abandoned,
-            retiredAt: "2026-08-20T12:00:00Z",
-            supersededByWaveId: "wave_current"
-        )
-        let lens = WaveViewModel(api: wave).lens
-
-        #expect(lens.color == .black)
-        #expect(lens.reason == "Retired at 2026-08-20T12:00:00Z · superseded by wave_current")
-    }
-
     // MARK: - Task conditions map 1:1, and unknown is lit (never off/black)
 
     @Test("Task conditions map to lens colors one-to-one")

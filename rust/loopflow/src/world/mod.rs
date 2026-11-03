@@ -337,7 +337,9 @@ impl World {
     /// Commit everything under `.lf/` (Wave goals, Graphs, config) and push it.
     pub fn push_authored(&self, message: &str) -> Result<()> {
         git(Some(&self.repo), &["add", ".lf"])?;
-        git(Some(&self.repo), &["commit", "-m", message])?;
+        if !git(Some(&self.repo), &["diff", "--cached", "--name-only"])?.is_empty() {
+            git(Some(&self.repo), &["commit", "-m", message])?;
+        }
         git(Some(&self.repo), &["push", "origin", "main"])?;
         Ok(())
     }
@@ -388,10 +390,10 @@ impl World {
         Ok(env)
     }
 
-    /// Ensure a Wave and its current Project.
+    /// Add a Wave and its current Project, as `lf wave add` does.
     pub fn wave(&self, name: &str) -> Result<()> {
         self.runtime
-            .block_on(crate::ops::project::ensure(&self.repo, name))?;
+            .block_on(crate::ops::wave_lifecycle::add(&self.repo, name, None))?;
         Ok(())
     }
 

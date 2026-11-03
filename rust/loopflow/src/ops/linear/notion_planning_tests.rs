@@ -893,7 +893,7 @@ fn notion_pages_show_the_pr() {
 fn notion_wave_projects_become_project_pages_related_to_their_tasks() {
     with_notion(|runtime, fixture, repo, state| {
         runtime
-            .block_on(crate::ops::project::ensure(repo, "product"))
+            .block_on(crate::ops::wave_lifecycle::add(repo, "product", None))
             .unwrap();
         let saved = crate::ops::task::task_create(
             repo,

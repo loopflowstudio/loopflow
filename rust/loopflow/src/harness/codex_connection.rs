@@ -502,7 +502,8 @@ impl CodexConnection {
                     if let Some(update) = pending {
                         let id = json!(format!("lf-task-update-{}", uuid::Uuid::new_v4()));
                         let request = json!({"id":id,"method":"turn/start","params":{
-                            "threadId":thread,"input":[{"type":"text","text":&update.text}]
+                            "threadId":thread,"input":[],
+                            "toolOutput":{"name":"loopflow_task_update","output":&update.text,"retain":true}
                         }});
                         if let Err(error) = history.outbound(&request).await {
                             if matches!(error.downcast_ref::<StoreError>(), Some(StoreError::InvalidAuthority(_))) { continue; }
@@ -967,7 +968,13 @@ mod tests {
                     .unwrap();
             assert_eq!(request["method"], "turn/start");
             assert_eq!(request["params"]["threadId"], "native-thread");
-            let progress = request["params"]["input"][0]["text"].as_str().unwrap();
+            assert_eq!(request["params"]["input"], json!([]));
+            assert_eq!(
+                request["params"]["toolOutput"]["name"],
+                "loopflow_task_update"
+            );
+            assert_eq!(request["params"]["toolOutput"]["retain"], true);
+            let progress = request["params"]["toolOutput"]["output"].as_str().unwrap();
             assert!(progress.contains("gate ("));
             assert!(progress.contains("): failed"));
             fixture_send(&mut socket, json!({"id":request["id"],"result":{"turn":{"id":"report","status":"inProgress","items":[]}}})).await;

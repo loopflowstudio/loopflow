@@ -112,12 +112,8 @@ impl OpenCodeHarness {
         let Some(update) = pending else {
             return Ok(());
         };
-        if !store
-            .session_summary(&session, time::OffsetDateTime::now_utc().unix_timestamp())?
-            .is_some_and(|summary| summary.available)
-        {
-            return Ok(());
-        }
+        // The owned stream supplies the turn boundary. The display projection can
+        // remain unavailable after native attachment even when the server is idle.
         if self
             .turn_in_progress
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -135,11 +131,12 @@ impl OpenCodeHarness {
             .as_ref()
             .ok_or_else(|| anyhow!("OpenCode conversation not selected"))?;
         let request = self.stream()?.lock().await.request(false)?;
-        let payload = json!({"id":request,"text":update.text});
+        let payload = json!({"id":request,"text":update.text,
+            "description":"Loopflow worker progress","metadata":{"source":"loopflow"}});
         let sent = post(
             (store, session, attachment),
             self.authorization.clone(),
-            format!("{base}/api/session/{thread}/prompt"),
+            format!("{base}/api/session/{thread}/synthetic"),
             payload,
             Some(update),
         )
@@ -961,7 +958,7 @@ mod tests {
         let owner = (store.clone(), "reader".to_owned(), attachment);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!(
-            "http://{}/api/session/native-thread/prompt",
+            "http://{}/api/session/native-thread/synthetic",
             listener.local_addr().unwrap()
         );
         let server = std::thread::spawn(move || {
@@ -1001,7 +998,7 @@ mod tests {
         .await
         .unwrap();
         let request = server.join().unwrap();
-        assert!(request.starts_with("POST /api/session/native-thread/prompt "));
+        assert!(request.starts_with("POST /api/session/native-thread/synthetic "));
         assert!(request.contains("gate: failed"));
         // The listener is gone: reconnect must use the durable receipt without sending.
         super::post(owner, authorization, url, payload, Some(update))

@@ -107,8 +107,10 @@ then expand a run, loop position and step for recorded timing and exit evidence.
 Earlier runs stay collapsed. **Files** opens the diff; steps without a recorded
 summary show no invented summary. Local and remote run pages follow store changes.
 Open native Task Sessions also receive settled progress through their provider,
-without typing into the draft. Busy Sessions coalesce updates; uncertain delivery
-is retained instead of replayed after reconnect.
+without typing into the draft. Codex and Pi keep the incoming context hidden;
+Claude shows a collapsed peer message and OpenCode a brief worker-progress notice.
+The provider schedules delivery around active turns; uncertain delivery is retained
+instead of replayed after reconnect.
 Progress posts name the runs that changed, including an earlier run that finishes
 or fails while newer work is running.
 

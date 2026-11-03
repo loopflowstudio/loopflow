@@ -282,20 +282,13 @@ pub(crate) fn watch(
             Err(error) => return Err(error.into()),
         };
         if let Some(update) = pending {
-            // Busy Sessions coalesce changes into their latest reading. The
-            // provider's next-priority queue handles a turn starting after this read.
-            let available = store
-                .session_summary(
-                    &adapter.session,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )?
-                .is_some_and(|session| session.available);
-            if available {
-                match deliver(&store, &adapter, thread, &update) {
-                    Ok(()) => {}
-                    Err(StoreError::InvalidAuthority(_)) => return Ok(()),
-                    Err(error) => tracing::warn!(%error, "native Task update delivery unavailable"),
-                }
+            // Claude's next-priority inbox and Pi's follow-up queue own when
+            // this input runs. A native terminal may have no availability
+            // observation; waiting for one would prevent idle delivery forever.
+            match deliver(&store, &adapter, thread, &update) {
+                Ok(()) => {}
+                Err(StoreError::InvalidAuthority(_)) => return Ok(()),
+                Err(error) => tracing::warn!(%error, "native Task update delivery unavailable"),
             }
         }
         std::thread::sleep(Duration::from_secs(1));

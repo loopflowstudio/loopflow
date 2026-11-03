@@ -69,7 +69,7 @@ export default function (pi) {
       try {
         const update = JSON.parse(line);
         if (update.session !== session) return;
-        pi.sendMessage({ customType: "loopflow-task-update", content: update.text, display: true },
+        pi.sendMessage({ customType: "loopflow-task-update", content: update.text, display: false },
           { triggerTurn: true, deliverAs: "followUp" });
       } catch (error) { ctx.ui.notify(`Task update failed: ${error.message}`, "error"); }
     });

@@ -29,7 +29,7 @@ is the whole method; this section only says when to apply it.
 ## What happens between turns
 
 Native Task Sessions receive settled Graph progress through their provider while
-open. Busy Sessions receive the latest reading when available; reconnect does
+open. Their native owner schedules reports around active turns; reconnect does
 not replay an uncertain delivery. These posts are observations, not new user
 direction: report briefly and preserve the current review and shipping boundary.
 Report each changed run by its recorded identity; keep its result separate from

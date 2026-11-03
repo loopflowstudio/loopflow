@@ -78,7 +78,7 @@ fi
   const deadline = Date.now() + 5000;
   while (!messages.length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
   await nativeHooks.get("session_shutdown")();
-  assert.deepEqual(messages, [{ message: { customType: "loopflow-task-update", content: "gate failed", display: true }, options: { triggerTurn: true, deliverAs: "followUp" } }]);
+  assert.deepEqual(messages, [{ message: { customType: "loopflow-task-update", content: "gate failed", display: false }, options: { triggerTurn: true, deliverAs: "followUp" } }]);
   assert.equal(nativeCtx.ui.getEditorText(), draft);
   assert.equal(nativeCtx.sessionManager.getSessionFile(), nativeSession);
   delete process.env.LF_CONTEXT_DELIVERY;

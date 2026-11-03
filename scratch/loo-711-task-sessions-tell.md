@@ -41,7 +41,7 @@ identity, outcome and latest step; receipts do not copy compiled graphs or full
 history. Runs settle independently for one second. A run between step exit and
 next start keeps its previous observation, without suppressing another run's
 settled change. Posts name only changed runs, with exact step Process IDs and loop
-positions. Busy Sessions keep the latest reading. The
+positions. Codex/OpenCode keep the latest reading while their native stream is busy; Claude/Pi use their provider queues (see the November 3 correction below). The
 cadence is a reversible implementation assumption for Jack's demo review, not
 an attributed product choice.
 
@@ -69,11 +69,10 @@ uncertain dispatch. A changed reading can produce a new report. No schema migrat
   name the selected thread and use next priority. Tokens never leave process memory.
   The socket supplies no consumption acknowledgement: a write remains uncertain.
   Observer locks include native thread identity so clear/resume can replace an old
-  observer without transferring its messages. Availability of this provider inbox
-  in the configured Claude build remains a demo prerequisite to verify; absence
+  observer without transferring its messages. The configured Claude inbox was verified in the November 3 native demo; absence
   produces no terminal-input substitute or invented delivery receipt.
 - **OpenCode:** the existing native server owner observes on its event loop and
-  posts through the existing authenticated prompt endpoint and request/stream
+  posts through the existing authenticated synthetic-input endpoint and request/stream
   owner. Native turn events hold delivery while busy; HTTP success records native
   acceptance, not a claim that a person read the report.
 - **Pi:** the existing launch-local extension owns an observer child and receives
@@ -215,3 +214,17 @@ delivery and draft preservation remain proof obligations. Concept review's
 Remaining acceptance is gate and the authored demo listed above, with no
 publication or merge authorization. Product memory was read in full; this
 checkout has no child Product memory directories to incorporate.
+
+## Native message attribution · 2026-11-03
+
+Jack Heart requested less noisy or hidden automatic updates and prefers them to appear from an agent rather than from the user. The installed Codex protocol exposes `turn/start.toolOutput` with a name and retained output, plus background additional context and raw history injection. The ordinary input path represents user input and is the deletion target for Codex task updates. Probe the named tool-output path with an empty user-input array; preserve the same Session, native owner, receipts and draft. These facts originate in Loopflow's process observations, so name the source `loopflow_task_update`, not an invented worker quotation. Native Codex wake/rendering and draft retention were verified, followed by equivalent quiet delivery through every supported harness; evidence is in `loo-711-native-update-demo.md`.
+
+Jack Heart additionally requires the quiet, non-user-attributed delivery behavior across **all supported harnesses** (Codex, Claude, OpenCode, Pi). Codex-only success does not satisfy this direction. Preserve each native owner; verify idle wake, busy delivery, native rendering, draft retention and retained context individually. Record unsupported or unavailable native capability explicitly rather than claiming parity from adapter tests.
+
+Cross-harness implementation uses Codex retained named tool output, OpenCode synthetic input with the concise notice “Loopflow worker progress”, and Pi hidden custom follow-up messages. Claude uses its existing authenticated native inbox, whose installed receiver marks origin as peer and the input as metadata. Native Claude testing exposed a stale unavailable projection despite its idle terminal: the observer must enqueue through the provider-owned next/follow-up queue rather than wait forever on a missing availability observation. Codex/OpenCode retain their owned stream busy gates. Claude/Pi delivery timing now follows their native queues; per-run settling remains, but multiple settled busy-period observations can be queued and must be checked for noise. No user-origin message fallback is allowed.
+
+Current proof: all four native clients delivered quiet automatic reports; Codex/Pi hide the incoming payload, Claude collapses a named peer message, and OpenCode shows one concise synthetic notice. Each preserved an unsent draft through the checked update. OpenCode’s redundant display-availability gate was also removed in favor of its owned stream. Native burst/coalescing and comprehensive reconnect acceptance remain distinct from this proof. The implementation deletes ordinary user-input transport for these posts; no agent quotation is invented. See `loo-711-native-update-demo.md` and `demo.html`.
+
+## Shipping approval · 2026-11-03
+
+After positive demo feedback and a review of outstanding issues, Jack Heart explicitly requested “lets ship it”. Continue the existing Task’s remaining feature graph on Codex: gate, waited landing, verify and completion. Include the local quiet-message changes in the current PR. No provider restriction. Preserve the native evidence and known limitations in the final PR body before scratch cleanup: all four configured clients demonstrated automatic quiet delivery and draft retention; native busy bursts and comprehensive reconnect/takeover remain unmeasured; Claude/Pi uncertain dispatches are not replayed and can lose an update at disconnect; the initial Codex 267,664 ms model turn remains unexplained. The latest 11 focused Rust tests, Pi extension check, CLI build, formatting and all-target clippy passed. Run the remaining required gate checks and fix actual failures. Do not claim the demo proves the default operator skill or all run-page navigation. Jack accepted shipping after these limitations were disclosed; do not turn them into a new approval request.

@@ -45,11 +45,22 @@ fn deliver(
     socket
         .set_write_timeout(Some(Duration::from_secs(2)))
         .map_err(io_error)?;
+    // Use Claude's native peer envelope so its transcript can attribute and
+    // collapse the message instead of rendering a user-style fallback block.
+    let body = update
+        .text
+        .strip_prefix("<lf:task-update>\n")
+        .and_then(|body| body.strip_suffix("\n</lf:task-update>"))
+        .unwrap_or(&update.text);
+    let content = format!(
+        "<cross-session-message from=\"loopflow\" from-name=\"Loopflow worker progress\">\n{}\n</cross-session-message>",
+        body.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    );
     let bytes = format!(
         "{}\n{}\n",
         json!({"type":"auth","token":token}),
         json!({"type":"user","session_id":thread,"uuid":uuid::Uuid::new_v4().to_string(),
-            "priority":"next","from":"loopflow", "message":{"role":"user","content":update.text}})
+            "priority":"next","from":"loopflow", "message":{"role":"user","content":content}})
     );
     store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
         if !store.record_task_update(
@@ -125,7 +136,8 @@ mod tests {
         assert!(frames[0]["token"].as_str() == Some(token.as_str()));
         assert_eq!(frames[1]["session_id"], "native-thread");
         assert_eq!(frames[1]["priority"], "next");
-        assert_eq!(frames[1]["message"]["content"], "gate: failed");
+        assert_eq!(frames[1]["message"]["content"],
+            "<cross-session-message from=\"loopflow\" from-name=\"Loopflow worker progress\">\ngate: failed\n</cross-session-message>");
         deliver(
             &store,
             &adapter,

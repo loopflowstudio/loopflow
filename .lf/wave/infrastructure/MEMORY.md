@@ -53,26 +53,26 @@ recency; preparation launches no provider. LOO-499 history:
 
 ## Idle owners end (LOO-709, 2026-11-02)
 
-Jack Heart's goal: a closed or idle conversation costs nothing. Source ends
-unviewed, quiet terminal owners after `session.end_detached_after` (chosen
-default `2m`; Jack named 2m and 30m). Resume retains history without replay;
-`--all` selects viewed owners that died without recording an exit. This
-supersedes LOO-415's "viewer loss never transitions".
+Jack Heart: idle conversations cost nothing. Source ends unviewed, quiet
+owners after `session.end_detached_after` (default `2m`; Jack named 2m and 30m).
+Resume preserves history without replay; `--all` selects viewed owners with no
+recorded exit. This supersedes LOO-415's viewer-loss rule.
 
 The failed 24h policy counted finished Graphs, awake time and stale status,
 exited on store errors, and was absent from pre-rule builds. Use `SystemTime`,
 retry failed judgments, and hold only running Graphs, live turns and headless
-Runs. Native turns may supply only output: both exit causes preserve recent
-output; viewer changes cannot reset executable-gone quiet time. Silent native
-work without store activity remains undetectable. LOO-705's `lf monitor rollover`
-owns pre-rule owners.
+Runs. Jack's review requires silent native turns: Claude prompt/stop hooks record
+fenced current-attachment activity before context delivery. Silence never settles
+a turn; output adds evidence. Viewers cannot reset executable-gone quiet time.
+Stand-in hooks prove both deadlines and ending after Stop; native permission waits
+need demo evidence. LOO-705's `lf monitor rollover` owns pre-rule owners.
 
-Agreement with LOO-710 (2026-11-02, following Jack's coordination request):
+LOO-710 agreement following Jack's coordination request:
 `screens/<session>.ghostsnp`, no DTO field; LOO-710 owns the reader and format.
 The second branch to land replaces LOO-709's `.vt` writer at policy and command
-exit. Pruning remains unresolved. Release's source/installed distinction applies:
-the disposable-Home live check ended all 20 owners, but resumed only three;
-installation and the full acceptance set remain unproved.
+exit. Jack retains screens without expiry or deletion. Release's evidence limit
+applies: the disposable-Home live check ended 20 owners but resumed only three;
+installation and full acceptance remain unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)
 

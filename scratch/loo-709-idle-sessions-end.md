@@ -7,6 +7,13 @@ Rust only; Desktop (LOO-672), process overhead (LOO-708), and snapshot fidelity
 (LOO-710) stay with their owners. Earlier design and concept review:
 `9bc58f47ba39ee1efaf0cc6677a37095d93d187f:scratch/loo-709-idle-sessions-end.md`.
 
+**Status, reconciled 2026-11-02:** the accepted silent-turn repair is implemented
+at `bafb3efdcd`, including generated-hook and attachment-handoff regressions.
+The focused checks below passed before reconciliation; code is unchanged here.
+The 2m default and viewed-only crash selection remain the documented assumptions
+in `questions.md`. No screen expiry or deletion is selected by Jack's review
+steer. Full return acceptance, gate and installation remain unproved.
+
 ## Required behavior
 
 - `session.end_detached_after` defaults to `2m`, supports `off`, and measures
@@ -60,6 +67,11 @@ and rewrites the transport fixture decode for `.ghostsnp`. LOO-710's APIs are
 Keep this branch's writer until that cutover. LOO-705's superseded exit uses
 this same policy-ending arm.
 
+Related-work readback, 2026-11-02: LOO-710's PR #1801 is open at demo; LOO-705's
+PR #1799 is open with gate running. Neither is integrated in this checkout
+(base `4e9ade2d04`, also the local `origin/main`). Their publication does not
+complete the writer cutover or prove installed behavior.
+
 ## Why the 24-hour rule failed
 
 2026-11-02: 56 owners alive, 27 older than a day; 39 idle Claude processes
@@ -96,10 +108,33 @@ and point the PR there rather than prescribing signals.
   but executable removal still asks this shared question and must preserve Runs.
 - Demo: return all twenty conversations at the bottom without new turns. Only
   three were resumed in the recorded probe; that does not meet full acceptance.
-- Realign may correct Wave memory's stale silent-native and pruning statements;
-  memory remains read-only in this compress step.
 - PR: include the numbers below and distinguish this writer from LOO-710's
   reader. Installation and the complete return acceptance remain unproved.
+
+## Concept review (2026-11-02)
+
+No further design change or unresolved product choice. Jack Heart's accepted
+silent-turn requirement fits the existing Session, provider and attachment
+model; it needs no suspended-Session state or separate resume lifecycle.
+
+The interaction remains: detach → retain a live turn → settle → save the screen
+and end after quiet → ordinary resume of the same provider history. A removed
+owner executable changes the quiet interval, not the turn's authority.
+`record_native_turn` records start/settlement on the current attachment;
+`owner_waits_for_person` combines that evidence with running Graphs and Runs;
+the transport saves the screen before policy exit. Generated callbacks resolve
+the stable executable entry independently of the owner's removable build.
+
+Preservation counterexamples remain binding: silence cannot settle a turn;
+an old provider cannot settle its replacement; a finished Graph cannot retain
+an idle owner. After a crash, saved screen and provider history survive while
+the dead owner does not; viewed-only automatic restoration remains the recorded
+assumption. The existing usage docs express this interaction and mark the
+LOO-710 reader boundary. No additional skill instruction is needed.
+
+Next proof is the remaining acceptance above, particularly all twenty returns
+without new turns and real native permission waits. This review inspected
+source and existing regression coverage; it adds no runtime acceptance claim.
 
 ## Recorded live evidence (2026-11-02)
 
@@ -113,4 +148,4 @@ welcome and pending prompt. The 27 pre-rule owners were untouched.
 
 ## Check result
 
-`cargo test -p loopflow --lib --test transport_tests silent_native_turn`: passed (2); `cargo fmt --check`, `git diff --check`, `lf context`: passed; macOS linker warned about the large unwind section; affected suites and Clippy: gate.
+`cargo test -p loopflow --lib --test transport_tests silent_native_turn`: prior pass (2), reused with unchanged code; `git diff --check`, `lf context`: passed at realign; affected suites and Clippy: gate.

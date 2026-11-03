@@ -108,8 +108,10 @@ supersedes the suggested copy above. Verification passed: lifecycle integration 
 `cargo fmt --all -- --check`; `cargo clippy --all-targets -- -D warnings`;
 `scripts/test_desktop.sh --filter 'DTOFixtureTests|RenameWaveSheetTests|RemoveWaveSheetTests' -Xswiftc -gnone < /dev/null` (57/57).
 New Wave's repository-scope button also opened the native creation form; it
-was dismissed without creating data. Reinstalling the final warning-free build
-is the remaining demo step.
+was dismissed without creating data. The warning-free app and bundled CLI were installed and signed, then reopened
+on the same private world. Accessibility inspection confirmed the repository
+window and the fixed New Wave footer. Changes are published as `57720b602e`.
+Native hands-on acceptance of the footer position remains open.
 
 For the requested comparison, current official docs show Linear team creation
 in Settings → Your teams → +; Figma folder creation on the team/folder page via

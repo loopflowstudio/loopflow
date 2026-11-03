@@ -250,10 +250,28 @@ pub fn emit_block(
         return Ok(());
     }
     let delivery = load_delivery(delivery, &input)?;
+    let adapter = std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<crate::steer::SteerAdapter>(&value))
+        .transpose()?;
+    let yielded = match (moment, input["hook_event_name"].as_str()) {
+        (crate::context_block::ContextMoment::Stop, Some("Stop")) => Some(true),
+        (crate::context_block::ContextMoment::Tool, Some("UserPromptSubmit")) => Some(false),
+        _ => None,
+    };
+    // Turn evidence is independent of steering and planning delivery: even a
+    // failed context refresh must preserve work the provider has started.
+    if let (Some(adapter), Some(yielded)) = (&adapter, yielded) {
+        let thread = input["session_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Provider turn callback has no native conversation"))?;
+        let store = crate::store::sqlite::SqliteStore::new(&delivery.home.join("loopflow.db"))?;
+        store.record_native_turn(adapter, thread, yielded)?;
+    }
     if moment == crate::context_block::ContextMoment::Stop {
         return acquire_planning(&delivery);
     }
-    emit_context(delivery, input, moment)
+    emit_context(delivery, input, moment, adapter.as_ref())
 }
 
 fn read_callback() -> Result<serde_json::Value> {
@@ -305,6 +323,7 @@ fn emit_context(
     delivery: crate::context_block::ContextDelivery,
     input: serde_json::Value,
     moment: crate::context_block::ContextMoment,
+    adapter: Option<&crate::steer::SteerAdapter>,
 ) -> Result<()> {
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let render = |prefix: &str| -> crate::store::StoreResult<String> {
@@ -319,10 +338,6 @@ fn emit_context(
         write_output(format!("{output}\n").as_bytes())
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
     };
-    let adapter = std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)
-        .ok()
-        .map(|value| serde_json::from_str::<crate::steer::SteerAdapter>(&value))
-        .transpose()?;
     // Mark the check before reading pending steers, so one saved during it is
     // newer and the next tool boundary checks again.
     let seen = std::env::var_os(crate::steer::STEER_SEEN_ENV)
@@ -332,15 +347,7 @@ fn emit_context(
         crate::steer::touch(seen)?;
     }
     let more = std::cell::Cell::new(false);
-    let result = deliver_steers(
-        &delivery,
-        &input,
-        event,
-        adapter.as_ref(),
-        &render,
-        &write,
-        &more,
-    );
+    let result = deliver_steers(&delivery, &input, event, adapter, &render, &write, &more);
     // Steers left beyond this batch, or a failed delivery, need the next boundary.
     if let Some(seen) = seen.filter(|_| result.is_err() || more.get()) {
         let _ = std::fs::remove_file(seen);

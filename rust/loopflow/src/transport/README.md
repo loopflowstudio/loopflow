@@ -32,25 +32,26 @@ nothing. Each resumes through ordinary `lf resume` in a new owner with no
 viewer; its interrupted turn is flagged, not replayed. It reports each Session
 it resumes or skips. Desktop runs it at launch.
 
-An idle conversation costs nothing. A Session nobody views ends after
-`session.end_detached_after` (default `2m`, `off` disables it) of quiet, counted
-in wall time from when its last viewer left or its command last wrote to the
-terminal, so a laptop waking from sleep ends overnight idlers at once. Before
-it exits, the owner writes the Session's last screen to
-`$LF_HOME/screens/<session>.vt`: scrollback first, then the visible grid, as a
-fresh terminal paints it. A Session whose lf executable is removed or replaced
-(a deleted worktree, a relinked build, a rebuilt Dev.app) ends once its command
-has been quiet for two seconds and no turn or running Graph holds it, viewed
-or not, and logs the path to `logs/lf.log`; an attached viewer prints
-why and the `lf resume <session>` that reopens it. A turn in progress or a
-step of a running Graph keeps its owner and restarts the grace; a finished
-Graph holds nothing; a terminal's status report counts only while a viewer is
-attached to refresh it; headless Runs (pipe owners) are never ended for want
-of viewers. Each owner judges only itself and ends by signaling itself, which
-stops its agent and records its exit. A store it cannot read is judged again
-at the next poll; the policy never stops. `lf resume` reopens the conversation
-from provider history under whichever lf runs it, landing at the bottom with
-no new turn; `lf resume --all` skips it.
+A Session nobody views ends after `session.end_detached_after` (default `2m`,
+`off` disables it) of quiet. The grace counts wall time, including laptop sleep,
+from the last viewer change, command output or held work. A turn or running
+Graph keeps its owner and restarts the grace; finished Graphs do not. Native
+Claude prompt/stop hooks preserve even silent tool or network waits until Stop.
+Terminal status counts only while a viewer is attached to refresh it. Headless
+Runs never end for want of viewers.
+
+Removing or replacing the owner's lf executable ends it after two seconds of
+command silence, once no turn, running Graph or headless Run holds it. Viewers
+cannot extend this interval. The owner logs the path to `logs/lf.log`; attached
+viewers receive the reason and a resume command. Failed store judgments retry
+at the next poll.
+
+At policy or command exit, the owner saves `$LF_HOME/screens/<session>.vt`:
+scrollback followed by the visible grid. Policy exit then signals the owner,
+stops its agent and records its exit. `lf resume` reopens provider history at
+the bottom without starting a turn; `lf resume --all` skips this recorded exit.
+Painting the saved screen on return belongs to LOO-710's reader and format
+cutover.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

@@ -1242,6 +1242,96 @@ fn detached_sessions_end_after_their_limit() {
     }
 }
 
+/// Real native callbacks hold a silent turn across both exit deadlines; a
+/// settlement releases it without requiring the provider itself to exit.
+#[test]
+fn silent_native_turns_survive_until_settlement() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 2s\n",
+    )
+    .unwrap();
+    let path = fixture.waiting_provider();
+    std::fs::write(
+        fixture.home.path().join("bin/claude"),
+        r#"#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys, time
+if sys.argv[1:] == ["--version"]:
+    print("2.1.302")
+    sys.exit(0)
+home = pathlib.Path(os.environ["HOME"])
+name = os.environ["SILENT_CASE"]
+settings = json.loads(pathlib.Path(sys.argv[sys.argv.index("--settings") + 1]).read_text())
+def hook(event, **extra):
+    command = settings["hooks"][event][0]["hooks"][0]["command"]
+    payload = dict(session_id=name, hook_event_name=event, **extra)
+    subprocess.run(command, shell=True, input=json.dumps(payload).encode(), stdout=subprocess.DEVNULL, check=True)
+hook("SessionStart", source="startup")
+# A second prompt must report its start even with no new steering to deliver.
+hook("UserPromptSubmit")
+hook("Stop")
+hook("UserPromptSubmit")
+# Child-agent completion must not settle the main conversation's turn.
+hook("Stop", agent_id="child")
+(home / (name + "-started")).write_text("started")
+while not (home / (name + "-settle")).exists():
+    time.sleep(0.05)
+hook("Stop")
+(home / (name + "-settled")).write_text("settled")
+while True:
+    time.sleep(1)
+"#,
+    )
+    .unwrap();
+    let removable = fixture.home.path().join("bin/lf-removable");
+    std::fs::copy(env!("CARGO_BIN_EXE_lf"), &removable).unwrap();
+    let mut owners = Vec::new();
+    for (name, executable) in [
+        ("idle", Path::new(env!("CARGO_BIN_EXE_lf"))),
+        ("gone", removable.as_path()),
+    ] {
+        let mut command = fixture.command_from(executable, &["session", "serve", "--terminal"]);
+        command
+            .args([
+                "--",
+                executable.to_str().unwrap(),
+                "--interactive",
+                "--agent",
+                "claude",
+                ":",
+                "silent turn",
+            ])
+            .env("PATH", &path)
+            .env("SILENT_CASE", name);
+        let owner = fixture.owner(command);
+        let viewer = fixture.viewer(&owner, false);
+        fixture.wait_file(&format!("{name}-started"));
+        drop(viewer);
+        owners.push(owner);
+    }
+    std::thread::sleep(Duration::from_secs(6));
+    for owner in &owners {
+        assert!(
+            fixture.running(owner),
+            "silent native turn ended after its grace"
+        );
+    }
+    std::fs::remove_file(&removable).unwrap();
+    std::thread::sleep(Duration::from_secs(4));
+    for owner in &owners {
+        assert!(
+            fixture.running(owner),
+            "silent native turn ended with its executable"
+        );
+    }
+    for (name, owner) in ["idle", "gone"].iter().zip(&owners) {
+        std::fs::write(fixture.home.path().join(format!("{name}-settle")), "").unwrap();
+        fixture.wait_file(&format!("{name}-settled"));
+        fixture.ends(owner);
+    }
+}
+
 /// A conversation whose lf executable is deleted or rebuilt ends once it waits
 /// for a person, even while viewed; a turn in progress finishes first. Swapping
 /// the symlink an owner launched through (as `lf install` does) ends nothing.

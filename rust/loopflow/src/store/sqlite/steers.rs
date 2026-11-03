@@ -134,6 +134,42 @@ impl SqliteStore {
         write()
     }
 
+    /// Native hooks report turn boundaries even when the terminal is silent.
+    /// A retained provider capability follows attachment handoff, but cannot
+    /// report for a replacement provider or a different native conversation.
+    pub(crate) fn record_native_turn(
+        &self,
+        adapter: &SteerAdapter,
+        thread: &str,
+        yielded: bool,
+    ) -> StoreResult<()> {
+        self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            let native: bool = self.conn.lock().expect("store mutex poisoned").query_row(
+                "SELECT agent_interactive FROM processes WHERE id=?1",
+                [&adapter.agent_process_id],
+                |row| row.get(0),
+            )?;
+            // Structured providers already report through their owned stream.
+            if !native {
+                return Ok(());
+            }
+            let attachment = self.session_attachment(&adapter.session)?.ok_or_else(|| {
+                StoreError::InvalidAuthority("Native provider has no attachment".into())
+            })?;
+            self.record_session_activity(
+                &adapter.session,
+                &attachment,
+                &crate::session::SessionActivity {
+                    preview: None,
+                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                    open_tools: 0,
+                    pending_input: 0,
+                    yielded,
+                },
+            )
+        })
+    }
+
     /// The Session's published resume reference with the input it belongs to.
     /// A Session that never published one leaves publication to its launch.
     fn resume_reference(

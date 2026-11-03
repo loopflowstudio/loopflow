@@ -41,6 +41,57 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
 }
 
 #[test]
+fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
+    let (_home, store, adapter) = fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1 WHERE id='session'",
+            [owner],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+            [&adapter.agent_process_id],
+        )
+        .unwrap();
+    }
+    store.record_native_turn(&adapter, "native", false).unwrap();
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    assert_ne!(first.token, next.token);
+    // The provider itself survived; its stop belongs to its current attachment.
+    store.record_native_turn(&adapter, "native", true).unwrap();
+    assert!(store.owner_waits_for_person(owner).unwrap());
+    store.record_native_turn(&adapter, "native", false).unwrap();
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    assert!(store.record_native_turn(&adapter, "child", true).is_err());
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    let replacement = store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    // Activity from the old provider cannot keep its replacement alive.
+    assert!(store.owner_waits_for_person(owner).unwrap());
+    assert!(store.record_native_turn(&adapter, "native", false).is_err());
+    let current = store
+        .reserve_steer_adapter("session", &replacement)
+        .unwrap();
+    store
+        .with_provider_context(&current, "native", ACTIVATE, || Ok(()))
+        .unwrap();
+    store.record_native_turn(&current, "native", false).unwrap();
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    assert!(store.record_native_turn(&adapter, "native", true).is_err());
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    store.record_native_turn(&current, "native", true).unwrap();
+    assert!(store.owner_waits_for_person(owner).unwrap());
+}
+
+#[test]
 fn saving_a_steer_wakes_tool_hooks() {
     let (home, store, _) = fixture();
     let latest = crate::steer::latest_marker(home.path());

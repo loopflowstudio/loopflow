@@ -702,7 +702,7 @@ struct TaskPlanningFactsView: View {
 }
 
 /// Every Graph process in the Task's checkout, newest first, whatever started
-/// it: one line each, opening to its launched graph and steps. It is not the
+/// it: one line each, opening to its recorded loops and steps. It is not the
 /// Workflow's history: a process `lf task run` started and one started ad hoc
 /// are the same kind of row. A multiplexer pane on the page surface.
 struct GraphProcessLog: View {
@@ -711,7 +711,9 @@ struct GraphProcessLog: View {
     let location: WorkspaceIdentity?
     var execution: TaskLocationObservation? = nil
     var query: RegistryQuery = RegistryQueryLocal.shared
-    @State private var captured: [GraphProcessDetail]?
+    var openFiles: (() -> Void)? = nil
+    @State private var captured: WorkFrame.TaskPart?
+    @State private var historyQuery: RegistryQuery?
     @State private var error: String?
     @State private var refresh = 0
     @Environment(\.palette) private var palette
@@ -719,28 +721,54 @@ struct GraphProcessLog: View {
     var body: some View {
         let task = model.task(id: taskId)?.task
         let reading = task.map { model.taskWork[$0.id] }
-        let readsWindow = execution == nil && query.remoteMachine == nil && location != nil
+        let readsWindow = (execution == nil || execution?.machineID == model.observingMachineId) && query.remoteMachine == nil && location != nil
             && location?.machineId == model.observingMachineId && location == task?.reference.workspace?.identity
+        let work = readsWindow ? reading?.value : captured?.work
+        let graphs = readsWindow ? work?.graphProcesses : captured?.graphProcesses.map(\.entry)
+        let details = readsWindow ? model.graphProcesses : Dictionary(uniqueKeysWithValues:
+            (captured?.graphProcesses ?? []).map { ($0.entry.id, $0) })
+        let contentQuery = readsWindow ? query : historyQuery
+        let readError = readsWindow ? reading?.errorMessage : error
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    if let work {
+                        TaskRunPosition(workflow: work.graph,
+                                        execution: readsWindow ? task?.execution : captured?.row?.execution)
+                    } else {
+                        Text("Reading workflow…")
+                    }
+                    Spacer()
+                    if let openFiles { Button("Files", action: openFiles) }
+                }.padding(.vertical, 8)
                 if !readsWindow {
                     Button("Refresh") { refresh += 1 }
-                    if let error { Text("Graph processes could not be read: \(error)").padding(.vertical, 6) }
                 }
-                if let graphs = captured?.map(\.entry) ?? (readsWindow ? reading?.value?.graphProcesses : nil) {
-                    ForEach(Array(graphs.reversed().enumerated()), id: \.element.id) { index, graph in
-                        if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                        // Status names who started the Task's latest Graph: the newest row.
-                        GraphProcessView(model: model, graph: graph, run: captured?.first { $0.entry.id == graph.id } ?? (readsWindow ? model.graphProcesses[graph.id] : nil),
-                                         startedBy: index == 0 && readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil)
+                if let readError {
+                    Text("Graph processes could not be read: \(readError)").padding(.vertical, 6)
+                }
+                if let graphs {
+                    if let graph = graphs.last {
+                        GraphProcessView(model: model, graph: graph,
+                            run: details[graph.id],
+                            startedBy: readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil,
+                            historyQuery: contentQuery)
+                    }
+                    if graphs.count > 1 {
+                        DisclosureGroup("Earlier runs (\(graphs.count - 1))") {
+                            ForEach(Array(graphs.dropLast().reversed())) { graph in
+                                GraphProcessView(model: model, graph: graph,
+                                    run: details[graph.id], historyQuery: contentQuery)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        .accessibilityIdentifier("task-earlier-runs")
                     }
                     if graphs.isEmpty {
                         Text("No Graph has run.").padding(.vertical, 6)
                             .accessibilityIdentifier("task-graph-processes-empty")
                     }
-                } else if let error = error ?? reading?.errorMessage {
-                    Text("Graph processes could not be read: \(error)").padding(.vertical, 6)
-                } else {
+                } else if readError == nil {
                     Text(task == nil ? "Task unavailable" : "Reading Graph processes…").padding(.vertical, 6)
                 }
             }
@@ -773,10 +801,27 @@ struct GraphProcessLog: View {
                     ownerQuery = query
                     subject = task?.runtime?.workId ?? taskId
                 }
-                let graphs = try await ownerQuery.taskGraphProcesses(task: subject)
-                try Task.checkCancellation()
-                captured = graphs
-                error = nil
+                historyQuery = ownerQuery
+                let watch = try await ownerQuery.watchTask(task: subject)
+                do {
+                    for try await line in watch.lines {
+                        try Task.checkCancellation()
+                        let frame = try WorkFrame.decode(part: .task,
+                            scope: WorkScope(repo: nil, headless: false, task: subject, activity: nil), sequence: 0, line: line)
+                        guard case .task(let reading?) = frame.content else {
+                            self.error = frame.unavailable ?? "Task reading is unavailable"
+                            continue
+                        }
+                        captured = reading
+                        error = nil
+                    }
+                } catch {
+                    await watch.cancel()
+                    throw error
+                }
+                await watch.cancel()
+            } catch is CancellationError {
+                return
             } catch { self.error = error.localizedDescription }
         }
     }
@@ -852,8 +897,8 @@ struct GraphProcessView: View {
     let graph: GraphProcessInventoryEntry
     let run: GraphProcessDetail?
     var startedBy: Starter? = nil
+    var historyQuery: RegistryQuery? = nil
     private var expanded: Bool { model.navigation.expandedGraphProcesses.contains(graph.id) }
-    @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
 
     private var started: Int64 { run?.steps.first?.startedAt ?? graph.updatedAt }
@@ -917,26 +962,102 @@ struct GraphProcessView: View {
         Text(graph.id).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
             .accessibilityIdentifier("graph-process-id-\(graph.id)")
         if let run {
-            GraphDiagram(compiled: run.compiled, latest: run, inspected: $inspected)
             Text([run.presentation.reason, graphIterationLabel(run.iterations)]
                 .compactMap { $0 }.joined(separator: " · "))
                 .accessibilityIdentifier("graph-process-status-\(graph.id)")
-            ForEach(run.steps) { step in
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Text(step.label).font(Typography.code(11))
-                    if let iteration = graphIterationLabel(step.iterations) { Text(iteration).monospacedDigit() }
-                    Spacer()
-                    Text(step.outcome ?? (step.completedAt == nil ? "running" : "no recorded exit"))
-                    if let completed = step.completedAt {
-                        Text(Self.duration(completed - step.startedAt)).monospacedDigit()
-                            .frame(minWidth: 52, alignment: .trailing)
-                    }
-                }
-                .help(step.lfProcessId)
-                .accessibilityIdentifier("graph-process-step-\(step.lfProcessId)")
-            }
+            GraphRunHistory(steps: run.steps, historyQuery: historyQuery)
         } else {
             Text("Reading Graph…")
         }
+    }
+}
+
+
+/// Leaf history stays inspectable without a terminal or window. No summary is
+/// invented from an exit: only the recorded Process facts appear here.
+struct GraphRunHistory: View {
+    let steps: [GraphStepProcess]
+    var historyQuery: RegistryQuery? = nil
+
+    var body: some View {
+        ForEach(GraphStepGroup.groups(steps)) { group in
+            DisclosureGroup(group.label) {
+                ForEach(group.steps) { step in
+                    GraphRunStep(step: step, historyQuery: historyQuery)
+                }
+            }
+            .accessibilityIdentifier("graph-process-loop-\(group.id)")
+        }
+    }
+}
+
+struct GraphRunStep: View {
+    let step: GraphStepProcess
+    var historyQuery: RegistryQuery? = nil
+    @State private var history: String?
+    @State private var error: String?
+    @State private var reading = false
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text(step.lfProcessId).font(Typography.code(10))
+                Text("Started " + Date(timeIntervalSince1970: TimeInterval(step.startedAt))
+                    .formatted(date: .abbreviated, time: .standard))
+                if let ended = step.completedAt {
+                    Text("Ended " + Date(timeIntervalSince1970: TimeInterval(ended))
+                        .formatted(date: .abbreviated, time: .standard))
+                }
+                if let code = step.exitCode { Text("Exit \(code)") }
+                if let historyQuery {
+                    Button("Read process history") {
+                        reading = true
+                        Task {
+                            defer { reading = false }
+                            do { history = try await historyQuery.processHistory(id: step.lfProcessId); error = nil }
+                            catch { self.error = error.localizedDescription }
+                        }
+                    }
+                    .disabled(reading)
+                    .accessibilityIdentifier("graph-step-history-\(step.id)")
+                }
+                if let history { Text(history).font(Typography.code(10)) }
+                if let error { Text("History unavailable: \(error)") }
+            }
+            .textSelection(.enabled)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(step.label).font(Typography.code(11))
+                Spacer()
+                Text(step.outcome ?? (step.completedAt == nil ? "running" : "no recorded exit"))
+                if let completed = step.completedAt {
+                    Text(GraphProcessView.duration(completed - step.startedAt)).monospacedDigit()
+                }
+            }
+        }
+        .accessibilityIdentifier("graph-process-step-\(step.lfProcessId)")
+    }
+}
+
+
+struct TaskRunPosition: View {
+    let workflow: TaskGraph?
+    let execution: TaskExecutionSnapshot?
+
+    var label: String {
+        guard let workflow else { return execution?.reason ?? "No workflow selected" }
+        switch workflow.position {
+        case .at(TaskGraph.start): return "\(workflow.name) · not started"
+        case .at(TaskGraph.end): return "\(workflow.name) · at end"
+        case .at(let step): return "\(step) · available for review"
+        case .run(let from, _, let running):
+            if let execution, execution.state != .idle { return execution.reason }
+            return "\(running ? "Running" : "Stopped") from \(from)"
+        }
+    }
+
+    var body: some View {
+        Text(label).textSelection(.enabled)
+            .accessibilityIdentifier("task-run-position")
     }
 }

@@ -1656,10 +1656,6 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
-        /// Resume every conversation a restart or crash interrupted; never one
-        /// someone left. Terminals attach when they open them.
-        #[arg(long, conflicts_with_all = ["id", "fork", "message", "prepare"])]
-        all: bool,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness
@@ -3882,6 +3878,7 @@ mod tests {
             vec!["lf", "session", "resume", "run_123", "--takeover"],
             vec!["lf", "session", "resume", "run_123", "--try"],
             vec!["lf", "session", "resume", "--fresh"],
+            vec!["lf", "session", "resume", "--all"],
         ] {
             assert!(Cli::try_parse_from(removed.clone()).is_err(), "{removed:?}");
         }

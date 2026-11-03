@@ -135,6 +135,35 @@ public struct GraphProcessDetail: Decodable, Sendable, Hashable {
     }
 }
 
+/// Contiguous steps at one complete nested loop position. Returning to an earlier
+/// position starts another group, so repeated occurrences never disappear.
+public struct GraphStepGroup: Identifiable, Sendable {
+    public private(set) var steps: [GraphStepProcess]
+    public var id: String { steps[0].id }
+    public var iterations: [[UInt32]] { steps[0].iterations }
+
+    public var label: String {
+        let levels = iterations.enumerated().compactMap { depth, counts -> String? in
+            guard !counts.isEmpty else { return nil }
+            let passes = counts.enumerated().map { "loop \($0.offset + 1) pass \(UInt64($0.element) + 1)" }
+            return "level \(depth + 1): " + passes.joined(separator: ", ")
+        }
+        return levels.isEmpty ? "Steps" : levels.joined(separator: " · ")
+    }
+
+    public static func groups(_ steps: [GraphStepProcess]) -> [Self] {
+        var result: [Self] = []
+        for step in steps {
+            if result.last?.iterations == step.iterations {
+                result[result.count - 1].steps.append(step)
+            } else {
+                result.append(Self(steps: [step]))
+            }
+        }
+        return result
+    }
+}
+
 public struct TaskRunControl: Codable, Sendable, Hashable {
     public let unavailable: String?
 }

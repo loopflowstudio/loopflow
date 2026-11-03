@@ -28,6 +28,14 @@ lf session list --available        # conversations available for your next turn,
 Each scope (repository, Wave, Task) has one ongoing conversation, with that
 scope's operating instructions.
 
+An unviewed, settled conversation ends its processes after two minutes of quiet;
+`session.end_detached_after` changes the grace or disables it with `off`.
+Returning paints its saved screen while the provider reopens its history, without
+replaying input. Active turns, watches, running Graphs, drafts and pending requests
+keep their owner. Drafts remain editable and requests remain answerable there.
+Edited, pasted or unacknowledged native input can retain the owner until the
+provider exits; the saved screen alone cannot restore an editor or request.
+
 ```bash
 lf resume <session> --fork         # leave the other client running; continue in a new conversation from it
 lf session new                     # restart this scope's conversation on a fresh thread, seeded with what the last one knew
@@ -44,17 +52,16 @@ adds finished conversations, and `--search` narrows the list.
 ## After a crash or reboot
 
 ```bash
-lf resume --all
+lf resume --task <ID>
 ```
 
-Every conversation a crash or restart cut off comes back, on the provider and
-login it was using, with its native history. A conversation you exited or
-detached from is left alone. A turn that was mid-flight is reported, not
-replayed. Terminals attach when they open them.
+Open the conversation you want, on the provider and login it was using, with
+its native history. Resuming does not replay a turn cut off by the crash.
+Other conversations stay stopped until opened.
 
 | After a crash… | |
 |---|---|
-| interactive conversations | `lf resume --all` brings them back |
+| interactive conversations | `lf resume --task <ID>` or `lf resume SESSION` |
 | Task worktrees, branches, PRs | untouched |
 | comments and steers | saved; delivered at the agent's next boundary |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |

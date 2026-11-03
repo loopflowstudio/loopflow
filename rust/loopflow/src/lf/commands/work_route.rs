@@ -150,12 +150,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let bare = match &cli.command {
         Some(Commands::Session {
-            cmd:
-                SessionCommand::Resume {
-                    id: None,
-                    all: false,
-                    ..
-                },
+            cmd: SessionCommand::Resume { id: None, .. },
         }) => cli.wave.is_none() && !cli.selects_repository(),
         _ => false,
     };
@@ -301,12 +296,7 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
 pub(super) fn resumed_session(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Session {
-            cmd:
-                SessionCommand::Resume {
-                    id: Some(id),
-                    all: false,
-                    ..
-                },
+            cmd: SessionCommand::Resume { id: Some(id), .. },
         }) => Some(id),
         _ => None,
     }
@@ -427,12 +417,7 @@ fn without_placement(args: Vec<String>) -> Vec<String> {
 fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Forward>> {
     let (
         Some(Commands::Session {
-            cmd:
-                SessionCommand::Resume {
-                    id: None,
-                    all: false,
-                    ..
-                },
+            cmd: SessionCommand::Resume { id: None, .. },
         }),
         None,
     ) = (&cli.command, cli.task.as_deref())

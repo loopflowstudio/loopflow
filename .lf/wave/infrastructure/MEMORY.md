@@ -60,35 +60,37 @@ recency; preparation launches no provider. LOO-499 history:
 
 Jack Heart requires idle conversations to cost nothing. Detached settled owners
 end after `session.end_detached_after` (default 2m, configurable/off). Jack selected
-editable unsent drafts and the same answerable pending requests on November 3,
-removed bulk resume, and authorized delivery after implementation and checks.
-Single-Session resume never replays. Workspace restoration belongs to LOO-498
-(Rex first, Herder second); open Rex tabs retain viewers even when unselected.
+editable drafts and the same pending requests on November 3, removed bulk resume,
+and authorized delivery after checks. Single-Session resume never replays.
+LOO-498 owns workspace restoration (Rex first, Herder second); unselected open
+Rex tabs retain viewers.
 
-Finished Graphs, awake-time clocks and stale unviewed status made the old policy
-ineffective; store errors killed its watcher. Use wall time and retry judgments;
-preserve running Graphs, live/silent turns and Runs. Claude's fenced callbacks
-record activity before context delivery. Stop alone cannot settle background
-watches or scheduled wakeups: retain complete task/cron evidence. Same-provider
-handoff carries activity to its new attachment fence; replacement cannot inherit it.
+Finished Graphs and stale unviewed status retained idle owners; store errors killed
+the watcher. Use wall time and retry judgments. Fenced unyielded turns, including
+quiet Graph supervision, outrank viewed idle reports; preserve running Graphs and
+Runs. Claude records activity before context delivery; Stop needs complete task/cron
+evidence to settle watches/wakeups. Same-provider handoff carries activity to its
+new fence; replacement cannot inherit it.
 
-Preserving a native editor requires retaining its owner, not repainting its screen.
-The owner records input before delivery; exact plain Claude submission text plus
-matching prompt-ID settlement can release it. Enter, submission hooks (which may
-reject or restore text), and Stop alone cannot. Edits/paste, later or ambiguous
-input and missing IDs retain the owner until native exit; other providers lack
-this acknowledgement. This deliberately limits idle-ending coverage. Recheck
-queued endings against input and live viewers; viewers veto idle ending, not
-executable rollover. LOO-705 owns rollover through the same owner judgment.
+Queued endings are candidates: drain ready output, recheck output revisions even
+when reports are throttled, and restart quiet after new activity. Idle ending also
+checks viewer history and current viewers; executable rollover ignores viewers.
+Recheck input/store protection at consumption. LOO-705 shares that owner judgment.
+
+Native editors need retained owners. Record input before delivery; exact plain
+Claude text plus matching prompt-ID settlement can release it. Enter, submission
+hooks (which may reject/restore text), and Stop alone cannot. Edits/paste, ambiguous
+or later input and missing IDs retain owners until native exit; other providers
+lack this acknowledgement. This deliberately limits idle-ending coverage.
 
 LOO-710's integrated `screens/<session>.ghostsnp` writer/reader replaces `.vt`;
 save at policy and command exit. Jack selected no DTO field, expiry or deletion.
-Real Claude 2.1.317 with local synthetic model responses preserved an editable
-draft and the same AskUserQuestion across grace/executable removal, and ended
-a settled plain submission. This proves native interaction, not configured-account
-or installed acceptance. Earlier twenty-owner teardown reopened only three;
-full return acceptance remains open. Release's entry-point lesson applies:
-source/fixture success and publication do not establish installed behavior.
+Real Claude 2.1.317/local model fixtures preserved editable drafts and the same
+AskUserQuestion across both deadlines, then ended a settled plain submission.
+Synthetic transport fixtures prove ending ordering and quiet-supervisor survival
+through settlement. Neither proves configured/installed acceptance. Earlier
+twenty-owner teardown reopened only three; full returns remain open. Release's
+entry-point lesson separates source/publication from installed behavior.
 
 ## Session viewer wire (LOO-712, 2026-11-02)
 

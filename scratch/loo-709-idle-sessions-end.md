@@ -38,8 +38,9 @@ code Graph owns the remaining demo, gate, publication, landing and verification.
 
 Upstream main `2bc29a72e0` integrates LOO-705 rollover, LOO-708 launcher/relay
 reduction, LOO-710 Ghostty snapshots and LOO-712 viewer byte-resume. This checkout
-is synced to that base; queued ending now travels as `Event::Control`, preserving
-the successor command. No parallel snapshot or viewer protocol is needed.
+is synced to that base. A queued `Ending` candidate becomes `Event::Control`
+only after confirmation, preserving the successor command. No parallel snapshot
+or viewer protocol is needed.
 The existing silent-turn/watch repair and Ghostty integration remain intact.
 Pending input now precedes viewed terminal-idle evidence in `TURN_LIVE`.
 Retained-provider attachment handoff carries its current activity reading to the
@@ -151,25 +152,40 @@ The pre-repair uncommitted review is retained in
 `.lf/tmp/loo-709-before-ending-repair.patch`. Existing draft, same-request, watch,
 attachment, Graph and snapshot protections remain on their original paths.
 
+Source reconciliation at `74880b72e3` confirms both requested repairs and their
+focused regressions are present. No further implementation mismatch was found
+in the reviewed ending/turn paths. The remaining obligations below are acceptance
+and delivery, not an unresolved product decision.
+
+Headless concept review at that same HEAD leaves the accepted design unchanged.
+The normal path retains the editor/request until settlement; failure to read the
+store retains execution for retry; return attaches to that owner or resumes ended
+provider history without replay. The queued-output/new-viewer and viewed-idle/
+unyielded-turn counterexamples above now have explicit final-judgment protection.
+Keep Session identity, provider activity and terminal preview distinct: no new
+user action, lifecycle record or scheduler is needed. The existing usage guidance
+already expresses these boundaries. This review inspected source and recorded
+proof only; it adds no runtime or installed acceptance. No open product choice
+and no next implementation direction remain; loop-or-next receives no change.
+
 ## Remaining acceptance and delivery
 
-1. Gate the input-ledger and activity regressions alongside existing silent-turn,
-   watch, Graph and headless cases. Include rejected prompt/startup boundaries and
-   the forced queued-ending/output/new-viewer regressions.
-2. Demo through the configured/installed path and inspect slow/failed startup
-   without replay. The real native probe below uses a local model fixture; it
-   does not establish installed or configured-account behavior.
-3. Complete all twenty returns at the bottom without new turns. Prior evidence
-   ended all twenty owners but resumed only three; do not call that acceptance.
-4. Gate owns the affected suites and Clippy, plus the schema upgrade boundary.
-   Affected Rust owners include `store::sqlite::native_input`, `transport::lifetime`,
-   `store::sqlite::{steers,processes,program_status}`, `context_block`,
-   `harness::context`, `lf::commands::{context,session,work_route,rollover}`,
-   CLI parsing/explanation (`binary(lf)`), `transport_tests`,
-   `integration::session_cli_tests`, launch-contract checks and `world_recipes`
-   watch cases. Prior headless compilation of RegistryQuery and LoopflowApp
-   consumers and 17 RegistryQuery tests passed; reuse that unchanged proof.
-   Documentation checks still apply.
+1. Gate completed on 2026-11-03, including input-ledger, silent-turn, watch,
+   Graph/headless, rejected prompt/startup and queued-ending regressions. The
+   gate repaired retry loss after failed viewer writes and repository reads;
+   results and fixture corrections are recorded below.
+2. Configured native startup and slow/failed resume are demonstrated in the
+   [2026-11-03 headless demo](loo-709-idle-demo.md). Verify the merged installed
+   build during delivery; the shared installed app remains unchanged.
+3. Twenty fresh configured conversations completed end/return/end cycles with
+   unchanged native messages in that demo. This supersedes the three-return
+   acceptance gap; the older cohort remains historical evidence, not twenty
+   completed returns. The new cohort was sequential, with a 4s test grace.
+4. The affected Rust checks, headless Desktop build/tests, website checks,
+   migration checks, disposable installation/upgrade proofs and macOS/Linux
+   Clippy have passed. CI owns the full matrix; optional display diagnostics
+   were skipped. Neither source checks nor disposable Linux promotion establish
+   merged installed macOS acceptance.
 5. Update PR copy with actual proof and limitations; publish, land, verify merged
    behavior and complete the Task through the authored Graph. No further shipping
    permission is required. Do not merge without editable-draft proof.
@@ -228,4 +244,59 @@ Pre-ledger uncommitted review material is preserved in
 
 ## Check result
 
-With inherited `LF_*` unset and stdin closed: `cargo test -p loopflow --lib --test transport_tests -- transport::lifetime store::sqlite::steers_tests:: native_background_watches_survive silent_native_turns_survive detached_sessions_end_after_their_limit sessions_end_when_their_lf_executable_goes` passed 9 tests; `cargo test -p loopflow --lib store::sqlite::steers::tests::` passed 17. The serve-loop test forces seven orderings. `cargo fmt --check`, `git diff --check` and `lf context` passed. The existing macOS large-unwind linker warning remains. Earlier unchanged input-ledger, migration and headless Desktop proof remains applicable. Gate owns broader affected suites and Clippy; demo owns configured/installed acceptance and all twenty returns.
+Gate plan — 2026-11-03, HEAD `74880b72e3`, compared with `origin/main`:
+
+- Transport/lifetime and input/activity store changes reach `transport_tests`,
+  `transport::`, `store::sqlite::{native_input,steers,processes,program_status}`,
+  and `store::migrations` (including the released-frontier upgrade fixture).
+- Native hook, resume and bulk-command removal reach `config::`, `context_block`,
+  `harness::context`, `lf::commands::{context,session,work_route,rollover}`,
+  `lf::tests`, `binary(lf)`, `session_cli_tests`, `agent_startup_tests`,
+  `session_launch_contract`, documented-command checks and `world_recipes` watch
+  cases. Retained transport also reaches the interactive Graph and nested-launch
+  acceptance boundaries named in the test README.
+- Use the changed-aware runner with this Rust filter and `--reuse-passing`;
+  its architecture, website and headless Swift suites cover the changed docs and
+  deleted Desktop startup caller. It runs fmt and Clippy after building/tests.
+- Run migration immutability first, then the disposable installation harness for
+  the migration and nested-Graph boundary. Linux-only execution stays with CI.
+  Native interaction/return measurements are already captured in the demo; this
+  pass does not repeat them or claim installed acceptance.
+
+Gate result — **passed**, 2026-11-03, with inherited `LF_*` unset and stdin closed.
+Rust checks used stable 1.99.1. The initial gate was deliberately interrupted
+during CLI compilation after discovering the retry defect; it reached no test
+timeout. The completed run and focused repair below retain their separate results.
+
+The policy previously forgot a failed viewer write when it advanced its activity
+revision. A later successful store read could therefore see stale viewed status
+forever. It now retries the latest viewed state until persistence succeeds.
+Repository lookup failures also leave the configured grace unknown for retry,
+instead of permanently choosing the global default. The new viewer-write
+regression failed before this fix and passed after recovery with no new viewer
+event. The output/quiet regression now also forces a Process read error and proves
+recovery without new activity.
+
+Two existing fixtures needed correction: rollover supplied unfenced terminal
+status instead of owned provider work, and the policy clock fixture inserted
+`trace_id='fixture'`, which cannot decode as a Process. The latter caused its
+eight-second candidate receive to time out once read failures were correctly
+retried. It now uses the existing valid Process fixture; rollover records activity
+through a current attachment. No deadline was increased.
+
+- `uv run python scripts/check_migrations.py` — passed; only `native_terminal_input.sql` is unmerged.
+- `uv run python scripts/test.py --reuse-passing --rust-filter <planned owners above>` — architecture passed; Rust ran 438 tests (436 passed, the two diagnosed fixtures failed); Desktop app build and headless suite passed (663 tests reported, 44 optional/display or measurement tests skipped), and Swift boundary checks passed. Exact filter/argv and output: `.lf/tmp/gate/loo-709-gate.log`.
+- `cargo nextest run -p loopflow --lib --no-fail-fast --build-jobs 4 --test-threads 4 -E 'test(transport::lifetime) | test(lf::commands::rollover::)'` under `scripts/test_network.py` — all 10 passed after fixture repairs; unchanged affected suites retain the completed run's evidence. Log: `.lf/tmp/gate/loo-709-repair.log`.
+- `LF_BIN=<absolute candidate> uv run python dev.py test` from `website/` — 72 passed. The first attempt selected an older installed `lf` that could not emit the command catalog; pinning the built candidate resolved it. `scripts/testing.md` now records this prerequisite. Log: `.lf/tmp/gate/loo-709-website.log`.
+- `uv run python scripts/test_task_installation.py --test declared_agent_can_start_another_tasks_graph` — all three isolated Linux proofs passed: planning migration preservation, prior Task delivery preservation, and nested Task Graph launch. Log: `.lf/tmp/gate/loo-709-installation.log`.
+- `uv run python scripts/test_task_installation.py --repository-upgrade` — populated 0.14.3 promotion preserved Task/Session identity, history, edits, move and retry. Log: `.lf/tmp/gate/loo-709-upgrade.log`.
+- `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` — passed on macOS; the same all-targets Clippy command passed in a disposable Linux container using the installation harness's migration order/cache. Logs: `.lf/tmp/gate/loo-709-clippy-{macos,linux}.log`.
+
+The macOS test linker still reports its existing large-unwind-section warning;
+both Clippy runs are clean. The repaired Rust fixture inputs alone were rerun;
+the final notes are prose-only. All created containers and check processes ended.
+The prior configured [demo](loo-709-idle-demo.md) remains the native interaction,
+startup and twenty-return evidence. Proceed through the authored delivery steps;
+merged installed verification remains outstanding. Conservative native input
+retention remains explicit, and Jack Heart's accepted interaction requirements
+are unchanged.

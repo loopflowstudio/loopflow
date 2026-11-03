@@ -183,6 +183,7 @@ fn watch(
     mut waker: &UnixStream,
 ) {
     let mut store = Store::default();
+    let mut recorded_viewed = None;
     let mut last_output = SystemTime::now();
     let mut grace = Grace {
         limit: None,
@@ -196,29 +197,31 @@ fn watch(
                 if activity.output != grace.activity.output {
                     last_output = now;
                 }
-                if activity.viewers != grace.activity.viewers {
-                    let viewed = activity.viewed;
-                    // A store a newer lf has advanced refuses this write. The
-                    // policy keeps running; readers ask this owner directly.
-                    if let Some(store) = store.open(owner) {
-                        if let Err(error) = store.record_owner_viewers(owner, viewed) {
-                            tracing::warn!(%error, %owner, viewed, "cannot record Session viewers");
-                        }
-                    }
-                }
                 grace.note(activity, now);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
+        let viewed = grace.activity.viewed;
+        if recorded_viewed != Some(viewed) {
+            if let Some(store) = store.open(owner) {
+                match store.record_owner_viewers(owner, viewed) {
+                    Ok(()) => recorded_viewed = Some(viewed),
+                    Err(error) => {
+                        tracing::warn!(%error, %owner, viewed, "cannot record Session viewers; retrying");
+                    }
+                }
+            }
+        }
         if terminal && grace.limit.is_none() {
             if let Some(store) = store.open(owner) {
-                let repo = store
-                    .process(owner)
-                    .ok()
-                    .flatten()
-                    .and_then(|process| process.repo);
-                grace.limit = Some(limit(repo.as_deref()));
+                match store.process(owner) {
+                    Ok(Some(process)) => grace.limit = Some(limit(process.repo.as_deref())),
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::warn!(%error, %owner, "cannot load Session repository for detached limit; retrying");
+                    }
+                }
             }
         }
         let now = SystemTime::now();
@@ -409,17 +412,66 @@ mod tests {
     }
 
     #[test]
-    fn output_restarts_both_policies_then_quiet_allows_ending() {
+    fn viewer_state_retries_after_a_store_failure_without_another_viewer_change() {
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
-        let owner = crate::id::LfProcessId::new();
+        let owner = store.test_lf_process();
         let db = guard.home().join("loopflow.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "UPDATE processes SET viewed=1 WHERE id=?1",
             [owner.as_str()],
         )
         .unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_viewer_change BEFORE UPDATE OF viewed ON processes
+             BEGIN SELECT RAISE(FAIL, 'temporary viewer write failure'); END;",
+        )
+        .unwrap();
+        let (activity, changes) = std::sync::mpsc::channel();
+        let (end, _ending) = std::sync::mpsc::channel();
+        let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let watched = owner.clone();
+        let policy = std::thread::spawn(move || {
+            crate::journal::with_test_ledger(db, || {
+                super::watch(&watched, None, false, &changes, &end, &waker);
+            });
+        });
+        activity
+            .send(Activity {
+                viewed: false,
+                viewers: 2,
+                output: 0,
+            })
+            .unwrap();
+        std::thread::sleep(super::POLL * 2);
+        conn.execute_batch("DROP TRIGGER reject_viewer_change")
+            .unwrap();
+        let deadline = std::time::Instant::now() + super::POLL * 3;
+        let mut viewed = true;
+        while viewed && std::time::Instant::now() < deadline {
+            viewed = conn
+                .query_row("SELECT viewed FROM processes WHERE id=?1", [&owner], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(activity);
+        policy.join().unwrap();
+        assert!(
+            !viewed,
+            "a recovered store must not retain stale viewer state"
+        );
+    }
+
+    #[test]
+    fn output_restarts_both_policies_then_quiet_allows_ending() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let owner = store.test_lf_process();
+        let db = guard.home().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         conn.execute(
             "UPDATE agent_sessions SET interactive=1, transport_lf_process_id=?1 WHERE id='session'",
@@ -431,6 +483,15 @@ mod tests {
         )
         .unwrap();
         for removed in [false, true] {
+            if !removed {
+                // An unreadable Process must not latch the global grace in
+                // place of the repository's setting. Repair it without activity.
+                conn.execute(
+                    "UPDATE processes SET trace_id='unreadable' WHERE id=?1",
+                    [&owner],
+                )
+                .unwrap();
+            }
             let executable = removed.then(|| super::Executable {
                 path: guard.home().join("removed"),
                 identity: (0, 0, 0, 0, 0),
@@ -438,13 +499,21 @@ mod tests {
             let (activity, changes) = std::sync::mpsc::channel();
             let (end, ending) = std::sync::mpsc::channel();
             let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
-            let owner = owner.clone();
+            let watched = owner.clone();
             let db = db.clone();
             let policy = std::thread::spawn(move || {
                 crate::journal::with_test_ledger(db, || {
-                    super::watch(&owner, executable.as_ref(), true, &changes, &end, &waker);
+                    super::watch(&watched, executable.as_ref(), true, &changes, &end, &waker);
                 });
             });
+            if !removed {
+                assert!(matches!(
+                    ending.recv_timeout(super::POLL * 2),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ));
+                conn.execute("UPDATE processes SET trace_id=?1 WHERE id=?1", [&owner])
+                    .unwrap();
+            }
             let candidate = ending.recv_timeout(Duration::from_secs(8)).unwrap();
             let observed = Activity {
                 output: 1,

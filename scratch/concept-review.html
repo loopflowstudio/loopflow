@@ -11,11 +11,11 @@
 </style>
 </head>
 <body><main>
-<header>LOO-709 · Concept review · 3 November 2026 · HEAD 39f57361dd<br>
+<header>LOO-709 · Concept review · 3 November 2026 · HEAD 74880b72e3<br>
 Sources: <code>scratch/loo-709-idle-sessions-end.md</code>, <code>transport.rs</code>, <code>transport/{README.md,lifetime.rs}</code>, <code>store/sqlite/{native_input.rs,sessions.rs,steers_tests.rs}</code>, <code>tests/transport_tests.rs</code>.</header>
-<h1>Recheck the work before ending.</h1>
-<p>Jack Heart already selected editable drafts, the same answerable requests, and protection for long Working turns and quiet Graph supervision. No product decision is open. Two final-ending rules need repair before acceptance.</p>
-<div class="callout"><p><strong>The consequential mismatch: an earlier quiet judgment can end work that is active now.</strong></p><p>The serving owner rechecks viewers and input, but handles a queued ending before reading ready output. A viewed terminal’s idle report can also override a current unyielded native turn.</p></div>
+<h1>No further design decision is needed.</h1>
+<p>Jack Heart selected editable drafts, the same answerable requests, and protection for long Working turns and quiet Graph supervision. The reviewed implementation now follows that design. Acceptance and delivery remain; no redesign is proposed.</p>
+<div class="callout"><p><strong>The consequential mismatch is repaired: an earlier quiet judgment cannot override newly observed work.</strong></p><p>The serving owner drains ready output before confirming an ending candidate, compares activity revisions and rechecks input, viewers and store evidence. Current unyielded native work holds execution even when a viewed terminal reports idle.</p></div>
 <table aria-label="Actions, concepts and state-changing APIs">
 <thead><tr><th>Action</th><th>Concept retained</th><th>API / implementation</th></tr></thead>
 <tbody>
@@ -24,15 +24,15 @@ Sources: <code>scratch/loo-709-idle-sessions-end.md</code>, <code>transport.rs</
 <tr><td>Leave a settled conversation</td><td>History and last display</td><td>Quiet grace → <code>snapshot::leave</code> → owner exit. Resume reopens history without a new turn.</td></tr>
 <tr><td>Supervise a running Graph</td><td>Active turn and running Graph</td><td>Current attachment and running-Graph evidence hold the owner through silence. No scheduler change.</td></tr>
 </tbody></table>
-<h2>Before and proposed correction</h2>
-<pre aria-label="Queued ending counterexample">Existing ordering:
+<h2>Before and implemented correction</h2>
+<pre aria-label="Queued ending counterexample">Before repair:
 quiet judgment → queue ending → provider writes output
 → owner handles ending before reading output → exit
 
-Proposed, not implemented:
-queue candidate → process ready activity → validate fresh quiet evidence
+Implemented at the reviewed HEAD:
+queue candidate → drain ready output → validate current activity and store
 → keep owner if activity changed → end after a fresh quiet interval</pre>
-<p><strong>Second correction:</strong> current-attachment <code>yielded=0</code> must hold execution even when a viewed terminal reports idle. Open tools and pending requests already receive that precedence. Keep provider replacement and attachment fences.</p>
+<p><strong>Implemented turn protection:</strong> current-attachment <code>yielded=0</code>, open tools or pending requests hold execution independently of viewed terminal status. Retained-provider handoff carries activity forward; stale attachments and replaced providers cannot settle current work.</p>
 <p>Attached viewers continue to veto idle ending; executable rollover may still move a viewed owner after work settles and two seconds of output silence. Both paths save the latest available screen before exit.</p>
 <h2>What returning already preserves</h2>
 <pre aria-label="Observed native draft interaction">Type NATIVE_DRAFT_X → detach beyond grace → executable removed
@@ -41,14 +41,14 @@ Model receives NATIVE_DRAFT_Y</pre>
 <p>Recorded native Claude 2.1.317 proof also answered “Keep” on the same pending <code>AskUserQuestion</code>. A separate plain acknowledged submission settled and ended. These probes used the branch CLI and a local model fixture; they do not establish installed-account acceptance.</p>
 <p>Edited, pasted, long, ambiguous or later input retains its owner until native exit. Other native providers lack this ledger acknowledgement and retain typed input. A saved screen restores neither an editor nor an unanswered request.</p>
 <details><summary>Recovery, boundaries and next proof</summary>
-<p>Force output between the policy judgment and serving-owner exit, including an already-read output notification still in transit. Check idle and executable ending, fresh silence afterward, and the resulting saved display. Add viewed-idle/current-unyielded coverage and quiet Graph supervision through settlement. Source inspection identifies these gaps; this review ran no runtime reproduction.</p>
-<p>Store failures retain execution for retry. Failed startup must preserve history without replay; a preview does not mean input is ready. Installed/configured startup, all twenty returns and required gate checks remain outstanding.</p>
-<p>Bulk resume and its startup caller are removed. Single-Session resume and rollover remain. LOO-498 owns workspace restoration; LOO-710 owns the integrated Ghostty snapshot path. Open Rex tabs retain viewers when unselected. No new migration, DTO or public lifecycle is proposed.</p>
+<p>Recorded focused regressions force queued, unreported and throttled output for both ending policies, plus a newly attached viewer for idle ending. They check current display retention and activity notification; the policy-clock test checks renewed silence. Native fixtures hold silent turns through viewed idle status and executable removal, then through live Graph supervision, and end after settlement. This review inspected those paths and reused recorded evidence; it ran no runtime reproduction.</p>
+<p>Store failures retain execution for retry. Failed startup must preserve history without replay; a preview does not mean input is ready. Subsequent November 3 demo and gate completed configured startup, all twenty returns, and affected checks. Gate also repaired retries after failed viewer writes and repository reads. Merged installed verification remains for delivery; see the current design notes for exact evidence and limits.</p>
+<p>Bulk resume and its startup caller are removed. Single-Session resume and rollover remain. LOO-498 owns workspace restoration; LOO-710 owns the integrated Ghostty snapshot path. Open Rex tabs retain viewers when unselected. The existing owner’s input ledger uses one nullable Process column; this review proposes no additional persistence, DTO or public lifecycle.</p>
 </details>
 <h2>Decisions already settled</h2>
 <ol>
 <li><strong>What survives detachment?</strong> Accepted 1a: the editable unsent draft. Accepted 2a: the same answerable pending approval or question.</li>
 <li><strong>May silence end a Working supervisor?</strong> No. Jack Heart requires active turns and running-Graph supervision to continue until completion or a concrete reported blocker.</li>
-<li><strong>What remains for implementation?</strong> Fresh quiet evidence at final exit and native-turn precedence over terminal idle status. No further product choice is required.</li>
+<li><strong>What remains?</strong> The authored publication, landing and merged installed verification steps. Configured startup, twenty returns without new turns, and gate are now complete. No product choice emerged from this review.</li>
 </ol>
 </main></body></html>

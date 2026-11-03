@@ -28,6 +28,14 @@ lf session list --available        # conversations available for your next turn,
 Each scope (repository, Wave, Task) has one ongoing conversation, with that
 scope's operating instructions.
 
+An unviewed, settled conversation ends its processes after two minutes of quiet;
+`session.end_detached_after` changes the grace or disables it with `off`.
+Returning paints its saved screen while the provider reopens its history, without
+replaying input. Active turns, watches, running Graphs, drafts and pending requests
+keep their owner. Drafts remain editable and requests remain answerable there.
+Edited, pasted or unacknowledged native input can retain the owner until the
+provider exits; the saved screen alone cannot restore an editor or request.
+
 ```bash
 lf resume <session> --fork         # leave the other client running; continue in a new conversation from it
 lf session new                     # restart this scope's conversation on a fresh thread, seeded with what the last one knew

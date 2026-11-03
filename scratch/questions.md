@@ -20,3 +20,10 @@ retention for uncertain editor state; it does not weaken draft preservation.
   deletion rule. LOO-710's writer/path/reader agreement remains intact.
 - **Delivery:** editable native return, same-request answering, all twenty
   returns and required checks remain acceptance. No merge before those proofs.
+
+- **Headless demo, 2026-11-03:** the old twenty-session store cannot open on this
+  branch because its recorded migration frontier differs. Preserve it and use
+  a fresh disposable store with the configured native Claude account and a 4s
+  grace. This is a replacement return cohort, not a claim to have reopened the
+  old seventeen. Keep the shared installed app unchanged while other Sessions
+  use it; merged installed verification remains the delivery step's obligation.

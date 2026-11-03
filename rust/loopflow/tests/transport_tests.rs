@@ -1477,6 +1477,18 @@ fn opening_a_prepared_conversation_runs_one_owner_and_one_relay() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert!(relay.contains(&owner), "{relay}");
+    let db = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let completed: Option<i64> = db
+        .query_row(
+            "SELECT completed_at FROM processes WHERE pid=?1",
+            [viewer.id()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        completed.is_none(),
+        "exec completed the live viewer's command"
+    );
     viewer.stdin.take().unwrap().write_all(b"bye\n").unwrap();
     let result = wait_for_viewer(viewer, Duration::from_secs(30));
     assert!(

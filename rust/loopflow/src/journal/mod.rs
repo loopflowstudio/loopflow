@@ -151,7 +151,7 @@ pub fn harness_issued() {
 // Library callers retain the thread-scoped with_runtime lifetime above.
 static PROCESS_CONTEXT: Mutex<Option<ProcessContext>> = Mutex::new(None);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProcessContext {
     trace_id: TraceId,
     lf_process_id: LfProcessId,
@@ -163,6 +163,7 @@ struct ProcessContext {
     cwd: PathBuf,
     ledger_path: PathBuf,
     /// Retain the first successful connection through Process completion.
+    #[serde(skip)]
     ledger: Arc<OnceLock<SqliteStore>>,
     receipt_wait: Duration,
     /// Serialized argv captured at Process start so terminal rows name their work.
@@ -172,6 +173,7 @@ struct ProcessContext {
     trace_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
+    #[serde(skip)]
     finished: Arc<AtomicBool>,
     /// True when this process minted the trace id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the Process ends.
@@ -183,7 +185,7 @@ struct ProcessContext {
 }
 
 /// What a process's ledger receipts cost, and how many did not land.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptCost {
     pub waited: Duration,
     pub unrecorded: u32,
@@ -511,6 +513,39 @@ pub fn finish_before_exec() {
     if let Some(context) = current_context() {
         finish_runtime(&context.cwd, &Ok::<(), anyhow::Error>(()));
     }
+}
+
+const EXEC_PROCESS_ENV: &str = "LF_EXEC_PROCESS";
+
+/// Keep this command's receipt across a relay exec, without its open store.
+pub(crate) fn carry_across_exec(command: &mut Command) -> anyhow::Result<()> {
+    if let Some(context) = current_context() {
+        command.env(
+            EXEC_PROCESS_ENV,
+            serde_json::to_string(&(std::process::id(), context))?,
+        );
+    }
+    Ok(())
+}
+
+/// Restore the relay's command identity without opening its store. Its actual
+/// return or interruption writes the ordinary terminal receipt.
+pub fn continue_after_exec() -> anyhow::Result<()> {
+    let Some(value) = std::env::var_os(EXEC_PROCESS_ENV) else {
+        return Ok(());
+    };
+    std::env::remove_var(EXEC_PROCESS_ENV);
+    let (pid, context): (u32, ProcessContext) = serde_json::from_str(
+        value
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("exec process receipt is not UTF-8"))?,
+    )?;
+    // Exec keeps the PID; a child cannot adopt its parent's command receipt.
+    if pid == std::process::id() {
+        set_context(context.clone());
+        crate::agent::register_interrupt_cleanup(move || record_process_interruption(&context));
+    }
+    Ok(())
 }
 
 fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {

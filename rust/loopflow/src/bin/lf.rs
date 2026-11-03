@@ -1551,6 +1551,7 @@ fn run() -> anyhow::Result<()> {
     let raw_args: Vec<String> = std::env::args().collect();
     if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
+        journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
         loopflow::transport::relay(&owner, moved)?;

@@ -72,7 +72,9 @@ public command. Session rows name that Process; viewer tokens and
 terminal bytes remain in memory. A Claude conversation keeps one lf owner
 and one relay per terminal showing it. `lf resume` resolves the Session,
 then execs into `lf session attach OWNER`, which
-opens no store and parses no commands. A Claude launcher under an owner hands
+opens no store while relaying and parses no commands. It carries the original
+command's receipt through exec and records its result when relaying ends.
+A Claude launcher under an owner hands
 the owner what it would record at exit, then execs into the provider, so Claude
 is the owner's direct child and no `lf -i` waits beside it; the owner records
 the provider's exit, settles its capture and reports where the conversation

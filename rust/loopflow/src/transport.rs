@@ -1171,8 +1171,8 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
 /// that viewer prints `moved` as it leaves.
 ///
 /// The process that resolved the connection built it with a store, a command
-/// tree and often a runtime; none of that serves a relay. It completes its
-/// Process and execs the relay entry, which opens no store while relaying.
+/// tree and often a runtime; none of that serves a relay. It carries its
+/// Process receipt into the relay, which opens no store until it returns.
 pub(crate) fn attach(
     id: &LfProcessId,
     moved: Option<String>,
@@ -1186,7 +1186,7 @@ pub(crate) fn attach(
     if let Some(session) = json_session {
         command.args([RELAY_JSON_FLAG, session]);
     }
-    crate::journal::finish_before_exec();
+    crate::journal::carry_across_exec(&mut command)?;
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
     relay(id, moved)

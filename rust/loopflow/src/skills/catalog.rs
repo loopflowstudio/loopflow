@@ -495,6 +495,26 @@ mod tests {
     }
 
     #[test]
+    fn agent_defaults_belong_only_to_loopflow_metadata() {
+        let repo = TempDir::new().unwrap();
+        let native = "---\nagent: Explore\ndefault_agent: native-persona\n---\nAudit.";
+        write(repo.path(), ".claude/skills/native/SKILL.md", native);
+        write(
+            repo.path(),
+            ".lf/skills/owned.md",
+            "---\ndefault_agent: codex\n---\nAudit.",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let skill = catalog.load_skill("native").unwrap();
+        assert!(skill.agent.is_none());
+        assert!(skill.settings.is_empty());
+        assert_eq!(skill.source_text(), native);
+        let skill = catalog.load_skill("owned").unwrap();
+        assert!(skill.agent.is_none());
+        assert_eq!(skill.settings["default_agent"].as_str(), Some("codex"));
+    }
+
+    #[test]
     fn unfamiliar_native_frontmatter_remains_plain_instructions() {
         let repo = TempDir::new().unwrap();
         let content = "---\nallowed-tools: [\n---\nRun this unfamiliar skill.";

@@ -612,6 +612,127 @@ graphs:
     );
 }
 
+#[test]
+fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(
+        &[
+            ("claude", CLAUDE_SETTINGS),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+            ("security", "#!/bin/sh\nexit 1\n"),
+        ],
+        Some(home.path()),
+    );
+    let store = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    connect_fixture_claude(home.path(), &store);
+    repo.create_file(".lf/config.yaml", "diff: false\ndiff_files: false\n");
+    repo.create_file(
+        ".lf/skills/probe.md",
+        "---\ndefault_agent: claude:skill\n---\nReport settings.",
+    );
+    repo.create_file(
+        ".lf/graphs/fallback.yaml",
+        "- step: {name: probe, id: work, default_agent: 'claude:occurrence'}\n",
+    );
+    fs::write(
+        home.path().join("config.yaml"),
+        "isolate: true\nskills: {probe: {default_agent: claude:personal}}\n",
+    )
+    .unwrap();
+    success(command(
+        repo.path(),
+        home.path(),
+        &["self", "sync-skills", "--repo"],
+    ));
+    let exported = exported_commands(repo.path(), "fallback");
+    let check = |flags: &[&str], environment: Option<&str>, expected: &str, key: &str| {
+        let mut args = flags.to_vec();
+        args.extend(["config", "show", "--graph", "fallback", "--json"]);
+        let prepare = |args: &[&str]| {
+            let mut cmd = command(repo.path(), home.path(), args);
+            if let Some(value) = environment {
+                cmd.env("LF_SETTINGS", value);
+            }
+            cmd
+        };
+        let output = success(prepare(&args));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("has no effect"));
+        let inspected: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let setting = &inspected[0]["settings"]["agent"];
+        assert_eq!(setting["value"], expected);
+        assert_eq!(
+            setting["candidates"].as_array().unwrap().last().unwrap()["key"],
+            key
+        );
+        let start = settings_records(home.path()).len();
+        let mut args = flags.to_vec();
+        args.extend(["-b", "graph", "fallback"]);
+        success(prepare(&args));
+        let mut args = flags.to_vec();
+        args.extend(exported[0][1..].iter().map(String::as_str));
+        success(prepare(&args));
+        let records = settings_records(home.path());
+        assert_eq!(records.len() - start, 2);
+        for launch in &records[start..] {
+            assert_launch_settings(launch, &inspected[0]);
+        }
+    };
+    check(&[], None, "claude:personal", "default_agent");
+    success(command(
+        repo.path(),
+        home.path(),
+        &[
+            "set",
+            "--global",
+            "graphs.fallback.steps.work.default_agent",
+            "claude:database",
+        ],
+    ));
+    check(&[], None, "claude:database", "default_agent");
+    check(
+        &[],
+        Some("default_agent: claude:environment"),
+        "claude:environment",
+        "default_agent",
+    );
+    check(
+        &["--setting", "default_agent=claude:cli"],
+        Some("default_agent: claude:environment"),
+        "claude:cli",
+        "default_agent",
+    );
+    repo.create_file(
+        ".lf/config.yaml",
+        "agent: claude:repo\ndiff: false\ndiff_files: false\n",
+    );
+    check(
+        &["--setting", "default_agent=claude:cli"],
+        None,
+        "claude:repo",
+        "agent",
+    );
+    check(&["-a", "claude:forced"], None, "claude:forced", "agent");
+    success(command(
+        repo.path(),
+        home.path(),
+        &[
+            "unset",
+            "--global",
+            "graphs.fallback.steps.work.default_agent",
+        ],
+    ));
+    repo.create_file(".lf/config.yaml", "diff: false\ndiff_files: false\n");
+    check(&[], None, "claude:personal", "default_agent");
+    fs::write(home.path().join("config.yaml"), "isolate: true\n").unwrap();
+    check(&[], None, "claude:occurrence", "default_agent");
+}
+
 struct TaskCheckouts<'a> {
     home: &'a Path,
     repo: &'a Path,

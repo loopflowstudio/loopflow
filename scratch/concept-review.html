@@ -1,0 +1,230 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-714 · Defaults and exceptions</title><style>*{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;background:#f7f6f2;color:#252b2a;font:17px/1.65 system-ui,sans-serif}main{max-width:910px;margin:auto;padding:48px 28px 90px}header{font-size:13px;color:#626b68;margin-bottom:36px}h1{font-size:clamp(32px,5vw,48px);line-height:1.15;letter-spacing:-.035em}h2{margin-top:52px;font-size:26px;line-height:1.3}h3{margin-top:32px;font-size:20px}p{margin:16px 0}a{color:#166b65;text-underline-offset:3px}code{font:0.88em ui-monospace,monospace;background:#e8e9e2;padding:2px 5px;border-radius:4px}table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.5;margin:24px 0}th,td{text-align:left;border-bottom:1px solid #cdd2ca;padding:12px 9px;vertical-align:top}th{font-weight:650}section{padding:4px 0 20px;border-bottom:1px solid #cdd2ca}label{display:block;font-weight:600}select{width:100%;padding:12px;font:inherit;background:transparent;color:inherit;border:1px solid #798a82;border-radius:5px;margin:8px 0 20px}.results{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.results div{border-left:3px solid #549381;padding:7px 12px}.results span{font-size:13px;display:block}.results strong{display:block;font-size:23px;margin-top:6px}figure{margin:36px 0}.flow{text-align:center;display:grid;gap:8px}.flow div{background:#e8eee7;padding:18px;border-radius:5px}figcaption{font-size:13px;color:#626b68;margin:12px 0}li{margin:10px 0}@media(prefers-color-scheme:dark){body{background:#171c1b;color:#e5e9e2}header,figcaption{color:#a5b3ad}a{color:#81cbbb}code{background:#303a35}th,td,section{border-color:#43534a}.flow div{background:#26362e}}@media(max-width:600px){main{padding:28px 16px 60px}.results{grid-template-columns:1fr;gap:8px}.results strong{font-size:20px}table{font-size:12px}th,td{padding:8px 5px}h2{margin-top:36px}}</style></head><body><main><header>LOO-714 · research / concept review · November 3, 2026<br>Built from config-precedence-research.md, config-prior-art-experiments.json and settings-scope.md</header><h1>Defaults, exceptions and overrides</h1>
+<p>LOO-714 · research/concept review · 2026-11-03 · for Jack Heart</p>
+<p>Jack requested prior art and concrete examples before revisiting precedence.
+This is research, not an accepted resolver change. The branch still implements
+source &gt; scope &gt; target. Per-skill accounts remain out of scope.</p>
+<aside><h2>Accepted logic: choices beat defaults</h2><p>Jack clarified that an applicable <code>agent</code> beats <code>default_agent</code>, regardless of source or specificity. Within either class, keep source → scope → target priority. This is accepted design; the resolver has not yet been changed.</p><table><thead><tr><th>Personal implement preference</th><th>Repository choice</th><th>Winner</th></tr></thead><tbody><tr><td>agent: codex</td><td>Occurrence agent: claude</td><td>Codex — personal authority</td></tr><tr><td>default_agent: codex</td><td>Occurrence agent: claude</td><td>Claude — choice beats fallback</td></tr><tr><td>default_agent: codex</td><td>General agent: claude</td><td>Claude — choice beats fallback</td></tr><tr><td>default_agent: codex</td><td>General default_agent: claude</td><td>Codex — personal authority among defaults</td></tr></tbody></table><p>The five builtin recommendations have been moved into repository config locally. The comparison below is the historical research, not a pending choice among three plans.</p></aside><h2>The decision</h2>
+<p>“Use Codex unless this step chooses something else” and “Use Codex everywhere
+while Claude is exhausted” are different requests. A personal global setting
+describes where a preference applies; it does not tell us which request it means.</p>
+<p>The current rule handles the second request well when a broad DB preference
+overrides file preferences, but makes the first awkward across sources. A general
+DB <code>agent: codex</code> defeats even a personal file's step-specific Claude selection.
+Same-file exceptions already work; this is a cross-source problem.</p>
+<section aria-labelledby="compare-title"><h2 id="compare-title">Try the conflicts</h2><p>Current behavior versus two proposals. Broad preferences use <code>default_agent</code> in C. This is an explanatory model, not a live settings editor.</p><label for="case">Example</label><select id="case"></select><div class="results" aria-live="polite"><div><span>A · Current</span><strong id="a"></strong></div><div><span>B · Target first</span><strong id="b"></strong></div><div><span>C · Explicit defaults</span><strong id="c"></strong></div></div><p id="reason"></p></section><figure aria-label="Two-stage alternative configuration model"><div class="flow"><div>Competing values at the same address<br><strong>DB → personal → repository</strong></div><span aria-hidden="true">↓</span><div>Which applicable address wins?<br><strong>Override · step · skill · fallback</strong></div></div><figcaption>Separating source resolution from selection is one alternative. The proposals below differ on how much personal authority survives the second stage.</figcaption></figure><h2>What other systems do</h2>
+<p>These are observations from primary documentation, not claims that any tool has
+Loopflow's complete matrix. The Git examples below were also executed locally.</p>
+<h3>OpenCode: merge configuration, then use a fallback</h3>
+<p>Configuration sources merge, preserving distinct keys. A primary agent's explicit
+model overrides the global model; absent that, it uses the global model. Subagents
+instead inherit the invoking primary's model when unspecified. Organization
+defaults, global files and project files participate in config loading.
+<a href="https://opencode.ai/docs/config/">Config</a>,
+<a href="https://opencode.ai/docs/agents/#model">agent model selection</a>.</p>
+<p>Implication, inferred from those documented rules: a generic model in a global
+file and a specific agent model in a project file can coexist. One is the fallback
+for the other, rather than two competing values for one slot. Its <code>default_agent</code>
+means the starting persona, such as plan/build; that name is not evidence of a
+weak-versus-strong harness setting.</p>
+<h3>VS Code: specificity can outrank source</h3>
+<p>Language-specific settings beat general settings, including when a user language
+setting competes with a workspace general setting. Within a language, workspace
+beats user. Language-specific defaults also sit above general user settings;
+policy settings have higher authority.
+<a href="https://code.visualstudio.com/docs/configure/settings#_settings-precedence">Settings precedence</a>.</p>
+<p>For LF this suggests skill &gt; general, then source. The counterexample matters:
+copying the rule literally could make a built-in skill's Claude recommendation
+defeat Jack's personal Codex default. That consequence must be chosen, not hidden.</p>
+<h3>NixOS: distinguish the strength of a definition</h3>
+<p>Normal option definitions outrank <code>mkDefault</code>; <code>mkForce</code> outranks normal
+definitions. Strength is attached to a definition of the same option, not encoded
+as a second option name. Merge ordering is a different concept from override
+priority.
+<a href="https://nixos.org/manual/nixos/stable/#sec-option-definitions">Setting priorities</a>.</p>
+<p>This is the strongest precedent for Jack's <code>agent</code> versus <code>default_agent</code> idea:
+say whether a value is a fallback or an override. LF could express that with two
+agent keys or a general <code>defaults:</code> mechanism. Nix does not settle LF's remaining
+source/scope/target ordering; it supplies another dimension.</p>
+<h3>Git: same-key source priority and target matching coexist</h3>
+<p>Ordinary scalar values use config source order. HTTP settings additionally support
+URL matching, with longer path matches preferred.
+<a href="https://git-scm.com/docs/git-config#Documentation/git-config.txt-httplturlgt">Git configuration</a>.</p>
+<p>Observed using Git 2.50.1 in a disposable repository, with no network request:</p>
+<table>
+<thead>
+<tr>
+<th>Inputs</th>
+<th>Query</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Global URL-specific HTTP/2; local generic HTTP/1.1</td>
+<td>Matching URL</td>
+<td>HTTP/2</td>
+</tr>
+<tr>
+<td>Same inputs</td>
+<td>Other URL</td>
+<td>HTTP/1.1</td>
+</tr>
+<tr>
+<td>Above plus CLI <code>-c http.version=HTTP/1.1</code></td>
+<td>Matching URL</td>
+<td>HTTP/2</td>
+</tr>
+<tr>
+<td>Local also sets the exact URL-specific key</td>
+<td>Matching URL</td>
+<td>Local value</td>
+</tr>
+</tbody>
+</table>
+<p>Evidence: <code>config-prior-art-experiments.json</code>. Source order still resolves the
+same target; a generic key does not erase a specific key. The CLI case warns
+against assuming “highest source” automatically means “force all targets.” LF's
+explicit Graph <code>-a</code> must retain its separately accepted force behavior.</p>
+<h3>OpenSSH: first applicable value, not most specific match</h3>
+<p>CLI precedes personal config, then system config. For ordinary scalar options,
+the first obtained value wins. Put specific Host entries before broad defaults;
+a broad earlier entry can defeat a narrow later one.
+<a href="https://man.openbsd.org/OpenBSD-current/man/ssh_config">ssh_config</a>.</p>
+<p>This supports source-first control but imposes ordering work on authors. It does
+not automatically solve “global default plus exception.” Some options accumulate;
+the scalar rule must not be generalized to every field.</p>
+<h3>ESLint: authors order the applicable rules</h3>
+<p>Matching configuration objects merge; later objects win conflicts. A narrow file
+glob has no inherent authority over an earlier or later broad glob.
+<a href="https://eslint.org/docs/latest/use/configure/configuration-files#cascading-configuration-objects">Cascading configuration objects</a>.</p>
+<p>Useful for composing a shared preset and local exceptions. It is an ordered list
+inside the selected configuration, not a full personal/org authority ladder.
+Copying this would make ordering another thing LF authors must understand.</p>
+<h3>GitHub Actions: defaults live outside the step choice</h3>
+<p>Workflow defaults can be refined at job level, and explicit step settings can
+override them. The most specific applicable default wins.
+<a href="https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defaults">Workflow defaults</a>.</p>
+<p>This makes “all steps use bash except this one uses pwsh” straightforward. It
+provides a useful graph-authoring model, but does not answer LF's personal versus
+repository conflict by itself.</p>
+<h2>Three concrete LF alternatives</h2>
+<p>All preserve explicit Graph <code>-a</code> across that Graph and conversation-only Session
+<code>-a</code>. Propagation is separate from precedence. All retain DB &gt; personal file &gt;
+shared file for competing values at the same source-independent address.</p>
+<p><strong>A — current branch.</strong> Source &gt; scope &gt; target. Broad preferences can override
+lower-source exceptions. No distinct weak default.</p>
+<p><strong>B — targeted choices with a fallback.</strong> Explicit invocation overrides first.
+Among persisted non-builtin choices, graph occurrence &gt; skill &gt; general; source
+then scope breaks ties at each target. Builtins are consulted only if no applicable
+non-builtin choice exists. <code>agent</code> at the root is a fallback, not a blanket override.
+That explicit builtin boundary is part of this proposal, not VS Code's rule.</p>
+<p><strong>C — defaults and choices.</strong> Two strengths, with source &gt; scope &gt; target within
+each. Applicable <code>agent</code> choices beat <code>default_agent</code> values; built-in
+recommendations are defaults. A personal <code>default_agent: codex</code> can yield to a
+repository step's <code>agent: claude</code>. A DB <code>agent: codex</code> can temporarily override
+file choices. This keeps current authority ordering among ordinary choices.</p>
+<p>C's generic spelling could be <code>defaults: {agent: codex}</code> instead of a special
+<code>default_agent</code> field. Do not introduce default_X counterparts for every setting
+without defining replacement, additive lists and applicability. Both strengths
+would need equivalent CLI, file and DB inspection/write support where appropriate.</p>
+<p>In the table, broad preferences use <code>agent</code> in A/B and <code>default_agent</code> in C.
+Specific authored choices use <code>agent</code>; the built-in recommendation is weak in C.
+These are illustrative algorithms, not observed alternative LF behavior.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>A: current</th>
+<th>B: target first</th>
+<th>C: explicit defaults</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Personal general Codex + same-file implement Claude</td>
+<td>Claude</td>
+<td>Claude</td>
+<td>Claude</td>
+</tr>
+<tr>
+<td>DB general Codex + personal-file implement Claude</td>
+<td>Codex</td>
+<td>Claude</td>
+<td>Claude</td>
+</tr>
+<tr>
+<td>Personal general Codex + repo step Claude</td>
+<td>Codex</td>
+<td>Claude</td>
+<td>Claude</td>
+</tr>
+<tr>
+<td>Historical: personal Codex + built-in skill Claude</td>
+<td>Codex</td>
+<td>Codex</td>
+<td>Codex</td>
+</tr>
+<tr>
+<td>Personal skill Codex + repo graph occurrence Claude</td>
+<td>Codex</td>
+<td>Claude</td>
+<td>Codex</td>
+</tr>
+<tr>
+<td>Personal global skill Claude + personal repo general Codex</td>
+<td>Codex</td>
+<td>Claude</td>
+<td>Claude</td>
+</tr>
+<tr>
+<td>DB and personal file choose the same occurrence differently</td>
+<td>DB</td>
+<td>DB</td>
+<td>DB</td>
+</tr>
+<tr>
+<td>Explicit Graph <code>-a codex</code> + any step Claude</td>
+<td>Codex</td>
+<td>Codex</td>
+<td>Codex</td>
+</tr>
+<tr>
+<td>Session <code>-a claude</code> + worker implement Codex</td>
+<td>Session Claude; worker Codex</td>
+<td>Same</td>
+<td>Same</td>
+</tr>
+</tbody>
+</table>
+<p>The fifth row is the hardest tradeoff. “Always use Codex for implement” could
+mean a usual skill preference that permits per-occurrence exceptions, or a
+personal override of the project's choices. B picks the former; C can express
+the latter through authority. Neither wording should be left ambiguous.</p>
+<h2>Assessment</h2>
+<p>The evidence favors separating fallback selection from authority. It does not
+establish one universal precedence ordering. Current LF makes one root <code>agent</code>
+serve both meanings and the DB's priority makes that ambiguity particularly visible.</p>
+<p>B is smaller if personal root agent should always mean a fallback and Graph CLI
+is enough for forcing. It cannot express an ongoing broad DB force without
+another mechanism. Jack's temporary Claude exhaustion is evidence that this
+second use case exists, although automatic recovery in PR2 may reduce it.</p>
+<p>C is a credible option if both persistent meanings matter. It preserves the
+chosen source ordering and makes “default” explicit, at the cost of another
+concept. Restoring the old <code>default_agent</code> name alone is insufficient: built-in
+recommendations, skill frontmatter and DB/file values must share the same strength
+rules, with provenance showing why an ordinary choice beat a default.</p>
+<p>Automatic availability routing is separate: neither model should silently rewrite
+stored preferences when Claude reaches its limit. No per-skill accounts are needed
+to settle this decision.</p>
+<h2>Questions for review</h2>
+<ol>
+<li>Should a personal general Codex preference yield to a repository's explicitly
+authored Claude step? (a) Yes, it is a default. (b) No, personal authority wins.</li>
+<li>Should a personal implement preference yield to a repository's one-occurrence
+exception? (a) Yes, target specificity wins. (b) Only if marked as a default.</li>
+<li>Is a persistent “Codex for everything temporarily” control needed independently
+of CLI Graph overrides and future limit recovery? (a) Yes. (b) CLI is sufficient.</li>
+</ol>
+<p>Research changes only scratch artifacts. PR #1805 remains open, with required CI
+failures; this is a design review, not merge availability. No Graph restarted.</p>
+</main><script>const cases=[["Personal general Codex + same-file implement Claude", ["Claude", "Claude", "Claude"], "An exception in the same source and scope already works."], ["DB general Codex + personal-file implement Claude", ["Codex", "Claude", "Claude"], "The current DB preference shadows the file exception. B treats the broad value as fallback; C writes it as default_agent."], ["Personal general Codex + repository step Claude", ["Codex", "Claude", "Claude"], "This is the central default-versus-override decision."], ["Historical: personal Codex + built-in skill Claude", ["Codex", "Codex", "Codex"], "B explicitly keeps builtins below authored preferences. C marks builtin recommendations as defaults. Pure specificity-first would instead choose Claude."], ["Personal skill Codex + repository occurrence Claude", ["Codex", "Claude", "Codex"], "B prioritizes the occurrence. C retains personal authority among ordinary agent choices."], ["Personal global skill Claude + personal repo general Codex", ["Codex", "Claude", "Claude"], "A prioritizes repo scope before target. B prioritizes target. In C the broad setting is a default."], ["DB and file disagree at the exact same occurrence", ["DB value", "DB value", "DB value"], "All three preserve source priority for competing values at the same address."], ["Explicit Graph -a codex + step Claude", ["Codex", "Codex", "Codex"], "Explicit Graph invocation still overrides every step in that Graph."], ["Session -a claude + worker implement Codex", ["Claude / Codex", "Claude / Codex", "Claude / Codex"], "Conversation selection does not become future worker policy. Propagation is separate from precedence."]];const select=document.getElementById('case');cases.forEach((entry,i)=>{const option=document.createElement('option');option.value=i;option.textContent=entry[0];select.appendChild(option)});function show(){const entry=cases[Number(select.value)];['a','b','c'].forEach((id,i)=>document.getElementById(id).textContent=entry[1][i]);document.getElementById('reason').textContent=entry[2]}select.value='2';select.addEventListener('change',show);show();</script></body></html>

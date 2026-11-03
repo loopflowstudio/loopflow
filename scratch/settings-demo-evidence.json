@@ -1,0 +1,762 @@
+{
+  "date": "2026-11-03",
+  "binary": "/Users/jack/src/loopflow.loo-714-recover-cleanly-from/target/debug/lf",
+  "binary_sha256": "c7806dd9bcaf87298cf7dbc2e7011d57c4242f28f2895586e6173a4c7986d616",
+  "fixture": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl",
+  "personal_yaml": "agent: claude\nskills:\n  implement:\n    agent: codex\ngraphs:\n  release:\n    steps:\n      write-code:\n        agent: claude\n        chrome: false\n",
+  "graph_yaml": "- step: {name: implement, id: write-code}\n- step: {name: implement, id: other-work}\n",
+  "results": [
+    {
+      "label": "Skill-wide preference",
+      "args": [
+        "config",
+        "show",
+        "--skill",
+        "implement",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"occurrence\": null,\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          }\n        ],\n        \"value\": \"codex\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          }\n        ],\n        \"value\": true\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  }\n]\n",
+      "stderr": "",
+      "selections": [
+        {
+          "skill": "implement",
+          "occurrence": null,
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              }
+            ],
+            "value": "codex"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              }
+            ],
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "label": "Two occurrences",
+      "args": [
+        "config",
+        "show",
+        "--graph",
+        "release",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"occurrence\": {\n      \"graph\": \"release\",\n      \"id\": \"write-code\",\n      \"layer\": \"Repo\",\n      \"values\": {}\n    },\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": \"claude\"\n          }\n        ],\n        \"value\": \"claude\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  },\n  {\n    \"occurrence\": {\n      \"graph\": \"release\",\n      \"id\": \"other-work\",\n      \"layer\": \"Repo\",\n      \"values\": {}\n    },\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          }\n        ],\n        \"value\": \"codex\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          }\n        ],\n        \"value\": true\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  }\n]\n",
+      "stderr": "",
+      "selections": [
+        {
+          "skill": "implement",
+          "occurrence": {
+            "graph": "release",
+            "id": "write-code",
+            "layer": "Repo",
+            "values": {}
+          },
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": "claude"
+              }
+            ],
+            "value": "claude"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": false
+              }
+            ],
+            "value": false
+          }
+        },
+        {
+          "skill": "implement",
+          "occurrence": {
+            "graph": "release",
+            "id": "other-work",
+            "layer": "Repo",
+            "values": {}
+          },
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              }
+            ],
+            "value": "codex"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              }
+            ],
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "label": "Composed occurrence",
+      "args": [
+        "config",
+        "show",
+        "--graph",
+        "outer",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"occurrence\": {\n      \"graph\": \"release\",\n      \"id\": \"write-code\",\n      \"layer\": \"Repo\",\n      \"values\": {}\n    },\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": \"claude\"\n          }\n        ],\n        \"value\": \"claude\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  },\n  {\n    \"occurrence\": {\n      \"graph\": \"release\",\n      \"id\": \"other-work\",\n      \"layer\": \"Repo\",\n      \"values\": {}\n    },\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          }\n        ],\n        \"value\": \"codex\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          }\n        ],\n        \"value\": true\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  }\n]\n",
+      "stderr": "",
+      "selections": [
+        {
+          "skill": "implement",
+          "occurrence": {
+            "graph": "release",
+            "id": "write-code",
+            "layer": "Repo",
+            "values": {}
+          },
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": "claude"
+              }
+            ],
+            "value": "claude"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": false
+              }
+            ],
+            "value": false
+          }
+        },
+        {
+          "skill": "implement",
+          "occurrence": {
+            "graph": "release",
+            "id": "other-work",
+            "layer": "Repo",
+            "values": {}
+          },
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              }
+            ],
+            "value": "codex"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              }
+            ],
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "label": "DB override",
+      "args": [
+        "set",
+        "--global",
+        "graphs.release.steps.write-code.agent",
+        "codex"
+      ],
+      "exit": 0,
+      "stdout": "Every repository: your graphs.release.steps.write-code.agent is codex\n",
+      "stderr": ""
+    },
+    {
+      "label": "DB wins",
+      "args": [
+        "config",
+        "show",
+        "--graph",
+        "release",
+        "--step",
+        "write-code",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"occurrence\": {\n      \"graph\": \"release\",\n      \"id\": \"write-code\",\n      \"layer\": \"Repo\",\n      \"values\": {}\n    },\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Personal\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/loopflow.db\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": \"codex\"\n          }\n        ],\n        \"value\": \"codex\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  }\n]\n",
+      "stderr": "",
+      "selections": [
+        {
+          "skill": "implement",
+          "occurrence": {
+            "graph": "release",
+            "id": "write-code",
+            "layer": "Repo",
+            "values": {}
+          },
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": "claude"
+              },
+              {
+                "layer": "Personal",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/loopflow.db",
+                "target": "graph:release/write-code",
+                "value": "codex"
+              }
+            ],
+            "value": "codex"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": false
+              }
+            ],
+            "value": false
+          }
+        }
+      ]
+    },
+    {
+      "label": "Remove DB override",
+      "args": [
+        "unset",
+        "--global",
+        "graphs.release.steps.write-code.agent"
+      ],
+      "exit": 0,
+      "stdout": "Every repository: your graphs.release.steps.write-code.agent is cleared; the committed config chooses\n",
+      "stderr": ""
+    },
+    {
+      "label": "Personal file resurfaces",
+      "args": [
+        "config",
+        "show",
+        "--graph",
+        "release",
+        "--step",
+        "write-code",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"occurrence\": {\n      \"graph\": \"release\",\n      \"id\": \"write-code\",\n      \"layer\": \"Repo\",\n      \"values\": {}\n    },\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": \"claude\"\n          }\n        ],\n        \"value\": \"claude\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  }\n]\n",
+      "stderr": "",
+      "selections": [
+        {
+          "skill": "implement",
+          "occurrence": {
+            "graph": "release",
+            "id": "write-code",
+            "layer": "Repo",
+            "values": {}
+          },
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": "claude"
+              }
+            ],
+            "value": "claude"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": false
+              }
+            ],
+            "value": false
+          }
+        }
+      ]
+    },
+    {
+      "label": "CLI beats environment",
+      "args": [
+        "-a",
+        "codex",
+        "config",
+        "show",
+        "--graph",
+        "release",
+        "--step",
+        "write-code",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"occurrence\": {\n      \"graph\": \"release\",\n      \"id\": \"write-code\",\n      \"layer\": \"Repo\",\n      \"values\": {}\n    },\n    \"settings\": {\n      \"agent\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"skill:implement\",\n            \"value\": \"codex\"\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"Environment\",\n            \"scope\": \"global\",\n            \"source\": \"environment\",\n            \"target\": \"general\",\n            \"value\": \"claude\"\n          },\n          {\n            \"layer\": \"CommandLine\",\n            \"scope\": \"global\",\n            \"source\": \"CLI\",\n            \"target\": \"general\",\n            \"value\": \"codex\"\n          }\n        ],\n        \"value\": \"codex\"\n      },\n      \"automation.retries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 1\n          }\n        ],\n        \"value\": 1\n      },\n      \"chrome\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          },\n          {\n            \"layer\": \"Repo\",\n            \"scope\": \"repository\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml\",\n            \"target\": \"general\",\n            \"value\": true\n          },\n          {\n            \"layer\": \"Global\",\n            \"scope\": \"global\",\n            \"source\": \"/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml\",\n            \"target\": \"graph:release/write-code\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"context\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"context_budgets.memory_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 131072\n          }\n        ],\n        \"value\": 131072\n      },\n      \"context_budgets.memory_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 16000\n          }\n        ],\n        \"value\": 16000\n      },\n      \"context_budgets.scratch_bytes\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 98304\n          }\n        ],\n        \"value\": 98304\n      },\n      \"context_budgets.scratch_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 12000\n          }\n        ],\n        \"value\": 12000\n      },\n      \"diff\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"diff_files\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"docs\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"exclude\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"graph\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"code\"\n          }\n        ],\n        \"value\": \"code\"\n      },\n      \"isolate\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"land\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"gh\"\n          }\n        ],\n        \"value\": \"gh\"\n      },\n      \"paste\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"planning\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": {\n              \"provider\": \"git\",\n              \"remote\": \"origin\",\n              \"shared\": \"main\"\n            }\n          }\n        ],\n        \"value\": {\n          \"provider\": \"git\",\n          \"remote\": \"origin\",\n          \"shared\": \"main\"\n        }\n      },\n      \"pr\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      },\n      \"session.end_detached_after\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": \"86400s\"\n          }\n        ],\n        \"value\": \"86400s\"\n      },\n      \"summaries\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"summary_tokens\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": 5000\n          }\n        ],\n        \"value\": 5000\n      },\n      \"supported_harnesses\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": []\n          }\n        ],\n        \"value\": []\n      },\n      \"yolo\": {\n        \"candidates\": [\n          {\n            \"layer\": \"Builtin\",\n            \"scope\": \"global\",\n            \"source\": \"builtin\",\n            \"target\": \"general\",\n            \"value\": false\n          }\n        ],\n        \"value\": false\n      }\n    },\n    \"skill\": \"implement\"\n  }\n]\n",
+      "stderr": "This command does not start an agent; --agent has no effect.\n",
+      "selections": [
+        {
+          "skill": "implement",
+          "occurrence": {
+            "graph": "release",
+            "id": "write-code",
+            "layer": "Repo",
+            "values": {}
+          },
+          "agent": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": "codex"
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "skill:implement",
+                "value": "codex"
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": "claude"
+              },
+              {
+                "layer": "Environment",
+                "scope": "global",
+                "source": "environment",
+                "target": "general",
+                "value": "claude"
+              },
+              {
+                "layer": "CommandLine",
+                "scope": "global",
+                "source": "CLI",
+                "target": "general",
+                "value": "codex"
+              }
+            ],
+            "value": "codex"
+          },
+          "chrome": {
+            "candidates": [
+              {
+                "layer": "Builtin",
+                "scope": "global",
+                "source": "builtin",
+                "target": "general",
+                "value": false
+              },
+              {
+                "layer": "Repo",
+                "scope": "repository",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml",
+                "target": "general",
+                "value": true
+              },
+              {
+                "layer": "Global",
+                "scope": "global",
+                "source": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml",
+                "target": "graph:release/write-code",
+                "value": false
+              }
+            ],
+            "value": false
+          }
+        }
+      ]
+    }
+  ],
+  "limits": "Real branch CLI and disposable config/store. No paid provider launch, live store migration, installation or human acceptance."
+}

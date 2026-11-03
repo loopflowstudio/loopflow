@@ -61,10 +61,14 @@ Resolve each preference in this order, highest first: explicit CLI, explicit
 environment, `lf set` database values, personal config, repository/Wave config,
 then builtins. Within a source, Wave beats repository beats global; within one
 scope, authored Graph step beats skill beats general. A broad higher-source
-preference wins over a more specific lower-source preference.
+preference wins over a more specific lower-source preference of the same strength.
+For agent selection, every applicable `agent` choice beats every `default_agent`
+fallback first. Only when no choice applies does a fallback select the agent;
+source, scope and target order apply within each class.
 
 ```bash
 lf set --global skills.implement.agent codex
+lf set --global skills.implement.default_agent codex
 lf set --global graphs.release.steps.write-code.chrome false
 lf unset --global graphs.release.steps.write-code.chrome
 lf --setting 'skills.implement.yolo=false' implement
@@ -78,7 +82,8 @@ Lists `docs`, `context`, `exclude`, `summaries`, and `supported_harnesses` add i
 precedence order; an explicit `[]` clears earlier entries. Keyed maps merge by
 key. `planning` replaces as a complete tagged provider configuration.
 Inspection lists effective values and every contributing candidate's source,
-scope and target. JSON uses the same read operation as Desktop clients.
+scope, target and authored key (`agent` or `default_agent`). The effective `agent`
+includes choices and fallbacks in selection order. JSON uses the same read operation as Desktop clients.
 
 ```yaml
 # ~/.lf/config.yaml
@@ -113,7 +118,7 @@ If `work` exists only in a composed child, targeting `outer/work` reports no
 matching step; inspect the child Graph instead. Without `--step`, inspection
 retains every occurrence, including repeated compositions.
 
-Launch targets accept `agent`, `yolo`, `chrome`, `isolate`, `docs`, `context`,
+Launch targets accept `agent`, `default_agent`, `yolo`, `chrome`, `isolate`, `docs`, `context`,
 `exclude`, `diff`, `diff_files`, `paste`, `summaries`, and `summary_tokens`.
 Repository delivery, planning, default Graph, retries and context authoring
 budgets are general preferences: they describe work rather than an agent turn.
@@ -435,7 +440,7 @@ Glob patterns to exclude from file listings.
 
 ### Agent
 
-Set the default harness, with an optional model.
+Choose a harness, with an optional model. Use `default_agent` for a fallback.
 
 | | |
 |---|---|
@@ -453,10 +458,13 @@ skills:
 
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
 
-Four built-in skills intentionally default to Claude: `kickoff`,
-`explore`, `realign`, and `prompt`. Every other unconfigured
-built-in skill uses Codex when it is installed, then Claude, then OpenCode, then Pi. A
-CLI `-a` wins over authored defaults. `xor-route` defaults to `claude:sonnet`.
+Built-in skills recommend no harness. With no authored choice or fallback,
+Loopflow uses the first installed harness: Codex, Claude, OpenCode, then Pi.
+A personal `skills.implement.agent: codex` beats a repository occurrence's
+`agent: claude`; changing that personal key to `default_agent` lets the repository
+choice win, even if it is general. `-a` explicitly selects the invocation's agent.
+Both keys work in CLI `--setting`, `LF_SETTINGS`, database preferences, personal
+and shared files, LF-owned skill metadata, and Graph occurrence settings.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex
@@ -594,7 +602,9 @@ sandbox, and OpenCode denies external-directory tools, including with `yolo`.
 Stopped-session resume reloads Loopflow settings at the saved checkout. The
 provider's conversation identity and account stay attached; a current model
 setting for that provider applies. A configured different provider does not
-change the saved history's provider. CLI overrides take precedence. Connecting
+change the saved history's provider. A `default_agent` can refresh the model for
+that provider; switching providers requires an explicit agent choice. CLI overrides
+take precedence. Connecting
 to an already running provider keeps its existing launch settings. Historical
 replay uses captured inputs. Resuming native history from an isolated account
 keeps that account's provider home, including when `--shared` is requested.

@@ -1,0 +1,215 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-714 · Settings and portability</title><style>*{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;background:#f7f6f2;color:#262c29;font:17px/1.65 system-ui,sans-serif}main{max-width:980px;margin:auto;padding:44px 28px 80px}header,figcaption{font-size:13px;color:#626e66}h1{font-size:clamp(30px,5vw,44px);line-height:1.15;letter-spacing:-.025em}h2{font-size:26px;line-height:1.3;margin-top:48px}a{color:#176c5c;text-underline-offset:3px}code{font:0.87em ui-monospace,monospace;background:#e5eae3;padding:2px 4px;border-radius:3px}pre{padding:18px;background:#e5eae3;overflow:auto}pre code{padding:0}.table{overflow:auto}table{border-collapse:collapse;font-size:14px;line-height:1.5;width:100%;min-width:620px;margin:22px 0}th,td{padding:12px 10px;border-bottom:1px solid #ccd6cd;text-align:left;vertical-align:top}.flow{text-align:center;display:grid;gap:7px}.flow div{padding:15px;background:#e5eae3;border-radius:4px}figure{margin:26px 0}figcaption{margin:10px 0}li{margin:9px 0}@media(prefers-color-scheme:dark){body{background:#181e1a;color:#e8eee8}header,figcaption{color:#a2b1a7}a{color:#8acdb9}code,pre,.flow div{background:#2b3930}th,td{border-color:#46584b}}@media(max-width:600px){main{padding:25px 16px 60px}h2{font-size:23px}}</style></head><body><main><header>LOO-714 · settings architecture review · November 3, 2026<br>Source: settings-portability-review.md and linked repository code</header><h1>Settings surfaces, inspection and portability</h1>
+<p>LOO-714 · review for Jack Heart · 2026-11-03</p>
+<p>Jack requested this audit while the approved choice-before-fallback pursue runs.
+This is a separate design discussion, not authorization to expand the running
+implementation into settings synchronization or per-skill accounts. Source paths
+below describe the branch at inspection; <code>default_agent</code> support is in progress.</p>
+<h2>What can be set where</h2>
+<p>The shared resolver already covers much of the matrix. “All sources” below means
+CLI typed settings, explicit environment settings, DB preferences, personal files,
+repo/Wave files where eligible, then application defaults. It does not mean every
+setting can sensibly apply to every target or that every consumer has been proved.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Settings</th>
+<th>Supported places / targets</th>
+<th>Current qualification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent</code>; accepted <code>default_agent</code></td>
+<td>All sources; general, named skill, named graph occurrence</td>
+<td>Agent works; distinct default strength is the active revision. LF-owned frontmatter only. Builtin skill recommendations removed locally.</td>
+</tr>
+<tr>
+<td><code>yolo</code>, <code>chrome</code>, <code>isolate</code>, <code>diff</code>, <code>diff_files</code>, <code>paste</code></td>
+<td>All sources and launch targets</td>
+<td>Explicit false matters. Account-home continuity on resume is a separate recorded constraint.</td>
+</tr>
+<tr>
+<td><code>docs</code>, <code>context</code>, <code>exclude</code></td>
+<td>All sources and launch targets</td>
+<td>Additive lists; explicit empty clears. Inspection must show contributions, not just one winner.</td>
+</tr>
+<tr>
+<td><code>summaries</code>, <code>summary_tokens</code></td>
+<td>Accepted by launch configuration and targets</td>
+<td>Prior implementation audit found no runtime summarization consumer; an accepted key alone does not prove useful behavior.</td>
+</tr>
+<tr>
+<td><code>graph</code>, <code>supported_harnesses</code>, <code>automation.retries</code>, <code>context_budgets</code></td>
+<td>General configuration through shared sources; global/repo/Wave scopes</td>
+<td>Not skill/occurrence preferences. A Task takes up its graph once. Budgets name authored context categories.</td>
+</tr>
+<tr>
+<td><code>planning</code>, <code>release</code>, <code>land</code>, <code>merge_method</code>, <code>pr</code></td>
+<td>General config and typed CLI/env/DB; personal/repo layers</td>
+<td>No Wave or skill/occurrence target. Planning replaces a tagged unit. Some operations deliberately read repository-owned setup.</td>
+</tr>
+<tr>
+<td><code>user.name</code>, <code>repo_root</code>, <code>session.terminal</code>, <code>session.end_detached_after</code></td>
+<td>Personal global settings; typed shared interfaces where applicable</td>
+<td>No repo/Wave/skill target. Local paths and terminals differ between machines.</td>
+</tr>
+<tr>
+<td><code>theme</code>, <code>stream</code>, <code>logs.linear_requests</code>, <code>portfolio</code></td>
+<td>Personal file plus dedicated UI/commands/readers</td>
+<td>Outside the generic Config schema. Theme has Apply/Cancel and file dependencies; startup diagnostics/install settings may be needed before the DB opens.</td>
+</tr>
+<tr>
+<td><code>machine.tasks</code>, <code>machine.session</code></td>
+<td>Dedicated <code>lf set</code>/<code>unset</code>, repo/Wave DB scope</td>
+<td>No global machine target. Machine choices copy to peers; capacity choices remain local. Session movement is an operation, not merely config.</td>
+</tr>
+<tr>
+<td><code>account.claude</code>, <code>account.codex</code></td>
+<td>Dedicated route set/unset in global/repo/Wave DB scope; invocation account flags/env</td>
+<td>Separate route parser/storage and registered identities. No per-skill accounts. Preference order is distinct from credentials and observed eligibility.</td>
+</tr>
+<tr>
+<td>Provider-native model/options, plugins, personal skill and graph files</td>
+<td>Provider config and definition files</td>
+<td>Some behavior intentionally belongs to the provider. LF inspection should identify delegation instead of pretending to own every native option.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Repository <code>.lf/config.yaml</code>, Wave <code>.lf/wave/&lt;name&gt;/config.yaml</code>, and personal
+<code>~/.lf/config.yaml</code> are distinct sources. Personal files support repo sections and
+nested Wave sections; this branch recognizes canonical repository identity as
+well as local paths (path entry takes precedence if both exist).</p>
+<p>Evidence: <a href="../rust/loopflow/src/config.rs">Config fields</a>,
+<a href="../rust/loopflow/src/config/settings.rs">eligibility and resolution</a>,
+<a href="../rust/loopflow/src/lf/commands/setting.rs">set/unset special routes</a>,
+<a href="../rust/loopflow/src/work/wave/setup.rs">Wave setup projection</a>,
+<a href="../swift/LoopflowMac/Design/AppearanceStore.swift">theme ownership</a>.
+Operational flags such as interactive/batch, navigation and publishing actions
+are not automatically persistent preferences. Their absence from the matrix
+should be explicit, rather than encoded as an unexplained exception.</p>
+<h2>What would make the architecture more consistent</h2><figure><div class="flow"><div>Setting definitions<br><strong>Type · applicability · merge · portability</strong></div><span>↓</span><div>CLI · environment · files · DB · domain adapters</div><span>↓</span><div>One resolver<br><strong>Value + explanation + source health</strong></div><span>↓</span><div>Execution · inspector · portable declarations</div></div><figcaption>Proposed architecture. Portable declarations retain their sources; a resolved execution snapshot is a different artifact.</figcaption></figure>
+<p>Proposed: one typed settings catalogue used by all surfaces. This should replace
+scattered definitions, not become another parallel schema. Keep Rust's typed
+values, adding the metadata the UI, writer and inspector otherwise guess:</p>
+<ul>
+<li>Key, value type, default and description.</li>
+<li>Applicable sources, scopes and targets, with a reason for restrictions.</li>
+<li>Resolution and merge behavior: replace, additive/clear, keyed merge or fallback.</li>
+<li>Persistence owner: shared config, personal file, DB preference or domain API.</li>
+<li>Portability: personal portable, project portable, or machine-bound; referenced assets.</li>
+<li>Lifecycle: bootstrap, new launch, live preference or captured execution state.</li>
+<li>Consumer/delegation and safe display policy; credentials are not ordinary settings.</li>
+</ul>
+<p>Use that catalogue to drive CLI/file/DB validation, editor completion, documentation,
+discovery, inspection and portable export. Dedicated commands can remain convenient
+adapters to the same typed rules. Account connection and Session movement retain
+their domain operations; uniform discovery does not require identical storage.</p>
+<p>Current duplication is concrete: <code>Config</code> supplies types; <code>LAUNCH_KEYS</code> supplies
+target eligibility; <code>REPO_ONLY_KEYS</code> and <code>validate_scope</code> supply scope rules;
+<code>ADDITIVE_KEYS</code> supplies merging; set/unset separately recognizes accounts/machines;
+theme and installation have other readers. The new default strength must be visible
+to all these consumers without each reimplementing resolution.</p>
+<p>A small number of behavioral contract tests should prove equivalent settings
+through applicable entry points reach the same execution values. Include false,
+empty, unset, fallback versus explicit choice, and contributor provenance. Do not
+test only schema acceptance or duplicate resolver code inside an inspector.</p>
+<h2>Inspection should answer three different questions</h2>
+<ol>
+<li><strong>What may I set?</strong> A complete catalogue, showing valid locations and target
+scopes. Include dedicated settings, and explain unavailable combinations.</li>
+<li><strong>What would apply here?</strong> Resolve for this repo, Wave, skill or graph occurrence.
+Show value, declaration key/strength, exact file or DB scope, and why competing
+values lost. Additive settings show each contribution and where a clear reset it.</li>
+<li><strong>What did this execution use?</strong> A nonsecret snapshot of the actual launch
+selection and provenance. Do not reconstruct history from today's config.</li>
+</ol>
+<p>The PR already provides <code>lf config show</code>, including <code>--skill</code>, <code>--graph</code>, <code>--step</code>
+and JSON. It shares the runtime resolver and reports candidate source/scope/target.
+The installed lf here does not yet have that command. Its current text rendering
+calls the last candidate “selected” and others “earlier”; that is insufficient for
+additive settings and does not explain strength/source/scope comparisons.
+See <a href="../rust/loopflow/src/lf/commands/config.rs">inspection implementation</a>.</p>
+<p>Proposed explanation, illustrative rather than current output:</p>
+<pre><code class="language-text">release / write-code (implement): agent = codex
+  selected: personal file, skills.implement.agent = codex
+    personal source beats repository source among explicit choices
+  shadowed: repository graph, write-code.agent = claude
+  fallback: personal file, default_agent = codex
+    not needed because an explicit agent applies
+</code></pre>
+<p>Useful additions: filter to configured values; inspect one key; preview removing
+one override; compare two targets or Machines; distinguish source absent from
+source unreadable. Today an unavailable settings DB logs a warning and falls back;
+an inspector should show that uncertainty rather than implying the DB had no values.
+File path plus YAML key is the minimum useful location; line links can follow.</p>
+<h2>Does database sync plus a shared repository cover a complex setup?</h2>
+<p>Only if every relevant preference and dependency is covered. There are three
+distinct distribution paths, and the same resolved value is not proof of the
+same stored policy:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Material</th>
+<th>How it can travel</th>
+<th>What remains</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Committed repo/Wave config, skills, graphs and referenced repo docs</td>
+<td>Git</td>
+<td>Receiving machine needs the intended revision; uncommitted edits do not travel.</td>
+</tr>
+<tr>
+<td>DB preferences</td>
+<td>Logical preference synchronization</td>
+<td>Preserve global/repo/Wave target identity, ordering, deletions and concurrent-edit semantics. Current general <code>lf set</code> does not do this.</td>
+</tr>
+<tr>
+<td>Personal <code>~/.lf/config.yaml</code> and personal definitions/assets</td>
+<td>Personal config distribution, e.g. a dotfiles repo, or an LF-managed mechanism</td>
+<td>Git for the project does not carry these. Keep personal-file authority when copying; importing values as DB overrides would change precedence.</td>
+</tr>
+<tr>
+<td>Paths, terminal setup, installed harnesses and credentials</td>
+<td>Machine setup/provisioning</td>
+<td>Resolve portable references locally; identical preferences do not install tools or connect accounts.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Current evidence: shared <code>lf set</code> writes only the local <code>scope_settings</code> table.
+Machine selection has a separate SSH copy-to-peers implementation, with unreachable
+peers retaining their old choice. History export copies Sessions/Processes/events
+as history, explicitly separate from local execution authority; it does not export
+settings tables. SSH carries explicit invocation settings but does not establish
+ongoing personal-file or DB synchronization.
+See <a href="../rust/loopflow/src/lf/commands/setting.rs">settings writers</a>,
+<a href="../rust/loopflow/src/machine_records.rs">history copy contract</a>,
+<a href="../rust/loopflow/src/lf/commands/ssh.rs">SSH invocation transport</a>.</p>
+<p>Proposed portability contract: synchronize personal preference records, share repo
+content through Git, and distribute personal config/definitions as personal files.
+Keep machine-bound values local or explicitly bound to their Machine. Prefer
+canonical repository identity over absolute paths in portable configuration.
+Use stable account references with locally provisioned credentials; native model
+configuration and personal skill/theme assets are dependencies too.</p>
+<p>Avoid flattening everything into an “effective config” and syncing that: it erases
+which values were defaults, promotes lower-source choices to overrides, and loses
+future fallback behavior. Export declarations with source, target and strength.
+Separate a portable profile from a diagnostic resolved snapshot.</p>
+<p>The DB also contains Machine identity, local processes, history and credentials.
+Synchronizing selected preference records is a smaller contract than cloning the
+whole runtime database; existing history copying deliberately preserves that
+boundary. No database replication design is accepted here.</p>
+<h2>Decisions to review</h2>
+<ol>
+<li>Make one catalogue own setting semantics and applicability, including special
+settings through adapters, while retaining appropriate storage owners?</li>
+<li>Treat a personal portable setup as declarations plus referenced assets, with
+explicit machine-local settings, rather than a flattened effective config?</li>
+<li>Prioritize catalogue/why-this-value inspection now, then cross-machine comparison
+and profile distribution as a separate outcome?</li>
+</ol>
+<p>The approved pursue is running as Graph 6559210a-be79-409c-8dca-1c469db45ba3 on
+Codex, with Auto-Ship stopped. This review neither changes its scope nor approves
+landing. PR #1805 remains the settings review destination.</p>
+</main></body></html>

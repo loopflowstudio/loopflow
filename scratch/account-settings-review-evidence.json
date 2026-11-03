@@ -1,0 +1,43 @@
+[
+  {
+    "label": "Personal-file general account preference",
+    "args": [
+      "config",
+      "show",
+      "--skill",
+      "implement",
+      "--json"
+    ],
+    "exit": 0,
+    "stderr": "",
+    "account_settings": [
+      {}
+    ]
+  },
+  {
+    "label": "Typed CLI account preference",
+    "args": [
+      "--setting",
+      "account.codex=[work, personal]",
+      "config",
+      "show",
+      "--skill",
+      "implement",
+      "--json"
+    ],
+    "exit": 1,
+    "stderr": "Error: invalid graph: unknown setting account.codex\n"
+  },
+  {
+    "label": "Personal-file skill account preference",
+    "args": [
+      "config",
+      "show",
+      "--skill",
+      "implement",
+      "--json"
+    ],
+    "exit": 1,
+    "stderr": "Error: invalid graph: /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml: invalid graph: unknown or ineligible setting account\n"
+  }
+]

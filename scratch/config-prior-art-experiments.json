@@ -1,0 +1,45 @@
+{
+  "git": "git version 2.50.1 (Apple Git-155)",
+  "fixture": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-config-prior-art-7bbprjbt",
+  "results": [
+    {
+      "case": "Global URL-specific vs repo general",
+      "command": [
+        "git",
+        "config",
+        "--get-urlmatch",
+        "http.version",
+        "https://example.invalid/repo"
+      ],
+      "result": "HTTP/2"
+    },
+    {
+      "case": "Other URL uses repo general",
+      "command": [
+        "git",
+        "config",
+        "--get-urlmatch",
+        "http.version",
+        "https://other.invalid/repo"
+      ],
+      "result": "HTTP/1.1"
+    },
+    {
+      "case": "CLI general vs global URL-specific",
+      "command": [
+        "git",
+        "-c",
+        "http.version=HTTP/1.1",
+        "config",
+        "--get-urlmatch",
+        "http.version",
+        "https://example.invalid/repo"
+      ],
+      "result": "HTTP/2"
+    },
+    {
+      "case": "Same URL-specific key in global and repo",
+      "result": "HTTP/1.1"
+    }
+  ]
+}

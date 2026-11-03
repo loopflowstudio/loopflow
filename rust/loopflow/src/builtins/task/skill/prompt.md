@@ -2,7 +2,6 @@
 description: Author or audit a Loopflow skill, Wave goal, or inline prompt.
 requires: a prompt idea or existing prompt asset
 produces: .lf/skills/*.md | .lf/wave/<name>/GOAL.md | reviewed prompt text
-agent: claude
 action_style: exploratory
 ---
 Turn intent into a prompt that can steer real work and prove when it is done.

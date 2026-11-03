@@ -159,9 +159,14 @@ pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
 }
 
 pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
-    let transport = crate::config::load_planning_transport(repo).map_err(|error| {
-        OpsError::Message(format!("failed to read planning configuration: {error}"))
-    })?;
+    // The team is repository identity even when a personal preference selects
+    // another synchronization transport. Connecting must retain that binding.
+    let transport = crate::config::load_repo_config(repo)
+        .map_err(|error| {
+            OpsError::Message(format!("failed to read planning configuration: {error}"))
+        })?
+        .unwrap_or_default()
+        .planning_transport();
     Ok(match transport {
         crate::config::PlanningConfig::Linear { team } => {
             team.filter(|team| !team.trim().is_empty())
@@ -2324,7 +2329,7 @@ mod tests {
     }
 
     #[test]
-    fn connect_overrides_personal_git_without_rebinding_the_repository() {
+    fn connect_preserves_personal_transport_and_repository_binding() {
         with_pm_home(|home, runtime| {
             std::fs::write(
                 home.path().join("config.yaml"),
@@ -2369,8 +2374,9 @@ mod tests {
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
                         assert_eq!(
                             config.planning_transport(),
-                            crate::config::PlanningConfig::Linear {
-                                team: Some("team-1".into())
+                            crate::config::PlanningConfig::Git {
+                                remote: "personal".into(),
+                                plan: crate::config::GitPlan::Shared("private".into()),
                             }
                         );
                         assert_eq!(

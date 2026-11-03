@@ -177,38 +177,32 @@ impl Cli {
             );
         }
         for (key, enabled) in [
-            ("yolo", self.yolo),
-            ("paste", self.clipboard),
-            ("isolate", self.isolate),
+            ("yolo", self.yolo.then_some(true)),
+            ("paste", self.clipboard.then_some(true)),
+            (
+                "isolate",
+                self.shared
+                    .then_some(false)
+                    .or(self.isolate.then_some(true)),
+            ),
+            ("chrome", self.chrome.map(|mode| mode == BrowserMode::On)),
+            (
+                "diff",
+                self.diff
+                    .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both)),
+            ),
+            (
+                "diff_files",
+                self.diff
+                    .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both)),
+            ),
         ] {
-            if enabled {
-                crate::config::settings::insert(&mut value, &[key], true.into());
+            if let Some(enabled) = enabled {
+                crate::config::settings::insert(&mut value, &[key], enabled.into());
             }
-        }
-        if let Some(diff) = self.diff {
-            crate::config::settings::insert(
-                &mut value,
-                &["diff"],
-                matches!(diff, DiffContext::Patch | DiffContext::Both).into(),
-            );
-            crate::config::settings::insert(
-                &mut value,
-                &["diff_files"],
-                matches!(diff, DiffContext::Files | DiffContext::Both).into(),
-            );
-        }
-        if self.shared {
-            crate::config::settings::insert(&mut value, &["isolate"], false.into());
         }
         if let Some(agent) = &self.agent {
             crate::config::settings::insert(&mut value, &["agent"], agent.clone().into());
-        }
-        if let Some(chrome) = self.chrome {
-            crate::config::settings::insert(
-                &mut value,
-                &["chrome"],
-                (chrome == BrowserMode::On).into(),
-            );
         }
         if !self.docs.is_empty() {
             crate::config::settings::insert(
@@ -1477,6 +1471,7 @@ impl WavePlanTarget {
 const SETTING_KEYS: &str = "Keys:
   graph                 the graph new Tasks take up
   agent                 the agent work launches on, such as claude:opus
+  default_agent         fallback when no applicable agent choice exists
   skills.<skill>.<key>  a preference for one skill
   graphs.<graph>.steps.<id>.<key>  a preference for an authored Graph step
   yolo, chrome, docs, context, diff, isolate, ...  typed configuration preferences

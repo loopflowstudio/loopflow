@@ -348,7 +348,6 @@ pub(crate) struct HistoryCapture {
 
 pub(crate) fn conversation(
     cwd: &std::path::Path,
-    agent: Option<&str>,
     skill: &str,
     title: String,
 ) -> anyhow::Result<LfSession> {
@@ -358,7 +357,6 @@ pub(crate) fn conversation(
         cwd,
         wave.as_deref(),
         &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
-        agent,
         Some(&skill),
     );
     let (provider, model) = crate::config::parse_agent(&agent);

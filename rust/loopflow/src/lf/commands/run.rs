@@ -550,8 +550,6 @@ fn build_prompt_at(
             skill_arguments: arguments.to_string(),
             no_loopflow: standalone_native,
             work: cli.task.clone().map(crate::prompt::WorkContext::Task),
-            agent: None,
-            yolo_mode: false,
             source_overrides: ContextSourceOverrides::default(),
             summary: None,
             references: task_message
@@ -1350,7 +1348,7 @@ mod tests {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
-            "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
+            "diff: false\ndiff_files: false\npaste: false\n",
         );
         let cli = Cli::parse_from(["lf", "--batch"]);
 

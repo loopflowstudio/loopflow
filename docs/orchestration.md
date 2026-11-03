@@ -44,8 +44,10 @@ A Skill's frontmatter `agent:` names its harness and model; a Graph step can
 name another for that occurrence. Explicit Graph `-a` applies to all its steps,
 including nested Graphs and routers. It is not exported to unrelated child work.
 Personal and database preferences can target the skill or an authored step ID;
-see [setting precedence](config.md). Builtin defaults apply only when higher
-sources leave the preference unset.
+see [setting precedence](config.md). Use `default_agent:` in either definition
+for a fallback: every applicable `agent:` choice wins before any fallback,
+then source, scope and target decide within each class. Builtin skills recommend
+no harness; the application's fallback applies when nothing else selects one.
 
 ```markdown
 ---

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::agent::AgentConfig;
-use crate::config::{default_agent, parse_agent, Config};
+use crate::config::{parse_agent, Config};
 use crate::error::CoreError;
 use crate::graph::Skill;
 use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
@@ -33,8 +33,6 @@ pub struct ProcessPromptInput {
     pub no_loopflow: bool,
     /// Work was selected or resolved from the current checkout/Session.
     pub work: Option<crate::prompt::WorkContext>,
-    pub agent: Option<String>,
-    pub yolo_mode: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
     /// Complete captured context, listed separately from the live request.
@@ -84,8 +82,6 @@ fn prepare_prompt(
         skill_arguments,
         no_loopflow,
         work,
-        agent,
-        yolo_mode,
         source_overrides,
         summary,
         references,
@@ -170,8 +166,7 @@ fn prepare_prompt(
             source: DocumentSource::Summary,
         }));
 
-    let agent = agent.unwrap_or_else(|| config.agent().to_owned());
-    validate_agent_policy(&agent)?;
+    let agent = config.agent().to_owned();
 
     let skill_invocation = components
         .skill
@@ -217,7 +212,7 @@ fn prepare_prompt(
         cwd: Some(repo_root),
         write_scope: crate::agent::AgentWriteScope::Configured,
         execution_boundary: None,
-        skip_permissions: yolo_mode || config.yolo,
+        skip_permissions: config.yolo,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
         env: [(
@@ -231,63 +226,6 @@ fn prepare_prompt(
         components,
         deduplication_decisions,
     })
-}
-
-pub(crate) fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
-    let (harness, variant) = parse_agent(agent);
-    match harness.as_str() {
-        "claude" | "codex" | "pi" => return Ok(()),
-        "opencode" => {}
-        _ => {
-            return Err(CoreError::ExecutionFailed(format!(
-                "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
-            )));
-        }
-    }
-
-    let Some(variant) = variant else {
-        return Ok(());
-    };
-    if is_supported_opencode_model_variant(&variant) {
-        return Ok(());
-    }
-
-    Err(CoreError::ExecutionFailed(format!(
-        "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'",
-        variant
-    )))
-}
-
-fn is_supported_opencode_model_variant(variant: &str) -> bool {
-    let variant = variant.trim().to_ascii_lowercase();
-    let Some((provider, model_id)) = variant.split_once('/') else {
-        return false;
-    };
-    if model_id.is_empty() {
-        return false;
-    }
-
-    match provider {
-        "moonshotai" => model_id.starts_with("kimi"),
-        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
-        _ => false,
-    }
-}
-
-/// The same precedence applies to direct commands, captured skills and reviews.
-pub(crate) fn resolve_agent(
-    override_agent: Option<&str>,
-    skill: Option<&Skill>,
-    config: &Config,
-) -> String {
-    override_agent
-        .map(str::to_owned)
-        .or_else(|| {
-            crate::config::settings::resolve(config, skill)
-                .ok()
-                .and_then(|resolved| resolved.config.agent)
-        })
-        .unwrap_or_else(|| default_agent().to_owned())
 }
 
 #[cfg(test)]
@@ -320,6 +258,12 @@ Test skill body.
             paste: false,
             ..Config::default()
         }
+    }
+
+    fn select_agent(agent: &str) -> crate::config::settings::InvocationSettings {
+        crate::config::settings::select_invocation(
+            serde_yaml_ng::to_value(serde_json::json!({"agent": agent})).unwrap(),
+        )
     }
 
     fn conversation(prepared: &super::PreparedProcessPrompt) -> String {
@@ -556,11 +500,11 @@ Test skill body.
         let repo = create_repo_fixture();
         fs::create_dir(repo.path().join("scratch")).unwrap();
         let prepare = |agent: &str, skill: Option<&str>, request: &str| {
+            let _selection = select_agent(agent);
             prepare_process_prompt(
                 &default_test_config(),
                 ProcessPromptInput {
                     repo_root: repo.path().into(),
-                    agent: Some(agent.into()),
                     skill: skill.map(str::to_owned),
                     message: Some(request.into()),
                     references: vec![("Task brief".into(), "Jack requested a stable API".into())],
@@ -615,6 +559,7 @@ Test skill body.
 
     #[test]
     fn implement_launch_treats_kickoff_plan_and_intent_as_references() {
+        let _selection = select_agent("codex");
         let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("scratch/nested")).unwrap();
@@ -633,7 +578,6 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".into()),
-                agent: Some("codex".into()),
                 wave: Some("product".into()),
                 message: Some(
                     "Build the accepted plan.\n<lf:steers>\nJack wrote `$kickoff`.\n</lf:steers>"
@@ -676,6 +620,7 @@ Test skill body.
             crate::lf::commands::graph::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
         for agent in ["claude", "codex", "opencode", "pi"] {
+            let _selection = select_agent(agent);
             for surface in [
                 Surface::Cli,
                 Surface::Mac,
@@ -687,7 +632,6 @@ Test skill body.
                     ProcessPromptInput {
                         repo_root: tmp.path().to_path_buf(),
                         surface,
-                        agent: Some(agent.into()),
                         ..Default::default()
                     },
                 )
@@ -733,6 +677,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_prefers_explicit_agent_override() {
+        let _selection = select_agent("claude:sonnet");
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_process_prompt(
@@ -740,7 +685,6 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
-                agent: Some("claude:sonnet".to_string()),
                 surface: Surface::Headless,
                 ..ProcessPromptInput::default()
             },
@@ -825,37 +769,32 @@ Test skill body.
     }
 
     #[test]
-    fn unmarked_builtin_skill_defaults_to_codex() {
+    fn builtin_skills_use_the_application_fallback() {
         let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_process_prompt(
-            &Config::default(),
-            ProcessPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                skill: Some("implement".to_string()),
-                surface: Surface::Headless,
-                ..ProcessPromptInput::default()
-            },
-        )
-        .expect("prepare Process prompt");
-
-        assert_eq!(prepared.config.agent.as_deref(), Some("codex"));
-    }
-
-    #[test]
-    fn marked_builtin_skill_keeps_claude_default() {
-        let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_process_prompt(
-            &Config::default(),
-            ProcessPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                skill: Some("kickoff".to_string()),
-                surface: Surface::Headless,
-                ..ProcessPromptInput::default()
-            },
-        )
-        .expect("prepare Process prompt");
-
-        assert_eq!(prepared.config.agent.as_deref(), Some("claude"));
+        for name in [
+            "implement",
+            "kickoff",
+            "explore",
+            "realign",
+            "prompt",
+            "xor-route",
+        ] {
+            let prepared = prepare_process_prompt(
+                &Config::default(),
+                ProcessPromptInput {
+                    repo_root: tmp.path().to_path_buf(),
+                    skill: Some(name.to_string()),
+                    surface: Surface::Headless,
+                    ..ProcessPromptInput::default()
+                },
+            )
+            .expect("prepare Process prompt");
+            assert_eq!(
+                prepared.config.agent(),
+                crate::config::default_agent(),
+                "{name}"
+            );
+        }
     }
 
     #[test]
@@ -1078,6 +1017,7 @@ Test skill body.
 
     #[test]
     fn native_skill_uses_the_same_context_channel() {
+        let _selection = select_agent("claude");
         let tmp = create_repo_fixture();
         fs::write(tmp.path().join("context.md"), "docs content").unwrap();
         let source = Skill {
@@ -1094,7 +1034,6 @@ Test skill body.
             resolved_skill: Some(source),
             docs: vec!["context.md".into()],
             no_loopflow: true,
-            agent: Some("claude".into()),
             ..Default::default()
         };
         let prepared = prepare_process_prompt(&default_test_config(), input.clone()).unwrap();
@@ -1132,6 +1071,7 @@ Test skill body.
             ("claude", Surface::Cli),
             ("codex", Surface::Cli),
         ] {
+            let _selection = select_agent(agent);
             let prepared = prepare_process_prompt(
                 &default_test_config(),
                 ProcessPromptInput {
@@ -1139,7 +1079,6 @@ Test skill body.
                     resolved_skill: Some(source.clone()),
                     message: Some("Preserve the Task checkout and return the decision".into()),
                     skill_arguments: "  \"exact arguments\"  ".into(),
-                    agent: Some(agent.into()),
                     surface,
                     ..ProcessPromptInput::default()
                 },
@@ -1172,13 +1111,13 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_rejects_unsupported_opencode_variants() {
+        let _selection = select_agent("opencode:anthropic/claude-sonnet-4-5");
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let err = prepare_process_prompt(
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                agent: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
                 surface: Surface::Headless,
                 ..ProcessPromptInput::default()
             },
@@ -1192,12 +1131,12 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_rejects_unknown_harnesses() {
+        let _selection = select_agent("retired-agent");
         let tmp = create_repo_fixture();
         let err = prepare_process_prompt(
             &default_test_config(),
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                agent: Some("retired-agent".to_string()),
                 surface: Surface::Headless,
                 ..ProcessPromptInput::default()
             },
@@ -1211,13 +1150,13 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_accepts_supported_opencode_variants() {
+        let _selection = select_agent("opencode:moonshotai/kimi-k2");
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_process_prompt(
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 surface: Surface::Headless,
                 ..ProcessPromptInput::default()
             },
@@ -1232,13 +1171,13 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_accepts_the_users_opencode_default() {
+        let _selection = select_agent("opencode");
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_process_prompt(
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                agent: Some("opencode".to_string()),
                 surface: Surface::Headless,
                 ..ProcessPromptInput::default()
             },

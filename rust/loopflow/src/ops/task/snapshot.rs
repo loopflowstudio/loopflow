@@ -109,7 +109,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         wave.as_ref().map(|w| w.slug()),
         &personal,
         None,
-        None,
     );
     let (provider, _) = parse_agent(&agent);
     let machine_id = store

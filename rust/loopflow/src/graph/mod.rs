@@ -37,14 +37,13 @@ pub struct Skill {
     pub content: Option<String>,
 }
 
-// Production Task graphs retain serialized skills. Normalize the retired field
-// on read; new captures contain only agent and never preserve a second tier.
+// Retained captures keep authored settings, including default_agent, unchanged.
+// Distinguish omitted docs from an explicit empty-list reset.
 #[derive(Deserialize)]
 struct StoredSkill {
     name: String,
     source: Option<SkillOrigin>,
     agent: Option<String>,
-    default_agent: Option<String>,
     occurrence: Option<Box<crate::config::settings::OccurrenceSettings>>,
     #[serde(default, flatten)]
     settings: BTreeMap<String, Value>,
@@ -64,7 +63,7 @@ impl From<StoredSkill> for Skill {
         Self {
             name: saved.name,
             source: saved.source,
-            agent: saved.agent.or(saved.default_agent),
+            agent: saved.agent,
             occurrence: saved.occurrence,
             settings: saved.settings,
             action_style: saved.action_style,

@@ -1646,7 +1646,15 @@ fn run() -> anyhow::Result<()> {
             return Ok(());
         }
     }
-    if cli.agent.is_some() && !cli.may_launch_agent() {
+    if cli.agent.is_some()
+        && !cli.may_launch_agent()
+        && !matches!(
+            cli.command,
+            Some(Commands::Config {
+                cmd: loopflow::lf::ConfigCommand::Show { .. }
+            })
+        )
+    {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
     // Installation owns its promotion/recovery authority. In particular,

@@ -1,0 +1,676 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LOO-714 · Settings demo</title><style>
+:root{color-scheme:light dark;--bg:#faf8f3;--ink:#282624;--muted:#69635d;--line:#d8d1c7;--code:#efebe4;--accent:#843d41}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.65 system-ui,sans-serif}main{max-width:850px;margin:0 auto;padding:64px 28px 90px}h1{font:normal 42px/1.13 Georgia,serif;margin:18px 0 24px}h2{font:normal 27px/1.3 Georgia,serif}h3{font-size:14px;color:var(--muted);margin:0}header p,.meta{font-size:14px;color:var(--muted)}a{color:var(--accent)}section{padding:24px 0;border-top:1px solid var(--line);margin-top:28px}pre{padding:18px;background:var(--code);overflow:auto;font:13px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}code{font-family:ui-monospace,monospace}.pair{display:grid;grid-template-columns:1fr 1fr;gap:28px}.pair p{margin-top:5px}textarea{display:block;width:100%;min-height:65px;border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:12px;font:inherit}label{display:block;font-size:14px;color:var(--muted);margin-top:18px}summary{cursor:pointer;color:var(--accent)}.problem{border-left:3px solid var(--accent);padding-left:20px}li{margin:12px 0}@media(prefers-color-scheme:dark){:root{--bg:#1c1b1a;--ink:#e8e2d9;--muted:#b8afa3;--line:#48423b;--code:#282522;--accent:#e6a5a6}}@media(max-width:580px){main{padding:30px 18px}h1{font-size:34px}.pair{grid-template-columns:1fr;gap:4px}}</style><main>
+<header><p>LOO-714 · Demo · 3 November 2026</p><h1>Does this express your preferences?</h1><p>Built from <a href="settings-scope.md">the accepted design</a>, <a href="../docs/config.md">configuration docs</a>, <a href="settings-demo-evidence.json">captured CLI output</a> and GitHub CI. Review record: <a href="settings-demo.md">settings-demo.md</a>.</p></header>
+<p>Choose one skill everywhere, then make one exception for one step in one graph. The settings below are <strong>implemented in the branch</strong>. This page shows real CLI results from a disposable configuration/store. It does not launch a paid agent or change your live preferences.</p>
+<div class="problem"><p><strong>PR #1805 is published, not merge-ready.</strong> Eight tests fail in three Rust CI jobs. No worker is running; auto-merge is off. Limit recovery remains the second PR.</p><p><a href="https://github.com/loopflowstudio/loopflow/pull/1805">PR and checks</a> · <a href="https://github.com/loopflowstudio/loopflow/actions/runs/41629160735">CI run</a></p></div>
+<section><h2>The preferences being exercised</h2><p>Personal configuration:</p><pre>agent: claude
+skills:
+  implement:
+    agent: codex
+graphs:
+  release:
+    steps:
+      write-code:
+        agent: claude
+        chrome: false
+</pre><p>The shared release graph:</p><pre>- step: {name: implement, id: write-code}
+- step: {name: implement, id: other-work}
+</pre><p>The repo supplies <code>agent: codex</code> and <code>chrome: true</code>. The second implement occurrence exposes whether the exception leaks.</p><details><summary>Run these commands yourself</summary><p>The fixture remains on disk. This shell function points <code>lf</code> at the candidate binary and clears inherited LF_* settings; it does not replace your installed CLI.</p><pre># Candidate CLI; disposable demo store, not the installed version.
+cd /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo
+lf() {
+  uv run python - &quot;$@&quot; &lt;&lt;&#x27;PYCODE&#x27;
+import os, subprocess, sys
+env = {k: v for k, v in os.environ.items() if not k.startswith(&#x27;LF_&#x27;)}
+env[&#x27;LF_HOME&#x27;] = &#x27;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home&#x27;
+env[&#x27;LF_BIN&#x27;] = &#x27;/Users/jack/src/loopflow.loo-714-recover-cleanly-from/target/debug/lf&#x27;
+raise SystemExit(subprocess.call([env[&#x27;LF_BIN&#x27;], *sys.argv[1:]], env=env))
+PYCODE
+}</pre><p>Run actions 1–7 below in order. Action 8 supplies its environment explicitly and runs independently of the wrapper.</p></details></section>
+<section><h2>1. Skill-wide preference</h2><pre><code>lf config show --skill implement --json</code></pre><div class="pair"><div><h3>Expected</h3><p>Codex for implement</p></div><div><h3>Observed</h3><p>codex; chrome=true inherited from repo</p></div></div><details><summary>Actual output and provenance</summary><pre>[
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {},
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;codex&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        }
+      ],
+      &quot;value&quot;: true
+    }
+  }
+]</pre></details><label for="note1">What you saw</label><textarea id="note1" placeholder="Your observation or change…"></textarea></section><section><h2>2. Two occurrences</h2><pre><code>lf config show --graph release --json</code></pre><div class="pair"><div><h3>Expected</h3><p>Claude only for write-code; Codex for other-work</p></div><div><h3>Observed</h3><p>write-code: claude, chrome=false; other-work: codex, chrome=true</p></div></div><details><summary>Actual output and provenance</summary><pre>[
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {
+      &quot;graph&quot;: &quot;release&quot;,
+      &quot;id&quot;: &quot;write-code&quot;,
+      &quot;layer&quot;: &quot;Repo&quot;,
+      &quot;values&quot;: {}
+    },
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;claude&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: false
+        }
+      ],
+      &quot;value&quot;: false
+    }
+  },
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {
+      &quot;graph&quot;: &quot;release&quot;,
+      &quot;id&quot;: &quot;other-work&quot;,
+      &quot;layer&quot;: &quot;Repo&quot;,
+      &quot;values&quot;: {}
+    },
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;codex&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        }
+      ],
+      &quot;value&quot;: true
+    }
+  }
+]</pre></details><label for="note2">What you saw</label><textarea id="note2" placeholder="Your observation or change…"></textarea></section><section><h2>3. Composed occurrence</h2><pre><code>lf config show --graph outer --json</code></pre><div class="pair"><div><h3>Expected</h3><p>Same choices when composed into outer</p></div><div><h3>Observed</h3><p>claude/false; codex/true</p></div></div><details><summary>Actual output and provenance</summary><pre>[
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {
+      &quot;graph&quot;: &quot;release&quot;,
+      &quot;id&quot;: &quot;write-code&quot;,
+      &quot;layer&quot;: &quot;Repo&quot;,
+      &quot;values&quot;: {}
+    },
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;claude&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: false
+        }
+      ],
+      &quot;value&quot;: false
+    }
+  },
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {
+      &quot;graph&quot;: &quot;release&quot;,
+      &quot;id&quot;: &quot;other-work&quot;,
+      &quot;layer&quot;: &quot;Repo&quot;,
+      &quot;values&quot;: {}
+    },
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;codex&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        }
+      ],
+      &quot;value&quot;: true
+    }
+  }
+]</pre></details><label for="note3">What you saw</label><textarea id="note3" placeholder="Your observation or change…"></textarea></section><section><h2>4. DB override</h2><pre><code>lf set --global graphs.release.steps.write-code.agent codex</code></pre><div class="pair"><div><h3>Expected</h3><p>Save one personal DB override</p></div><div><h3>Observed</h3><p>DB value saved</p></div></div><details><summary>Actual output and provenance</summary><pre>Every repository: your graphs.release.steps.write-code.agent is codex
+</pre></details><label for="note4">What you saw</label><textarea id="note4" placeholder="Your observation or change…"></textarea></section><section><h2>5. DB wins</h2><pre><code>lf config show --graph release --step write-code --json</code></pre><div class="pair"><div><h3>Expected</h3><p>DB overrides the personal file</p></div><div><h3>Observed</h3><p>codex; chrome=false</p></div></div><details><summary>Actual output and provenance</summary><pre>[
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {
+      &quot;graph&quot;: &quot;release&quot;,
+      &quot;id&quot;: &quot;write-code&quot;,
+      &quot;layer&quot;: &quot;Repo&quot;,
+      &quot;values&quot;: {}
+    },
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Personal&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/loopflow.db&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;codex&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: false
+        }
+      ],
+      &quot;value&quot;: false
+    }
+  }
+]</pre></details><label for="note5">What you saw</label><textarea id="note5" placeholder="Your observation or change…"></textarea></section><section><h2>6. Remove DB override</h2><pre><code>lf unset --global graphs.release.steps.write-code.agent</code></pre><div class="pair"><div><h3>Expected</h3><p>Remove only that DB override</p></div><div><h3>Observed</h3><p>DB value removed</p></div></div><details><summary>Actual output and provenance</summary><pre>Every repository: your graphs.release.steps.write-code.agent is cleared; the committed config chooses
+</pre></details><label for="note6">What you saw</label><textarea id="note6" placeholder="Your observation or change…"></textarea></section><section><h2>7. Personal file resurfaces</h2><pre><code>lf config show --graph release --step write-code --json</code></pre><div class="pair"><div><h3>Expected</h3><p>Personal file becomes effective again</p></div><div><h3>Observed</h3><p>claude; chrome=false</p></div></div><details><summary>Actual output and provenance</summary><pre>[
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {
+      &quot;graph&quot;: &quot;release&quot;,
+      &quot;id&quot;: &quot;write-code&quot;,
+      &quot;layer&quot;: &quot;Repo&quot;,
+      &quot;values&quot;: {}
+    },
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;claude&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: false
+        }
+      ],
+      &quot;value&quot;: false
+    }
+  }
+]</pre></details><label for="note7">What you saw</label><textarea id="note7" placeholder="Your observation or change…"></textarea></section><section><h2>8. CLI beats environment</h2><pre><code>uv run python - &lt;&lt;&#x27;PYCODE&#x27;
+import os, subprocess
+env = {k: v for k, v in os.environ.items() if not k.startswith(&#x27;LF_&#x27;)}
+env.update(LF_HOME=&#x27;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home&#x27;, LF_BIN=&#x27;/Users/jack/src/loopflow.loo-714-recover-cleanly-from/target/debug/lf&#x27;, LF_AGENT_OVERRIDE=&#x27;claude&#x27;)
+subprocess.run([env[&#x27;LF_BIN&#x27;], &#x27;-a&#x27;, &#x27;codex&#x27;, &#x27;config&#x27;, &#x27;show&#x27;, &#x27;--graph&#x27;, &#x27;release&#x27;, &#x27;--step&#x27;, &#x27;write-code&#x27;, &#x27;--json&#x27;], cwd=&#x27;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo&#x27;, env=env, check=True)
+PYCODE</code></pre><div class="pair"><div><h3>Expected</h3><p>Explicit CLI Codex beats env Claude</p></div><div><h3>Observed</h3><p>codex; chrome=false; misleading warning also printed</p></div></div><details><summary>Actual output and provenance</summary><pre>[
+  {
+    &quot;skill&quot;: &quot;implement&quot;,
+    &quot;target&quot;: {
+      &quot;graph&quot;: &quot;release&quot;,
+      &quot;id&quot;: &quot;write-code&quot;,
+      &quot;layer&quot;: &quot;Repo&quot;,
+      &quot;values&quot;: {}
+    },
+    &quot;agent&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/skills/implement.md&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;skill:implement&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;Environment&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;environment&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;claude&quot;
+        },
+        {
+          &quot;layer&quot;: &quot;CommandLine&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;CLI&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: &quot;codex&quot;
+        }
+      ],
+      &quot;value&quot;: &quot;codex&quot;
+    },
+    &quot;chrome&quot;: {
+      &quot;candidates&quot;: [
+        {
+          &quot;layer&quot;: &quot;Builtin&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;builtin&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: false
+        },
+        {
+          &quot;layer&quot;: &quot;Repo&quot;,
+          &quot;scope&quot;: &quot;repository&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/repo/.lf/config.yaml&quot;,
+          &quot;target&quot;: &quot;general&quot;,
+          &quot;value&quot;: true
+        },
+        {
+          &quot;layer&quot;: &quot;Global&quot;,
+          &quot;scope&quot;: &quot;global&quot;,
+          &quot;source&quot;: &quot;/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo-714-demo-4x0xqpvl/home/config.yaml&quot;,
+          &quot;target&quot;: &quot;graph:release/write-code&quot;,
+          &quot;value&quot;: false
+        }
+      ],
+      &quot;value&quot;: false
+    }
+  }
+]
+This command does not start an agent; --agent has no effect.
+</pre></details><label for="note8">What you saw</label><textarea id="note8" placeholder="Your observation or change…"></textarea></section>
+<section><h2>What remains wrong or unproven</h2><ul><li>Inspection says “--agent has no effect” while displaying the explicitly selected agent. The output works; the warning contradicts it.</li><li>CI failures cover old help wording, duplicate IDs, default-agent expectations, personal-name scope and planning-provider precedence. Repairs and a green CI run remain necessary.</li><li>Session-to-Task separation and Graph-wide forcing have recorded stand-in launch coverage. This demo has not exercised authenticated provider launches or installed the change.</li></ul></section>
+<section><h2>Your review</h2><p>Reply with a number and letter; add detail wherever the behavior should change.</p><ol><li><strong>Targeting:</strong> a — skill-wide plus graph-step exceptions work as expected; b — change the targeting syntax or meaning.</li><li><strong>Precedence:</strong> a — DB overrides the personal file, and unset reveals it, as expected; b — change that behavior.</li><li><strong>Inspection:</strong> a — the effective value and source are understandable after fixing the warning; b — change what the inspection shows.</li></ol><p class="meta">Notes stay in this browser until you share them here. Nothing on this page approves a merge or changes Task state.</p></section></main><script>for(const t of document.querySelectorAll('textarea')){try{t.value=localStorage.getItem('loo714-demo-'+t.id)||'';t.addEventListener('input',()=>localStorage.setItem('loo714-demo-'+t.id,t.value))}catch(e){}}</script></html>

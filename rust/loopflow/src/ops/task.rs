@@ -1589,14 +1589,15 @@ pub(crate) fn resolve_task_agent(
     worktree: &Path,
     wave: Option<&str>,
     personal: &crate::config::PersonalSettings,
-    agent: Option<&str>,
     skill: Option<&crate::graph::Skill>,
 ) -> String {
     let config = crate::config::load_wave_config_with(Some(worktree), wave, personal)
         .ok()
         .flatten()
         .unwrap_or_default();
-    crate::prompt::process::resolve_agent(agent, skill, &config)
+    crate::config::settings::resolve(&config, skill)
+        .map(|resolved| resolved.config.agent().to_owned())
+        .unwrap_or_else(|_| crate::config::default_agent().to_owned())
 }
 
 fn task_configuration_refusal(
@@ -1608,7 +1609,7 @@ fn task_configuration_refusal(
     let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
-        &resolve_task_agent(worktree, wave, personal, None, skill),
+        &resolve_task_agent(worktree, wave, personal, skill),
     )
     .err()
     .map(|error| error.to_string())

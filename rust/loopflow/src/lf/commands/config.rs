@@ -35,7 +35,8 @@ pub fn show(
                                 "earlier"
                             };
                             println!(
-                                "  {status}: {} · {} · {} = {}",
+                                "  {status}: {} · {} · {} · {} = {}",
+                                candidate["key"].as_str().expect("candidate key"),
                                 candidate["source"].as_str().unwrap_or("builtin"),
                                 candidate["scope"].as_str().unwrap_or("global"),
                                 candidate["target"].as_str().unwrap_or("general"),

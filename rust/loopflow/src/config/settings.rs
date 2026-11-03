@@ -52,6 +52,8 @@ impl OccurrenceSettings {
 /// All candidates are ordered from lowest to highest authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingCandidate {
+    /// Authored key; agent and default_agent retain their choice strength.
+    pub key: String,
     pub source: String,
     pub layer: ConfigLayer,
     pub scope: SettingScope,
@@ -73,6 +75,7 @@ pub struct ResolvedSettings {
 
 const LAUNCH_KEYS: &[&str] = &[
     "agent",
+    "default_agent",
     "yolo",
     "chrome",
     "context",
@@ -172,13 +175,12 @@ fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
             "omit a file value or use unset to remove a preference",
         ));
     }
-    if path[0] == "agent" {
+    if ["agent", "default_agent"].contains(&path[0]) {
         let agent = value
             .as_str()
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| invalid("agent needs harness[:model]"))?;
-        crate::prompt::process::validate_agent_policy(agent)
-            .map_err(|error| invalid(error.to_string()))?;
+        validate_agent_policy(agent)?;
     }
     let mut check = serde_yaml_ng::to_value(Config::default()).expect("Config is serializable");
     insert(&mut check, path, value.clone());
@@ -193,6 +195,47 @@ fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
             .map_err(|error| invalid(error.to_string()))?;
     }
     Ok(())
+}
+
+fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
+    let (harness, variant) = super::parse_agent(agent);
+    match harness.as_str() {
+        "claude" | "codex" | "pi" => return Ok(()),
+        "opencode" => {}
+        _ => {
+            return Err(invalid(format!(
+                "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
+            )));
+        }
+    }
+
+    let Some(variant) = variant else {
+        return Ok(());
+    };
+    if is_supported_opencode_model_variant(&variant) {
+        return Ok(());
+    }
+
+    Err(invalid(format!(
+        "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'",
+        variant
+    )))
+}
+
+fn is_supported_opencode_model_variant(variant: &str) -> bool {
+    let variant = variant.trim().to_ascii_lowercase();
+    let Some((provider, model_id)) = variant.split_once('/') else {
+        return false;
+    };
+    if model_id.is_empty() {
+        return false;
+    }
+
+    match provider {
+        "moonshotai" => model_id.starts_with("kimi"),
+        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
+        _ => false,
+    }
 }
 
 pub(crate) fn insert(root: &mut Value, path: &[&str], value: Value) {
@@ -241,7 +284,7 @@ fn validate_preferences(value: &Value, targeted: bool, strict: bool) -> Result<(
         } else {
             key
         };
-        if key == "skill_agents" || key == "default_agent" {
+        if key == "skill_agents" {
             return Err(invalid(format!(
                 "{key} is retired; use skills.<name>.agent or agent"
             )));
@@ -293,17 +336,16 @@ fn rank(layer: ConfigLayer) -> u8 {
 }
 
 pub fn definition_layer(path: Option<&std::path::Path>) -> ConfigLayer {
-    if path.is_none() {
+    let Some(path) = path else {
         return ConfigLayer::Builtin;
-    }
-    if path.is_some_and(|path| {
-        path.starts_with(crate::store::lf_home_dir())
-            || dirs::home_dir().is_some_and(|home| {
-                [".agents", ".claude", ".codex"]
-                    .iter()
-                    .any(|dir| path.starts_with(home.join(dir)))
-            })
-    }) {
+    };
+    if path.starts_with(crate::store::lf_home_dir())
+        || dirs::home_dir().is_some_and(|home| {
+            [".agents", ".claude", ".codex"]
+                .iter()
+                .any(|dir| path.starts_with(home.join(dir)))
+        })
+    {
         ConfigLayer::Global
     } else {
         ConfigLayer::Repo
@@ -344,7 +386,7 @@ fn leaves(value: &Value, prefix: &str, result: &mut Vec<(String, Value)>) {
     }
 }
 
-/// Resolve all preferences using source, then scope, then target specificity.
+/// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigLayerValues],
     skill: Option<&Skill>,
@@ -352,7 +394,11 @@ pub fn resolve_layers(
     // Each block shares provenance; specificity orders blocks within a source/scope.
     let mut candidates = Vec::new();
     let mut defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    insert(&mut defaults, &["agent"], super::default_agent().into());
+    insert(
+        &mut defaults,
+        &["default_agent"],
+        super::default_agent().into(),
+    );
     insert(
         &mut defaults,
         &["graph"],
@@ -373,6 +419,7 @@ pub fn resolve_layers(
     candidates.push((
         0,
         SettingCandidate {
+            key: String::new(),
             layer: ConfigLayer::Builtin,
             scope: SettingScope::Global,
             source: "builtin".into(),
@@ -386,6 +433,7 @@ pub fn resolve_layers(
         candidates.push((
             1,
             SettingCandidate {
+                key: String::new(),
                 layer,
                 scope: if layer == ConfigLayer::Repo {
                     SettingScope::Repository
@@ -404,6 +452,7 @@ pub fn resolve_layers(
             candidates.push((
                 2,
                 SettingCandidate {
+                    key: String::new(),
                     layer: occurrence.layer,
                     scope: if occurrence.layer == ConfigLayer::Repo {
                         SettingScope::Repository
@@ -448,6 +497,7 @@ pub fn resolve_layers(
         }
         // Scope orders scopes within one source; authored repo metadata shares repo scope.
         let mut candidate = SettingCandidate {
+            key: String::new(),
             layer: layer.layer,
             scope: layer.scope,
             source: layer.path.display().to_string(),
@@ -525,12 +575,12 @@ pub fn resolve_layers(
                     candidates: Vec::new(),
                 });
             entry.candidates.push(SettingCandidate {
+                key: key.clone(),
                 value: value.clone(),
                 ..candidate.clone()
             });
-            let previous = std::mem::replace(&mut entry.value, Value::Null);
             entry.value = if super::ADDITIVE_KEYS.contains(&key.as_str()) {
-                match (previous, value) {
+                match (std::mem::replace(&mut entry.value, Value::Null), value) {
                     (Value::Sequence(mut old), Value::Sequence(new)) if !new.is_empty() => {
                         old.extend(new);
                         Value::Sequence(old)
@@ -570,6 +620,14 @@ pub fn resolve_layers(
             }
         }
     }
+    // Config keeps the two authored keys distinct. Inspection's effective agent
+    // includes both classes, with every fallback below every explicit choice.
+    let mut agent = explanations["default_agent"].clone();
+    if let Some(choices) = explanations.remove("agent") {
+        agent.value = choices.value;
+        agent.candidates.extend(choices.candidates);
+    }
+    explanations.insert("agent".into(), agent);
     Ok(ResolvedSettings {
         config,
         settings: explanations,
@@ -721,6 +779,142 @@ mod tests {
         skill
     }
     #[test]
+    fn choices_precede_fallbacks_before_source_scope_and_target() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let mut skill = occurrence();
+        skill.occurrence.as_mut().unwrap().values =
+            serde_yaml_ng::from_str("agent: claude:occurrence").unwrap();
+        for (key, expected) in [("agent", "codex"), ("default_agent", "claude:occurrence")] {
+            let personal = layer(
+                ConfigLayer::Global,
+                SettingScope::Global,
+                &format!("skills: {{implement: {{{key}: codex}}}}"),
+            );
+            let resolved = resolve_layers(&[personal], Some(&skill)).unwrap();
+            assert_eq!(resolved.config.agent(), expected);
+            assert_eq!(resolved.settings["agent"].value.as_str(), Some(expected));
+            assert_eq!(
+                resolved.settings["agent"].candidates.last().unwrap().key,
+                "agent"
+            );
+        }
+        skill.occurrence.as_mut().unwrap().values = Value::Null;
+        let personal = layer(
+            ConfigLayer::Global,
+            SettingScope::Global,
+            "skills: {implement: {default_agent: codex}}",
+        );
+        let repo = layer(ConfigLayer::Repo, SettingScope::Repository, "agent: claude");
+        assert_eq!(
+            resolve_layers(&[personal.clone(), repo], Some(&skill))
+                .unwrap()
+                .config
+                .agent(),
+            "claude"
+        );
+        let repo = layer(
+            ConfigLayer::Repo,
+            SettingScope::Repository,
+            "graphs: {release: {steps: {write-code: {default_agent: claude}}}}",
+        );
+        let resolved = resolve_layers(&[personal, repo], Some(&skill)).unwrap();
+        assert_eq!(resolved.config.agent(), "codex");
+        assert!(resolved.config.agent.is_none());
+        assert_eq!(
+            resolved.settings["agent"].candidates.last().unwrap().key,
+            "default_agent"
+        );
+    }
+
+    #[test]
+    fn fallback_sources_keep_cli_environment_database_and_target_order() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let layers = [
+            layer(ConfigLayer::Global, SettingScope::Global,
+                "graphs: {release: {steps: {write-code: {default_agent: claude:personal}}}}"),
+            layer(ConfigLayer::Personal, SettingScope::Global, "default_agent: codex:database"),
+            layer(ConfigLayer::Personal, SettingScope::Repository, "default_agent: codex:repo"),
+            layer(ConfigLayer::Personal, SettingScope::Wave,
+                "default_agent: codex:wave\nskills: {implement: {default_agent: codex:skill}}\ngraphs: {release: {steps: {write-code: {default_agent: codex:step}}}}"),
+        ];
+        for (count, expected) in [
+            (1, "claude:personal"),
+            (2, "codex:database"),
+            (3, "codex:repo"),
+            (4, "codex:step"),
+        ] {
+            assert_eq!(
+                resolve_layers(&layers[..count], Some(&occurrence()))
+                    .unwrap()
+                    .config
+                    .agent(),
+                expected
+            );
+        }
+        let _environment = crate::lf::commands::graph::EnvVarGuard::set(
+            "LF_SETTINGS",
+            "default_agent: claude:environment",
+        );
+        assert_eq!(
+            resolve_layers(&layers, Some(&occurrence()))
+                .unwrap()
+                .config
+                .agent(),
+            "claude:environment"
+        );
+        let _cli = select_invocation(serde_yaml_ng::from_str("default_agent: codex:cli").unwrap());
+        assert_eq!(
+            resolve_layers(&layers, Some(&occurrence()))
+                .unwrap()
+                .config
+                .agent(),
+            "codex:cli"
+        );
+        let mut skill = occurrence();
+        skill.agent = Some("claude:choice".into());
+        assert_eq!(
+            resolve_layers(&layers, Some(&skill))
+                .unwrap()
+                .config
+                .agent(),
+            "claude:choice"
+        );
+        let _force = select_invocation(serde_yaml_ng::from_str("agent: codex:forced").unwrap());
+        assert_eq!(
+            resolve_layers(&layers, Some(&skill))
+                .unwrap()
+                .config
+                .agent(),
+            "codex:forced"
+        );
+    }
+
+    #[test]
+    fn captured_defaults_keep_fallback_meaning_and_explicit_empty_docs() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let captured = r#"{"name":"implement","default_agent":"codex","docs":[]}"#;
+        let skill: Skill = serde_json::from_str(captured).unwrap();
+        assert!(skill.agent.is_none());
+        let saved = serde_json::to_value(&skill).unwrap();
+        assert_eq!(saved["default_agent"], "codex");
+        let resolved = resolve_layers(
+            &[layer(
+                ConfigLayer::Repo,
+                SettingScope::Repository,
+                "agent: claude\ndocs: [repo.md]",
+            )],
+            Some(&skill),
+        )
+        .unwrap();
+        assert_eq!(resolved.config.agent(), "claude");
+        assert_eq!(skill.settings["docs"], Value::Sequence(vec![]));
+        assert_eq!(
+            resolve_layers(&[], Some(&skill)).unwrap().config.agent(),
+            "codex"
+        );
+    }
+
+    #[test]
     fn loaded_defaults_remain_builtin_when_selecting_a_skill() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let general = resolve_layers(&[], None).unwrap();
@@ -862,6 +1056,7 @@ mod tests {
         for (key, value) in [
             ("graphs.release.steps.write-code.yolo", "false"),
             ("skills.implement.docs", "[]"),
+            ("graphs.release.steps.write-code.default_agent", "codex"),
             ("automation.retries", "3"),
             ("release.targets.cli.verify", "[cargo test]"),
             ("planning", "{provider: git, shared: main}"),
@@ -872,6 +1067,7 @@ mod tests {
             ("skills.implement.planning", "{}"),
             ("yolo", "perhaps"),
             ("agent", "Explore"),
+            ("default_agent", "Explore"),
             ("missing", "false"),
             ("context_budgets.scratch_tokens", "0"),
             ("session", "{unknown: true}"),

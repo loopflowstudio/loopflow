@@ -269,29 +269,18 @@ pub(crate) fn resolve_session_config(
         .ok_or_else(|| anyhow::anyhow!("Session has no provider"))?;
     let resolved = crate::config::settings::resolve(&current, skill.as_ref())?;
     let current = &resolved.config;
-    let selected = resolved
-        .settings
-        .get("agent")
-        .filter(|setting| {
-            setting.candidates.last().is_some_and(|candidate| {
-                matches!(
-                    candidate.layer,
-                    crate::config::ConfigLayer::CommandLine
-                        | crate::config::ConfigLayer::Environment
-                )
-            })
-        })
-        .and_then(|setting| setting.value.as_str());
-    let configured_agent = resolved
-        .settings
-        .get("agent")
-        .filter(|setting| {
-            setting
-                .candidates
-                .last()
-                .is_some_and(|candidate| candidate.layer != crate::config::ConfigLayer::Builtin)
-        })
-        .and_then(|setting| setting.value.as_str());
+    let candidate = resolved.settings["agent"]
+        .candidates
+        .last()
+        .expect("agent has a builtin fallback");
+    let selected = (candidate.key == "agent"
+        && matches!(
+            candidate.layer,
+            crate::config::ConfigLayer::CommandLine | crate::config::ConfigLayer::Environment
+        ))
+    .then(|| current.agent());
+    let configured_agent =
+        (candidate.layer != crate::config::ConfigLayer::Builtin).then(|| current.agent());
     let model = if let Some(agent) = configured_agent {
         let (harness, model) = crate::config::parse_agent(agent);
         if harness == provider {

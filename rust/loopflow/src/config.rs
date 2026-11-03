@@ -491,6 +491,8 @@ pub struct Config {
     /// Agent in format harness:model (e.g., claude:opus, codex)
     #[serde(default)]
     pub agent: Option<String>,
+    /// Fallback used only when no applicable agent choice exists.
+    pub default_agent: Option<String>,
 
     /// Preferences for named skills and authored Graph occurrences.
     #[serde(default)]
@@ -603,6 +605,7 @@ impl Default for Config {
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),
             agent: None,
+            default_agent: None,
             skills: BTreeMap::new(),
             graphs: BTreeMap::new(),
             setting_layers: None,
@@ -631,10 +634,10 @@ impl Default for Config {
 impl Config {
     /// Return the configured agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
-        match self.agent.as_deref() {
-            Some(agent) => agent,
-            None => default_agent(),
-        }
+        self.agent
+            .as_deref()
+            .or(self.default_agent.as_deref())
+            .unwrap_or_else(|| default_agent())
     }
 }
 

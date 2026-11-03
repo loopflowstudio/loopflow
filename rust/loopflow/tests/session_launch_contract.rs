@@ -416,6 +416,35 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
 }
 
 #[test]
+fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
+    let fixture = Fixture::new("claude:sonnet");
+    let first = fixture.run(&["-i", ":", "Keep this conversation"]);
+    let session = fixture.session();
+    let arguments = args(&first);
+    let token = arguments[arguments
+        .iter()
+        .position(|arg| *arg == "--session-id")
+        .unwrap()
+        + 1];
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    for (fallback, expected) in [("codex", "sonnet"), ("claude:haiku", "haiku")] {
+        let resumed = fixture.run(&[
+            "--setting",
+            &format!("default_agent={fallback}"),
+            "session",
+            "resume",
+            &session,
+        ]);
+        pair(&resumed, "--resume", token);
+        pair(&resumed, "--model", expected);
+        assert_eq!(fixture.session(), session);
+    }
+}
+
+#[test]
 fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
     let fixture = Fixture::new("claude");
     fs::create_dir_all(fixture.home.path().join("machine")).unwrap();

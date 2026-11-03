@@ -1938,7 +1938,6 @@ async fn snapshot_task_detail(
         wave,
         personal,
         None,
-        None,
     );
     let (provider, _) = crate::config::parse_agent(&agent);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);

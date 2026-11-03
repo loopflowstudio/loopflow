@@ -25,14 +25,18 @@ worktree, PR or Graph exists. Create Tasks when requested or when the selected
 planning procedure calls for them; taskless work remains taskless otherwise.
 
 `lf task create --title "<outcome>"` adopts an unassociated linked checkout and
-its current conversation. `--session <id>` selects an exact conversation;
+its invoking Session. A Session can select itself with
+`LF_AGENT_CALLER.session_id`; from a shell, find its Loopflow ID with
+`lf session list --json` and pass `--session <id>`. Without a selected or
+invoking Session, no conversation is bound or made primary;
 `lf task promote <task> --session <id>` makes existing work that Task's home.
 `--worktree <path>` selects a checkout without requiring a Session. Promotion
 keeps files, branch, provider history and live input attachment; it starts no
 Graph and approves no Auto-Ship. Repeats keep the existing Task. Use
 `lf task create --new` to file independent backlog work from an owned checkout.
-Main/Wave checkouts stay shared; an ordinary Session there binds without moving.
-Repository/Wave primary conversations retain their scope. Remote sources must
+Main/Wave checkouts stay shared; a selected Session there binds without moving.
+A selected repository/Wave primary conversation transfers to the Task, freeing
+its former scope to open a new conversation. Remote sources must
 already exist on the selected Machine; promotion never copies live work.
 
 Use `lf` for changes to managed worktrees, Task delivery and Work state so their

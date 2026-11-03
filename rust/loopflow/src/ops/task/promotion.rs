@@ -35,17 +35,16 @@ pub(super) async fn resolve_source(
     repo: &Path,
     options: &TaskPromotionOptions,
 ) -> OpsResult<Source> {
-    let mut source = Source {
-        task: None,
-        checkout: None,
-        session: None,
-        _admission: Vec::new(),
-    };
     if options.new {
         if options.session.is_some() || options.worktree.is_some() {
             return Err(task_error("--new cannot select existing work"));
         }
-        return Ok(source);
+        return Ok(Source {
+            task: None,
+            checkout: None,
+            session: None,
+            _admission: Vec::new(),
+        });
     }
     let main = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
     let mut selected = match &options.session {
@@ -55,7 +54,22 @@ pub(super) async fn resolve_source(
                 .map_err(task_error)?
                 .ok_or_else(|| task_error(format!("Session {id} was not found on this Machine")))?,
         ),
-        None => None,
+        None => match crate::journal::agent_caller() {
+            Some(caller) => {
+                let root = crate::git::worktree_root(options.worktree.as_deref().unwrap_or(repo))
+                    .map_err(task_error)?;
+                store
+                    .session(&caller.session_id)
+                    .await
+                    .map_err(task_error)?
+                    .filter(|session| {
+                        session.interactive
+                            && session.completed_at.is_none()
+                            && crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(&root)
+                    })
+            }
+            None => None,
+        },
     };
     let cwd = options
         .worktree
@@ -78,17 +92,8 @@ pub(super) async fn resolve_source(
                 "Select an unfinished interactive Session to become the Task conversation",
             ));
         }
-        if matches!(
-            store
-                .sqlite
-                .primary_scope(&session.id)
-                .map_err(task_error)?,
-            Some(PrimaryScope::Repository(_) | PrimaryScope::Wave(_))
-        ) {
-            return Err(task_error("A repository or Wave primary Session retains its scope; select an ordinary Session"));
-        }
     }
-    source._admission = store
+    let admission = store
         .lock_checkout_roots(vec![root.clone()])
         .await
         .map_err(task_error)?;
@@ -109,63 +114,40 @@ pub(super) async fn resolve_source(
     let scope = checkout_scope(store, &root, SessionTarget::Context)
         .await
         .map_err(task_error)?;
-    match scope {
-        Some(PrimaryScope::Task(id)) => {
-            source.task = store.get_task(&id).await.map_err(task_error)?;
-            source.checkout = Some(root.clone());
-        }
-        None => {
-            source.checkout = Some(root.clone());
-            if selected.is_none() {
-                selected = select_checkout_conversation(store, &root).await?;
-            }
-        }
+    let (checkout, checkout_task) = match scope {
+        Some(PrimaryScope::Task(id)) => (Some(root), Some(id)),
+        None => (Some(root), None),
         Some(PrimaryScope::Repository(_) | PrimaryScope::Wave(_)) => {
             if options.worktree.is_some() {
                 return Err(task_error("This checkout is shared by its repository or Wave; select a Session without --worktree, or use an unassociated linked checkout"));
             }
+            (None, None)
+        }
+    };
+    let session_task = selected
+        .as_ref()
+        .and_then(|session| session.task_id.as_ref());
+    if let (Some(checkout_task), Some(session_task)) = (&checkout_task, session_task) {
+        if checkout_task != session_task {
+            return Err(task_error("The Session and checkout belong to different Tasks; permanent bindings are unchanged"));
         }
     }
-    source.session = selected;
-    if let Some(session) = &source.session {
-        if let Some(id) = &session.task_id {
-            let task = store
+    let task = match session_task.or(checkout_task.as_ref()) {
+        Some(id) => Some(
+            store
                 .get_task(id)
                 .await
                 .map_err(task_error)?
-                .ok_or_else(|| task_error("The Session's Task is unavailable"))?;
-            if source
-                .task
-                .as_ref()
-                .is_some_and(|existing| existing.id != task.id)
-            {
-                return Err(task_error("The Session and checkout belong to different Tasks; permanent bindings are unchanged"));
-            }
-            source.task = Some(task);
-        }
-    }
-    Ok(source)
-}
-
-async fn select_checkout_conversation(
-    store: &SharedStore,
-    root: &Path,
-) -> OpsResult<Option<LfSession>> {
-    if let Some(caller) = crate::journal::agent_caller() {
-        let session = store
-            .session(&caller.session_id)
-            .await
-            .map_err(task_error)?
-            .filter(|session| {
-                session.interactive
-                    && session.completed_at.is_none()
-                    && crate::git::worktree_root(&session.cwd).ok().as_deref() == Some(root)
-            });
-        if session.is_some() {
-            return Ok(session);
-        }
-    }
-    store.sqlite.checkout_conversation(root).map_err(task_error)
+                .ok_or_else(|| task_error("The selected work's Task is unavailable"))?,
+        ),
+        None => None,
+    };
+    Ok(Source {
+        task,
+        checkout,
+        session: selected,
+        _admission: admission,
+    })
 }
 
 pub(super) async fn save(
@@ -176,14 +158,6 @@ pub(super) async fn save(
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
 ) -> OpsResult<Task> {
-    if source.checkout.is_none() && source.session.is_none() {
-        if let Some(creation) = creation.as_ref() {
-            return store
-                .create_task(creation, acquisition)
-                .await
-                .map_err(task_error);
-        }
-    }
     if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
         return Err(task_error(format!(
             "The selected work already belongs to {}; ownership is unchanged",

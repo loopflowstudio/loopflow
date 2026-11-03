@@ -2859,6 +2859,13 @@ fn execute_command(
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(cli, &directory, cmd.selector())?;
+            // Promotion's default source is the caller's checkout. Resolving its
+            // target Task must not replace that source with the repository root.
+            let repo = if matches!(cmd, TaskCommand::Promote { .. }) {
+                loopflow::repo::discover_repo_root(&directory)?.unwrap_or(repo)
+            } else {
+                repo
+            };
             with_runtime(&repo, args, || run_task_command(cli, &repo, cmd))
         }
         Some(Commands::Context { json, wave, task }) => {

@@ -276,16 +276,14 @@ impl SqliteStore {
         }
         if let Some(session) = session {
             super::task_ownership::claim_in(&tx, task_id)?;
-            let scope: Option<String> = tx.query_row(
-                "SELECT primary_scope FROM agent_sessions WHERE id=?1",
+            // Transfer only the selected conversation out of its shared primary
+            // scope. The checkout and historical captures retain their owners.
+            tx.execute(
+                "UPDATE agent_sessions SET primary_scope=NULL,
+                 wave_id=CASE WHEN task_id IS NULL THEN NULL ELSE wave_id END
+                 WHERE id=?1 AND primary_scope IS NOT NULL",
                 [session.id.as_str()],
-                |row| row.get(0),
             )?;
-            if scope.is_some() {
-                return Err(StoreError::InvalidAuthority(
-                    "A repository or Wave primary Session retains its scope; select an ordinary Session".into(),
-                ));
-            }
             // Re-read the capture under the transaction: promotion changes only
             // prospective ownership, so a concurrent input need not be replayed.
             let current =

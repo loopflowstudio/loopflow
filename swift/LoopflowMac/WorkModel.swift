@@ -2382,7 +2382,10 @@ final class WorkModel {
 
     func beginSessionBinding(_ record: SessionRecord) {
         guard navigation.binding == nil else { return }
-        navigation.binding = SessionBindingDraft(sessionId: record.id, title: record.title, taskTitle: record.title)
+        navigation.binding = SessionBindingDraft(
+            sessionId: record.id, title: record.title,
+            assignedTaskId: record.work?.kind == .task ? record.work?.id : nil,
+            taskTitle: record.title)
     }
 
     func previewSessionBinding() async {
@@ -2430,7 +2433,7 @@ final class WorkModel {
         owner.binding?.error = nil
         do {
             let task = try await query.promoteSession(
-                id: draft.sessionId, task: draft.preview?.taskId,
+                id: draft.sessionId, task: draft.assignedTaskId ?? draft.preview?.taskId,
                 title: draft.taskTitle, cwd: repo)
             // Keep the selected Session, its retained terminal and composer.
             // Promotion changes its Work address, never its input attachment.

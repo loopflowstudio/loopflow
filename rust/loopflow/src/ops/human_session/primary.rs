@@ -1,5 +1,5 @@
-//! The one ongoing conversation of a scope. A primary Session is an ordinary
-//! interactive conversation; its row names the scope it is primary for.
+//! The ongoing conversation of a scope. Shared scopes mark their primary
+//! Session; a Task points to one of its existing conversations.
 
 use std::path::Path;
 
@@ -188,15 +188,18 @@ pub(crate) async fn admit_workspace(
             ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
         }
         PrimaryScope::Task(task) => {
+            // Promotion associates an existing conversation in place, including
+            // when the Task has a separate checkout of its own.
+            if session.work_source == Some(WorkSource::Bound) {
+                return Ok(session);
+            }
             let task = store
                 .get_task(task)
                 .await?
                 .ok_or_else(|| anyhow!("primary Task is unavailable"))?;
-            if session.work_source == Some(WorkSource::Bound)
-                && task.worktree.as_ref().is_none_or(|cwd| {
-                    crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(cwd)
-                })
-            {
+            if task.worktree.as_ref().is_some_and(|root| {
+                crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(root)
+            }) {
                 return Ok(session);
             }
             if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {

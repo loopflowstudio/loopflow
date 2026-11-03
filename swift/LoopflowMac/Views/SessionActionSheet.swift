@@ -30,17 +30,27 @@ struct SessionActionSheet: View {
     private var bindingForm: some View {
         if let draft = model.navigation.binding {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Assign “\(draft.title)” to a Task").font(Typography.textStrong)
-                if let preview = draft.preview {
+                Text(draft.assignedTaskId == nil ? "Assign “\(draft.title)” to a Task" : "Make “\(draft.title)” primary")
+                    .font(Typography.textStrong)
+                if draft.assignedTaskId == nil {
+                    Text("Assignment is permanent. This Session cannot be moved to another Task or unbound. No workflow starts.")
+                }
+                if draft.assignedTaskId != nil {
+                    Text("Use this conversation when opening its Task. No workflow starts.")
+                    Button("Make primary Task conversation") {
+                        Task { await model.promoteSessionToTask() }
+                    }
+                    .disabled(draft.submitting)
+                    .accessibilityIdentifier("session-promote-assigned")
+                } else if let preview = draft.preview {
                     Text("\(preview.identifier) · \(preview.title)")
-                    Text("This assignment is permanent. This Session cannot be moved to another Task or unbound.")
                     HStack {
                         Button("Choose another Task") { model.navigation.binding?.preview = nil }
-                        Button("Bind permanently") { Task { await model.commitSessionBinding() } }
+                        Button("Assign to Task") { Task { await model.commitSessionBinding() } }
                             .accessibilityIdentifier("session-bind-confirm")
                     }
                     .disabled(draft.submitting)
-                    Button("Use Session and checkout as Task home") {
+                    Button("Make primary Task conversation") {
                         Task { await model.promoteSessionToTask() }
                     }
                     .disabled(draft.submitting)
@@ -56,7 +66,7 @@ struct SessionActionSheet: View {
                     }
                     .disabled(draft.submitting || draft.taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("session-promote-create")
-                    Text("Keeps this conversation and its work in place. Starts no workflow.")
+                    Text("Makes this the primary Task conversation.")
                     Divider()
                     TextField("Task identifier or stable ID", text: Binding(
                         get: { model.navigation.binding?.selector ?? "" },
@@ -67,6 +77,7 @@ struct SessionActionSheet: View {
                         .disabled(draft.submitting || draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("session-bind-preview")
                 }
+                Text("Making this conversation primary adopts its unassociated linked checkout. Main and Wave checkouts stay shared. The conversation stays in place.")
                 if let error = draft.error {
                     Text(error).foregroundStyle(palette.warning)
                         .accessibilityIdentifier("session-bind-error")

@@ -1947,7 +1947,7 @@ pub enum TaskCommand {
     },
     /// Make an existing worktree or Session this Task's home without starting work
     #[command(
-        after_help = "Defaults to this checkout. --session uses that conversation's cwd and makes it the Task's primary. Shared main/Wave checkouts are never adopted. Remote calls select paths and Sessions on the target Machine; they never transfer live work."
+        after_help = "Defaults to this checkout and the invoking Session, if any. From a shell, --session explicitly selects the primary conversation; find its Loopflow ID with `lf session list --json`. A selected Session supplies its cwd. Shared main/Wave checkouts are never adopted. Remote calls select paths and Sessions on the target Machine; they never transfer live work."
     )]
     Promote {
         issue: String,
@@ -2012,7 +2012,7 @@ until `lf ship`."
     },
     /// Create a Task from existing work; with --run, also start its Graph
     #[command(
-        after_help = "An unassociated linked checkout becomes the Task's home, preserving its branch and files. Its current conversation becomes primary. Repeating creation there returns the same Task; use --new to file separate backlog work. Main and Wave checkouts stay shared. --session selects an existing conversation without restarting it. Promotion alone never starts a Graph or approves Auto-Ship. Remote calls use sources on the selected Machine."
+        after_help = "An unassociated linked checkout becomes the Task's home, preserving its branch and files. Its invoking Session becomes primary; from a shell, select one with --session (find its Loopflow ID with `lf session list --json`). Without either, no conversation is bound or made primary. Repeating creation there returns the same Task; use --new to file separate backlog work. Main and Wave checkouts stay shared. --session selects an existing conversation without restarting it. Promotion alone never starts a Graph or approves Auto-Ship. Remote calls use sources on the selected Machine."
     )]
     Create {
         /// Existing conversation to promote without replaying its input

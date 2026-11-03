@@ -2604,6 +2604,8 @@ fn promotion_preserves_live_conversation_and_existing_work() {
                     path,
                     "task",
                     "create",
+                    "--session",
+                    &id,
                     "--title",
                     "Research prototype",
                     "--json",
@@ -2892,54 +2894,384 @@ fn promotion_failed_reservation_leaves_no_task_and_retry_succeeds() {
 
 #[test]
 fn promotion_continuation_keeps_a_recorded_session_subdirectory() {
+    for assigned in [false, true] {
+        let fixture = Fixture::new(false);
+        let output = fixture.run(&LAUNCH);
+        assert!(output.status.success(), "{output:?}");
+        let original = fixture.session_row(&fixture.launches()[0]).0;
+        let root = fixture
+            .repo
+            .create_named_worktree("prototype")
+            .canonicalize()
+            .unwrap();
+        let research = root.join("research");
+        std::fs::create_dir(&research).unwrap();
+        let existing = assigned.then(|| {
+            fixture.json(&[
+                "task",
+                "create",
+                "--worktree",
+                root.to_str().unwrap(),
+                "--title",
+                "Existing Task",
+                "--json",
+            ])
+        });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        // Desktop/import admission can record a more specific cwd than the CLI's
+        // --repo selector, which normalizes its initial launch to the checkout root.
+        let session = runtime.block_on(async {
+            let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
+                path: fixture.home.path().join("loopflow.db"),
+            })
+            .await
+            .unwrap();
+            let mut session = store.session(&original).await.unwrap().unwrap();
+            session.id = uuid::Uuid::new_v4().simple().to_string().into();
+            session.cwd = research.clone();
+            session.captured = None;
+            session.artifact_key = None;
+            session.caller_artifact_key = None;
+            session.input_published = false;
+            session.completed_at = None;
+            if let Some(task) = &existing {
+                session.task_id =
+                    Some(loopflow::durable::TaskId::parse(task["id"].as_str().unwrap()).unwrap());
+                session.work_source = Some(loopflow::session::WorkSource::Declared);
+            }
+
+            store.create_session(session).await.unwrap()
+        });
+        let task = fixture.json(&[
+            "task",
+            "create",
+            "--session",
+            session.id.as_str(),
+            "--title",
+            "Research",
+            "--json",
+        ]);
+        let primary = fixture.json(&[
+            "resume",
+            "--task",
+            task["id"].as_str().unwrap(),
+            "--prepare",
+            "--json",
+        ]);
+        assert_eq!(primary["id"], session.id.as_str());
+        assert_eq!(primary["cwd"], research.to_str().unwrap());
+        assert_eq!(task["worktree"], root.to_str().unwrap());
+        assert_eq!(fixture.launches().len(), 1);
+    }
+}
+
+#[test]
+fn promotion_shell_never_selects_a_conversation_by_recency() {
     let fixture = Fixture::new(false);
-    let output = fixture.run(&LAUNCH);
-    assert!(output.status.success(), "{output:?}");
-    let original = fixture.session_row(&fixture.launches()[0]).0;
     let root = fixture
         .repo
         .create_named_worktree("prototype")
         .canonicalize()
         .unwrap();
-    let research = root.join("research");
-    std::fs::create_dir(&research).unwrap();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    // Desktop/import admission can record a more specific cwd than the CLI's
-    // --repo selector, which normalizes its initial launch to the checkout root.
-    let session = runtime.block_on(async {
-        let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
-            path: fixture.home.path().join("loopflow.db"),
-        })
-        .await
-        .unwrap();
-        let mut session = store.session(&original).await.unwrap().unwrap();
-        session.id = uuid::Uuid::new_v4().simple().to_string().into();
-        session.cwd = research.clone();
-        session.captured = None;
-        session.artifact_key = None;
-        session.caller_artifact_key = None;
-        session.input_published = false;
-        session.completed_at = None;
-        store.create_session(session).await.unwrap()
-    });
-    let task = fixture.json(&[
+    fixture.json(&["session", "list", "--json"]);
+    let ids = ["session_research", "session_question"];
+    for (created, id) in ids.iter().enumerate() {
+        fixture.db().execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,repo,interactive,input_published) VALUES(?1,?1,'human',?2,?3,?4,1,0)",
+            rusqlite::params![id, created as i64 + 1, root.to_str().unwrap(), fixture.repo.path().to_str().unwrap()],
+        ).unwrap();
+    }
+    let other = fixture.json(&[
         "task",
         "create",
-        "--session",
-        session.id.as_str(),
+        "--new",
         "--title",
-        "Research",
+        "Other question",
         "--json",
     ]);
-    let primary = fixture.json(&[
-        "resume",
+    fixture.json(&[
+        "session",
+        "bind",
+        &ids[1],
         "--task",
-        task["id"].as_str().unwrap(),
-        "--prepare",
+        other["id"].as_str().unwrap(),
         "--json",
     ]);
-    assert_eq!(primary["id"], session.id.as_str());
-    assert_eq!(primary["cwd"], research.to_str().unwrap());
-    assert_eq!(task["worktree"], root.to_str().unwrap());
-    assert_eq!(fixture.launches().len(), 1);
+    // Opening the other Task's conversation most recently cannot choose ownership.
+    fixture.json(&["resume", &ids[1], "--prepare", "--json"]);
+    let created = fixture.json(&[
+        "--repo",
+        root.to_str().unwrap(),
+        "task",
+        "create",
+        "--title",
+        "Prototype",
+        "--json",
+    ]);
+    let task = created["id"].as_str().unwrap();
+    assert_ne!(created["id"], other["id"]);
+    assert_eq!(created["worktree"], root.to_str().unwrap());
+    let primary: Option<String> = fixture
+        .db()
+        .query_row(
+            "SELECT primary_session_id FROM tasks WHERE id=?1",
+            [task],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(primary, None);
+    let bound: Option<String> = fixture
+        .db()
+        .query_row(
+            "SELECT task_id FROM agent_sessions WHERE id=?1",
+            [&ids[0]],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(bound, None);
+    // An exact selection works even with a newer conversation in the checkout.
+    fixture.json(&["task", "promote", task, "--session", &ids[0], "--json"]);
+    let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
+    assert_eq!(primary["id"], ids[0]);
+    let other_bound: String = fixture
+        .db()
+        .query_row(
+            "SELECT task_id FROM agent_sessions WHERE id=?1",
+            [&ids[1]],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(other_bound, other["id"]);
+    assert!(fixture.launches().is_empty());
+    assert_eq!(fixture.count("task_graphs"), 0);
+}
+
+#[test]
+fn promotion_invoking_session_replaces_primary_in_owned_and_shared_checkouts() {
+    for (create, shared) in [(false, false), (true, false), (false, true), (true, true)] {
+        let fixture = Fixture::new(true);
+        let root = if shared {
+            fixture.repo.path().canonicalize().unwrap()
+        } else {
+            fixture
+                .repo
+                .create_named_worktree("prototype")
+                .canonicalize()
+                .unwrap()
+        };
+        let args = [
+            "--repo",
+            root.to_str().unwrap(),
+            "-i",
+            "--agent",
+            "opencode",
+            ":",
+            "Research",
+        ];
+        let (first, first_capture) = fixture.attach(&args);
+        let (second, second_capture) = fixture.attach(&args);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let ids = [
+                fixture.session_row(&first_capture).0,
+                fixture.session_row(&second_capture).0,
+            ];
+            let store =
+                loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+                    .unwrap();
+            let attachment = store.session_attachment(&ids[1]).unwrap().unwrap();
+            let caller = serde_json::to_string(&attachment.caller(ids[1].clone().into())).unwrap();
+            let caller_cwd = store.session(&ids[1]).unwrap().unwrap().cwd;
+            let created = fixture.json(&[
+                "task",
+                "create",
+                "--title",
+                "Prototype",
+                "--session",
+                &ids[0],
+                "--json",
+            ]);
+            let task = created["id"].as_str().unwrap();
+            assert_eq!(
+                fixture.json(&["resume", "--task", task, "--prepare", "--json"])["id"],
+                ids[0]
+            );
+            if create && shared {
+                // A shared checkout cannot identify a Task. The invoking
+                // conversation's existing bind supplies it for repeat creation.
+                fixture.json(&["session", "bind", &ids[1], "--task", task, "--json"]);
+            }
+            let args = if create {
+                vec!["task", "create", "--title", "Same work", "--json"]
+            } else {
+                vec!["task", "promote", task, "--json"]
+            };
+            let output = fixture
+                .command(&args)
+                .current_dir(&caller_cwd)
+                .env("LF_AGENT_CALLER", caller)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "create={create}, shared={shared}: {output:?}"
+            );
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap()["id"],
+                task
+            );
+            let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
+            assert_eq!(primary["id"], ids[1]);
+            assert_eq!(primary["interactive"], true);
+            assert_eq!(primary["cwd"], caller_cwd.to_str().unwrap());
+            assert_eq!(fixture.count("tasks"), 1);
+            assert_eq!(fixture.count("agent_sessions"), 2);
+            assert_eq!(fixture.count("task_graphs"), 0);
+            assert_eq!(fixture.launches().len(), 2);
+            (task.to_owned(), ids[1].clone(), caller_cwd)
+        }));
+        fixture.release(first);
+        fixture.release(second);
+        let (task, session, cwd) = result.unwrap_or_else(|error| std::panic::resume_unwind(error));
+        std::fs::write(
+            fixture.home.path().join("bin/opencode"),
+            include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+        )
+        .unwrap();
+        let continued = fixture.run(&["resume", "--task", &task]);
+        assert!(continued.status.success(), "{continued:?}");
+        assert_eq!(
+            fixture.session_row(fixture.launches().last().unwrap()).0,
+            session
+        );
+        let resumed: Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture.home.path().join("received.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(resumed["cwd"], cwd.to_str().unwrap());
+    }
+}
+
+#[test]
+fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
+    for wave in [false, true] {
+        let fixture = Fixture::new(false);
+        let scope = if wave {
+            let task_path = fixture.repo.create_named_worktree("other-task");
+            support::register_task_with_pr(
+                fixture.home.path(),
+                &task_path,
+                "other-task",
+                &fixture.repo.head_sha(),
+            );
+            vec!["resume", "--wave", "task-pr-tests", "--prepare", "--json"]
+        } else {
+            vec!["resume", "--prepare", "--json"]
+        };
+        let before = fixture.json(&scope);
+        let session = before["id"].as_str().unwrap();
+        let created = fixture.json(&[
+            "task",
+            "create",
+            "--session",
+            session,
+            "--title",
+            "Continue research",
+            "--json",
+        ]);
+        let task = created["id"].as_str().unwrap();
+        assert!(created["worktree"].is_null());
+        let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
+        assert_eq!(primary["id"], session);
+        assert_eq!(primary["cwd"], before["cwd"]);
+        assert!(primary["primary_scope"].is_null());
+        assert_eq!(primary["task_primary"], true);
+        // Retrying from the selected conversation keeps the Task identity.
+        assert_eq!(
+            fixture.json(&[
+                "task",
+                "create",
+                "--session",
+                session,
+                "--title",
+                "Continue research",
+                "--json"
+            ])["id"],
+            task
+        );
+        let replacement = fixture.json(&scope);
+        assert_ne!(replacement["id"], session);
+        assert_eq!(replacement["cwd"], before["cwd"]);
+        assert_eq!(replacement["primary_scope"], before["primary_scope"]);
+        let checkout = fixture.json(&["task", "checkout", task, "--json"]);
+        assert_ne!(checkout["worktree"], before["cwd"]);
+        let continued = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
+        assert_eq!(continued["id"], session);
+        assert_eq!(continued["cwd"], before["cwd"]);
+        assert!(fixture.launches().is_empty());
+        assert_eq!(fixture.count("task_graphs"), 0);
+    }
+}
+
+#[test]
+fn promotion_background_run_does_not_claim_primary() {
+    let fixture = Fixture::new(false);
+    let root = fixture
+        .repo
+        .create_named_worktree("prototype")
+        .canonicalize()
+        .unwrap();
+    let created = fixture.json(&[
+        "task",
+        "create",
+        "--worktree",
+        root.to_str().unwrap(),
+        "--title",
+        "Prototype",
+        "--json",
+    ]);
+    let task = created["id"].as_str().unwrap();
+    fixture.db().execute(
+        "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,repo,interactive,input_published) VALUES('background','Research','human',1,?1,?2,0,0)",
+        rusqlite::params![root.to_str().unwrap(), fixture.repo.path().to_str().unwrap()],
+    ).unwrap();
+    let caller = serde_json::json!({"session_id":"background", "origin_exec_id": uuid::Uuid::new_v4().to_string()});
+    for args in [
+        vec!["task", "create", "--title", "Same work", "--json"],
+        vec!["task", "promote", task, "--json"],
+    ] {
+        let output = fixture
+            .command(&args)
+            .current_dir(&root)
+            .env("LF_AGENT_CALLER", caller.to_string())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["id"],
+            task
+        );
+    }
+    let refused = fixture.run(&["task", "promote", task, "--session", "background"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("unfinished interactive Session"));
+    let primary: Option<String> = fixture
+        .db()
+        .query_row(
+            "SELECT primary_session_id FROM tasks WHERE id=?1",
+            [task],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(primary, None);
+    let bound: Option<String> = fixture
+        .db()
+        .query_row(
+            "SELECT task_id FROM agent_sessions WHERE id='background'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(bound, None);
+    assert_eq!(fixture.count("tasks"), 1);
+    assert!(fixture.launches().is_empty());
 }

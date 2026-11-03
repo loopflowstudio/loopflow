@@ -45,6 +45,8 @@ pub fn run(
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
                 | crate::lf::TaskCommand::Save { .. }
+                | crate::lf::TaskCommand::Promote { .. }
+                | crate::lf::TaskCommand::Create { run: false, .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
         })

@@ -60,6 +60,9 @@ extension WorkModel {
             if session.work?.kind != .task {
                 rows.append(.init(id: .bind(id), title: "Bind to Task…",
                                   detail: "Action · \(session.title) · Review permanent assignment", key: "Bind"))
+            } else if session.interactive, !session.taskPrimary {
+                rows.append(.init(id: .bind(id), title: "Make primary Task conversation…",
+                                  detail: "Action · \(session.title)", key: "Primary"))
             }
         }
         return rows

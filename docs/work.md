@@ -26,27 +26,33 @@ memory and KRs.
 
 ```bash
 lf task create --title "Finish the prototype"    # adopt this linked checkout
+lf session list --json                         # find the Loopflow Session ID
 lf task create --session SESSION --title "Finish the prototype"
 lf task promote LOO-12 --session SESSION         # use work for an existing Task
-lf task promote LOO-12 --worktree ../prototype   # checkout without a conversation
+lf task promote LOO-12 --worktree ../prototype   # select an existing checkout
 ```
 
 Promotion preserves the branch, dirty and untracked files, and the Session's
 provider history and live attachment. The selected Session becomes the Task's
 primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
+An interactive Session issuing the command selects itself through `LF_AGENT_CALLER.session_id`.
+From a shell, use `--session` with an ID from `lf session list --json`. Without
+a selected or invoking Session, only the checkout is adopted; no conversation
+is bound or made primary. Opening a conversation more recently never selects it.
 Promotion starts no Graph and approves no Auto-Ship. Repeating it keeps the same
 Task; conflicting Task ownership fails without moving either person's work.
 Use `--new` when filing independent backlog work from an existing Task checkout.
 
-Main and Wave checkouts remain shared. An ordinary Session there can become a
+Main and Wave checkouts remain shared. A selected Session there can become a
 Task conversation without moving its cwd; an explicit later `lf task checkout`
-gives the Task a separate home. Repository and Wave primary conversations keep
-their scope. A remote command uses the selected Machine's existing paths and
-Sessions; it does not transfer local live work.
+gives the Task a separate home. Selecting a repository or Wave primary Session
+transfers that conversation to the Task; its former scope can open a new one.
+A remote command uses the selected Machine's existing paths and Sessions; it does not transfer local live work.
 
 Desktop offers **Create Task from this Session** in the Session's Task-assignment
-action. Selecting an existing Task also offers **Use Session and checkout as Task
-home**. The current terminal and composer stay in place.
+action. Selecting an existing Task also offers **Make primary Task
+conversation**. Already-assigned Sessions offer the same action in the palette
+and Task menu. The current terminal and composer stay in place.
 
 ## Steer it while it runs
 

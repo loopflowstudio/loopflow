@@ -2,6 +2,8 @@
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
 mod lifetime;
+#[cfg(test)]
+mod lifetime_tests;
 mod native;
 mod output;
 mod snapshot;
@@ -35,6 +37,9 @@ const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Continuous output tells the lifetime policy once per pause, not per read.
+const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
+
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
 /// Stream bytes retained per viewer for resume.
@@ -724,6 +729,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut ownership = Ownership::default();
     let mut size = (24, 80);
     let mut pending_input = VecDeque::new();
+    let mut recorded_input = 0;
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -737,17 +743,20 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let (wake, waker) = UnixStream::pair()?;
     wake.set_nonblocking(true)?;
     waker.set_nonblocking(true)?;
-    let (viewing, ending) = lifetime::spawn(id.clone(), waker.try_clone()?);
+    let (activity, ending) = lifetime::spawn(id.clone(), terminal, waker.try_clone()?);
     let child_pid = child.id();
     let (finished, child_exit) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = finished.send(child.wait());
         let _ = (&waker).write_all(&[1]);
     });
-    let mut viewed = None;
+    let mut observed = lifetime::Activity::default();
+    let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut planning = None;
     loop {
+        #[cfg(test)]
+        lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
         let mut replaced = Vec::new();
         let mut owner_change = false;
         let mut size_change = false;
@@ -1073,16 +1082,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         drain(&wake);
-        if let Ok(event) = ending.try_recv() {
-            end_viewers(&mut viewers, event);
-            snapshot::leave(&id, &output);
-            crate::platform::kill_process(std::process::id());
-        }
-        let now_viewed = viewers.iter().any(|v| v.live());
-        if viewed != Some(now_viewed) {
-            viewed = Some(now_viewed);
-            let _ = viewing.send(now_viewed);
-        }
         let detached = !viewers
             .iter()
             .any(|v| v.token.is_some() && v.token == control);
@@ -1099,12 +1098,28 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         place_events(&output, &mut viewers, announced);
         if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
-            match input.write(pending_input.as_slices().0) {
-                Ok(n) => {
-                    pending_input.drain(..n);
+            let recorded = if terminal && recorded_input < pending_input.len() {
+                let bytes = &pending_input.make_contiguous()[recorded_input..];
+                crate::journal::process_ledger()
+                    .and_then(|store| store.record_owner_input(&id, bytes))
+                    .map(|()| recorded_input = pending_input.len())
+                    .inspect_err(|error| tracing::warn!(%error, "cannot retain terminal input; retrying before delivery"))
+                    .is_ok()
+            } else {
+                true
+            };
+            if recorded {
+                match input.write(pending_input.as_slices().0) {
+                    Ok(n) => {
+                        pending_input.drain(..n);
+                        recorded_input = recorded_input.saturating_sub(n);
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(_) => {
+                        pending_input.clear();
+                        recorded_input = 0;
+                    }
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(_) => pending_input.clear(),
             }
         }
         if end_input && pending_input.is_empty() {
@@ -1128,6 +1143,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(e) => return Err(e.into()),
                 };
+                observed.output += 1;
                 let ready = match client.as_mut().filter(|_| terminal) {
                     Some(client) => client.accept(reader.as_raw_fd(), &bytes[..n]),
                     None => bytes[..n].to_vec(),
@@ -1140,6 +1156,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     &ready,
                     detached,
                 );
+                if output_told.is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE) {
+                    output_told = Some(Instant::now());
+                    let _ = activity.send(observed);
+                }
             }
         }
         readers.retain(|(stream, _)| !drained.contains(stream));
@@ -1167,6 +1187,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && exit_record.is_some())
         {
+            if let Err(error) =
+                crate::journal::process_ledger().and_then(|store| store.clear_owner_input(&id))
+            {
+                tracing::warn!(%error, "cannot clear ended native input; retaining its owner");
+            }
+            recorded_input = 0;
             if let Some(ended) = client.take() {
                 finish_client(
                     ended,
@@ -1271,6 +1297,34 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 };
             }
         }
+        // Ready output and viewer changes precede the final ending judgment.
+        // A throttled/unconsumed activity report also invalidates the candidate.
+        if observed.view(viewers.iter().any(|v| v.live())) {
+            let _ = activity.send(observed);
+        }
+        #[cfg(test)]
+        lifetime_tests::before_judgment();
+        if let Ok(ending) = ending.try_recv() {
+            let event = ending
+                .confirm(&id, observed, !pending_input.is_empty())
+                .inspect_err(|error| {
+                    tracing::warn!(%error, owner = %id, "cannot confirm Session ending; judging again later");
+                })
+                .ok()
+                .flatten();
+            if let Some(event) = event {
+                end_viewers(&mut viewers, event);
+                snapshot::leave(&id, &output);
+                crate::platform::kill_process(std::process::id());
+            }
+            // Flush even throttled activity so the applicable quiet interval
+            // starts again and a settled owner can eventually end.
+            if ending.activity != observed {
+                let _ = activity.send(observed);
+            }
+        }
+        #[cfg(test)]
+        lifetime_tests::after_judgment(&output, observed)?;
         // Sleep until a descriptor has work; only held exit text and a
         // pending exit announcement are timed.
         let deadline = match exit {

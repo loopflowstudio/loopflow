@@ -262,20 +262,13 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   new Task appear there; Jack kept the rule then (2026-10-05). LOO-505 now
   exposes unstarted standalone captures in repository inventory/navigation.
 
-## Workflow and Flow alignment (LOO-386, 2026-10-07)
+## Graph alignment (reconciled 2026-11-02)
 
-Jack Heart approved LOO-386/#1492, retaining Workflow/Flow and restart-to-start,
-then requested gate and Task-completing landing. Review/approval:
-`9669d67d5:scratch/workflow-review.md`; earlier detail: `97bf9dbcb`, this heading.
-
-Independent namespaces retain kind/name. Restart keeps the graph/history;
-Wave/repository defaults affect future take-up (LOO-505). Latest FlowProcessDetail
-grants no control authority; selection, execution and TaskRunControl stay separate.
-LOO-400's `e467ea995` supplies Process/LFID; old captures remain readable.
-Wave-owned commands supersede Project commands. A reset Task cannot advance
-from an older Flow's arrival. Catalog, gate failures/repairs and reruns:
-`a73198197:wave/product/MEMORY.md`, this heading. Approval proves no native,
-live-planning, configured-provider acceptance or chapter KR.
+AGENTS.md owns the current Graph/Task contract. Latest GraphProcessDetail grants
+no control authority; Task position, execution and TaskRunControl stay separate.
+Jack Heart's LOO-386 approval and superseded Workflow/Flow vocabulary remain at
+`fb382a7d45:.lf/wave/product/MEMORY.md`, **Workflow and Flow alignment**.
+That approval established no native/provider acceptance or chapter KR.
 
 ## Task conversation and Workflows (LOO-353, reconciled 2026-10-17)
 
@@ -311,8 +304,8 @@ Jack Heart (LOO-383) selected operating Wave conversations: move started Tasks,
 leave unstarted backlog alone, and report PR-linked work as waiting, moving or
 stuck. Leaving unarmed merges to Jack remained unreviewed. Current session/operate
 skills and Work APIs supersede the old wrapper and process-inspection recipe.
-Stopped execution is history, not permission to resume; an open conversation
-schedules nothing. Naming the Wave as next owner must not evade its own duty.
+Stopped execution is history, not permission to resume; progress observations
+grant no operating authority. Naming the Wave as next owner must not evade its own duty.
 Original decisions, continuation history and evidence limits:
 `28588f8910:.lf/wave/product/MEMORY.md`, this heading.
 The review established simulations and read-only model runs, not installed behavior.
@@ -1000,14 +993,27 @@ October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
 
 ### Task observation and retired Watch
 
+Jack Heart selected Session posts plus an expandable run page for LOO-711
+(2026-11-02): minimal default, combined position/readiness, Files owning the diff.
+The wait-only proposal is superseded. `db5cdbbd14` implements four native provider
+paths and grouped history, repairing `dd2bb7bc21`'s latest-run-only reports.
+Compare reportable facts by durable run identity and settle gaps per run: a newer
+helper must not hide an older worker's failure. Existing receipts retain compact
+observations across reconnect, suppress uncertain dispatch replay and exclude late
+acknowledgements from the observed baseline. Worker Runs receive no posts; posts
+grant no operating authority. Historical run completion never completes a Task.
+Missing summaries stay absent; prose joins the exact captured step separately
+from its exit. Focused checks prove components, not configured idle wake or draft
+retention; Claude hook inbox availability remains unverified. Preserve Session
+identity and drafts. One-second settling is a demo assumption, not Jack's choice.
+Gate and authored demo remain; provider restriction or an adjacent card is no
+substitute for delivery.
+
 Desktop launched two LOO-293 helpers while its worker still produced output.
 Missing `lf ps` rows or a finished launcher do not prove idle execution.
 
-LOO-293's bounded history, passive native output and configured proof remain;
-use current Task panes, not the deleted Watch/Monitor view. Join history by exact
-captured step, never skill name or current YAML. Earlier scope and retired
-FlowPosition mechanism: `2c23acbb8:wave/product/MEMORY.md`, **Task observation and
-Watch**. Integration is not acceptance.
+LOO-293's unproved native scope and retired Watch/FlowPosition history:
+`2c23acbb8:wave/product/MEMORY.md`, **Task observation and Watch**.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 

@@ -2870,6 +2870,26 @@ mod tests {
     }
 
     #[test]
+    fn native_terminal_input_upgrade_preserves_owners_without_inventing_drafts() {
+        let conn = open();
+        let migration = section("native_terminal_input");
+        apply_set(&conn, &MIGRATIONS[..migration.index], &mut Vec::new()).unwrap();
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/native_terminal_input_released.sql"
+        ))
+        .unwrap();
+        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
+        let owner: (i64, bool, Option<String>) = conn
+            .query_row(
+                "SELECT started_at,viewed,native_input FROM processes WHERE id='retained-owner'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(owner, (100, true, None));
+    }
+
+    #[test]
     fn session_preview_upgrades_released_activity_without_inventing_output() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&conn, "session_preview");

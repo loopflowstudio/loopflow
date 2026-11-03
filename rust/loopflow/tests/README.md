@@ -50,6 +50,16 @@ Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
 viewer's OS exit and its original command's recorded result must agree, including
 failed placement, failed shipping and a Graph held at landing.
 
+`session_activity` fixtures that stand for a provider's own facts (open tools,
+pending input, yielded) carry the AgentProcess's `attachment_token`; a row
+without one is a terminal's status observation, which an unviewed owner does
+not read as a turn (`transport_tests::detached_sessions_end_after_their_limit`).
+`transport_tests::silent_native_turns_survive_until_settlement` runs native
+prompt/stop callbacks from the generated hook settings, preserves silent work
+past the detached grace and executable removal, then proves ending after stop.
+`native_background_watches_survive_until_settlement` covers a yielded reply with
+background work, then scheduled wakeups, and ending only after both settle.
+
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
 cover startup cost and release retries that share the same Git operations.
@@ -320,12 +330,14 @@ broken pipes that interrupt Git after the remote ref moves; background children
 must use stdio that survives their parent's exit.
 
 Builtin skill Markdown is compiled into Rust. After editing it, run the builtin
-contract tests alongside the relevant behavior tests; PR renderer tests alone do
-not cover the prompts that generate their input. Update obsolete assertions to
+and prompt contract tests alongside the relevant behavior tests; prompt tests also
+cover composed Session instructions. PR renderer tests alone do not cover the
+prompts that generate their input. Update obsolete assertions to
 match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
 cargo test -p loopflow --lib builtins::tests
+cargo test -p loopflow --lib prompt::tests
 ```
 
 When changing the builtin catalog or Graph composition, also exercise discovery.

@@ -98,7 +98,7 @@ lf wave status infrastructure                                   # each setting a
 lf : "fix the flaky retry test"            # an agent, on whichever of your logins has room
 lf -a codex : "fix the flaky retry test"   # the same thing on Codex
 lf debug -c                                # a Skill: paste an error, it finds and fixes the cause
-lf resume --all                            # after a crash or reboot, every interrupted conversation comes back
+lf resume                                  # return to this scope’s conversation
 ```
 
 ## The pieces

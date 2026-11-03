@@ -37,8 +37,9 @@ enum LoopflowLibrary {
     ) async throws -> String? {
         let json = String(decoding: request, as: UTF8.self)
         return try await withCheckedThrowingContinuation { continuation in
-            // The stack an `lf` process's main thread has: parsing its command
-            // line overflows a Swift task thread's 512 KB in a debug build.
+            // Rust's synchronous command parsing can exceed a cooperative
+            // executor thread's stack in debug builds. Give these blocking
+            // calls a native thread with the same stack budget as the CLI.
             let thread = Thread {
                 var error: UnsafeMutablePointer<CChar>?
                 let result = entry(json, &error)
@@ -48,8 +49,9 @@ enum LoopflowLibrary {
                     continuation.resume(returning: result.flatMap(take))
                 }
             }
-            thread.stackSize = 8 << 20
+            thread.name = "Loopflow library call"
             thread.qualityOfService = .userInitiated
+            thread.stackSize = 8 * 1024 * 1024
             thread.start()
         }
     }

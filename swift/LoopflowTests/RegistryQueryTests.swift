@@ -12,20 +12,37 @@ struct RegistryQueryTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
-        let entry = String(decoding: try JSONEncoder().encode(expected.entry), as: UTF8.self)
+        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"}}}"
+        let query = RegistryQuery(watchRead: { args, cwd in
+            guard args == ["--machine", "peer", "--repository", "plan", "desktop", "task", "task", "--json", "--watch"], cwd == nil else {
+                throw RegistryQueryError("A peer run page must never use local execution")
+            }
+            let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
+            let lines = AsyncThrowingStream<Data, any Error> { continuation in
+                continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body)}".utf8))
+                continuation.finish()
+            }
+            return LineWatch(lines: lines, send: { _ in }, cancel: {})
+        }) { _, _ in throw RegistryQueryError("Unexpected one-shot read") }
+        let watch = try await query.onMachine("peer", repository: "plan").watchTask(task: "task")
+        var iterator = watch.lines.makeAsyncIterator()
+        let line = try #require(await iterator.next())
+        let frame = try WorkFrame.decode(part: .task,
+            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil), sequence: 0, line: line)
+        guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
+        #expect(reading.graphProcesses == [expected])
+        #expect(reading.work.graph?.position == .at(step: "demo"))
+    }
+
+    @Test("Step history uses the exact process on the content Machine")
+    func contentRoutedStepHistory() async throws {
         let query = RegistryQuery { args, cwd in
-            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
-                throw RegistryQueryError("A peer Graph log must never use local execution")
+            guard args == ["--machine", "peer", "--repository", "plan", "history", "show", "process-step"], cwd == nil else {
+                throw RegistryQueryError("Wrong process history owner")
             }
-            let command = Array(args.dropFirst(4))
-            if command.starts(with: ["graph", "list"]) {
-                return "{\"entries\":[\(entry)],\"next\":null}"
-            }
-            if command == ["graph", "show", expected.entry.id, "--processes", "--json"] { return detail }
-            throw RegistryQueryError("Unexpected execution")
+            return "gate failed: exit 1"
         }
-        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task")
-        #expect(graphs == [expected])
+        #expect(try await query.onMachine("peer", repository: "plan").processHistory(id: "process-step") == "gate failed: exit 1")
     }
 
     /// The JSON `read::tests::desktop_encodings_name_their_reads` decodes in Rust.

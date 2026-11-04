@@ -969,23 +969,26 @@ MTG-117's unknown exit is not proven upgrade-caused.
 ## Moving onto the installed lf (LOO-705/724, reconciled 2026-11-04)
 
 Jack Heart requested one rollover mechanism; durable-state replacement remains
-a headless choice. Supersession compares owner and launch entry. Idle owners send
-`<entry> session resume <id>`; viewers follow without replay. Busy answering
-owners remain viewed; unanswering superseded owners end with a cut-turn report.
-Graph runners stay; steps use the entry. Unreadable stores retry. Earlier decisions
-and unproved Mac/Graph acceptance: `cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`,
-this heading.
-LOO-712's framed stream supersedes the earlier Response-variant guidance.
+a headless choice. Idle superseded owners send `<entry> session resume <id>`;
+busy answering owners remain viewed; unanswering ones report cut turns. Graphs
+stay; unreadable stores retry. LOO-712 framing replaces Response variants.
+EOF remains unknown; orderly successors resume without replay. Earlier decisions
+and unproved Mac/Graph acceptance:
+`cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
-Jack expanded LOO-724 on November 4 to recovering old Sessions reported permanently
-disconnected, preserving identity/history/Work. LOO-723 owns coherent installation
-and promotion lifetime. Hook and launch entries depend on app/CLI coherence.
-Hook-entry fixtures prove neither owner lifetime nor installed recovery.
-Socket EOF fails with unknown outcome; only an orderly successor
-event follows resume. Jack's LOO-582 reproduction failed on surviving helpers after
-leader death; group confirmation waits only when releasing a locally held lifeline.
-Cross-process recovery needs observation without treating leader death as signal
-authority. The broader disconnect cause and installed recovery remain unproved.
+Jack's November 4 LOO-724 expansion requires affected Sessions to accept input,
+complete a turn and sustain interaction, preserving identity/history/Work/drafts.
+LOO-582's retry retained native identity but proved no completed resumed turn;
+Jack later reported reopened conversations stopped accepting input or crashed.
+LOO-723 owns installation policy/promotion lifetime; the parent owns immediate
+Desktop repair.
+
+LOO-724 source now observes dead-leader groups for three seconds even without a
+local lifeline writer. Separate-process Session fixtures prove natural-exit
+recovery and persistent-survivor refusal with preserved state/fencing; no signal
+authority follows from leader death. Retained-hook fixtures leave the owner
+unchanged. Release's entry-point lesson applies: these prove neither owner/build
+reconnect nor installed turns. Broader disconnection causes remain unproved.
 
 ## Shipped history
 

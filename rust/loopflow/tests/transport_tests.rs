@@ -2455,6 +2455,188 @@ wait("finish-upgrade")
     fixture.ends(&owner);
 }
 
+/// Reconnect keeps an unsent draft in its old provider; after submission the
+/// viewer follows the new build and completes more turns in the same history.
+#[test]
+fn resumed_session_completes_turns_after_build_replacement_and_viewer_return() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys, tty
+if sys.argv[1:] == ["--version"]:
+    print("2.1.317")
+    sys.exit(0)
+home = pathlib.Path(os.environ["HOME"])
+thread = "upgrade-native-thread"
+history_file = home / "native-history.json"
+resumed = "--resume" in sys.argv
+if resumed:
+    assert sys.argv[sys.argv.index("--resume") + 1] == thread, sys.argv
+    assert "original request" not in sys.argv, sys.argv
+    history = json.loads(history_file.read_text())
+    assert history == ["original request", "retained draft"], history
+else:
+    assert not history_file.exists(), "conversation was recreated"
+    history = []
+settings = json.loads(pathlib.Path(sys.argv[sys.argv.index("--settings") + 1]).read_text())
+def mark(name, value):
+    pending = home / (name + ".tmp")
+    pending.write_text(value)
+    pending.replace(home / name)
+def hook(event, **extra):
+    command = settings["hooks"][event][0]["hooks"][0]["command"]
+    payload = dict(session_id=thread, hook_event_name=event, **extra)
+    subprocess.run(command, shell=True, input=json.dumps(payload).encode(),
+                   stdout=subprocess.DEVNULL, check=True)
+def turn(prompt):
+    prompt_id = "turn-" + str(len(history))
+    hook("UserPromptSubmit", prompt_id=prompt_id, prompt=prompt)
+    history.append(prompt)
+    mark("native-history.json", json.dumps(history))
+    hook("Stop", prompt_id=prompt_id, background_tasks=[], session_crons=[])
+    mark("completed-" + str(len(history)), prompt)
+    os.write(1, ("\r\nCOMPLETED:" + prompt + "\r\n").encode())
+hook("SessionStart", source="resume" if resumed else "startup")
+if not resumed:
+    turn("original request")
+terminal = os.open("/dev/tty", os.O_RDWR)
+tty.setraw(terminal)
+mark("ready-" + ("2" if resumed else "1"), str(os.getpid()))
+os.write(1, b"EDITOR_READY\r\n")
+draft = bytearray()
+while True:
+    key = os.read(terminal, 1)
+    if key == b'\x04': break
+    if key == b'\r':
+        turn(draft.decode())
+        draft.clear()
+    else:
+        draft.extend(key)
+    os.write(1, b'\r\nEDITOR:' + draft + b'\r\n')
+"#,
+    );
+    let bin = fixture.home.path().join("bin");
+    let previous = bin.join("lf-before");
+    std::fs::copy(env!("CARGO_BIN_EXE_lf"), &previous).unwrap();
+    let entry = bin.join("lf");
+    std::os::unix::fs::symlink(&previous, &entry).unwrap();
+    let mut command = fixture.native(&entry, &path, "original request");
+    command.env("LF_BIN", &entry);
+    let owner = fixture.owner(command);
+    let mut first = fixture.viewer(&owner, true);
+    until_out(&mut first, "EDITOR_READY");
+    let session = fixture.session_of_owner(&owner);
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let task = store
+        .create_task(&loopflow::work::task::NewTask {
+            id: loopflow::durable::TaskId::new(),
+            repository_id: store
+                .ensure_repository(
+                    &loopflow::repository::CanonicalRepo::discover(fixture.repo.path())
+                        .unwrap()
+                        .to_string(),
+                )
+                .unwrap(),
+            project_id: None,
+            title: "Continue the existing conversation".into(),
+            description: "Preserve recorded work across upgrade".into(),
+            due_date: None,
+        })
+        .unwrap();
+    let capture = store.session(&session).unwrap().unwrap().captured;
+    store.bind_session(&session, capture, &task.id).unwrap();
+    let continuity = || {
+        fixture
+            .sql()
+            .query_row(
+                "SELECT current_capture,provider_thread,task_id FROM agent_sessions WHERE id=?1",
+                [&session],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .unwrap()
+    };
+    let attachment = || store.session_attachment(&session).unwrap().unwrap();
+    let original = continuity();
+    let before = attachment();
+    first.input("retained draft");
+    until_out(&mut first, "EDITOR:retained draft");
+    first.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    drop(first);
+
+    let next = bin.join("lf-after");
+    other_build(&next);
+    let swapped = bin.join("lf-swap");
+    std::os::unix::fs::symlink(&next, &swapped).unwrap();
+    std::fs::rename(&swapped, &entry).unwrap();
+    let resume = || {
+        let mut command = fixture.command_from(&entry, &["session", "resume", &session]);
+        command.env("LF_BIN", &entry).env("PATH", &path);
+        Terminal::spawn(command)
+    };
+    let mut terminal = resume();
+    fixture.wait_controlled(&owner);
+    assert_eq!(
+        attachment(),
+        before,
+        "reconnect must retain the draft's provider"
+    );
+    assert_eq!(continuity(), original);
+    terminal.input(b"\r");
+    assert_eq!(fixture.wait_file("completed-2"), "retained draft");
+    fixture.wait_file("ready-2");
+    fixture.ends(&owner);
+    let replacement = fixture.owner_of(&session);
+    assert_ne!(replacement, owner);
+    fixture.wait_controlled(&replacement);
+    let after = attachment();
+    assert_eq!(continuity(), original);
+    assert_ne!(
+        after.agent_process_id, before.agent_process_id,
+        "replacement needs a new AgentProcess"
+    );
+    assert_ne!(
+        after.token, before.token,
+        "replacement needs a new attachment fence"
+    );
+    terminal.input(b"after upgrade\r");
+    assert_eq!(fixture.wait_file("completed-3"), "after upgrade");
+    terminal.input(b"\x1d");
+    let output = wait_for_viewer(terminal.child, Duration::from_secs(10));
+    assert!(output.status.success(), "{output:?}");
+
+    let mut returned = resume();
+    fixture.wait_controlled(&replacement);
+    returned.input(b"after return\r");
+    assert_eq!(fixture.wait_file("completed-4"), "after return");
+    assert_eq!(
+        attachment(),
+        after,
+        "viewer return must not replace the provider"
+    );
+    assert_eq!(continuity(), original);
+    let history: Value = serde_json::from_str(&fixture.wait_file("native-history.json")).unwrap();
+    assert_eq!(
+        history,
+        json!([
+            "original request",
+            "retained draft",
+            "after upgrade",
+            "after return"
+        ])
+    );
+    returned.input(b"\x04");
+    let output = wait_for_viewer(returned.child, Duration::from_secs(10));
+    assert!(output.status.success(), "{output:?}");
+    fixture.ends(&replacement);
+}
+
 /// Native start/stop callbacks preserve silent work across both deadlines.
 #[test]
 fn silent_native_turns_survive_until_settlement() {
@@ -2835,6 +3017,10 @@ struct Terminal {
     screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 impl Terminal {
+    fn input(&mut self, bytes: &[u8]) {
+        self.child.stdin.as_mut().unwrap().write_all(bytes).unwrap();
+    }
+
     fn spawn(command: Command) -> Self {
         Self::spawn_with_placement(command, None)
     }

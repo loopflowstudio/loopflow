@@ -13,6 +13,14 @@ unknown callback: older Sessions can also retain retired title hooks.
 The existing three-second group-death observation bound also applies to recovery
 in another process. A missing local lifeline is not evidence helpers will persist;
 natural group disappearance permits recovery, while survivors still refuse it.
-Installed recovery depends on LOO-723 replacing the incompatible app helper;
-detached or unknown inventory state alone does not authorize restarting every
-old Session or replaying a finished Task.
+Jack Heart's later LOO-723 comment `769c9593-3021-4c4d-9bfc-e98da3a9d7b3` assigns
+the immediate Desktop install to the parent Session; LOO-723 retains permanent
+installation policy and mini rollout. Installed recovery needs that coherent
+helper and a recovery receipt. Detached or unknown inventory state alone does not
+authorize restarting every old Session or replaying a finished Task.
+
+The 2026-11-04 composed regression uses two candidate executables with the same
+wire/schema and a native provider stand-in. It establishes completed continued
+input, not an earlier-release upgrade or installed-provider recovery. Read-only
+correlation found `Uncertain` native input on LOO-582/312/515/558; no inference
+that those drafts can be discarded is accepted. No live handoff was attempted.

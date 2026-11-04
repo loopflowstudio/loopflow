@@ -65,15 +65,19 @@ past the detached grace and executable removal, then proves ending after stop.
 background work, then scheduled wakeups, and ending only after both settle.
 `transport_tests::retained_hooks_survive_upgrade` replaces a fixture lf entry
 while its native provider keeps the old `__planning-check` Stop declaration.
-It checks settlement, subagent exclusion, retained identity and real delivery
-errors. The alias uses the current ContextBlock handler; no second planning
-callback implementation exists. This fixture does not prove installed app/CLI
-coherence or a released-binary upgrade.
+It checks settlement through ContextBlock, subagent exclusion, retained identity
+and real delivery errors.
 `session_record::runtime::tests::resume_*dead_owners*` runs recovery in another
-process while a dead headless leader still has a helper. Natural helper exit
-allows the same recovery attempt to retain Task, history and pending steers with a
-fresh attachment fence; a persistent helper leaves the old attachment unsettled.
-Neither case grants permission to signal a helper after its leader has died.
+process after leader death. Natural helper exit permits recovery with Task,
+history and steers retained; persistent helpers refuse it without signaling or
+settling the attachment.
+`transport_tests::resumed_session_completes_turns_after_build_replacement_and_viewer_return`
+submits a retained draft through public resume, follows the replacement build,
+completes a turn, then detaches and returns for another. The provider reloads
+history and rejects seed replay. Session, capture and Task stay fixed; only owner
+replacement changes the AgentProcess and fence. These stand-in fixtures use the
+candidate's wire/schema; released-version and installed-provider recovery need
+separate proof.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

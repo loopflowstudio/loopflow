@@ -43,6 +43,13 @@ retain typed input because they have no matching acknowledgement here. Clearing
 the screen or showing an idle prompt cannot discard that protection. Pending
 approvals and questions stay with their original provider until answered or canceled.
 
+Input waits in the owner until its retention record commits. A busy store pauses
+delivery while output, control queries and viewer return remain responsive.
+The owner retries every 100 ms without polling the writable PTY between attempts.
+Changed failures log once; delivery resumes automatically when the store recovers.
+Returning to the Session does not resubmit queued input. This cannot restore a
+deleted store or recover an editor from a dead provider.
+
 Removing, replacing or superseding the owner's lf executable ends it after two
 seconds of command silence, once no input, turn, pending request, running Graph
 or headless Run holds it. Viewers cannot extend this interval. The owner logs the
@@ -54,10 +61,6 @@ Retention logs name native input, a live turn, running Graph, headless Run,
 missing Session or command output. Repeated unchanged policy errors and retention
 reasons produce one warning until the condition changes. Activity cannot accelerate
 the two-second policy poll; it launches no helper process.
-If recording input fails, the owner retains the queued bytes and retries every
-100 ms without polling the writable PTY between attempts. Delivery resumes when
-the store recovers. This preserves record-before-delivery without a busy loop;
-it cannot restore a deleted store or recover an editor from a dead provider.
 Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 

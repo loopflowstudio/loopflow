@@ -1,6 +1,7 @@
 //! A detached terminal owns an execution, including its capture and native client.
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
+mod input;
 #[cfg(test)]
 mod input_retry_tests;
 mod lifetime;
@@ -32,6 +33,7 @@ use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::NativeExit;
 use crate::id::LfProcessId;
+use input::PendingInput;
 use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner, Tag};
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
@@ -42,9 +44,6 @@ const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Continuous output tells the lifetime policy once per pause, not per read.
 const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
-/// A failed store must not spin on the PTY's write readiness, and a transient
-/// write lock must not visibly delay typing.
-const INPUT_RETRY: Duration = Duration::from_millis(100);
 
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
@@ -754,10 +753,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut control: Option<String> = None;
     let mut ownership = Ownership::default();
     let mut size = (24, 80);
-    let mut pending_input = VecDeque::new();
-    let mut recorded_input = 0;
-    let mut input_retry_at = None;
-    let mut input_failure = None;
+    let mut pending_input = PendingInput::default();
     let mut ending_failure = None;
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
@@ -818,10 +814,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             // Stale and passive viewers cannot write.
                             if viewer.token.is_some() && viewer.token == control && !end_input {
                                 anyhow::ensure!(
-                                    pending_input.len() + payload.len() <= LIMIT,
+                                    pending_input.push(&payload),
                                     "Provider input is busy"
                                 );
-                                pending_input.extend(payload);
                             }
                             continue;
                         }
@@ -1128,48 +1123,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             });
         }
         place_events(&output, &mut viewers, announced);
-        if let Some(input) = input.as_mut().filter(|_| {
-            !pending_input.is_empty() && input_retry_at.is_none_or(|at| Instant::now() >= at)
-        }) {
-            let recorded = if terminal && recorded_input < pending_input.len() {
-                let bytes = &pending_input.make_contiguous()[recorded_input..];
-                match crate::journal::process_ledger()
-                    .and_then(|store| store.record_owner_input(&id, bytes))
-                {
-                    Ok(()) => {
-                        recorded_input = pending_input.len();
-                        input_retry_at = None;
-                        if input_failure.take().is_some() {
-                            tracing::info!(owner = %id, "terminal input store recovered; delivering queued input");
-                        }
-                        true
-                    }
-                    Err(error) => {
-                        let message = error.to_string();
-                        if input_failure.as_ref() != Some(&message) {
-                            tracing::warn!(%error, owner = %id, "cannot retain terminal input; retrying before delivery");
-                            input_failure = Some(message);
-                        }
-                        input_retry_at = Some(Instant::now() + INPUT_RETRY);
-                        false
-                    }
-                }
-            } else {
-                true
-            };
-            if recorded {
-                match input.write(pending_input.as_slices().0) {
-                    Ok(n) => {
-                        pending_input.drain(..n);
-                        recorded_input = recorded_input.saturating_sub(n);
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                    Err(_) => {
-                        pending_input.clear();
-                        recorded_input = 0;
-                    }
-                }
-            }
+        if let Some(input) = input.as_mut() {
+            pending_input.forward(input, &id, terminal);
         }
         if end_input && pending_input.is_empty() {
             input.take();
@@ -1236,12 +1191,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && exit_record.is_some())
         {
-            if let Err(error) =
-                crate::journal::process_ledger().and_then(|store| store.clear_owner_input(&id))
-            {
-                tracing::warn!(%error, "cannot clear ended native input; retaining its owner");
-            }
-            recorded_input = 0;
+            pending_input.native_ended(&id);
             if let Some(ended) = client.take() {
                 finish_client(
                     ended,
@@ -1377,8 +1327,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         #[cfg(test)]
         lifetime_tests::after_judgment(&output, observed)?;
-        // Sleep until a descriptor has work; only held exit text and a
-        // pending exit announcement are timed.
+        // Sleep until a descriptor has work or held output, exit announcement,
+        // input retention or disconnected-viewer grace needs another attempt.
         let deadline = match exit {
             Some((_, at)) if announced => Some(at + Duration::from_secs(2)),
             Some((_, at)) if readers.is_empty() => Some(at + Duration::from_millis(50)),
@@ -1391,16 +1341,14 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 Connection::Open(_) => None,
             })
             .chain(deadline)
-            .chain(input_retry_at)
+            .chain(pending_input.retry_at())
             .min();
         wait_for_activity(
             &listener,
             &wake,
             &viewers,
             &readers,
-            input
-                .as_ref()
-                .filter(|_| !pending_input.is_empty() && input_retry_at.is_none()),
+            input.as_ref().filter(|_| pending_input.needs_write()),
             deadline.map(|at| at.saturating_duration_since(Instant::now())),
         );
     }
@@ -1412,7 +1360,7 @@ fn finish_client(
     readers: &mut [(u8, File)],
     output: &mut output::Output,
     viewers: &mut Vec<Viewer>,
-    pending_input: &mut VecDeque<u8>,
+    pending_input: &mut PendingInput,
     detached: bool,
 ) {
     for (stream, reader) in readers.iter_mut() {
@@ -1512,7 +1460,7 @@ fn place_events(output: &output::Output, viewers: &mut Vec<Viewer>, announced: b
 fn deliver(
     output: &mut output::Output,
     viewers: &mut Vec<Viewer>,
-    pending_input: &mut VecDeque<u8>,
+    pending_input: &mut PendingInput,
     stream: u8,
     bytes: &[u8],
     detached: bool,
@@ -1521,9 +1469,7 @@ fn deliver(
         return;
     }
     let replies = output.process(stream, bytes, detached);
-    if pending_input.len() + replies.len() <= LIMIT {
-        pending_input.extend(replies);
-    }
+    pending_input.push(&replies);
     viewers.retain_mut(|viewer| {
         !viewer.attached || {
             let written = viewer

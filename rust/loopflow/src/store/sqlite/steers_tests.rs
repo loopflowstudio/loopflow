@@ -65,7 +65,7 @@ fn native_input_acknowledgements_cannot_cross_provider_replacement() {
     let (_home, store, adapter) = native_fixture();
     let first = store.session_attachment("session").unwrap().unwrap();
     let owner = first.lf_process_id.as_ref().unwrap();
-    store.record_owner_input(owner, b"draft\r").unwrap();
+    assert!(store.try_record_owner_input(owner, b"draft\r").unwrap());
     assert_eq!(store.owner_retention(owner).unwrap(), Some(NativeInput));
     assert!(store
         .acknowledge_native_input(&adapter, "other-thread", "one", Some("draft"))
@@ -81,7 +81,7 @@ fn native_input_acknowledgements_cannot_cross_provider_replacement() {
         .acknowledge_native_input(&adapter, "native", "one", None)
         .unwrap();
     assert_eq!(store.owner_retention(owner).unwrap(), None);
-    store.record_owner_input(owner, b"next\r").unwrap();
+    assert!(store.try_record_owner_input(owner, b"next\r").unwrap());
     store
         .acknowledge_native_input(&adapter, "native", "two", Some("next"))
         .unwrap();

@@ -1,6 +1,6 @@
 # Assumptions — 2026-11-04
 
-No design file arrived in scratch; the Task brief supplies the accepted outcome.
+The Task brief supplies the accepted outcome.
 Bound the demonstrated terminal store retry loop and preserve the existing input
 retention contract. Do not infer permission to discard drafts after unexpected
 path loss. Historical request attribution is unavailable after the owners exited;
@@ -16,6 +16,8 @@ prefers stopping owners and reclaiming disposable demos over indefinite retentio
 and also requires durable conversation history to survive. LOO-722's marker
 authorizes deleting a root's store and drafts on the premise that evidence lives
 elsewhere; `demo.md` keeps private provider history inside the root and writes no
-marker. Choice: (a) demos split evidence from runtime and write the marker, which
-ties a shipped skill to a laptop-only runner, or (b) unmarked retained demos stay
-until their own teardown runs. Current state is (b), the simpler safe choice.
+marker. Choice: (a) separate durable evidence from disposable runtime, making
+eligible roots available to LOO-722 without a competing cleaner, or (b) retain
+the complete unmarked root until explicit teardown. Current state is (b), the
+simpler safe choice; it does not establish acceptance of indefinite retention.
+Demo/review still owns that judgment.

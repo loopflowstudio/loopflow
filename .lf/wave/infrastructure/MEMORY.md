@@ -92,6 +92,29 @@ through settlement. Neither proves configured/installed acceptance. Earlier
 twenty-owner teardown reopened only three; full returns remain open. Release's
 entry-point lesson separates source/publication from installed behavior.
 
+## Demo runtime lifetime (LOO-725, 2026-11-04)
+
+Jack Heart requested recurrence prevention after stopping six stale demo owners
+recovered syspolicyd CPU; restarting the service alone failed. The families'
+combined contribution is established, not the exact requesting hook/thread or
+fixture mover. One image was unchanged; a moved-WAL probe still accepted writes.
+Neither executable replacement nor store-path loss alone explains the incident.
+
+Draft protection needs valid runtime/store files until verified teardown.
+Disposable demos copy their complete runtime outside build output, select the
+private Home/binary for children too, and retain durable history. Jack prefers
+stopping verified owners before reclaiming eligible output; LOO-722 owns that
+cleanup. Its laptop-only marker assumes evidence elsewhere, so unmarked demos
+with history inside remain outside its backstop. That boundary is unresolved.
+
+Store failure exposed writable-PTY retry spin. A short retry deadline must also
+remove write readiness; blocking retention still stalls control under contention
+(LOO-724 owns the nonblocking path). Retention diagnostics share the retirement
+judgment. Security pressure stops later verification suites as unproven, without
+changing ordinary product-failure behavior. Release's entry-point lesson applies:
+combined teardown, rebuild, recovery and installed proof remain distinct from
+isolated fixture passes.
+
 ## Session viewer wire (LOO-712, 2026-11-02)
 
 Jack Heart asked (2026-11-02) that the owner and its viewers adopt the parts of
@@ -186,17 +209,16 @@ Jack Heart authorized selective cleanup without retries or a five-minute CI clai
 #1545 merged; installed savings remain unproved. Evidence:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
-## Global agent override (LOO-440, curated 2026-10-11)
+## Global agent override (LOO-440, curated 2026-11-04)
 
 Jack Heart selected global `-a`/`--agent` over Task, Flow, step, skill and child
-choices; omission preserves defaults. October 10 approval authorizes landing and
-completion after verified merge. No logins, credential reads or real-provider tests.
-Six fixture Sessions prove Claude across child overrides; replay/native history
-retain their provider. Conflicting resume explains starting anew.
-
-October 11 gate passed override checks; release-lock failure's cause remains
-unknown. Remote/live/installed acceptance, landing and completion remain unproved.
-Evidence: `6935bfbadb:wave/infrastructure/MEMORY.md`, this heading.
+choices; omission preserves defaults. Resume retains its provider or explains
+starting anew. Jack authorized landing and completion after verified merge;
+no login, credential reads or real-provider tests. Stand-ins passed; remote/live/
+installed acceptance and delivery remain unproved. The unknown release-lock
+failure, exact approvals and fixture evidence remain at
+`664de4fe14d548749467d6ecc9f55ea7b3796b85:.lf/wave/infrastructure/MEMORY.md`,
+Global agent override.
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
 
@@ -220,37 +242,26 @@ The superseded prototype/delivery narrative and exact October 8 comments remain 
 `616d73b4dcd21dd78c62f3f3420c5e4f9b0d8f21:.lf/wave/infrastructure/MEMORY.md`,
 Plan ownership; LOO-406 owns common writers/Linear and LOO-412 transport.
 
-Foreground acquisition and delivery are independent; effect locks block neither.
-Captured receipts retain losing values; only complete-list observations settle
-Project ordering. Every create returns a distinct ID, even for identical titles
-(Jack Heart's October 8 comments removed public creation tokens); LOO-412's
-October 10 redesign owns machine-local execution linked by Task ID, and shared
-completion does not move or stop the local Flow. Observed Linear reopening keeps
-both values and retires delivery, leaving execution; unseen reopening can be
-overwritten. Comments preserve authorship, losing edits and pending direction;
-cancellation resolves the Team's lowest-position state; deletion requires
-trash/acknowledgment, never absence. Earlier checks, writer proofs and schema
-evidence: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md` and
-`078a6642e:wave/infrastructure/MEMORY.md`, Plan ownership; peer and installed
-acceptance remain unproved, full CI open.
+Foreground acquisition and delivery are independent of effect locks. Receipts
+retain losing edits; complete-list observations alone settle Project ordering.
+Jack's October 8 decision makes every create distinct, with no public creation
+token. LOO-412 links machine-local execution by Task ID: shared completion moves
+no local Flow. Observed reopening retires delivery, retaining execution and both
+values; unseen edits remain a race. Comments retain attribution and pending
+direction; cancellation uses the Team's lowest-position state, deletion needs
+trash/acknowledgment. Exact writer proofs remain in the Plan ownership archive
+below; peer/installed acceptance and full CI remain open.
 
-Jack Heart's LOO-449 decision makes checkout files own goal, memory and ancestor
-Markdown; edit directly, without a document cache or CLI. Canonical identity
-cannot redirect bytes. SQLite retains identity/execution; `wave_workflows` retains
-Project selection and Task capture. Registry relocation preserves files in place;
-authoring moves them.
-Jack's October 10 decision makes Linear sync pin one committed local default-branch
-revision, never fetch or fall back; local views stay checkout-based. Mocked sync,
-checkout and stand-in launch proofs preserve LOO-444; installed acceptance remains
-unproved. Jack approved #1521 and landing with the default-branch fix (`05b04fa8`).
-Plan: `scratch/read-wave-goals-and-memory.md`.
-
-Export saves UUIDs before acquisition and retains uncertain creates/links;
-acceptance remains unproved. Jack selected unambiguous Task prefixes (4+ hex
-characters), preserving full IDs, receipts and placement; no landing/install.
-Writer/prefix evidence:
-`72dbe0344f73722bd90a4f392c3e801cd976b80f:.lf/wave/infrastructure/MEMORY.md`,
-Plan ownership. Backup/export remains unproved.
+Jack Heart's LOO-449 decision makes checkout files own goal, memory and
+ancestor Markdown; identity cannot redirect bytes. SQLite retains execution and
+Project/Task selection. Registry relocation preserves files; authoring moves them.
+Linear sync pins one committed local default-branch revision without fetch or
+fallback; local views stay checkout-based. Export saves UUIDs before acquisition
+and retains uncertain links. Task prefixes require four or more unambiguous hex
+characters. Backup/export, peer and installed acceptance remain unproved.
+October decisions, approval of #1521, exact evidence and archival links:
+`664de4fe14d548749467d6ecc9f55ea7b3796b85:.lf/wave/infrastructure/MEMORY.md`,
+Plan ownership. No document cache or CLI writer is restored.
 
 ## On-demand Linear acquisition (lf-6f396c0, 2026-10-11)
 
@@ -624,35 +635,28 @@ classify commits as foreign. Preserve every commit. Stack forks still own squash
 refreshing them during publication can restore files main deleted. Disposable
 CLI proofs pass; installed Etude and hosted acceptance remain unproved.
 
-## Scheduled release accounting (LOO-285, source reconciliation October 2)
+## Scheduled release accounting (curated 2026-11-04)
 
-Jack Heart retained one execution per wake for frozen missed dues. Completion
-still requires two adjacent original configured dues, two automatic executions,
-at least one artifact publication, required verification and no manual repair.
-Collapsed misses supply accounting coverage, never additional settlements.
+Jack Heart requires two adjacent original configured dues, two automatic
+executions, required verification and at least one publication without manual
+repair. One execution per wake retains frozen missed dues; collapsed misses
+count as coverage, not settlements. Schedule repair,
+activation, manual recovery and reports establish no unattended success;
+installed acceptance and the qualifying pair remain unproved.
 
-Publication uncertainty blocks candidate replacement; retain rejected candidates,
-original dues, physical cron exits, publisher stages, settlement proofs and repair
-ownership independently. Same-Home continuation does not transfer old-Home authority.
-Child-held mutation locks and checkout leases protect separate scopes; cleanup
-reacquires after descriptor closure. Parent death, elapsed time and reset/stash
-helpers cannot confer cleanup rights or replace a held lock inode.
+Preserve original dues, physical exits, publisher stages, rejected candidates,
+uncertain effects and repair ownership. Unknown publication blocks replacement.
+Same-Home continuation grants no old-Home authority. Child-held mutation locks
+and checkout leases protect separate scopes; cleanup reacquires after descriptor
+closure. Parent death, age and reset/stash helpers grant no cleanup rights.
 
-October 5 evidence: installed jobs repaired at unchanged 09:00/10:00 schedules;
-three opportunities have unknown timezone provenance, zero executions and no
-qualifying pair. Schedule repair cannot backfill settlement; September 24's 36
-telemetry failures remain contrary evidence. Reproduce a current failure before
-repeating analytics repair. Recovery fixtures are not Scheduled evidence. No
-installed pass or accepted Intelligence handoff is established.
-
-LOO-357/PR #1441 removed the UI-host prerequisite; Jack Heart waived the
-interactive demo and authorized #1419 landing October 4. Installed acceptance and
-two automatic settlements remain unproved; no local reconciliation authorizes
-installation, schedule/Home changes or review completion. Reporting proves no
-operation success; activation proves neither accounting installation nor
-qualifying settlement. Dated proofs and authorizations:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
-Scheduled release accounting.
+October 5's unresolved opportunities, September telemetry gaps, Jack's October 4
+UI-demo waiver/landing authorization and exact proofs remain at
+`664de4fe14d548749467d6ecc9f55ea7b3796b85:.lf/wave/infrastructure/MEMORY.md`,
+Scheduled release accounting. Current failures require fresh evidence before
+repeating analytics repair. Required headless/artifact checks remain; this
+reconciliation authorizes no installation, schedule/Home change or review
+completion.
 
 ## Operator acceptance and account direction (2026-10-04)
 

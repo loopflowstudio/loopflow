@@ -94,11 +94,13 @@ product choice. Native terminal remote presentation and LOO-498 restoration
 remain the explicit dependency boundaries above. No implementation, navigation
 or delivery action is selected by this review.
 
-- Gate: graph compilation/Task progression and `world_recipes`, prompt golden,
-  Desktop action DTO, TaskFiles/Desktop pane checks, README/index sync and the
-  remaining affected checks. The current-tree focused Rust, formatting and Clippy
-  results below remain applicable; imported results at `5e6d3b1` establish no
-  merged-tree Swift or graph pass. No migration is added by LOO-728.
+- Gate: finish the remaining affected checks. Publication verification on the
+  merged tree passed graph compilation/Task progression (13 tests), the two
+  changed `world_recipes` scenarios, prompt goldens, Desktop action DTO round-trip,
+  and README/index sync. The headless Desktop run passed 55 tests across TaskFiles,
+  DesktopPaneControl and the action DTO fixture, with the optional native display
+  diagnostic skipped. The focused Rust, formatting and Clippy results below remain
+  applicable. No migration is added by LOO-728.
 - Publication and configured-host demo/review remain the code Graph's later
   steps. No parent landing or extra approval boundary is authorized here.
   Demo must show the original files in the current host, preserve active edits,
@@ -121,3 +123,13 @@ Earlier integration checks and unexplained host-response timeouts are preserved
 at `13e7d5dac8:scratch/write-docs-first.md`; isolated reruns passed there.
 
 Check: `git diff --check` and `lf context` passed at realignment; reused the preceding current-tree passes for `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1` (18 passed, 2 opt-in native cases ignored), `cargo test -p loopflow --lib lf::commands::desktop::tests` (13 passed; nonfatal macOS unwind-size linker warning), `cargo +stable fmt --all` and `cargo +stable clippy --all-targets -- -D warnings`. Gate owns broader affected suites; demo owns configured-host behavior.
+
+Publication review, 2026-11-04: `lf sync` completed without conflicts against
+LOO-498 at `da41d2031f`. PR #1817 was created as a draft at `6feff830f2` during
+the checks; that commit contains the reviewed uncommitted integration work.
+The code Graph publishes before its interactive demo, so publication does not
+establish configured-host acceptance. Source #1810 and parent #1814 remain open
+at their pinned revisions. The first README check used the root Python environment
+and lacked Playwright; the documented website environment passed. Swift linking
+reported nonfatal macOS deployment-target warnings. No configured host was opened
+or store upgraded for these checks.

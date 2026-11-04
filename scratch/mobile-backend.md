@@ -125,9 +125,11 @@ The review page at `scratch/concept-review.html` compares the earlier gap with
 the current recovery contract. The recovery change needs no new product decision;
 the terminal prompt and deliberate Ctrl+R interaction remain for native review.
 
-### Concept review after recovery implementation · November 3, 2026
+### Earlier headless concept review · November 3, 2026
 
-No further design change or unresolved product choice blocks this local slice.
+That review found no further design change or unresolved product choice in the
+local slice. The interactive review below reopens recovery presentation; it
+supersedes this earlier conclusion about having no open product choice.
 Jack Heart's accepted experience remains: open a Task's recorded primary Session,
 edit it, and recover access after a helper interruption without starting another
 provider. Task → primary Session → existing owner maps directly to `view_plan`,
@@ -146,6 +148,134 @@ composed installed replacement, native continuity and unchanged usage accounting
 A failure there requires repair within this contract, not inferred approval to
 restart providers or relax continuity. Remote admission, phone takeover and
 unattended hosting remain later product choices outside this slice.
+
+### Interactive concept review · November 3, 2026
+
+Jack Heart requested concept-review and an additional review simulating Mitchell
+Hashimoto's perspective. This is an analysis inspired by Hashimoto's public
+writing, not his participation, endorsement or a prediction of his verdict.
+The review is against `07a6a184d4`; no implementation or execution restart is
+authorized by this review alone. The Task remains at `feature/demo`, with
+PR #1813 published and Auto-Ship unapproved. No new native demo was performed.
+
+**Accepted model remains:** a Task selects its recorded primary Session; the
+existing execution owner retains provider, terminal and input claims. The Machine
+service carries reads, complete CLI commands and attachments. Desktop owns native
+presentation and UI automation. Keep the same owner through a connection failure,
+never replay uncertain input, never take a newer viewer's control, and never start
+an ended provider merely to restore a connection. The local scope excludes remote
+admission, create/start recovery, unattended hosting and a second retention policy.
+
+**The consequential mismatch:** a helper restart is currently a terminal
+interaction. `transport.rs::reconnect_machine` writes the connection error into
+the terminal, drains outage input and waits for Ctrl+R. Work subscriptions recover
+through their existing observation path, while the terminal remains interrupted.
+This is implemented behavior; rendered usability is still unverified. Deliberate
+Ctrl+R was earlier derived implementation direction, not an explicit choice Jack
+made between recovery interfaces.
+
+**Proposal, awaiting Jack's judgment:** automatically reconnect the exact live
+owner, show connection state outside terminal content, and keep input disabled
+until the owner acknowledges the attachment and its current claims. Use bounded
+retry/backoff for transient connection loss; an ended owner, disabled service or
+incompatible installation remains an explicit state. Returning to another viewer's
+Session stays passive. Stop retrying when the pane closes. No queued raw keys,
+command resubmission, provider resume, or takeover is implied. A native Reconnect
+button with deliberate retry is the alternative; retaining Ctrl+R is also valid
+if Jack prefers the existing interaction. No option has been accepted yet.
+
+The proposed client state is ephemeral: connected, reconnecting, or unavailable,
+with input capability derived from the existing owner acknowledgement. It adds no
+durable Session state or service registry. The current CLI relay exposes status
+as terminal text; native presentation would need a structured connection-state
+signal from that relay or a native bridge consumer. Keep that signal outside the
+provider's byte stream. Choose the smallest implementation after the interaction
+is selected; the public service operations need no new execution authority.
+
+**Draft usage wording for the automatic option (unimplemented):**
+
+> Open a Task to return to its Session. If the Machine connection drops, the pane
+> shows “Reconnecting…” and pauses input. Once the same owner is reachable, its
+> screen refreshes and input returns if control is free. If another viewer holds
+> control, the pane stays read-only; use Move here to take control deliberately.
+> An ended Session stays ended. Uncertain typing and commands are never resent.
+
+Keep existing operator skill instructions unchanged: recovering a view grants no
+permission to run a Task, resume a provider or approve shipping. The CLI's current
+documented Ctrl+R path remains true until a selected change is implemented.
+
+**Hashimoto-inspired assessment (our application of the sources):**
+
+- Keep the reusable core small and exercised by real clients. Reusing Rust reads,
+  CLI operations and the existing owner protocol is the strongest part of this
+  design. The Swift fixtures are useful consumer feedback; they do not establish
+  a live phone connection. Avoid widening the protocol before the local Desktop
+  experience works. Source: [Libghostty Is Coming](https://mitchellh.com/writing/libghostty-is-coming).
+- Make the next result tangible. Installed helper replacement with an editable
+  draft, quit/reopen and continued Graph progress is the useful demonstration.
+  Separate registrar and foreground-restart tests cannot establish the composed
+  result. Preserve Linux and telemetry acceptance too; this priority does not
+  waive them. Source: [Building Large Technical Projects](https://mitchellh.com/writing/building-large-technical-projects).
+- Review how interruption feels. The terminal prompt is mechanically explicit,
+  but exposes helper recovery to someone editing a Session and changes the screen
+  being recovered. A native status surface could preserve context. Automatic retry
+  versus deliberate retry is Jack's product choice, not a conclusion attributed
+  to Hashimoto. Source: [You Have to Feel It](https://mitchellh.com/writing/feel-it).
+- Exercise actual failure transitions. Retain the existing takeover, expired
+  output and ended-owner fixtures. Add the composed update proof and lost-command
+  reply/usage/cancellation evidence already required by acceptance; passing the
+  happy path cannot settle these. Source: [Testing Error Recovery](https://mitchellh.com/writing/tripwire).
+
+**Lifetime qualification:** the existing two-minute detached quiet grace excludes
+held drafts, active turns, pending requests and running Graphs; headless Runs do
+not expire for lack of viewers. The service does not promise indefinite live
+retention of an empty idle prompt. An initial observation that an unviewed Session
+can expire is incomplete without those holds. Keep the existing policy and prove
+both held-work survival and honest ended-Session presentation. “Standalone” here
+means service lifetime independent of the open UI, not an independently distributed
+Mac host: the selected signed app still supplies its helper and registration.
+
+**Open question:** automatic exact-owner reconnect with native status, deliberate
+native Reconnect, or the existing Ctrl+R prompt? The question is in the current
+conversation. `scratch/concept-review.html` presents the actions, models, API
+boundary and alternatives. No response is not approval. After Jack answers,
+update this design; implement only when requested, then verify the composed
+installed path and record native feedback at demo.
+
+### Review continuation · November 4, 2026
+
+Jack Heart invoked concept-review again. Inspection of the current relay confirms
+the existing Ctrl+R interaction; the recovery-interface question above remains
+unanswered. Task status still places LOO-593 at `feature/demo`. This review changes
+no implementation and supplies no new native or installed-update proof.
+
+Keep **unreachable** distinct from **ended** in the proposed presentation. A
+failed connection or refused attachment proves that this view cannot attach;
+it does not by itself prove provider termination. Show “Session unavailable” when
+the exact owner cannot be reached, preserving the last screen as stale. Show
+“Session ended” only with authoritative execution evidence. Neither state permits
+implicit provider restart. Disabled service and incompatible installation need
+their own actionable explanations. This follows the accepted truthful-state
+requirement and applies to all three recovery-interface options.
+
+The proposed action/API sequence stays small: open Task → `read(view_plan)` →
+recorded primary Session → `session_owner` → `attach` to that owner. On interruption,
+recover only that attachment and its current claims; Work subscriptions separately
+replace their readings. Native connection state is ephemeral client state, sent
+outside terminal bytes. No SQLite migration, new Session lifecycle, provider-usage
+event or durable request receipt follows from this interaction change.
+
+Draft usage addition, **proposed**: “If the Session is unavailable, the pane keeps
+its last screen and marks it stale. An unavailable connection does not mean the
+Session ended. Reconnecting never starts another provider.” Existing operator
+skills remain accurate and unchanged: restoring access does not run a Task,
+resume a provider, take control or approve shipping.
+
+Next proof after the interaction is selected: interrupt the installed helper while
+editing a held draft; recover the same provider and Graph; repeat with another
+viewer holding control and with an unreachable owner whose exit is unknown. The
+last case must stay unavailable, not become “ended.” Preserve all remaining
+acceptance below, including installed replacement and unchanged usage totals.
 
 ## Installation and lifetime
 

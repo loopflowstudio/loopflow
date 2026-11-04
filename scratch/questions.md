@@ -35,3 +35,12 @@ nonterminal relays use retained Resume bytes and fall back to a fresh attachment
 when the spool expires. Both retain the owner, reconnect token and byte position
 in memory only, request free claims without replacement, and discard outage input.
 Native presentation remains for the interactive demo.
+
+November 4 interactive review: the earlier statement that no local product
+question needs an answer is superseded by the interactive review in
+`scratch/mobile-backend.md`. Jack Heart has not selected automatic native
+reconnect, a deliberate native Reconnect button, or the current Ctrl+R prompt.
+The current implementation remains deliberate Ctrl+R. All options preserve exact
+ownership and uncertain-input handling. An unreachable owner is unavailable;
+only authoritative execution evidence can establish that it ended. The current
+conversation asks the recovery-interface question; no answer is not approval.

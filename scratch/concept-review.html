@@ -2,109 +2,83 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-593 · Recover the same Session</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-593 · Recover the connection</title>
 <style>
-:root { color-scheme: light dark; --paper:#faf9f5; --ink:#202a31; --muted:#56616a; --rule:#c5cbc9; --accent:#126257; }
-@media (prefers-color-scheme:dark) { :root { --paper:#17201f; --ink:#e8ece8; --muted:#b1bfba; --rule:#475852; --accent:#8ed9c5; } }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 system-ui,sans-serif; }
-main { max-width:790px; margin:auto; padding:48px 26px 72px; }
-header, footer, .muted { color:var(--muted); }
-header, footer { font-size:13px; }
-h1 { font-size:clamp(29px,5vw,41px); line-height:1.15; letter-spacing:-.025em; margin:26px 0 20px; }
-h2 { font-size:23px; line-height:1.3; margin:38px 0 14px; }
-p { margin:12px 0; }
-a { color:var(--accent); text-underline-offset:3px; }
-code { font:.85em ui-monospace,monospace; overflow-wrap:anywhere; }
-.path { padding:14px 0; border-block:1px solid var(--rule); }
-.path p { margin:6px 0; }
-blockquote { margin:24px 0; padding-left:20px; border-left:3px solid var(--accent); }
-li { margin:14px 0; }
-ol { padding-left:24px; }
-footer { margin-top:36px; }
-@media (max-width:480px) { main { padding:28px 20px 48px; } }
+:root{color-scheme:light dark;--paper:#faf9f5;--ink:#202a31;--muted:#59656b;--rule:#c5cbc9;--accent:#126257;--panel:#f0f2ee}
+@media(prefers-color-scheme:dark){:root{--paper:#17201f;--ink:#e8ece8;--muted:#b1bfba;--rule:#475852;--accent:#8ed9c5;--panel:#202b28}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:36px 24px 60px}header,footer,.muted{color:var(--muted);font-size:13px}h1{font-size:clamp(28px,5vw,38px);line-height:1.15;letter-spacing:-.025em;margin:24px 0 14px}h2{font-size:21px;margin:28px 0 10px}p{margin:10px 0}a{color:var(--accent);text-underline-offset:3px}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{font:14px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}.path{border-block:1px solid var(--rule);padding:12px 0}.path p{margin:4px 0}.example{background:var(--panel);padding:16px;border:1px solid var(--rule);margin:12px 0}.example label{display:block;font-weight:600}button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:5px;padding:7px 11px;cursor:pointer;margin:6px 6px 0 0}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 -2px var(--accent)}.status{border-bottom:1px solid var(--rule);padding-bottom:9px;margin-bottom:10px;color:var(--accent)}li{margin:9px 0}ol,ul{padding-left:24px}details{border-top:1px solid var(--rule);padding:14px 0;margin-top:20px}summary{cursor:pointer;font-weight:600}footer{margin-top:28px}@media(max-width:480px){main{padding:24px 18px 40px}}
 </style>
 </head>
 <body><main>
-<header>LOO-593 · concept-review · November 3, 2026<br>
-Built from <a href="mobile-backend.md">mobile-backend.md</a>,
-<code>machine_service/{README.md,service.rs,client.rs}</code>,
-<code>transport.rs</code>, <code>transport_tests.rs</code>,
-<code>MachineService.swift</code> and <code>RegistryQueryLocal.swift</code>.</header>
-<h1>Keep the same Session across a lost connection.</h1>
-<p><strong>No further design decision is needed for the accepted local slice.</strong>
-Jack Heart's continuity requirement now maps to the recovery implementation.
-The remaining obligation is acceptance proof, not another execution owner.</p>
-<p class="muted">Headless review of the implemented change. No new product approval,
-publication or Auto-Ship approval. Native presentation remains for demo.</p>
+<header>LOO-593 · concept-review · November 4, 2026<br>
+Sources: <a href="mobile-backend.md">working design</a>, <code>transport.rs::reconnect_machine</code>,
+<code>transport/README.md</code>, <code>MachineService.swift</code>, <code>machine_service/wire.rs</code>.</header>
+<h1>Should a helper restart interrupt editing?</h1>
+<p><strong>Proposal:</strong> reconnect to the same live owner automatically and show connection state outside the terminal. Input stays paused until the owner confirms the connection and current control.</p>
+<p class="muted">Not accepted or implemented. Current behavior waits for Ctrl+R. This page is an interaction sketch, not a native screenshot or a successful demo.</p>
 
-<h2>Actions → concepts → APIs</h2>
 <div class="path">
-<p><strong>Open a Task</strong> → recorded primary Session → <code>read(view_plan)</code>.</p>
-<p><strong>Edit its Session</strong> → existing execution owner →
-<code>session_owner(session)</code>, then <code>attach(owner)</code>.</p>
-<p><strong>Reconnect after interruption</strong> → that same owner → fresh terminal
-attachment or byte-stream <code>Resume</code>, without replacing control.</p>
+<p><strong>Open Task</strong> → primary Session → <code>read(view_plan)</code></p>
+<p><strong>Edit</strong> → existing execution owner → <code>session_owner → attach</code></p>
+<p><strong>Recover connection</strong> → same owner and current claims → refresh screen; never replay keys</p>
 </div>
-<p>The Machine service carries Work readings, complete CLI commands and owner
-traffic. The owner keeps the provider, draft and claims; the Graph keeps execution.
-Desktop keeps its renderer and app-owned UI automation. No service-side Session
-registry, scheduler or retention policy is introduced.</p>
 
-<h2>The consequential mismatch is repaired</h2>
-<p><strong>Before:</strong> bridge EOF ended the relay and could send Desktop through
-ordinary Session preparation. The original restart fixture removed its viewer
-before interruption, proving owner survival without proving viewer recovery.</p>
-<blockquote>A failed connection does not establish that the provider ended.</blockquote>
-<p><strong>Implemented now:</strong> the relay stays alive. It retains the exact owner
-and output continuation state in memory. The terminal shows:</p>
-<div class="path">
-<p><strong>Machine connection lost.</strong></p>
-<p>Ctrl+R to reconnect; Ctrl+] to close. Typing while disconnected is discarded.</p>
-<p>After reconnect: the same Session, or a passive view if input remains elsewhere.</p>
+<h2>During a helper interruption</h2>
+<div class="example">
+<label>Existing implementation · inside the terminal</label>
+<pre>Machine connection lost: …
+Ctrl+R to reconnect; Ctrl+] to close.
+Typing while disconnected is discarded.</pre>
+<p>The provider may still be running. The viewer waits for a key before attempting recovery.</p>
 </div>
-<p>A terminal gets a fresh screen because the disconnect prompt changed its display.
-A byte stream resumes retained output; an expired spool falls back to a fresh
-attachment. Current claims override replayed notices. An unavailable exact owner
-ends this recovery path without provider resume.</p>
-<p>Work subscriptions separately reopen with complete current readings. If a rename
-reply is lost, inspect the current name before deciding on another command.
-Request IDs correlate attempts; they do not promise deduplication.</p>
+<div class="example">
+<label>Proposed native presentation · simulation</label>
+<p class="muted">Explore the states below. These controls change this sketch only.</p>
+<div role="group" aria-label="Simulated connection state">
+<button type="button" data-state="lost" aria-pressed="true">Connection drops</button>
+<button type="button" data-state="back" aria-pressed="false">Owner reconnects</button>
+<button type="button" data-state="other" aria-pressed="false">Control moved elsewhere</button>
+<button type="button" data-state="unavailable" aria-pressed="false">Owner unreachable</button>
+<button type="button" data-state="ended" aria-pressed="false">Owner ended</button>
+</div>
+<div aria-live="polite" aria-atomic="true">
+<p class="status" id="status">Reconnecting… Input paused.</p>
+<pre>Unfinished provider draft:
+Explain the failing migration before changing…</pre>
+<p id="result">Preserve the last screen. Retry only the connection to the recorded owner; queue no typing.</p>
+</div>
+</div>
+<p><strong>The boundary stays:</strong> Machine carries traffic; the owner keeps execution, drafts and control; Desktop presents connection state. A native status signal would be new client plumbing, not a new Session lifecycle.</p>
+<p><strong>Unreachable does not establish ended.</strong> Preserve the last screen as stale when attachment fails. Only authoritative execution evidence can label the Session ended. Disabled service and incompatible installation need their own explanations.</p>
 
-<h2>What would invalidate this design?</h2>
+<details>
+<summary>Hashimoto-inspired review</summary>
+<p class="muted">Simulated analysis grounded in public writing. Mitchell Hashimoto did not review this change; the judgments below are ours.</p>
 <ul>
-<li>Reconnect takes input or geometry from a newer viewer. The current recovery
-requests free claims and becomes passive when input is held.</li>
-<li>Outage typing reaches the provider, or an ended owner launches again. The current
-relay discards outage input and refuses replacement-provider recovery.</li>
-<li>Installing a replacement helper kills the live owner or Graph. Separate registrar
-and supervisor-restart fixtures do not settle this; composed replacement must prove it.</li>
-<li>Reconnect creates provider usage again. Existing ownership is preserved in code;
-unchanged usage totals still require acceptance evidence.</li>
+<li><strong>Keep the shared core.</strong> Reuse the existing owner, Rust reads and CLI commands. Let Desktop and iOS exercise the contract before expanding it. This applies the consumer-driven extraction described in <a href="https://mitchellh.com/writing/libghostty-is-coming">Libghostty Is Coming</a>.</li>
+<li><strong>Make the next proof usable.</strong> Replace the installed helper while a draft and Graph are live, then keep editing. Separate registration and restart tests leave that composition unproved. This applies the tangible-progress approach in <a href="https://mitchellh.com/writing/building-large-technical-projects">Building Large Technical Projects</a>.</li>
+<li><strong>Judge the interruption in context.</strong> A recovery shortcut can be correct and still break the editing flow. Native status is a proposal to evaluate with actual use, applying <a href="https://mitchellh.com/writing/feel-it">You Have to Feel It</a>.</li>
+<li><strong>Force failures.</strong> Keep takeover, expired-output and ended-owner tests; finish update, cancellation, uncertain-command and usage proofs. The principle comes from <a href="https://mitchellh.com/writing/tripwire">Testing Error Recovery</a>, not a recommendation to add Zig or Tripwire here.</li>
 </ul>
+</details>
 
-<h2>Remaining proof, within the accepted contract</h2>
-<p>Gate retains installed executable replacement with active Work, bounded-client and
-cancellation acceptance, command attribution/default equivalence and usage accounting.
-Demo retains Desktop quit/reopen, disabled-service presentation and the rendered
-editable draft. This review does not claim those checks passed.</p>
-<p><strong>Later proposals, not approved here:</strong> remote admission, unattended
-hosting and phone takeover gestures. They do not block reviewing this local slice.
-The existing service README already describes the implemented recovery interaction.</p>
+<details>
+<summary>What must survive—and what remains unproved</summary>
+<p>Held drafts, active turns, pending requests and running Graphs already protect their owners. The default two-minute detached quiet expiry applies to unheld Sessions. Headless Runs do not expire because viewers leave. Keep this existing policy.</p>
+<p>Automatic recovery must become passive when another viewer owns control, stop when the pane closes, report disabled/incompatible service or an ended owner explicitly, and never resubmit commands or uncertain input. A replacement provider would violate this recovery contract.</p>
+<p>Native quit/reopen, installed-helper replacement, unchanged provider usage, affected suites and Linux acceptance remain open. This review adds no passed checks. “Standalone” means the UI can close; the selected signed app still supplies the Mac helper.</p>
+</details>
 
-<h2>Questions for the scheduled proof</h2>
-<p class="muted">These are acceptance questions, not unanswered product choices or a
-request for input during this headless run.</p>
+<footer><a href="https://github.com/loopflowstudio/loopflow/pull/1813">PR #1813</a> is published; the Task remains at demo. No implementation restart or Auto-Ship approval. Decisions will be recorded in <a href="mobile-backend.md">mobile-backend.md</a>.</footer>
+<h2>Choice for this conversation</h2>
 <ol>
-<li>Does installed helper replacement preserve the exact live provider, owner,
-unfinished draft and Graph through reconnection?</li>
-<li>Does Desktop quit/reopen preserve usable Session access, with honest unavailable
-and disabled states and no replay of uncertain input?</li>
-<li>Do command defaults and attribution match CLI behavior, and do reconnects leave
-provider-usage totals unchanged?</li>
+<li>Recovery interaction:<br><strong>1a.</strong> Automatic reconnect with native status (proposed).<br><strong>1b.</strong> Deliberate native Reconnect button.<br><strong>1c.</strong> Keep the Ctrl+R terminal prompt.</li>
 </ol>
-<footer>Outcome for loop-or-next: nothing further to change in the design; no open
-product choice within the accepted local scope. Acceptance remains required.</footer>
-</main></body>
+</main>
+<script>
+const states={lost:['Reconnecting… Input paused.','Preserve the last screen. Retry only the connection to the recorded owner; queue no typing.'],back:['Connected · Input available','Refresh from the same owner and allow new input after acknowledgement. Never replay outage typing.'],other:['Connected · Read-only','Another viewer holds control. Observe the same Session; Move here remains a deliberate action.'],unavailable:['Session unavailable · Last screen is stale','The exact owner cannot be reached. Its exit is unknown. Explain the failure without starting another provider.'],ended:['Session ended · Last screen is stale','Execution evidence confirms the owner ended. Stop connection recovery; do not launch a replacement provider.']};
+document.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>{const [status,result]=states[button.dataset.state];document.getElementById('status').textContent=status;document.getElementById('result').textContent=result;document.querySelectorAll('[data-state]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));}));
+</script>
+</body>
 </html>

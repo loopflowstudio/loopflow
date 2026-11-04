@@ -113,19 +113,23 @@ lf machine list                                      # each Machine with the def
 A Wave or repository has two settings, where its new Tasks run and where its
 primary Session runs. `machine.tasks` or `machine.session` sets one; `machine`
 sets both. Each resolves on its own, with no fallback from one to the other.
-A default lives in Machine-local SQLite `scope_defaults`, keyed by Wave or
-repository identity, and is copied to the
-person's other added Machines over `lf --machine`, so the laptop launches there and
-mini receives the runs. An unreachable Machine gets a warning; rerun later.
-Resolution for an unowned Task walks its Wave, its parent Waves, its repository, then this Machine,
-so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
-same resolver.
+Placement preferences are authored in personal configuration files. The private
+repository file is shared across linked Task worktrees; independent clones can have
+different defaults. Machine alias/identity references are portable declarations;
+this installation's own identity and observed state remain runtime facts. Connection
+addresses may require host-local bindings. [Settings ownership](settings.md) defines
+the catalogue, file writer and migration boundary.
 
-Setting the Session Machine moves the Wave Session with its native provider
-history, as `lf --machine <machine> resume <session>` does. `lf resume --wave <w>`,
-a bare resume resolving to a Wave or the repository, and Desktop's Wave Session
-route to the Session Machine over `lf --machine`. `lf open` reads a primary on
-another of your Machines through that resume, never from this Machine's copy.
+Resolve the selected machine to its durable ID at the initiating LF instance. If
+it is the current identity, execute locally. Already assigned work does not choose
+placement again on arrival. The executor provides local tools and credentials;
+the originating profile supplies portable preferences. Retaining those preferences
+for later direct commands is a separate, inspectable file update.
+
+Saving a preference selects future placement. Moving an existing Task or Session
+is an explicit domain operation that preserves its identity and native history;
+it must not be hidden in a generic file edit. CLI and Desktop expose the same
+placement resolution and movement operations.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
 moves no existing Task; `lf task move <task> --machine <machine>` moves one. It
@@ -250,11 +254,12 @@ binary instead of the published `lf`, so a development build rents sandboxes
 running its own code.
 
 `lf [--repo REPO] [--wave WAVE] set machine R`, naming a pool or on-demand, sets the
-scope's Tasks capacity (`scope_defaults.tasks_capacity`) in place of a Tasks
+scope's personal Tasks capacity preference in place of a Tasks
 Machine; the nearest scope that sets either wins. `lf task run` places an
 unowned Task by that default as `--pool` or `--rent` would. Its Session stays
-where it runs, and pools and on-demands are this Machine's own, so the default
-is not copied to your other Machines.
+where it runs. Pool and on-demand bindings remain host-local; transporting a
+preference does not create that capacity on another machine. File-backed setting
+resolution must distinguish the authored capacity choice from its runtime binding.
 
 Providers are reached through one embedded bridge
 (`rust/loopflow/src/rental/sandbox.py`) under `uv`, with the provider's pinned

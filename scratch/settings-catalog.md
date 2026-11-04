@@ -11,52 +11,82 @@ remain evidence, not competing designs.
 
 Delivery: continue PR #1805 for review with Auto-Ship stopped. Automatic limit
 recovery remains the later PR; neither merge nor whole-Task completion is authorized.
-The previously requested Codex execution still applies to this run, without making
-Codex a permanent product preference.
 
-## Implementation finding — November 3, 2026
+## Documentation-first direction — November 3
 
-Implementation stopped at a repository-scope authority conflict. Jack Heart's
-accepted outcome remains unchanged; no revised scope policy has been accepted.
+Jack Heart requested rewriting configuration documentation first, then making code
+match it. docs/config.md is the user contract and docs/architecture/settings.md is
+the internal ownership contract. These replace historical DB-backed explanations;
+the checked architecture inventory remains current-source evidence until cutover.
+The user explicitly emphasized conceptual cleanup, not just behavior parity.
 
-At `da937b7f5a`, `RepoId::discover` (`repository.rs`) derives `owner/repo` from
-Git origin. `lf/commands/setting.rs::account` writes repository account routes
-using that identity, without registering a checkout. `store/sqlite.rs` stores
-and retrieves the ordered route by that identity alone, and
-`provider_account.rs::nearest_provider_route` selects it by the same identity.
-Two independent clones with the same origin therefore share one account policy.
-A route can also survive removal of its checkout.
+Separate ConfigSource (Builtin, Repository, Personal, Environment, CommandLine),
+SettingScope (Global, Repository, Wave) and work target. Remove the old ConfigLayer
+Global/Personal file-versus-DB split and Repo/Wave source split, including DTOs,
+serializer labels, rank tables, compatibility aliases and inspector vocabulary.
+Use one catalogue, resolver, writer and explanation across interfaces. Demonstrate
+that the documented examples agree with real launch preparation before publishing.
 
-The accepted destination is one private file per main checkout, with no global
-`repos:` authority or DB preference fallback. That cannot preserve an
-origin-wide route's scope for two independent clones, future clones, or a route
-with no discoverable checkout. The prototype's lookup through
-`repository_plans` imposed an unaccepted registration requirement and selected
-one matching clone. It is not a valid migration or runtime owner. Copying the
-route into all known clones would lose the single authority and future-clone
-behavior; refusing an unavailable checkout would tie preference availability to
-runtime inventory.
+The independent-clone account-scope answer is now recorded below. Finish the
+documentation contract first, then implement it end to end. Do not preserve old
+storage concepts merely to satisfy tests for the removed architecture.
 
-Remaining design decision: either explicitly change repository account policy
-to checkout scope (including a reviewed migration disposition for absent and
-multiple clones), or provide one file owner for origin-scoped policy and define
-its relation to checkout-local declarations. The latter changes the accepted
-file model; the former changes the scope-preservation requirement. Neither is
-selected by this run. This affects migration, account consumers and remote
-repository retention, not just a filename or parser choice.
+## Repository scope — resolved November 3
 
-All 42 source-file changes from this run were archived and byte-verified before
-restoring pre-run code at `da937b7f5a709260afd39430a0be5ba17f8343ed`. The archive
-contains complete changed/new files, a tracked patch, hashes and check logs:
-`/tmp/loo-714-settings-prototype-piyvdr0m/source.tar.gz`
-(SHA256 `f0a6b73c7de4cf532df2741f3467288b8516209f0e41b28e1bdfd31be72095ee`).
-It is unfinished evidence, not a shippable implementation. No installed config
-or database was migrated. Earlier committed PR work and unrelated research remain.
+Jack Heart explicitly chose private preferences per independent clone, including
+account order, with linked Task worktrees sharing one file. This is an intentional
+scope change from legacy origin-wide DB account routes. No origin-wide runtime
+preference file or DB fallback is required. docs/config.md and
+docs/architecture/settings.md now specify this behavior.
 
-The complete catalogue/file/UI/remote extension remains to deliver. The prototype
-has no CLI/FFI/Swift acceptance proof; consumer migration, file invalidation,
-DTO parity, local-ID dispatch and complete retention/migration coverage remain
-unfinished. The deletion list below still applies after resolving the scope model.
+Migration materializes the legacy policy into explicitly identified existing clones
+with collision handling; these become independent policies. Preserve absent or
+ambiguous destinations as recovery exports until explicitly imported. Future clones
+do not automatically acquire old private settings. An arbitrary registered checkout
+cannot own every clone's policy, and registration cannot gate normal config access.
+The old requirement to preserve origin-wide routing scope is superseded by this
+explicit decision; preserve values, ordering and recovery evidence instead.
+
+The earlier prototype is archived at
+/tmp/loo-714-settings-prototype-piyvdr0m/source.tar.gz, SHA256
+f0a6b73c7de4cf532df2741f3467288b8516209f0e41b28e1bdfd31be72095ee.
+It contains unfinished source and focused checks, not delivered code. Use it only
+as evidence and reusable work after checking against current merged code. No live
+config or DB migration occurred. The earlier run's blocked scope decision is resolved.
+
+## Reconciliation — November 3, 2026
+
+Accepted design and implemented behavior differ deliberately until cutover. At
+`de23763a03`, generic setters still write `scope_settings`, account routes still
+use `provider_routes`, and machine preferences still use `scope_defaults`.
+The resolver still uses `LAUNCH_KEYS`, `REPO_ONLY_KEYS`, `ADDITIVE_KEYS` and
+serialized `Config::default()` for discovery. These are remaining replacements,
+not the accepted catalogue. The earlier choice-before-fallback and invocation
+work remains; `4c95a728c8` also removed `StoredSkill` and duplicate docs storage.
+The prototype was restored before these later changes, not over them.
+
+Main was merged through `aef0c0a5cd` in `de23763a03`. Relevant changes:
+
+- LOO-709 / #1804 changes `session.end_detached_after` to a two-minute default
+  with duration/off parsing. The catalogue must describe this existing preference
+  and its applicability; owner activity and native draft records remain runtime
+  state. No bulk-resume setting or command exists.
+- #1803 adds identity-preserving Wave add/rename/removal. File-backed
+  Wave preferences must retain their owner through rename/relocation, including
+  descendants, without applying retired preferences to a new Wave at the old
+  name. Current DB preferences use Wave IDs; translating them to file selectors
+  is part of migration, not a reason to retain a second DB preference authority.
+- `settings_authority.sql` remains absent from the inspected `origin/main`
+  frontier and is this Task's one editable migration. Its current contents remove
+  Task agent policy and normalize skill keys; they do not migrate preferences to files.
+
+Earlier test evidence remains in settings-scope.md and
+`4c95a728c8:scratch/settings-catalog.md`: the capture reduction passed its focused
+test and 153 related tests, formatting and Clippy. The archived prototype's 53
+config tests prove only that discarded prototype. Neither result establishes
+post-merge extension acceptance. That reconciliation preceded Jack's clone-scope
+decision recorded above; the former blocker is resolved, while implementation
+acceptance remains open.
 
 ## Outcome and scope
 
@@ -233,12 +263,12 @@ AGENTS.md; any necessary temporary compatibility has a named removal outcome.
 
 ### Delete — do not maintain
 
-The independent capture reduction removes `graph::StoredSkill` and the duplicate
+The completed independent capture reduction removed `graph::StoredSkill` and the duplicate
 `Skill.settings["docs"]` representation. `Skill.docs: Option<Vec<String>>` keeps
 omission, empty-list reset and authored paths on one surviving field, including
 retained JSON captures. Export ownership checks live in `skills::writable_target`;
 the caller no longer repeats them. These changes do not select a repository scope
-policy or perform any of the blocked preference migration.
+policy or perform the preference migration that can now proceed.
 
 Remaining predecessors to delete in the same coherent migration cut:
 
@@ -254,13 +284,13 @@ Existing code owners: config.rs, config/settings.rs, lf/mod.rs, lf/commands/sett
 lf/commands/config.rs, lf/commands/machine.rs, lf/commands/ssh.rs, store/sqlite/durable.rs,
 work/wave/setup.rs and Desktop AppearanceStore. Follow actual call paths before changing.
 
-## Execution and proof
+## Remaining implementation and proof
 
-Implement in coherent internal slices without stopping after scaffolding: catalogue and
-file ownership/cutover; all consumer/API/UI writers and provenance; remote authority and
-retention. Preserve previous PR1 tests and close the setting-by-setting gaps. Settings
-coverage is the deliverable, not a small agent-only subset. Resolve routine syntax and
-adapter choices from the existing code; record consequential counterexamples for review.
+The repository scope decision is resolved. The rewritten configuration docs precede
+the coherent migration cut and define its expected behavior.
+Remaining implementation comprises catalogue and file ownership/cutover; all
+consumer/API/UI writers and provenance; and remote authority and retention.
+Previous PR1 behavior remains required alongside complete setting-by-setting coverage.
 
 Headless acceptance covers:
 
@@ -271,7 +301,8 @@ Headless acceptance covers:
 - Bootstrap/config discovery survives DB absence/version skew; runtime unavailability is
   reported separately. DTO fixtures agree across Rust and Swift.
 - Migration fixtures cover collisions, scope/strength/order, interrupted file cutover and
-  removals. No obsolete DB preference can influence later launches.
+  removals, plus Wave rename/relocation and old-name reuse. No obsolete DB preference
+  can influence later launches.
 - Stand-in remote launches prove origin wins, direct remote uses retained settings,
   repository precedence remains, local-ID placement executes locally, and nested Graph
   execution does not leak invocation selection into unrelated work.
@@ -279,15 +310,10 @@ Headless acceptance covers:
   and deletions, stale/concurrent deliveries, restart, host-only fields, no credential or
   CLI/env persistence, and nonblocking forwarded execution with clear persistence status.
 
-Focused tests during implementation, affected suites once at gate/publication, cargo fmt
-and cargo clippy --all-targets -- -D warnings before code commits. Clear inherited LF_*
-for Rust tests and close stdin as repository guidance requires. No live paid provider,
-config migration on Jack's installation or remote infrastructure provisioning is needed
-for these proofs. Follow the pursue publication boundary and show remaining demo limits.
+Gate owns affected-suite and complete extension acceptance after implementation;
+configured/installed behavior remains distinct from stand-in proof. Automatic
+failure recovery remains unimplemented as PR2.
 
-Check: archived prototype `cargo test -p loopflow --lib config::` passed 53 tests
-with inherited LF_* cleared and stdin closed; this is not acceptance of the restored
-tree or the complete extension. Previous PR evidence is in settings-scope.md;
-automatic failure recovery remains unimplemented separately.
+Check: `git diff --check` passed; `lf context` remains within both memory and scratch limits; no code changed or tests rerun during reconciliation.
 
-Compression check (LF_* unset, stdin closed): `cargo test -p loopflow --lib captured_docs_preserve_omission_reset_and_addition` (1 passed); `cargo test -p loopflow --lib -- skills:: config::settings:: graph:: prompt::process::tests::prepare_process_prompt --skip captured_docs_preserve_omission_reset_and_addition` (153 passed); `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Gate owns the complete extension acceptance after its scope decision.
+Documentation-first check: `git diff --check` and `uv run --no-sync python scripts/check_architecture.py --json` passed; code/behavior parity remains the implementation run's acceptance.

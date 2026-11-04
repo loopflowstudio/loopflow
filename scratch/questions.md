@@ -22,13 +22,19 @@ Record any architectural counterexample here rather than silently weakening the
 accepted outcome. Remote profile differences are deliberate per-launch authority;
 existing runtime account/thread continuity still applies.
 
-Unresolved authority conflict (November 3 implementation): repository account
-routes currently follow Git `owner/repo` across independent and future clones,
-while the accepted private file belongs to one main checkout. Preserving that
-scope and deleting every identity-wide preference owner cannot both hold.
-`settings-catalog.md` records the source evidence, alternative design decisions,
-preserved prototype and remaining work. No scope revision is attributed to Jack
-Heart; dependent implementation stopped and pre-run code was restored.
+November 3 follow-up: Jack Heart requested documentation first, then code parity,
+with aggressive conceptual cleanup. docs/config.md and docs/architecture/settings.md
+are the contracts. Replace ConfigLayer's mixed source/scope/storage variants with
+separate source, scope and target throughout code, DTOs and inspection. Delete
+obsolete authorities and parallel paths, not just misleading names.
+
+Jack resolved the earlier stop: private preferences, including account order, are
+per independent clone; linked Task worktrees share. Legacy origin-wide routes may
+be materialized into identified existing clones after collision checks. Preserve
+unavailable destinations as non-executing recovery exports for explicit import;
+future clones do not inherit automatically. This intentionally changes scope and
+removes the earlier migration contradiction. Implementation can resume after the
+docs-first checkpoint, keeping Auto-Ship stopped and limit recovery separate.
 
 ## Duplicate implement run stopped (2026-11-02 14:25)
 

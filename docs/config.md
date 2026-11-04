@@ -1,96 +1,129 @@
 # Configuration
 
 ```bash
-lf user                                # show the resolved display name
-lf user --json                         # name as a JSON string, or null when unavailable
+lf set --global default_agent codex      # fallback for your work
+lf set skills.implement.agent claude     # implement in this checkout and its Task worktrees
+lf config show --skill implement --json  # effective values and their sources
+lf unset skills.implement.agent          # reveal the next applicable value
 ```
 
-`user` is the unique shortcut for `lf config user`. It returns a display name,
-such as `Jack Heart`, using Git's configured `user.name`,
-including repository overrides. Agents can use a familiar name such as `Jack`
-in prose. No first name or username is derived from this value. Override it
-in personal Loopflow configuration (`$LF_HOME/config.yaml`, or
-`~/.lf/config.yaml` when `LF_HOME` is unset):
+`set` and `unset` edit your configuration files. Desktop settings edit the same
+files. Hand edits, CLI edits and Desktop edits have the same meaning.
 
-```yaml
-user:
-  name: Jack
-```
+Use `default_agent` for a fallback and `agent` for a choice. In this example,
+implementation uses Claude; other steps fall back to Codex unless another
+applicable setting chooses an agent. Built-in skills recommend no harness.
 
-Edit `user.name` to correct it; remove it or leave it blank to use Git again.
-Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
-preference. Direct interactive and batch launches use the resolved name, and `lf --machine`
-carries the caller's name rather than reading the destination owner's name.
-A non-empty `LF_USER_NAME` overrides file and database values; an explicit
-`--setting user.name=NAME` wins over the environment. For a launched request, an
-empty or whitespace-only value falls through to personal configuration and Git.
-Steering comments prefer their recorded requester, then Linear's author name.
-Names describe people; they do not grant authority or establish who wrote an
-older request. Task claims compare names, so give each person on a repository a
-distinct one: a claim with no name, or under yours, reads as yours. Unattributed background Task and Wave work remains unattributed.
+## Where settings live
 
-Persisted artifacts use the person's name; session replies use “you.” Stored
-transcripts retain their conversational wording.
+| File | Applies to | Shared through Git? |
+| --- | --- | --- |
+| `~/.lf/config.yaml` | Your global preferences | No |
+| `./lf.config.local.yaml` | Your repository and Wave preferences | No |
+| `.lf/config.yaml` | The repository's shared preferences | Yes |
+| `.lf/wave/<name>/config.yaml` | The Wave's shared preferences | Yes |
 
-Opening, moving, or resuming a native session preserves the conversation without
-submitting a prompt or resetting its participant. Agents can use a name they
-already know or the configured name; no reconciliation is required. Opening a
-session does not approve a review.
+`LF_HOME` changes the personal global directory. Run `set --global` to edit the
+personal global file. Bare `set` edits private repository settings; `--wave`
+selects a Wave within that private file. Edit committed files deliberately when
+changing the team's configuration.
 
-`lf user --json` resolves the name without provider or PM access.
-Session prompts carry the selected participant name. Stored transcripts retain
-their original wording; unnamed historical messages remain anonymous.
-
-Discord and Linear retain their provider author IDs alongside display names;
-a shared publisher account never substitutes for an explicitly named requester.
-
-Start with a one-run override; keep it in repo config only when the choice
-should apply to everyone:
-
-```bash
-lf gate -a codex --docs docs/api.md
-```
-
-```yaml
-# .lf/config.yaml
-agent: codex
-docs: [docs/api.md]
-```
-
-Resolve each preference in this order, highest first: explicit CLI, explicit
-environment, `lf set` database values, personal config, repository/Wave config,
-then builtins. Within a source, Wave beats repository beats global; within one
-scope, authored Graph step beats skill beats general. A broad higher-source
-preference wins over a more specific lower-source preference of the same strength.
-For agent selection, every applicable `agent` choice beats every `default_agent`
-fallback first. Only when no choice applies does a fallback select the agent;
-source, scope and target order apply within each class.
-
-```bash
-lf set --global skills.implement.agent codex
-lf set --global skills.implement.default_agent codex
-lf set --global graphs.release.steps.write-code.chrome false
-lf unset --global graphs.release.steps.write-code.chrome
-lf --setting 'skills.implement.yolo=false' implement
-lf config show --skill implement --json
-lf config show --graph release --step write-code --json
-```
-
-Use the same typed YAML values in files, `set`, and repeatable `--setting KEY=YAML`.
-`false` disables a boolean; omitting a file key or `unset` exposes the lower layer.
-Lists `docs`, `context`, `exclude`, `summaries`, and `supported_harnesses` add in
-precedence order; an explicit `[]` clears earlier entries. Keyed maps merge by
-key. `planning` replaces as a complete tagged provider configuration.
-Inspection lists effective values and every contributing candidate's source,
-scope, target and authored key (`agent` or `default_agent`). The effective `agent`
-includes choices and fallbacks in selection order. JSON uses the same read operation as Desktop clients.
+Independent clones have independent private preferences, even when they have the
+same Git remote. This includes account order and machine preferences. New clones
+start without another clone's private overrides; copy or import them deliberately.
+Task worktrees share the main checkout's `lf.config.local.yaml`. LF resolves that
+file through Git's worktree metadata; a Task's working directory does not give it
+another private preference file. The first LF write adds `/lf.config.local.yaml`
+to the repository's private Git exclude file if needed. It preserves existing
+ignore rules and does not edit the committed `.gitignore`. An already tracked
+file needs to be removed from tracking before Git can ignore it.
 
 ```yaml
 # ~/.lf/config.yaml
-agent: claude
+default_agent: codex
+session:
+  terminal: Ghostty
+  end_detached_after: 2m
+```
+
+```yaml
+# ./lf.config.local.yaml
 skills:
   implement:
-    agent: codex
+    agent: claude
+```
+
+```yaml
+# .lf/config.yaml — team preferences
+docs: [README.md, docs/api.md]
+```
+
+Files hold declared preferences, including account order, preferred machines and
+layout templates. The database holds live state and observations: account usage,
+cooldowns, machine identity, Sessions, execution history and actual saved Task
+arrangements. A saved arrangement remains state; applying a template changes it.
+Credentials stay with their secret/provider owner. The database is not an
+additional preference override layer.
+
+## Source, scope and target
+
+Every declaration has three independent dimensions:
+
+| Dimension | Answers | Values |
+| --- | --- | --- |
+| Source | Who supplied it? | Builtin, repository, personal, environment, command line |
+| Scope | Where does it apply? | Global, repository, Wave |
+| Target | Which work does it select? | General, a skill, a named occurrence in a Graph |
+
+A personal Wave preference is **personal source, Wave scope**. The same Wave's
+committed preference is **repository source, Wave scope**. A file path records
+where the declaration was written; it does not create another authority tier.
+
+A setting supports only meaningful combinations. Account order has global,
+repository and Wave scopes but no skill target. Appearance has no Graph-step
+target. Native provider settings remain owned by the provider. The settings
+catalogue supplies the same applicability and validation to files, CLI and Desktop;
+unsupported combinations report an explanation rather than being silently ignored.
+
+## Which value wins
+
+Resolve each setting independently. For scalar choices, use this source order:
+
+1. Explicit command-line settings.
+2. Explicit environment settings.
+3. Personal configuration.
+4. Repository configuration, including Wave files and repository definitions.
+5. Built-in defaults.
+
+Within one source, Wave scope beats repository scope, which beats global scope.
+Within the same scope, a Graph occurrence beats a skill, which beats general
+settings. A more specific target does not outrank a higher source.
+
+Agent selection first separates **choices** from **fallbacks**: every applicable
+`agent` beats every `default_agent`. Apply source, scope and target ordering within
+each class. A command-line `default_agent` is still a fallback.
+
+| Declarations | Selected agent |
+| --- | --- |
+| Personal `default_agent: codex`; repository implement `agent: claude` | Claude |
+| Personal implement `agent: codex`; repository occurrence `agent: claude` | Codex |
+| Personal implement `default_agent: codex`; repository general `agent: claude` | Claude |
+| Explicit `-a codex`; repository occurrence `agent: claude` | Codex |
+
+Lists and compound settings follow their declared merge rules. `docs`, `context`,
+`exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
+clears earlier contributions. Keyed maps merge by key. Account lists preserve
+order and replace as a unit. `planning` replaces its complete tagged provider
+configuration. `false` is a value; omission and `unset` reveal lower declarations.
+
+## Skills and Graph occurrences
+
+Use the same nesting in personal and repository configuration:
+
+```yaml
+skills:
+  implement:
+    default_agent: codex
     docs: [scripts/testing.md]
 graphs:
   release:
@@ -100,40 +133,117 @@ graphs:
         chrome: false
 ```
 
-`write-code` names `id: write-code` in the defining `release` Graph. Composition
-and loop iterations retain that identity; another Graph's same-named step does
-not match. Reusing a Graph applies its preferences to each copy. Steps without
-IDs use skill and general preferences. Duplicate IDs within a definition are
-invalid. Repeated interactive stops receive distinct navigation names such as
-`review#1`; settings still select their original authored IDs.
+The skill rule applies wherever `implement` runs. The Graph rule applies to
+`id: write-code` authored in `release`. Reusing that Graph applies the rule to
+each copy. Composition and loops retain the defining Graph and original step ID;
+another Graph's same-named step does not match. Steps without IDs use skill and
+general settings. Duplicate IDs within one definition are invalid.
 
 ```bash
-lf config show --graph outer --json              # every composed agent step and router
-lf config show --graph outer --step work --json  # only authored outer/work
-lf config show --graph inner --step work --json  # authored inner/work
+lf set --global skills.implement.default_agent codex
+lf set graphs.release.steps.write-code.agent claude
+lf config show --graph release --step write-code --json
+lf config show --graph outer --json
 ```
 
-`--step` selects the defining Graph and original authored ID, just like `set`.
-If `work` exists only in a composed child, targeting `outer/work` reports no
-matching step; inspect the child Graph instead. Without `--step`, inspection
-retains every occurrence, including repeated compositions.
+Whole-Graph inspection includes composed steps and routers. Targeting
+`outer/work` does not select a step authored only in `inner/work`. Navigation
+labels such as `review#1` do not change setting addresses.
 
-Launch targets accept `agent`, `default_agent`, `yolo`, `chrome`, `isolate`, `docs`, `context`,
-`exclude`, `diff`, `diff_files`, `paste`, `summaries`, and `summary_tokens`.
-Repository delivery, planning, default Graph, retries and context authoring
-budgets are general preferences: they describe work rather than an agent turn.
-`user`, `repo_root`, and `session` are personal-only; use `set --global`.
-Account routes and Machine registration retain their dedicated commands.
-Theme, installation stream and portfolio remain local presentation,
-installation and navigation settings; they have no skill or Graph-step target.
+Launch targets support agent selection and context/launch preferences. Planning,
+release policy, a Task's default Graph and context budgets describe broader work;
+they do not acquire skill targets merely because their values are configurable.
+Theme, installation stream, portfolio and terminal preferences retain their
+appropriate lifecycle. Reserved summary settings do not start a summarization run.
 
-`LF_SETTINGS` accepts a YAML mapping of these preferences. Existing
-`LF_AGENT_OVERRIDE`, `LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME`, and
-`LF_ACCOUNT_ISOLATION` supply explicit environment preferences. User-supplied
-environment follows child processes and remote launches; CLI choices stay with
-the invocation. A Graph forwards explicit CLI choices to its own steps.
-A Session or `resume -a` changes that conversation only, never a Task default
-or the policy of unrelated Tasks its agent creates.
+## Invocation and inheritance
+
+```bash
+lf -a claude resume --task LOO-123
+lf -a codex graph release
+lf --setting 'skills.implement.yolo=false' implement
+```
+
+The first command selects Claude for that conversation. It does not change the
+preferences of Tasks the conversation creates. The second explicitly selects
+Codex for all steps in the Graph, including composed steps and routers.
+
+`--setting KEY=YAML` uses the same typed values as configuration files.
+`LF_SETTINGS` accepts a YAML mapping. Explicit `LF_AGENT_OVERRIDE`,
+`LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME` and
+`LF_ACCOUNT_ISOLATION` retain their invocation meanings. User-supplied environment
+can flow into children; LF does not export a resolved preference as an environment
+override. Internal process identity variables carry execution context, not settings.
+Neither environment nor command-line choices are saved as future preferences.
+
+## Remote work
+
+The initiating LF instance supplies your personal preferences. The executor
+supplies its environment: installed tools, credentials, local paths and machine
+identity. Repository configuration keeps its normal source and scope.
+
+| Start work from | Personal preferences used |
+| --- | --- |
+| Laptop, targeting a remote machine | Laptop's |
+| Phone through the laptop's LF server | Laptop's |
+| Shell or phone directly on the remote | Remote's saved preferences |
+
+Forward authored declarations with their scope, target and choice/fallback
+meaning. Do not turn the effective result into command-line overrides or combine
+two personal profiles into an undocumented precedence layer.
+
+The remote can retain portable preferences for subsequent direct work while the
+laptop is unavailable. Refresh an unchanged retained copy when new work arrives.
+Preserve independently edited remote configuration, including deletions; expose
+the difference for explicit reconciliation. Forwarded work can use the incoming
+profile even when saving it would overwrite remote edits. Inspection distinguishes
+“used for this launch” from “saved for future launches.” Remote edits do not
+silently flow back to the laptop.
+
+Resolve machine selection once at the origin to a durable identity. A selection
+that names the current machine runs locally. Existing assigned work does not
+forward itself again. Preferences neither install tools nor transfer credentials;
+provider conversation/account continuity still constrains resume.
+
+## Inspect and edit
+
+```bash
+lf config show --skill implement --json
+lf config show --graph release --step write-code --json
+lf context --json
+```
+
+Inspection shows the effective value, authored key, source, scope, target and file
+location. It explains why candidates won, lost, contributed or cleared earlier
+values. A fallback remains identifiable as `default_agent`. CLI and Desktop read
+the same resolution used to prepare a launch.
+
+The catalogue lists supported keys, value types, destinations and lifecycle.
+A successful write reports where it was saved and whether it applies immediately,
+on a later launch or only after a domain action. Saving a preference does not
+itself log into an account, provision a machine or move existing work.
+
+Setters validate before writing, preserve unrelated content and comments, and
+protect against concurrent edits. Hand edits invalidate the same readers. Config
+inspection and bootstrap preferences do not require a compatible database; account
+or machine availability can still require runtime observations.
+
+## Your display name
+
+```bash
+lf user
+lf user --json
+```
+
+Set `user.name` in personal global configuration; omit it or leave it blank to
+use Git's configured name. Repository configuration cannot supply someone else's
+personal display name. Explicit `LF_USER_NAME` and command-line values retain
+normal precedence. Empty invocation values fall through to personal config and
+Git. The initiating participant is carried with remote requests.
+
+Names describe people, not authority. Task claims use the repository's Git email
+identity. Persisted artifacts name their participant; conversation replies use
+“you.” Native history and provider author IDs retain their original attribution.
 
 ## Quick Reference
 
@@ -237,50 +347,6 @@ includes the saved active skill. Large documents include marked start excerpts
 with complete source paths and sizes.
 The rendered block stays within the provider byte cap; overflow listings and skills
 remain readable through complete-file pointers.
-
-## Config Files
-
-**Personal config** (`~/.lf/config.yaml`) overrides shared defaults. **Repo config**
-(`.lf/config.yaml`) supplies shared preferences; **Wave config**
-(`.lf/wave/<name>/config.yaml`) specializes them for that Wave. Repository-only
-keys (`planning`, `release`, `merge_method`, `land`, `pr`) are an error in Wave
-settings, whether stored in files or the database. Personal config can scope a `repos` block by canonical repository name
-or checkout path, with a nested `waves` block keyed by Wave name.
-See [Set it up once](work.md#set-it-up-once).
-
-```yaml
-# ~/.lf/config.yaml (global)
-agent: claude:opus
-session:
-  terminal: Ghostty       # presents review GraphStep sessions on this Machine
-  end_detached_after: 2m  # ends an unviewed Session once work and unfinished input settle
-
-# .lf/config.yaml (repo)
-agent: codex        # shared default; personal agent wins
-context:
-  - docs/api.md           # combined with global context
-```
-
-Scheduled commands are personal and never configured here; see
-[Schedule it yourself](ops.md#schedule-it-yourself).
-
-Example repo config:
-
-```yaml
-agent: claude:opus
-
-context:
-  - src/schema.py
-  - docs/api.md
-
-docs:
-  - README.md
-  - docs/
-
-exclude:
-  - "*.test.ts"
-  - node_modules
-```
 
 ## Graphs
 
@@ -446,7 +512,7 @@ Choose a harness, with an optional model. Use `default_agent` for a fallback.
 |---|---|
 | **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode`, `pi` installed on this machine) |
+| **Default** | unset (uses applicable authored fallbacks, then the first installed harness: `codex`, `claude`, `opencode`, `pi`) |
 
 ```yaml
 agent: codex          # harness default
@@ -463,8 +529,8 @@ Loopflow uses the first installed harness: Codex, Claude, OpenCode, then Pi.
 A personal `skills.implement.agent: codex` beats a repository occurrence's
 `agent: claude`; changing that personal key to `default_agent` lets the repository
 choice win, even if it is general. `-a` explicitly selects the invocation's agent.
-Both keys work in CLI `--setting`, `LF_SETTINGS`, database preferences, personal
-and shared files, LF-owned skill metadata, and Graph occurrence settings.
+Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
+LF-owned skill metadata, and Graph occurrence settings.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex
@@ -719,8 +785,8 @@ go to the corresponding checkout directories, never home. Release promotion’s
 skill sync includes builtin Graphs. Recipes capture Graph topology at sync time;
 sync again after adding, editing, removing or overriding repository definitions.
 Headless commands retain the defining Graph, authored step ID and source precedence
-in invocation files beside the recipe. Skill definitions and personal, DB,
-environment and CLI preferences resolve in the launch repository. Sync refreshes and prunes
+in invocation files beside the recipe. Skill definitions and personal, repository, environment and CLI preferences
+resolve in the launch repository. Sync refreshes and prunes
 these captures with their recipe, preserving unrelated bundle assets.
 
 Exact names win: `.lf/skills/wave/session.md` and `.lf/skills/wave-session.md`

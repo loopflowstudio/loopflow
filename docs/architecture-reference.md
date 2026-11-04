@@ -26,6 +26,7 @@ execution contract and its cutover status. [Architecture](architecture.md) intro
 The checked inventory below stays on this page. The contract lives by area:
 
 - [Cutover status](architecture/reference-cutover.md): Which AgentProcess, Session, Graph and launch cutovers remain open.
+- [Settings ownership and resolution](architecture/settings.md): File-backed declarations, source/scope/target, the catalogue and remote preference authority.
 - [Models and vocabulary](architecture/reference-models.md): Work, Graph, Process and Session models and their APIs.
 - [Code, persistence and public APIs](architecture/reference-code.md): Source territories, persistence and process entry points.
 - [Launch, Graphs and delivery](architecture/reference-runtime.md): Harness launch, Task Graphs, communication and delivery.

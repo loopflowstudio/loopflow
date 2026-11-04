@@ -2,8 +2,8 @@
 
 Jack Heart approved LOO-717 implementation and review publication on November 3,
 2026, stopping at interactive demo. No shipping, merge or installation approval.
-LOO-498’s existing feature Graph was observed running compress on November 3;
-no competing run was launched or existing workflow changed.
+LOO-498's November 4 status shows open PR #1814 and a stopped feature Graph;
+publication does not establish native adapter acceptance. Its workflow is unchanged.
 
 The accepted contract lives in `questions.md` and `loo-717-shell-lifetimes.md`.
 Rex owns its native shells/layouts and adapter; Desktop owns its own. Shared lf
@@ -18,8 +18,8 @@ Comment `30bf4970-3bb1-481f-8200-83a6734cb26e` refines
 - `task presence TASK --occurrence ID --state STATE --revision N` reports a
   native occurrence as retained, away, closed or unknown, with required
   `--native-settled true|false`. Closed selects explicit-Close policy; it does
-  not prove native cleanup. Persist increasing
-  revisions; delayed release must not overwrite a return.
+  not prove native cleanup. Keep increasing revisions for the occurrence's lifetime;
+  persist them if restoring that occurrence. Delayed release must not overwrite a return.
 - Renew retained leases within 30 seconds. Expiry is unknown, never confirmed
   closure. Another retaining occurrence keeps shared resources alive.
 - The destination returns a completion-pinned retirement intent. At `closing`,

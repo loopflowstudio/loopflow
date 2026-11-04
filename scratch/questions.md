@@ -51,8 +51,9 @@ Keep the existing agent idle clock/protections distinct. Record/test exact races
 LOO-498 owns the Rex-specific adapter and workspace features and remains independently owned. The shared contract and Desktop path are implemented here; concrete API needs
 were shared in the coordination note. Rex end-to-end proof remains outstanding.
 
-Main through `aef0c0a5cd`, including LOO-709 and LOO-711, is integrated. LOO-714
-routing remains an overlap constraint. The Task uses one migration. Remaining
+Main through `ac8e088f5f`, including LOO-709, LOO-711 and native status restoration
+across reconnects, is integrated. LOO-714 routing remains an overlap constraint.
+The Task uses one migration. Remaining
 implementation and proof are tracked in `loo-717-shell-lifetimes.md`.
 
 ## Build assumptions — November 3
@@ -60,8 +61,10 @@ implementation and proof are tracked in `loo-717-shell-lifetimes.md`.
 A lost retained-host lease is unknown. Cleanup needs fresh release or positive
 evidence that the exact retaining owner exited, per the accepted November 4 choice. Desktop releases on departure, including unfinished Tasks; ordinary
 shell execution stays alive and an eligible idle agent uses its existing grace.
-Host observations carry increasing persisted revisions so an old release cannot
-overwrite a newer return. Native Rex integration remains owned by LOO-498.
+Host observations carry increasing revisions so an old release cannot overwrite
+a newer return. Reusing an occurrence across restarts requires persisted revisions;
+Desktop uses a fresh occurrence per app process and an in-memory counter per retained
+workspace. Native Rex integration remains owned by LOO-498.
 
 ## Earlier headless concept-review interpretation — November 3
 
@@ -82,10 +85,10 @@ policy. This bounds departure only, not requested work or the cleanup deadline.
 
 ## Interactive concept review — accepted November 4
 
-Jack Heart requested another concept review at demo. Current code allows an
-expired retained-host lease to hold completed-Task shells and checkout indefinitely;
-the eligible idle agent can still end. Even a dead Desktop instance needs a fresh
-host report before workspace cleanup can proceed.
+Jack Heart requested another concept review at demo. Before the November 4 repair,
+an expired retained-host lease held completed-Task shells and checkout indefinitely;
+even a dead Desktop instance needed a fresh host report. Eligible idle agent ending
+was already independent of that workspace hold.
 
 Jack Heart selected **1a** ("1a i guess") on November 4: positive evidence that the exact retaining host
 instance exited releases its hold and starts ordinary absence cleanup without
@@ -95,8 +98,9 @@ Rex client disappearance does not establish its retaining server's death.
 
 The choice is resolved; the confirmed-exit path is implemented with focused local,
 real SSH and headless Swift evidence recorded in the working design.
-The working design records usage copy, layer consequences and counterexamples.
-This review changes no runtime code, restarts no Graph and grants no shipping approval.
+The working design preserves the contract and evidence limits; the earlier review
+and counterexamples remain at `e7fd5db44f:scratch/loo-717-shell-lifetimes.md`.
+The review granted no shipping approval.
 
 ## Implementation continuation — November 4
 
@@ -105,11 +109,6 @@ retaining-host exit recovery, then republish PR #1811 for interactive demo. Keep
 the existing feature Graph and Task checkout. No Auto-Ship, merge or installation.
 Reuse the accepted design's protections and independent native/destination
 settlement. Share concrete adapter changes with LOO-498 without launching its work.
-
-This conversation's app-bundled lf cannot read the current wave_removal schema.
-Use the already installed /Users/jack/.local/bin/lf for managed Work operations;
-set LF_BIN and PATH for child commands accordingly. Do not install, migrate or
-change accounts to repair the obsolete caller binary.
 
 Implementation choice — November 4: use the existing retirement executor and OS
 process reader. A host owner names Machine, PID, kernel start time and whether

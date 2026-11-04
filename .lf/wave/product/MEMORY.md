@@ -274,28 +274,28 @@ Capture models before records, delete replaced mechanisms, and use UPSERT when
 revision triggers matter: `INSERT OR REPLACE` skips update triggers. Focused SQL
 checks do not replace affected suites.
 
-## Native shell lifetimes (LOO-717, accepted 2026-11-03)
+## Native shell lifetimes (LOO-717, accepted November 3–4, 2026)
 
-Jack Heart approved implementation and review publication through interactive demo, not landing
-or installation. Desktop/Rex own native shells/layouts; lf shares Session retention
-and Task retirement. No ordinary-shell relay or automatic deleted-checkout restoration.
-LOO-498 owns Rex's adapter.
+Jack Heart approved building/publication through demo, not landing/installation.
+Hosts own shells/layouts and Session retention policy; lf owns shared
+retirement. LOO-498 owns Rex's adapter. No ordinary-shell relay or deleted-checkout
+restoration. Close ends Desktop shells/jobs; Hide/switch/quit preserve execution.
+Undo restores history. Nested lf preserves shell purpose.
 
-Close ends a Desktop shell and ordinary jobs; Hide/switch/quit retain execution.
-Undo restores identity/history, not processes. Hosts own Session retention/release.
-Eligible idle agents end at two minutes; completed-and-away shells/checkouts retire
-at fifteen total. Return cancels the deadline. Active work, drafts and pending
-requests protect execution; elapsed deadlines need not restart after settlement.
-Cleanup discards uncommitted files, preserving committed-ref safeguards and history.
+Eligible idle agents end at two minutes; completed-and-away workspaces at fifteen.
+Return cancels grace; explicit last Close skips it. Active work, drafts and pending
+requests delay cleanup without restarting elapsed grace. Uncommitted files are
+discarded; committed-ref safeguards and history survive.
 
-Release policy and native settlement are independent, revisioned host facts.
-Closed selects explicit Close; away+settled preserves grace and permits cleanup
-without relaunch. Desktop detaches presentation before reporting; Rex must settle
-its native jobs. New retention defeats stale settlement. Expired retained leases
-remain unknown; a lost reply cannot revoke a destination-committed release.
-Nested lf preserves shell purpose. Evidence and limits:
-`781e5dc5b4:scratch/loo-717-shell-lifetimes.md`. These checks establish
-neither installed Desktop/Rex recovery nor physical remote-Machine acceptance.
+Jack's November 4 choice: proven retaining-instance exit releases as away without
+relaunch. Machine/PID/start evidence, revision fences and per-instance occurrences
+protect newer retention; lease/network/client loss stays unknown. Remote verification
+needs an existing reverse Machine route. Release and native settlement are independent;
+Rex server exit cannot settle surviving jobs. Destination owners settle separately.
+Away+settled preserves grace; a lost reply cannot undo committed release.
+Only reused occurrences need persisted revisions. Evidence:
+`76750bdc55:scratch/loo-717-shell-lifetimes.md`. Installed Desktop/Rex and physical
+remote-Machine acceptance remain unproved.
 
 ## Session and operate pairs (2026-10-05)
 

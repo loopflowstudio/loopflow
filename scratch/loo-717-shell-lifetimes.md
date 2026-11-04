@@ -60,7 +60,9 @@ Use one durable retirement intent pinned to completion, checkout and branch.
 Host writes and destructive passes share a Task lock. Prepare existing landed
 Git deletion, then request settlement, wait on native resources and destination
 Session/shell owners, recheck the intent, and apply deletion. Partial failure
-keeps a pending reason and retries remaining effects. Cancellation is a fence
+keeps a pending reason and retries remaining effects on the next host report or
+scheduling call. Active-work waits stay in the executor; recorded cleanup errors
+end that run. This is not unattended retry after every failure. Cancellation is a fence
 between effects, not rollback of external Git/process effects already underway.
 
 ## Confirmed exit implementation — November 4
@@ -127,17 +129,26 @@ shell Close. Keep one unreleased `task_workspace_lifetimes.sql` migration.
 - Focused implementation checks are complete: exact process exit, stale-revision
   races, other retaining instances, native job settlement after server exit,
   requested work/drafts/pending input beyond the deadline, and cleanup without
-  another Desktop report. Real loopback SSH proves disconnect is unknown, then
-  the same executor observes exit after reconnect without fresh presence.
+  another Desktop report. Real loopback SSH proves a failed remote read is unknown,
+  then the same executor observes exit after reconnect without fresh presence and
+  starts grace. Composed local Git fixtures prove deletion after job settlement;
+  the SSH exit fixture does not delete a remote checkout.
 - Gate owns affected suites, migration-frontier/DTO checks, CLI dispatch,
   formatting, Clippy and broader completion/landing coverage. Relevant Rust scope:
   store::sqlite::task_retirement, ops::task::retirement, transport::lifetime,
   machine/SSH CLI, dto_fixtures and transport_tests::ssh_shells. Owner README also
   requires CLI graph compilation and Machine global-command boundaries.
-- Demo owns installed Desktop quit/crash/relaunch, input/TUI preservation, failed
-  Close presentation and physical remote-Machine recovery. Rex acceptance depends
+- Demo owns installed Desktop quit/crash/relaunch, sleep, input/TUI preservation,
+  failed Close presentation, execution-owner failure and physical remote-Machine
+  recovery. Rex acceptance depends
   on LOO-498's independent native integration. Logout/reboot require a disposable
   OS environment. No saved preview or loopback fixture proves installed survival.
+
+November 4 reconciliation found no bounded runtime repair. Main through
+`ac8e088f5f` supplies native status restoration across reconnects; the branch retains
+that path and LOO-709's existing active-work/draft protections. No new product
+decision is needed. LOO-498's published PR #1814 is independent delivery evidence,
+not proof that its native adapter satisfies this contract.
 
 ## Prior evidence and limits
 
@@ -170,4 +181,33 @@ No mobile, Tailscale setup, public hub, general network server, compulsory Rex
 backend, process migration, arbitrary replay or workload recipes. Review publication
 belongs to the feature Graph after implement; stop at interactive demo.
 
-Check: November 4 compression — `cargo test -p loopflow --lib retirement` passed 18; `scripts/test_desktop.sh --jobs 2 --filter WorkspaceRetentionTests` built Desktop and passed 11 headless tests; `cargo fmt`, `git diff --check` and `lf context` passed (memory/scratch within both limits). Earlier implementation corrected the composed fixture to use a live worker; its exact rerun, exit-fence test, real SSH retirement case (`--ignored`), host-owner DTO and migration validation passed. Builds emitted unwind-size and macOS SDK/linker warnings. Gate owns broader checks above; installed proof remains demo's.
+## Concept review — November 4, after implementation
+
+Outcome: **no design change and no open product choice.** Jack Heart's accepted
+1a resolves the earlier mismatch: a confirmed dead retaining instance no longer
+requires a fresh report from that instance to release its hold. The implementation
+uses the existing host observation and retirement intent; no additional lifecycle
+or user action is needed. The review page now distinguishes the earlier behavior
+from the implemented path and from installed acceptance still outstanding.
+
+The normal interaction remains select, work, then leave. Departure releases
+retention; explicit Close also skips workspace grace. A crash converges on
+departure only after exact-owner exit evidence. A lost connection cannot do that:
+recovery needs an existing route to observe the retaining Machine, or a fresh host
+report. Return cancels cleanup, and an old exit observation cannot release another
+instance. These are consequences of the accepted contract, not new approvals.
+
+Keep release separate from native settlement. A Rex server can exit while its
+jobs survive; merging those facts would discard the accepted protection. Desktop
+presentation can settle independently because destination owners retain and end
+its shells. Requested work, drafts and pending requests remain with their existing
+owner policy. Deletion still requires the pinned completion, settled resources
+and existing Git safeguards. Task and conversation history survive it.
+
+The usage guidance in `swift/README.md` and `transport/README.md` already states
+this experience; no skill or API redesign is implied. Next proof remains gate's
+affected checks and demo's installed crash/quit/relaunch and physical remote
+recovery, including a surviving host during disconnect and another instance
+returning during cleanup. Existing focused results are not installed acceptance.
+
+Check: November 4 realignment — `git diff --check` and `lf context` passed; documentation only, reusing compression's `cargo test -p loopflow --lib retirement` (18 passed) and `scripts/test_desktop.sh --jobs 2 --filter WorkspaceRetentionTests` (11 passed, Desktop built). Earlier exact SSH (`--ignored`), DTO and migration checks passed; SDK/linker warnings remain. Broader checks belong to gate; installed proof belongs to demo.

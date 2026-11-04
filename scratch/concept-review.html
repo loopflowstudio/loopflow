@@ -1,109 +1,70 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-717 · Shell lifetimes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-717 · When a host never returns</title>
 <style>
-  :root { color-scheme: light dark; --ink:#24282b; --paper:#faf9f6; --muted:#62676c; --line:#c7cbd0; --accent:#185c74; }
-  @media(prefers-color-scheme:dark) { :root { --ink:#e8e7e3; --paper:#181c20; --muted:#a8b0b6; --line:#48515b; --accent:#8ccfe4; } }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 system-ui,sans-serif; }
-  main { max-width:780px; margin:auto; padding:44px 24px 72px; }
-  header,small { color:var(--muted); font-size:14px; }
-  h1 { font-size:clamp(27px,5vw,40px); line-height:1.15; margin:22px 0; }
-  h2 { font-size:23px; margin:38px 0 14px; }
-  p { margin:14px 0; }
-  a { color:var(--accent); }
-  code { font:0.87em/1.5 ui-monospace,monospace; overflow-wrap:anywhere; }
-  blockquote { margin:24px 0; padding:0 0 0 20px; border-left:3px solid var(--accent); }
-  ol { padding-left:24px; } li { margin:14px 0; }
-  dl { margin:22px 0; } dt { font-weight:650; margin-top:20px; } dd { margin:5px 0 0; }
-  .source { overflow-wrap:anywhere; } .rule { border-top:1px solid var(--line); padding-top:22px; }
+:root{color-scheme:light dark;--bg:#faf8f3;--ink:#262d2a;--muted:#626c64;--line:#d8ded4;--surface:#eff2e9;--accent:#225e48;--callout:#e7eee0}
+@media(prefers-color-scheme:dark){:root{--bg:#191e1b;--ink:#e5e9df;--muted:#b0baae;--line:#414d42;--surface:#242d26;--accent:#a5d4b8;--callout:#2b382b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,-apple-system,sans-serif}main{max-width:850px;padding:42px 28px 72px;margin:auto}header{font-size:13px;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:22px}header p{margin:0 0 9px}a{color:var(--accent);text-underline-offset:3px;overflow-wrap:anywhere}h1{font-size:clamp(30px,5vw,46px);font-weight:650;line-height:1.15;letter-spacing:-.035em;margin:36px 0 20px;max-width:700px}h2{font-size:23px;line-height:1.3;margin:34px 0 12px}h3{font-size:16px;margin:0 0 6px}p{margin:12px 0}small,.meta{font-size:13px;color:var(--muted)}.lead{font-size:20px;line-height:1.5}.decision{border-left:3px solid var(--accent);padding:8px 20px;background:var(--callout);margin:22px 0}fieldset{border:0;padding:0;margin:22px 0 12px}legend{font-weight:600;margin-bottom:8px}.choices{display:flex;flex-wrap:wrap;gap:8px}.choices label{border:1px solid var(--line);border-radius:5px;padding:8px 12px;cursor:pointer;font-size:15px}.choices label:has(input:checked){background:var(--surface);border-color:var(--accent)}input{accent-color:var(--accent)}.comparison{border-top:1px solid var(--line)}.result{padding:17px 0;border-bottom:1px solid var(--line)}.result p{margin:0}.proposed{color:var(--accent)}.note{color:var(--muted);font-size:15px}table{width:100%;border-collapse:collapse;font-size:14px;margin:20px 0}th,td{text-align:left;vertical-align:top;padding:12px 10px 12px 0;border-bottom:1px solid var(--line)}th{font-weight:600}code{font:12px/1.5 ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}blockquote{margin:18px 0;padding:12px 22px;border-left:3px solid var(--line);background:var(--surface)}ol{padding-left:24px}li{margin:8px 0}.answers p{margin:12px 0}.answers strong{color:var(--accent)}@media(max-width:580px){main{padding:22px 18px 48px}table,tbody,tr,td{display:block}thead{display:none}td{border:0;padding:3px 0}td:first-child{font-weight:650}tr{padding:12px 0;border-bottom:1px solid var(--line)}td:last-child{color:var(--muted)}.lead{font-size:18px}}
 </style>
-<main>
-<header>LOO-717 · concept-review · November 3, 2026
-<p class="source">Built from <a href="questions.md">questions.md</a>,
-<a href="loo-717-shell-lifetimes.md">loo-717-shell-lifetimes.md</a>,
-SessionsView.swift, RepositoryWorkspace.swift, WorkspaceRetentionTests.swift,
-store/sqlite/task_retirement.rs, ops/task/retirement_tests.rs,
-transport/lifetime.rs and the Swift/transport guides at 781e5dc5b4.</p></header>
-<h1>Quit releases the view.<br>Cleanup must not need it back.</h1>
-<p><strong>No design change or open product choice.</strong> The implementation now
-separates release policy from native settlement, as Jack Heart's accepted quit,
-Close and grace rules require. Installed behavior remains for demo; this review
-does not add acceptance evidence.</p>
-
-<h2>The consequential mismatch, resolved</h2>
-<p><strong>Before, at 2abcfc28cc:</strong> <code>closed</code> both skipped the
-fifteen-minute grace and acknowledged native cleanup. <code>away</code> preserved
-grace but required the host to report again before checkout deletion.</p>
-<blockquote>Leave a completed Task → quit Desktop → grace expires.<br>
-<strong>Now implemented:</strong> <code>away</code> plus
-<code>native_settled=true</code> preserves the deadline and lets cleanup finish
-without another Desktop launch.</blockquote>
-<p>AppKit termination defers for a release attempt with one five-second budget.
-Desktop detaches presentation first and fences Close notifications and heartbeats.
-Destination owners still settle Sessions and shell jobs before checkout deletion.</p>
-
+</head>
+<body><main>
+<header>
+<p><a href="loopflow://loopflow/task/LOO-717">LOO-717 · Shell lifetimes</a> / concept review at demo / decision November 4, 2026</p>
+<p>Source review at <code>0ba0d4705a</code>. Jack Heart selected 1a on November 4. Accepted behavior below remains unimplemented.</p>
+<details><summary>Design and source files</summary>
+<p><a href="loo-717-shell-lifetimes.md">Working design</a> · <a href="questions.md">Accepted direction and open choice</a> · <a href="../rust/loopflow/src/store/sqlite/task_retirement.rs">Retention policy</a> · <a href="../rust/loopflow/src/ops/task/retirement.rs">Cleanup executor</a> · <a href="../rust/loopflow/src/transport/lifetime.rs">Agent lifetime</a> · <a href="../swift/LoopflowMac/Views/SessionsView.swift">Desktop presence</a> · <a href="../swift/LoopflowMac/RepositoryWorkspace.swift">Quit reporting</a></p>
+</details>
+</header>
+<h1>Confirmed host exit releases retention.</h1>
+<p class="lead">The current code can keep its shells and checkout indefinitely if Desktop crashes before reporting release. The idle agent can still end.</p>
+<div class="decision"><p><strong>Accepted · 1a:</strong> once lf confirms that the retaining instance is gone, release its hold and allow normal cleanup without reopening the app. Final requested work still finishes first.</p></div>
+<p>A missed heartbeat cannot prove this. A Rex client can disconnect while its server still owns useful shells. That remains retained or unknown until the real owner's state is known.</p>
+<h2>Finish a Task, then leave Desktop</h2>
+<p>The Task is complete and selected. Its conversation and shells are open. Change how Desktop disappears:</p>
+<fieldset><legend>Scenario</legend><div class="choices">
+<label><input type="radio" name="scenario" value="quit"> Clean quit</label>
+<label><input type="radio" name="scenario" value="crash" checked> Confirmed Desktop crash</label>
+<label><input type="radio" name="scenario" value="network"> Remote contact lost</label>
+</div></fieldset>
+<div class="comparison" aria-live="polite">
+<div class="result"><h3>Existing behavior</h3><p id="existing"></p></div>
+<div class="result"><h3 class="proposed">Accepted behavior · not yet implemented</h3><p id="proposed"></p></div>
+</div>
+<p class="note" id="detail"></p>
+<p class="note">This is a policy illustration, not a running terminal demo. Two minutes applies to eligible idle agents. Cleanup also waits for active work, drafts, pending requests, other retaining hosts and resource settlement.</p>
 <h2>Actions → concepts → APIs</h2>
-<dl>
-<dt>Leave or quit Desktop</dt>
-<dd><strong>Implemented:</strong> release retention and settle native
-presentation; preserve destination execution. <code>task presence</code> records
-<code>away</code> plus native settlement in the same revision. The existing deadline
-runs; Desktop need not stay open to acknowledge it later.</dd>
-<dt>Explicitly close the last Task workspace</dt>
-<dd>Use <code>closed</code> as Close intent; record settlement independently.
-Skip grace after requested work settles. Session and shell owners retain their
-own execution checks.</dd>
-<dt>Return before retirement</dt>
-<dd>A newer <code>retained</code> observation revokes pending retirement. Reconnect
-checks the same shell receipt. Delayed settlement cannot override the return.</dd>
-<dt>Leave a Rex Task with native shells</dt>
-<dd><strong>Accepted contract; native adapter proof outstanding:</strong>
-<code>away</code> releases retention but does not prove settlement. LOO-498 owns
-closing that Task's native resources and acknowledging them; other Tasks survive.</dd>
-</dl>
-<p>Keep the existing Task, Session, shell receipt, host occurrence and retirement
-intent. The required settlement fact is part of the same occurrence and
-<code>task presence</code> write. Increasing revisions fence delayed reports;
-one destination executor coordinates cleanup.</p>
-
-<h2>Usage documented in the guides</h2>
-<blockquote>Quit Desktop to leave shells running. Completed Tasks retain their
-shells and checkout through the fifteen-minute absence grace; eligible idle
-agents follow the two-minute policy. Cleanup can finish while Desktop stays quit.
-Explicit Close skips grace after work settles. If release never reaches the
-destination, cleanup stays pending. Reconnect reuses surviving execution;
-New Shell starts fresh.</blockquote>
-
-<h2>Normal, failure, recovery</h2>
-<p><strong>Normal:</strong> an acknowledged away release preserves the existing
-deadline. After requested work settles, destination owners and native hosts each
-prove their own cleanup. Task and conversation history survive.</p>
-<p><strong>Failure:</strong> a retained lease expiring without a release leaves
-checkout cleanup pending. A lost reply is different: the caller is uncertain,
-but a committed release still counts. Retry the identical revision safely.</p>
-<p><strong>Recovery:</strong> a newer retained observation clears native settlement
-and cancels pending retirement. A delayed old report cannot undo that return.
-Cancellation between cleanup passes cannot roll back effects already performed.</p>
-<p><strong>Next proof:</strong> demonstrate installed quit/relaunch with the same
-shell PID, input, TUI and jobs; cleanup without relaunch; remote loss and recovery;
-and Rex-native settlement. Inspected headless fixtures cover policy and composed
-cleanup, and recorded loopback SSH cycles cover transport. Neither establishes
-installed host behavior. No runtime tests were rerun for this source review.</p>
-
-<h2 class="rule">Review questions and dispositions</h2>
-<ol>
-<li><strong>Does quit mean explicit Close?</strong> No. Jack Heart accepted retaining
-ordinary shells on quit. Departure with grace is implemented.</li>
-<li><strong>Does release prove native cleanup?</strong> No. Record settlement
-separately; Desktop and Rex have different native resources.</li>
-<li><strong>Does missing acknowledgement mean closure?</strong> No. The caller's
-result is unknown; the destination retains any observation it committed.</li>
-</ol>
-<small>No unresolved product question or next implementation redesign. The working
-design and this page record the review result. Interactive demo remains the delivery
-boundary; no merge or installation approval was added.</small>
+<table><thead><tr><th>Action / observation</th><th>Meaning</th><th>State-changing path</th></tr></thead><tbody>
+<tr><td>Use a Task</td><td>Host retains its occurrence.</td><td><code>task presence … --state retained</code></td></tr>
+<tr><td>Leave or quit normally</td><td>Release; preserve the absence grace. Desktop settles its detached presentation.</td><td><code>task presence … --state away --native-settled true</code></td></tr>
+<tr><td>Explicitly close the last workspace</td><td>Skip absence grace once requested work settles.</td><td><code>task presence … --state closed</code>; settlement remains a separate fact.</td></tr>
+<tr><td>Confirm retaining instance exited</td><td class="proposed">Accepted: release without requiring it to return; unimplemented.</td><td>No implemented path. Needs exact owner identity and an exit observation that triggers existing retirement.</td></tr>
+<tr><td>Lose remote contact</td><td>Owner may still be retaining work.</td><td>Unknown; expiry alone cannot authorize deletion.</td></tr>
+</tbody></table>
+<p>The occurrence currently records a lease and revision, but no retaining-owner identity. The accepted change will connect it to verifiable owner evidence. A newer host instance must defeat a delayed old-exit report.</p>
+<p>Desktop's presentation can be gone while its destination-owned shells still run. Their owners settle those jobs separately. Rex's native server has its own responsibility; closing its client cannot stand in for ending its shells.</p>
+<h2>What the guide would say</h2>
+<p class="meta">Draft usage copy for accepted, unimplemented behavior; the Markdown design holds the decision.</p>
+<blockquote>Leave a completed Task to start its cleanup grace. Eligible idle agents end after two minutes; shells and checkout can clean up after fifteen minutes. Requested final work finishes first. If Desktop crashes, cleanup can proceed once lf confirms that instance has exited; reopening Desktop is unnecessary. Losing contact with a remote host leaves cleanup pending until its state is known.</blockquote>
+<p>History remains. The accepted disposal of uncommitted files and safeguards for changed committed refs stay in place. This introduces no automatic recreation of deleted checkouts.</p>
+<h2>Next implementation proof</h2>
+<p>Kill Desktop and let cleanup finish while it stays closed. Contrast that with a lost connection to a surviving host. Repeat with a final agent turn running past the deadline, another host retaining the Task, and a new Desktop instance racing an old exit report.</p>
+<h2>Decision recorded</h2>
+<div class="answers">
+<p><strong>1a · Selected by Jack Heart.</strong> Confirmed retaining-host exit releases its hold. Use ordinary cleanup grace and wait for work and resource settlement.</p>
+<p><strong>1b · Not selected.</strong> Require a fresh release report even after confirmed exit. Shells and checkout can remain pending until the host returns.</p>
+</div>
+<p class="note">No open product question remains from this review. Implementing and proving this recovery path remains next work.</p>
 </main>
-</html>
+<script>
+const scenarios={
+quit:{existing:'Acknowledged release starts or preserves the fifteen-minute absence deadline. Eligible idle agents can end after two minutes. Cleanup can finish with Desktop closed.',proposed:'Same behavior. Clean quit already has a release and native-settlement report.',detail:'A prior explicit Close keeps its separate skip-grace policy. Ordinary quit does not turn into Close.'},
+crash:{existing:'After the thirty-second lease expires, host state becomes unknown. An eligible idle agent can end, but shells and checkout remain pending indefinitely until a fresh host report.',proposed:'After lf confirms that exact retaining instance exited, release its hold and begin the ordinary fifteen-minute grace. Cleanup can finish without an app relaunch.',detail:'The positive exit-observation path does not exist yet. Lease expiry alone would still leave the state unknown. Destination shell owners must settle their own jobs.'},
+network:{existing:'The last retained lease expires to unknown. Cleanup remains pending because the remote host may still retain the Task.',proposed:'Same behavior until the actual retaining owner can be observed. A disconnected Rex client does not establish its server exited.',detail:'Reconnection supplies fresh evidence. Renewed retention cancels cleanup; a confirmed release can start it. Neither path reconstructs deleted checkouts.'}
+};
+function render(){const s=scenarios[document.querySelector('input[name="scenario"]:checked').value];for(const key of ['existing','proposed','detail'])document.getElementById(key).textContent=s[key];}
+for(const input of document.querySelectorAll('input[name="scenario"]'))input.addEventListener('change',render);render();
+</script>
+</body></html>

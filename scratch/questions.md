@@ -63,7 +63,7 @@ shell execution stays alive and an eligible idle agent uses its existing grace.
 Host observations carry increasing persisted revisions so an old release cannot
 overwrite a newer return. Native Rex integration remains owned by LOO-498.
 
-## Concept-review interpretation — November 3
+## Earlier headless concept-review interpretation — November 3
 
 Clean Desktop quit is departure, not explicit Close: it preserves ordinary
 shells and the completed Task's fifteen-minute grace. This follows Jack Heart's
@@ -78,3 +78,33 @@ Build choice: quit has one five-second reporting budget across all destinations.
 Desktop fences window Close and heartbeats before detaching surfaces; failed or
 canceled writes provide no acknowledgement. A prior explicit Close keeps its
 policy. This bounds departure only, not requested work or the cleanup deadline.
+
+## Interactive concept review — accepted November 4
+
+Jack Heart requested another concept review at demo. Current code allows an
+expired retained-host lease to hold completed-Task shells and checkout indefinitely;
+the eligible idle agent can still end. Even a dead Desktop instance needs a fresh
+host report before workspace cleanup can proceed.
+
+Jack Heart selected **1a** ("1a i guess") on November 4: positive evidence that the exact retaining host
+instance exited releases its hold and starts ordinary absence cleanup without
+reopening the app. Requested work and independent native/destination settlement
+still precede deletion. Network loss or lease expiry alone remains unknown;
+Rex client disappearance does not establish its retaining server's death.
+
+The choice is resolved; the confirmed-exit path remains to implement and prove.
+The working design records usage copy, layer consequences and counterexamples.
+This review changes no runtime code, restarts no Graph and grants no shipping approval.
+
+## Implementation continuation — November 4
+
+Jack Heart requested "build it" after accepting 1a. Implement and prove confirmed
+retaining-host exit recovery, then republish PR #1811 for interactive demo. Keep
+the existing feature Graph and Task checkout. No Auto-Ship, merge or installation.
+Reuse the accepted design's protections and independent native/destination
+settlement. Share concrete adapter changes with LOO-498 without launching its work.
+
+This conversation's app-bundled lf cannot read the current wave_removal schema.
+Use the already installed /Users/jack/.local/bin/lf for managed Work operations;
+set LF_BIN and PATH for child commands accordingly. Do not install, migrate or
+change accounts to repair the obsolete caller binary.

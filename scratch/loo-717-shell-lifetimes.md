@@ -431,6 +431,94 @@ or native shell PID survival; the prior transport fixtures and demo retain those
 separate boundaries. Refined adapter contract shared with LOO-498 in comment
 `30bf4970-3bb1-481f-8200-83a6734cb26e`; its independently running Graph was left alone.
 
+## Interactive concept review — November 3–4: a host that never returns
+
+Jack Heart requested this concept review at the interactive demo boundary. The
+earlier headless review above records its own completed pass, not acceptance of
+the proposal here. Source reviewed: `0ba0d4705a`, including main's reconnect-status
+repair. No runtime changes or new Graph launch accompany this review.
+
+**Accepted decision — November 4:** Jack Heart selected **1a** ("1a i guess").
+Positive evidence that the exact retaining host instance exited releases its hold
+and starts the ordinary absence grace without reopening the app. A lost connection
+or an expired lease alone remains unknown, never proof that the host exited.
+The behavior is accepted but not implemented; no further product choice remains
+from this review.
+
+### One concrete interaction
+
+Finish a Task while its conversation remains selected in Desktop. Quit normally:
+Desktop reports away plus native settlement, eligible agents use the two-minute
+idle policy, and shells/checkout retire at the fifteen-minute absence deadline.
+Requested final work still finishes first. That normal path is implemented.
+
+Now force-quit Desktop before its release reaches the destination. The last
+retained lease expires after thirty seconds. `reconcile_task_retirement` treats
+that expired observation as unknown, clears the cleanup deadline, and leaves
+"Host observation unavailable; cleanup pending." The agent's separate
+`owner_host_hold` only honors live leases, so an eligible idle agent can still end.
+The shells and checkout can remain indefinitely. Current recovery requires a
+fresh host observation, such as reopening Desktop and later releasing the Task.
+
+Accepted recovery, not yet implemented: positive evidence that the exact retaining instance is gone
+releases its hold and starts the ordinary absence grace, without requiring an app
+relaunch. It does not mean explicit Close and does not skip the fifteen minutes.
+The existing destination owners still finish requested work and settle shell jobs
+before deletion. Another retaining host still keeps shared resources alive.
+Uncommitted-file disposal and committed-ref safeguards retain their accepted rules.
+Task/conversation history survives; checkout resurrection remains outside scope.
+
+### Draft usage copy for the accepted behavior
+
+> Leave a completed Task to start its cleanup grace. Eligible idle agents end
+> after two minutes; shells and checkout can clean up after fifteen minutes.
+> Requested final work finishes first. If Desktop crashes, cleanup can proceed
+> once lf confirms that instance has exited; reopening Desktop is unnecessary.
+> Losing contact with a remote host leaves cleanup pending until its state is
+> known. A Rex server still retaining the Task keeps it alive even if its client
+> disconnects. Conversation history remains after cleanup.
+
+This copy belongs in the existing Swift and transport usage sections when
+the accepted recovery path is implemented. No new agent skill or cleanup instructions are needed;
+the host adapter and shared runtime own the policy.
+
+### Actions → concepts → APIs
+
+| Action or observation | Meaning | Existing API / implementation consequence |
+| --- | --- | --- |
+| Use the Task in Desktop or Rex | Host retains its occurrence | `task presence … --state retained`; renewable lease |
+| Leave or quit normally | Release without skipping grace; separately settle native presentation | `task presence … --state away --native-settled true` for detached Desktop surfaces |
+| Explicitly close the last workspace | Request cleanup once work settles | `task presence … --state closed`; native settlement remains independent |
+| Retaining instance is confirmed dead | Accepted release without relaunch; unimplemented | No implemented observation path; bind the occurrence to verifiable owner identity and reconcile its exit |
+| Remote contact is lost | Owner may still retain native work | Existing unknown state; no deletion based on timeout alone |
+| Eligible absence and all work settled | Retire resources once | Existing completion-pinned Task retirement and destination executor |
+
+The current occurrence stores state, lease, revision and native settlement, but
+no retaining-owner identity. The accepted change needs an exact owner-instance
+reference and a reliable exit observation, preferably using existing process
+evidence. PID reuse must not count as proof; a newer instance's retention must win
+over an old exit. This does not select a new host registry, daemon or public API.
+The normal release and confirmed-exit paths should converge on one retirement
+intent. The exit observer must also trigger reconciliation without Desktop alive.
+
+Owner identity follows the resource: Desktop owns its presentation, while its
+shells execute under destination owners. In Rex, the native retaining owner may
+be the server; a client window/process disappearing does not prove native shell
+settlement. LOO-498 retains that adapter boundary. Confirming host death cannot
+stand in for confirming all its remaining jobs have ended.
+
+### Decision and next proof
+
+Jack selected 1a: clean up after confirmed retaining-host exit, using the ordinary
+grace and existing work/settlement checks. The alternative requiring a fresh
+release after confirmed exit was not selected.
+
+Next implementation proof: confirmed
+Desktop exit versus network loss, a surviving Rex server, another retaining host,
+newer-instance retention racing old exit, and a final agent turn running past the
+deadline. Prove cleanup finishes with Desktop absent, including destination shell
+settlement; a simulated record alone does not establish that recovery path.
+
 ## Remaining work — November 3
 
 - Gate owns broader completion/landing regression,
@@ -442,7 +530,8 @@ separate boundaries. Refined adapter contract shared with LOO-498 in comment
   presentation and remote recovery remain demo evidence. One host's state records
   do not prove the other's real adapter. Rex acceptance depends on LOO-498's
   independently owned integration; unavailable proof remains visible here.
-- No new product decision is needed to finish these checks. Continuation UI during
+- Implement the accepted confirmed-host-exit recovery above. No product choice
+  remains from this review. Continuation UI during
   retained-checkout grace remains subject to demo judgment. Automatic deleted-
   checkout restoration remains outside scope.
 

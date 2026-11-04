@@ -47,3 +47,13 @@ Earlier coordination: outgoing `aa155162-7bd6-4d4c-b3c0-374f6d89768d`, incoming
 `2f7f49fd-5c75-45e0-a688-cb70a3917bcd`. Superseded proposals and discussion are
 preserved at `17cf6a71f9:scratch/rex-coordination.md`; accepted decisions above
 replace their open timing, retention and post-cleanup restoration questions.
+
+## Confirmed host exit — accepted November 4
+
+Jack Heart selected 1a in the interactive review: positive evidence that the exact
+retaining host instance exited releases retention and starts ordinary absence
+cleanup without requiring relaunch. Lost contact or lease expiry alone stays
+unknown. Rex client exit does not establish retaining-server or native-job
+settlement. Active requested work, other retaining hosts and newer-instance
+retention remain protected. No implementation or new API shape is claimed.
+Shared with LOO-498 in comment `512d1b03-c6de-4fda-878b-d8f5d723f3b5`.

@@ -3,7 +3,7 @@
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Product writes read before they write (for example, validating parent Work),
 // so a deferred transaction has to upgrade its read lock to a write
@@ -243,6 +243,7 @@ impl SqliteStore {
         creation: Option<&NewTask>,
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
+        requested_cwd: Option<&Path>,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -296,6 +297,18 @@ impl SqliteStore {
                 task_id,
             )?;
             super::sessions::choose_task_primary_in(&tx, task_id, &session.id)?;
+            if let Some(cwd) = requested_cwd {
+                let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+                if task.worktree.as_deref() != Some(cwd) {
+                    return Err(StoreError::InvalidAuthority(
+                        "Task workspace changed before promotion; retry".into(),
+                    ));
+                }
+                tx.execute(
+                    "UPDATE agent_sessions SET requested_cwd=?2 WHERE id=?1",
+                    params![session.id, cwd.to_string_lossy()],
+                )?;
+            }
         }
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;

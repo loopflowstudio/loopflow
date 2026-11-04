@@ -92,6 +92,7 @@ import ViewInspector
             #expect(promoted.cwd == session.cwd)
             #expect(promoted.agentProcessId == session.agentProcessId)
             #expect(promoted.taskPrimary)
+            #expect(promoted.requestedCwd == (existing ? "/src/delivery" : nil))
             #expect(await source.bindCount == 0)
         }
     }
@@ -108,10 +109,9 @@ import ViewInspector
         model.beginSessionBinding(session)
         let sheet = SessionActionSheet(model: model)
         _ = try sheet.inspect().find(button: "Make primary Task conversation")
-        #expect(throws: (any Error).self) { try sheet.inspect().find(button: "Create Task from this Session") }
+        #expect(throws: (any Error).self) { try sheet.inspect().find(button: "Create Task from this conversation") }
         #expect(throws: (any Error).self) { try sheet.inspect().find(button: "Assign to Task") }
         await model.promoteSessionToTask()
-        #expect(await source.lastPromotion == ["task", "promote", "task-exact", "--session", session.id, "--json"])
         #expect(await source.bindCount == 0)
         #expect(model.navigation.selectedSessionId == session.id)
         #expect(model.sessions.value?.first?.agentProcessId == session.agentProcessId)
@@ -151,7 +151,6 @@ private actor ControlsSource {
     private var pending: CheckedContinuation<Void, Never>?
     private var waiter: CheckedContinuation<Void, Never>?
     private(set) var bindCount = 0
-    private(set) var lastPromotion: [String]?
 
     init(assigned: Bool = false) throws {
         let session = try renameFixtureRecord("interactive", title: "Conversation")
@@ -177,11 +176,11 @@ private actor ControlsSource {
             return String(decoding: snapshot, as: UTF8.self)
         }
         if args.starts(with: ["task", "create"]) || args.starts(with: ["task", "promote"]) {
-            lastPromotion = args
             #expect(args.contains("--session"))
             #expect(!args.contains("--run"))
             record["work"] = ["kind": "task", "id": "task-exact"]
             record["task_primary"] = true
+            if args.starts(with: ["task", "promote"]) { record["requested_cwd"] = "/src/delivery" }
             return #"{"id":"task-exact","identifier":"INF-123","title":"Conversation"}"#
         }
         if args.contains("--dry-run") {

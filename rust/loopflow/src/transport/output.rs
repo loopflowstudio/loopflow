@@ -21,6 +21,7 @@ pub(super) struct Terminal {
     terminal: ghostty_vt::Terminal,
     reports: BTreeMap<String, Vec<u8>>,
     pending_reports: Vec<u8>,
+    directory: Option<Vec<u8>>,
 }
 
 impl Output {
@@ -30,6 +31,7 @@ impl Output {
                 terminal: ghostty_vt::Terminal::new(80, 24).context("Open the owner's terminal")?,
                 reports: BTreeMap::new(),
                 pending_reports: Vec::new(),
+                directory: None,
             })))
         } else {
             Ok(Self::Pipes {
@@ -56,6 +58,9 @@ impl Output {
         };
         let mut bytes =
             terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
+        if let Some(directory) = &terminal.directory {
+            bytes.extend(directory);
+        }
         for report in terminal.reports.values() {
             bytes.extend(report);
         }
@@ -149,6 +154,22 @@ impl Output {
         }
     }
 
+    /// Publish the connected provider's cwd through the same serialized stream
+    /// as status reports, including when a viewer attaches after the launch.
+    pub fn directory(&mut self, cwd: &std::path::Path) {
+        let Self::Terminal(terminal) = self else {
+            return;
+        };
+        let host = gethostname::gethostname();
+        let Some(bytes) = directory_report(cwd, &host.to_string_lossy()) else {
+            return;
+        };
+        if terminal.directory.as_ref() != Some(&bytes) {
+            terminal.pending_reports.extend(&bytes);
+            terminal.directory = Some(bytes);
+        }
+    }
+
     pub fn take_reports(&mut self) -> Option<Vec<u8>> {
         let Self::Terminal(terminal) = self else {
             return None;
@@ -165,5 +186,65 @@ impl Output {
             Self::Terminal(terminal) => Some(&terminal.terminal),
             Self::Pipes { .. } => None,
         }
+    }
+}
+
+fn directory_report(cwd: &std::path::Path, host: &str) -> Option<Vec<u8>> {
+    let mut uri = reqwest::Url::from_directory_path(cwd).ok()?;
+    // The execution host owns this path. A remote viewer must never mistake it
+    // for a directory on the viewer's Machine.
+    uri.set_host(Some(host)).ok()?;
+    Some(format!("\x1b]7;{uri}\x1b\\").into_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{directory_report, Output};
+    use std::path::Path;
+
+    #[test]
+    fn directory_report_identifies_execution_host_and_escapes_paths() {
+        assert_eq!(
+            directory_report(Path::new("/work/research notes/雪"), "remote.example").unwrap(),
+            b"\x1b]7;file://remote.example/work/research%20notes/%E9%9B%AA/\x1b\\"
+        );
+        assert!(directory_report(Path::new("relative"), "remote.example").is_none());
+    }
+
+    #[test]
+    fn directory_reports_survive_attachment_without_splitting_provider_sequences() {
+        let mut output = Output::new(true).unwrap();
+        output.process(1, b"\x1b]0;unfinished", false);
+        output.directory(Path::new("/work/research notes/雪"));
+        assert!(output.take_reports().is_none());
+        let snapshot = output.snapshot().unwrap().unwrap();
+        let expected = directory_report(
+            Path::new("/work/research notes/雪"),
+            &gethostname::gethostname().to_string_lossy(),
+        )
+        .unwrap();
+        assert!(snapshot
+            .windows(expected.len())
+            .any(|part| part == expected));
+        assert!(snapshot.ends_with(b"\x1b]0;unfinished"));
+        output.process(1, b" title\x07", false);
+        assert_eq!(output.take_reports().unwrap(), expected);
+        output.directory(Path::new("/work/delivery"));
+        let moved = directory_report(
+            Path::new("/work/delivery"),
+            &gethostname::gethostname().to_string_lossy(),
+        )
+        .unwrap();
+        assert_eq!(output.take_reports().unwrap(), moved);
+        let snapshot = output.snapshot().unwrap().unwrap();
+        assert!(snapshot.windows(moved.len()).any(|part| part == moved));
+        assert!(!snapshot
+            .windows(expected.len())
+            .any(|part| part == expected));
+        output.directory(Path::new("/work/delivery"));
+        assert!(output.take_reports().is_none());
+        let mut pipes = Output::new(false).unwrap();
+        pipes.directory(Path::new("/work/delivery"));
+        assert!(pipes.take_reports().is_none());
     }
 }

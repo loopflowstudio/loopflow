@@ -277,6 +277,7 @@ pub struct SessionRow {
 /// One Session's own facts; `lf task status` lists its Task's Sessions with them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionFacts {
+    pub requested_cwd: Option<String>,
     pub id: crate::id::LfSessionId,
     pub title: String,
     /// The provider its current input launched with; `null` before a first launch.
@@ -319,6 +320,7 @@ impl SessionFacts {
             available: session.availability.is_some(),
             cwd: session.cwd,
             agent_process_id: session.agent_process_id,
+            requested_cwd: session.requested_cwd,
         }
     }
 }
@@ -552,6 +554,12 @@ async fn list(
                     None => session.title.clone(),
                 }
             );
+            if let Some(cwd) = &session.requested_cwd {
+                println!(
+                    "  Current directory: {}; next connection: {cwd}",
+                    session.cwd
+                );
+            }
             for action in session.actions {
                 println!(
                     "  {} — {}",
@@ -636,7 +644,13 @@ async fn resume(
         let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
+        let lock_id = session.id.to_string();
+        let launch = tokio::task::spawn_blocking(move || {
+            crate::ops::human_session::lock_session_process(&lock_id)
+        })
+        .await??;
         let session = crate::ops::human_session::admit_workspace(&store, session).await?;
+        drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
     }

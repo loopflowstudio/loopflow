@@ -135,6 +135,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     let task = TaskId::new();
     let wave = crate::id::WaveId::new();
     let mut summary = crate::session::SessionSummary {
+        requested_cwd: None,
         preview: None,
         program_status: None,
         agent_process_id: None,
@@ -433,6 +434,7 @@ fn canonical_ids_session_wire_decodes_structured_ids_and_keeps_native_bytes() {
     let fixture = include_str!("../../../../../tests/fixtures/dto/canonical_ids_session.json");
     let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
     let wire = serde_json::to_value(&session).unwrap();
+    assert_eq!(wire["requested_cwd"], "/src/loopflow.delivery");
     assert_eq!(
         wire["open_argv"][3], "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "argv is opaque"

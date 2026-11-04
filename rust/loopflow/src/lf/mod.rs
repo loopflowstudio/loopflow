@@ -1943,7 +1943,7 @@ pub enum TaskCommand {
     },
     /// Make an existing worktree or Session this Task's home without starting work
     #[command(
-        after_help = "Defaults to this checkout and the invoking Session, if any. From a shell, --session explicitly selects the primary conversation; find its Loopflow ID with `lf session list --json`. A selected Session supplies its cwd. Shared main/Wave checkouts are never adopted. Remote calls select paths and Sessions on the target Machine; they never transfer live work."
+        after_help = "Defaults to this checkout and the invoking Session, if any. From a shell, --session explicitly selects the primary conversation; find its Loopflow ID with `lf session list --json`. A selected Session supplies its cwd. Shared main/Wave checkouts are never adopted. If the Task already has a checkout, selecting --session schedules continuation there after the current client exits; no live client is stopped. An explicit --worktree never replaces a Task checkout. Status shows requested_cwd until the provider confirms its connection. Remote calls select paths and Sessions on the target Machine; they never transfer live work."
     )]
     Promote {
         issue: String,

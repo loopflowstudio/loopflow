@@ -162,65 +162,72 @@ pub(crate) async fn admit_workspace(
     store: &SharedStore,
     mut session: LfSession,
 ) -> Result<LfSession> {
-    let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
-        return Ok(session);
-    };
-    if store
-        .sqlite
-        .session_summary(
-            &session.id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?
-        .is_some_and(|summary| {
-            summary.agent_process_id.is_some()
-                && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
-        })
-    {
+    let scope = store.sqlite.primary_scope(&session.id)?;
+    let summary = store.sqlite.session_summary(
+        &session.id,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
+    if summary.as_ref().is_some_and(|summary| {
+        summary.agent_process_id.is_some()
+            && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+    }) {
         return Ok(session);
     }
-    let cwd = match &scope {
-        PrimaryScope::Repository(repo) => ensure_scope_worktree(repo.as_path(), &scope)?.path,
-        PrimaryScope::Wave(id) => {
-            let wave = store
-                .get_wave(id)
-                .await?
-                .ok_or_else(|| anyhow!("primary Wave {id} is unavailable"))?;
-            ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
+    let cwd = match (summary.and_then(|summary| summary.requested_cwd), scope) {
+        (Some(cwd), _) => {
+            anyhow::ensure!(
+                cwd.is_dir(),
+                "Requested Session workspace is missing: {}; restore it and reconnect",
+                cwd.display()
+            );
+            cwd
         }
-        PrimaryScope::Task(task) => {
-            // Promotion associates an existing conversation in place, including
-            // when the Task has a separate checkout of its own.
-            if session.work_source == Some(WorkSource::Bound) {
-                return Ok(session);
+        (None, None) => return Ok(session),
+        (None, Some(scope)) => match &scope {
+            PrimaryScope::Repository(repo) => ensure_scope_worktree(repo.as_path(), &scope)?.path,
+            PrimaryScope::Wave(id) => {
+                let wave = store
+                    .get_wave(id)
+                    .await?
+                    .ok_or_else(|| anyhow!("primary Wave {id} is unavailable"))?;
+                ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
             }
-            let task = store
-                .get_task(task)
-                .await?
-                .ok_or_else(|| anyhow!("primary Task is unavailable"))?;
-            if task.worktree.as_ref().is_some_and(|root| {
-                crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(root)
-            }) {
-                return Ok(session);
+            PrimaryScope::Task(task) => {
+                // Promotion associates an existing conversation in place, including
+                // when the Task has a separate checkout of its own.
+                if session.work_source == Some(WorkSource::Bound) {
+                    return Ok(session);
+                }
+                let task = store
+                    .get_task(task)
+                    .await?
+                    .ok_or_else(|| anyhow!("primary Task is unavailable"))?;
+                if task.worktree.as_ref().is_some_and(|root| {
+                    crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(root)
+                }) {
+                    return Ok(session);
+                }
+                if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
+                    cwd
+                } else {
+                    let task = task.id.to_string();
+                    let repo = session
+                        .repo
+                        .as_deref()
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| session.cwd.clone());
+                    tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf> {
+                        let task =
+                            crate::ops::task::task_checkout(&repo, &task, Default::default())?;
+                        Ok(task.worktree()?.clone())
+                    })
+                    .await??
+                }
             }
-            if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
-                cwd
-            } else {
-                let task = task.id.to_string();
-                let repo = session
-                    .repo
-                    .as_deref()
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|| session.cwd.clone());
-                tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf> {
-                    let task = crate::ops::task::task_checkout(&repo, &task, Default::default())?;
-                    Ok(task.worktree()?.clone())
-                })
-                .await??
-            }
-        }
+        },
     };
     if session.cwd != cwd {
-        store.sqlite.move_primary_workspace(&session, &cwd)?;
+        store.sqlite.admit_session_workspace(&session, &cwd)?;
         session.cwd = cwd;
     }
     Ok(session)

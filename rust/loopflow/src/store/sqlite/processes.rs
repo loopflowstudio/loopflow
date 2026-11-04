@@ -341,6 +341,24 @@ pub(super) fn attach_in(
     Ok(attached)
 }
 
+// Native identity confirms a connection, including completion of a requested
+// workspace change. A failed or older connection leaves the request retryable.
+fn record_session_agent_session_in(
+    conn: &rusqlite::Connection,
+    session: &str,
+    thread: &AgentSessionId,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE agent_sessions SET provider_thread=?2,
+         requested_cwd=CASE WHEN requested_cwd=(
+             SELECT cwd FROM processes WHERE id=agent_sessions.agent_process_id
+             AND pid IS NOT NULL AND completed_at IS NULL
+         ) THEN NULL ELSE requested_cwd END WHERE id=?1",
+        params![session, thread],
+    )?;
+    Ok(())
+}
+
 impl SqliteStore {
     pub(crate) fn unfinished_processes(&self) -> StoreResult<Vec<LfProcess>> {
         unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
@@ -822,10 +840,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
-        tx.execute(
-            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
-            params![session, thread],
-        )?;
+        record_session_agent_session_in(&tx, session, thread)?;
         tx.commit()?;
         Ok(())
     }
@@ -873,10 +888,7 @@ impl SqliteStore {
             "UPDATE processes SET endpoint=?2 WHERE id=?1",
             params![expected.agent_process_id, endpoint],
         )?;
-        tx.execute(
-            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
-            params![session, thread],
-        )?;
+        record_session_agent_session_in(&tx, session, thread)?;
         tx.commit()?;
         Ok(())
     }

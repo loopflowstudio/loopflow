@@ -1,74 +1,62 @@
 <!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-582 · Promotion concept review</title>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-582 · Create a Task around this work</title>
 <style>
-  :root { color-scheme: light dark; --ink: #202520; --paper: #faf9f5; --muted: #535e55; --line: #ccd2c9; --accent: #256544; }
-  @media (prefers-color-scheme: dark) { :root { --ink: #eceee7; --paper: #191e1a; --muted: #b4beb5; --line: #49544a; --accent: #9cdbad; } }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 system-ui, sans-serif; }
-  main { max-width: 810px; margin: auto; padding: 42px 24px 64px; }
-  header { color: var(--muted); font-size: .83rem; overflow-wrap: anywhere; }
-  h1 { font-size: clamp(1.7rem, 5vw, 2.4rem); line-height: 1.2; margin: 28px 0 16px; }
-  h2 { font-size: 1.2rem; margin-top: 34px; }
-  p { margin: 14px 0; }
-  a { color: var(--accent); }
-  code { font: .88em/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
-  pre { border-left: 3px solid var(--accent); padding: 12px 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
-  th, td { padding: 12px 8px; vertical-align: top; text-align: left; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-  th { font-weight: 650; }
-  .decision { border-left: 3px solid var(--accent); padding-left: 18px; }
-  .note { color: var(--muted); font-size: .9rem; }
-  li { margin: 12px 0; }
-  @media (max-width: 540px) { main { padding: 24px 16px 40px; } table { font-size: .8rem; } th, td { padding: 10px 4px; } }
-</style>
-<main>
-  <header>
-    LOO-582 · concept-review · November 3, 2026<br>
-    Built from <a href="loo-582.md">scratch/loo-582.md</a>, docs/work.md,
-    rust/loopflow/src/builtins/ops/skill/work.md, ops/task/promotion.rs,
-    store/sqlite/{children,sessions}.rs, ops/human_session/primary.rs,
-    tests/session_lifecycle_tests.rs, and Swift SessionActionSheet, WorkModel and SessionControlsTests.
-  </header>
-  <h1>Keep the work and choose its Task conversation.</h1>
-  <p class="decision"><strong>No new decision needed.</strong> Jack Heart's accepted design survives this review of the merged change. No implementation revision or unresolved product choice is proposed.</p>
+:root{color-scheme:light dark;--paper:#faf9f6;--ink:#252a27;--muted:#59645d;--line:#cbd3cb;--accent:#246044;--wash:#edf2ec}
+@media(prefers-color-scheme:dark){:root{--paper:#191e1b;--ink:#eceee8;--muted:#b5c0b8;--line:#45544a;--accent:#a1d7b4;--wash:#263129}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 system-ui,sans-serif}main{max-width:770px;margin:auto;padding:30px 24px 54px}header,.note{font-size:.85rem;color:var(--muted)}h1{font-size:clamp(1.9rem,5vw,2.5rem);line-height:1.15;letter-spacing:-.025em;margin:24px 0 14px}h2{font-size:1.15rem;margin:26px 0 10px}p{margin:10px 0}a,summary{color:var(--accent)}summary{cursor:pointer}details{margin:16px 0}code{font:.86em/1.5 ui-monospace,monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--wash);padding:14px 16px}blockquote{margin:18px 0;padding:4px 0 4px 18px;border-left:3px solid var(--accent);font-size:1.15rem}table{width:100%;border-collapse:collapse;font-size:.88rem}th,td{text-align:left;vertical-align:top;padding:10px 8px 10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.decision{border-top:1px solid var(--line);padding-top:12px}.sources{overflow-wrap:anywhere}@media(max-width:520px){main{padding:22px 16px 38px}body{font-size:16px}table{font-size:.8rem}}
+</style></head><body><main>
+<header>LOO-582 · concept-review with Jack Heart · November 3, 2026
+<details class="sources"><summary>Files behind this screen</summary><a href="loo-582.md">scratch/loo-582.md</a>; docs/work.md; rust/loopflow/src/builtins/ops/skill/work.md; ops/task.rs; ops/task/promotion.rs; store/sqlite/children.rs; ops/human_session/primary.rs; swift/LoopflowMac/Views/SessionActionSheet.swift.</details></header>
+<h1>Create a Task around this chat and worktree.</h1>
+<p><strong>Accepted priority.</strong> Keep the work already happening. Selecting a conversation for an <em>existing</em> Task should continue it in that Task’s worktree, where supported; creation keeps the existing chat and checkout together.</p>
+<blockquote>“Create a Task for this work and keep this conversation.”</blockquote>
+<pre><code>Before: this chat S · checkout B · branch + unfinished edits
+Action: create Task T
+After:  Task T → this same chat S, in checkout B
+        Task runs and its PR also use B</code></pre>
+<p>The Task supplies an identity and a place in the plan. The chat, cwd, branch, files, history and live attachment stay in place.</p>
+<table><thead><tr><th scope="col">Action</th><th scope="col">Concept / state</th><th scope="col">Shared operation</th></tr></thead><tbody>
+<tr><td>Create from this work</td><td>New Task adopts B</td><td><code>task_create</code> → placement</td></tr>
+<tr><td>Keep this chat</td><td>S binds to T; T points to S as primary</td><td><code>promote_task</code> → binding + primary</td></tr>
+<tr><td>Open and continue</td><td>Same Session and working directory</td><td>Existing open/resume path</td></tr>
+</tbody></table>
+<p class="note">Creation, adoption and binding commit together. No extra chat, checkout, provider process, replayed turn, Graph or Auto-Ship approval. Implemented on the branch; installed/configured-provider and rendered acceptance remain pending.</p>
+<details><summary>Usage and skill draft</summary>
+<pre><code># Issued by the existing chat
+lf task create --title "Finish the prototype"
 
-  <h2>The interaction</h2>
-  <p><strong>Existing branch implementation; runtime acceptance still pending.</strong> From a shell in a prototype checkout, select the existing Loopflow Session explicitly:</p>
-  <pre><code>lf session list --json
-lf task create --session SESSION --title "Finish the prototype"
-lf task status TASK --json
-lf open --task TASK --link
-lf resume --task TASK</code></pre>
-  <p>An unfinished interactive Session can select itself when issuing creation. For an existing Task, use <code>lf task promote TASK --session SESSION</code>. Desktop offers <strong>Create Task from this Session</strong> or <strong>Make primary Task conversation</strong>; ordinary <strong>Assign to Task</strong> remains a separate action.</p>
-
-  <h2>Actions → concepts → APIs</h2>
-  <table>
-    <thead><tr><th scope="col">Action</th><th scope="col">State that changes</th><th scope="col">Shared operation</th></tr></thead>
-    <tbody>
-      <tr><td>Keep the prototype</td><td>Task owns the existing linked checkout and branch; records an available open PR.</td><td><code>task_create</code> / <code>task_promote</code> → <code>place_task_in</code></td></tr>
-      <tr><td>Keep this conversation</td><td>Session binds prospectively to the Task; Task points to it as primary.</td><td><code>promote_task</code> → <code>bind_session_in</code> + <code>choose_task_primary_in</code></td></tr>
-      <tr><td>Continue</td><td>Existing Session identity, cwd and provider history remain. Promotion preserves the live attachment and input.</td><td>Existing open/resume path; <code>admit_workspace</code> retains bound cwd.</td></tr>
-    </tbody>
-  </table>
-  <p class="note">Creation, placement, binding and primary selection commit in one SQLite transaction. No new promotion record, Graph or attachment lifecycle.</p>
-
-  <h2>The mismatch, before and after</h2>
-  <p><strong>Before this change:</strong> creation filed planning work without adopting the checkout. The superseded selection proposal also inferred the desired conversation from recency.</p>
-  <p><strong>Accepted and implemented:</strong> adopt existing work; select a conversation by its identity. With two Sessions in one checkout, the newer one may belong to another Task. A shell selecting only the checkout binds neither conversation. An explicit selection or the eligible invoking Session supplies the permanent assignment.</p>
-  <p><strong>Shared checkout:</strong> selecting a repository or Wave primary transfers that conversation and frees its former primary scope. The checkout remains shared. A later Task checkout does not move the conversation. Ordinary Wave assignments and permanent Task bindings remain intact.</p>
-
-  <h2>Failure and recovery</h2>
-  <p>A reservation failure or conflicting permanent bind leaves the local promotion uncommitted. Correct the source or reservation condition, then repeat. If commit succeeded but the reply was lost, the selected Session or adopted checkout identifies the same Task on retry. No turn is replayed.</p>
-  <p>Remote promotion selects work already on the addressed Machine. Headless Runs do not implicitly become primary; completed Sessions remain assignable through ordinary binding. These boundaries preserve existing work identities.</p>
-
-  <h2>Review questions, resolved from accepted decisions</h2>
-  <ol>
-    <li><strong>Which Session becomes primary?</strong> The explicit selection or eligible invoking Session. Never the most recent one.</li>
-    <li><strong>Does promotion relocate or restart work?</strong> No. It changes association and primary selection; the ordinary idle policy still applies afterward.</li>
-    <li><strong>What remains to prove?</strong> Installed and configured-provider create/promote → status/open → continue, including draft or pending-input retention across idle deadlines and Task progress updates. Gate owns the affected suites. Existing fixture evidence is not rendered or configured-provider acceptance.</li>
-  </ol>
-</main>
-</html>
+# From a shell: select the chat explicitly
+lf session list --json
+lf task create --session SESSION --title "Finish the prototype"</code></pre>
+<p><strong>Desktop wording:</strong> “Create Task from this conversation”<br><span class="note">Keep this chat, worktree, branch and unfinished edits.</span></p>
+<p><strong>Skill draft:</strong> When asked to make current work a new Task, create it using the invoking Session or its exact Loopflow Session ID. Adopt the existing unassociated linked checkout and make that conversation primary. Continue in place.</p>
+<p class="note">Shared checkouts remain shared. Preserve permanent bindings, target-Machine locality, explicit selection and the separate --new backlog path. Recency never chooses the conversation.</p>
+</details>
+<details><summary>Failure, recovery and next proof</summary>
+<p>A conflicting owner or failed reservation leaves local creation/adoption/binding uncommitted. Correct the cause and retry. If commit succeeds but the reply is lost, the same selected Session or adopted checkout recovers the same Task.</p>
+<p><strong>Next proof:</strong> live chat and dirty linked checkout → create → status/open → continue the same chat in the same directory, retaining drafts and pending input. Repeat without duplicating anything. Fixture checks do not replace this live acceptance.</p>
+</details>
+<h2>Existing Task: keep its worktree, continue this chat there</h2>
+<p><strong>Accepted direction:</strong> Task T already owns A; Session S is in B. Make S primary and continue the same chat in A. Keep T’s branch and PR. Files in B stay there.</p>
+<pre><code>Use this conversation for T in A.
+Same chat and history → Task worktree A</code></pre>
+<p><strong>Capability still to verify:</strong> Loopflow has idle Session workspace admission and native resume using the stored cwd and conversation ID. That provides a continuation path, not a universal live-process directory switch.</p>
+<details><summary>Provider evidence and recovery</summary>
+<p>Codex resume requests carry cwd and the saved thread ID. Claude starts a resume from its configured directory. OpenCode now applies its native move on reconnect; an isolated installed probe preserved identity and executed shell pwd at the destination. Configured-provider relocation acceptance remains pending.</p>
+<p>Use a supported idle/attachment boundary, preserve drafts and pending input, and verify the next tool’s actual cwd. Show any required continuation explicitly. A database-only cwd change must not count as a completed move. A conflicting permanent Task bind still requires resolution.</p>
+</details>
+<h2>Cmd-T must know where the Session is working</h2>
+<p><strong>Jack Heart’s observed symptom:</strong> a new tab opens <code>~/src/loopflow</code> instead of the linked worktree in <strong>cmux and Rex</strong>. Warp is possible, not confirmed.</p>
+<pre><code>Start:       ~/src/loopflow
+Session:     ~/src/loopflow.&lt;worktree&gt;
+Cmd-T → pwd: ~/src/loopflow.&lt;worktree&gt;   ← expected</code></pre>
+<p><strong>Working hypothesis:</strong> the terminal retains the launcher’s directory while the provider works in the worktree. The earlier viewer path updated terminal names without publishing cwd; the branch now serializes cwd reports with provider output and replays them on attachment. Bundled shell integration reports its own cwd; a child process using another directory does not change the parent shell.</p>
+<p class="note">This is not yet a reproduced diagnosis. Check cmux and Rex directly, then Warp. Publish the real location on attachment and after a completed move through a safe terminal output/control path. Keep host new-tab preferences intact.</p>
+<h2 class="decision">Review questions, now resolved</h2>
+<p><strong>1. What happens on creation?</strong> Adopt the existing linked worktree and keep the same chat. Nothing moves or restarts.</p>
+<p><strong>2. What happens for an existing Task?</strong> Keep its worktree; continue the selected chat there through a supported move, retaining history and input.</p>
+<p><strong>3. What remains to prove?</strong> Provider relocation and recovery, draft retention, and Cmd-T inheriting the actual Session directory in cmux and Rex; Warp remains unconfirmed.</p>
+<p class="note">No new product decision is requested. Jack Heart accepted this design and requested implementation on November 3. Continue the same Task and PR through implementation to the next demo; Auto-Ship remains unapproved.</p>
+</main></body></html>

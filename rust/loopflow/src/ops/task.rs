@@ -1503,7 +1503,8 @@ pub fn task_create(
                     )));
                 }
             }
-            let task = promotion::save(&store, &main, task.id.clone(), None, source, None).await?;
+            let task =
+                promotion::save(&store, &main, task.id.clone(), None, source, None, false).await?;
             super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
             return store
                 .get_task(&task.id)
@@ -1551,6 +1552,7 @@ pub fn task_create(
             Some(creation),
             source,
             acquisition,
+            false,
         )
         .await?;
         if let Some(update) = &regression {

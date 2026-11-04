@@ -2693,6 +2693,187 @@ fn promotion_preserves_live_conversation_and_existing_work() {
 }
 
 #[test]
+fn promotion_continues_in_existing_task_after_live_client_exits() {
+    let fixture = Fixture::new(true);
+    let origin = fixture
+        .repo
+        .create_named_worktree("research")
+        .canonicalize()
+        .unwrap();
+    let destination = fixture
+        .repo
+        .create_named_worktree("delivery")
+        .canonicalize()
+        .unwrap();
+    std::fs::write(origin.join("draft.txt"), "keep unfinished work").unwrap();
+    let task = fixture.json(&[
+        "task",
+        "create",
+        "--worktree",
+        destination.to_str().unwrap(),
+        "--title",
+        "Delivery",
+        "--json",
+    ]);
+    let task_id = task["id"].as_str().unwrap();
+    let (child, capture) = fixture.attach(&[
+        "--repo",
+        origin.to_str().unwrap(),
+        "-i",
+        "--agent",
+        "opencode",
+        ":",
+        "Research",
+    ]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let id = fixture.session_row(&capture).0;
+        let before = fixture
+            .sessions()
+            .into_iter()
+            .find(|s| s["id"] == id)
+            .unwrap();
+        let captures = fixture.captures();
+        let explicit = fixture.run(&[
+            "task",
+            "promote",
+            task_id,
+            "--session",
+            &id,
+            "--worktree",
+            origin.to_str().unwrap(),
+            "--json",
+        ]);
+        assert!(
+            !explicit.status.success(),
+            "explicit checkout cannot be silently ignored"
+        );
+        for _ in 0..2 {
+            let promoted = fixture.json(&["task", "promote", task_id, "--session", &id, "--json"]);
+            assert_eq!(promoted["worktree"], task["worktree"]);
+            assert_eq!(promoted["branch"], task["branch"]);
+        }
+        let after = fixture
+            .sessions()
+            .into_iter()
+            .find(|s| s["id"] == id)
+            .unwrap();
+        assert_eq!(after["cwd"], before["cwd"]);
+        assert_eq!(after["agent_process_id"], before["agent_process_id"]);
+        assert_eq!(after["requested_cwd"], destination.to_str().unwrap());
+        let opened = fixture.json(&["resume", "--task", task_id, "--prepare", "--json"]);
+        assert_eq!(opened["id"], id);
+        assert_eq!(opened["requested_cwd"], after["requested_cwd"]);
+        let status = fixture.json(&["task", "status", task_id, "--json"]);
+        assert_eq!(
+            status["sessions"][0]["requested_cwd"],
+            after["requested_cwd"]
+        );
+        assert_eq!(fixture.captures(), captures);
+        assert_eq!(fixture.launches().len(), 1);
+        assert_eq!(fixture.count("task_graphs"), 0);
+        id
+    }));
+    fixture.release(child);
+    let id = result.unwrap();
+    // Selecting another primary does not cancel this Session's accepted move.
+    let other = tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
+            path: fixture.home.path().join("loopflow.db"),
+        })
+        .await
+        .unwrap();
+        let mut other = store.session(&id).await.unwrap().unwrap();
+        other.id = uuid::Uuid::new_v4().simple().to_string().into();
+        other.cwd = destination.clone();
+        other.captured = None;
+        other.artifact_key = None;
+        other.caller_artifact_key = None;
+        other.input_published = false;
+        other.completed_at = None;
+        store.create_session(other).await.unwrap()
+    });
+    fixture.json(&[
+        "task",
+        "promote",
+        task_id,
+        "--session",
+        other.id.as_str(),
+        "--json",
+    ]);
+    let native_before: Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture.home.path().join("native-sessions.json")).unwrap(),
+    )
+    .unwrap();
+    // The target can temporarily disappear; the same request remains retryable.
+    let held = destination.with_extension("held");
+    std::fs::rename(&destination, &held).unwrap();
+    let failed = fixture.run(&["resume", &id]);
+    std::fs::rename(&held, &destination).unwrap();
+    assert!(!failed.status.success());
+    assert_eq!(
+        fixture
+            .sessions()
+            .into_iter()
+            .find(|s| s["id"] == id)
+            .unwrap()["requested_cwd"],
+        destination.to_str().unwrap()
+    );
+    std::fs::write(
+        fixture.home.path().join("bin/opencode"),
+        include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+    )
+    .unwrap();
+    std::fs::write(fixture.home.path().join("reject-move"), "once").unwrap();
+    let failed = fixture.run(&["resume", &id]);
+    assert!(
+        !failed.status.success(),
+        "native move failure must not advertise a connection"
+    );
+    let pending = fixture
+        .sessions()
+        .into_iter()
+        .find(|s| s["id"] == id)
+        .unwrap();
+    assert_eq!(pending["requested_cwd"], destination.to_str().unwrap());
+    let continued = fixture.run(&["resume", &id]);
+    assert!(continued.status.success(), "{continued:?}");
+    let received: Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture.home.path().join("received.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(received["cwd"], destination.to_str().unwrap());
+    let native_after: Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture.home.path().join("native-sessions.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        native_after, native_before,
+        "resume preserves native identity and messages without a turn"
+    );
+    let locations: Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture.home.path().join("native-locations.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(locations
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|cwd| cwd == destination.to_str().unwrap()));
+    let after = fixture
+        .sessions()
+        .into_iter()
+        .find(|s| s["id"] == id)
+        .unwrap();
+    assert!(after["requested_cwd"].is_null());
+    assert_eq!(after["cwd"], destination.to_str().unwrap());
+    assert_eq!(
+        std::fs::read_to_string(origin.join("draft.txt")).unwrap(),
+        "keep unfinished work"
+    );
+    assert_eq!(fixture.count("tasks"), 1);
+}
+
+#[test]
 fn promotion_worktree_only_records_pr_and_rejects_conflicting_owner() {
     let fixture = Fixture::new(false);
     let root = fixture
@@ -2992,13 +3173,13 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
     fixture.json(&[
         "session",
         "bind",
-        &ids[1],
+        ids[1],
         "--task",
         other["id"].as_str().unwrap(),
         "--json",
     ]);
     // Opening the other Task's conversation most recently cannot choose ownership.
-    fixture.json(&["resume", &ids[1], "--prepare", "--json"]);
+    fixture.json(&["resume", ids[1], "--prepare", "--json"]);
     let created = fixture.json(&[
         "--repo",
         root.to_str().unwrap(),
@@ -3030,7 +3211,7 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
         .unwrap();
     assert_eq!(bound, None);
     // An exact selection works even with a newer conversation in the checkout.
-    fixture.json(&["task", "promote", task, "--session", &ids[0], "--json"]);
+    fixture.json(&["task", "promote", task, "--session", ids[0], "--json"]);
     let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
     assert_eq!(primary["id"], ids[0]);
     let other_bound: String = fixture

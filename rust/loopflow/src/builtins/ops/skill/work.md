@@ -29,12 +29,16 @@ its invoking Session. A Session can select itself with
 `LF_AGENT_CALLER.session_id`; from a shell, find its Loopflow ID with
 `lf session list --json` and pass `--session <id>`. Without a selected or
 invoking Session, no conversation is bound or made primary;
-`lf task promote <task> --session <id>` makes existing work that Task's home.
+`lf task promote <task> --session <id>` selects the conversation for that Task.
+If the Task already owns another worktree, the same conversation continues there
+after its current client exits. Status and Desktop show the pending directory;
+reconnect to continue. Files stay where they are. An explicit `--worktree` never
+replaces the Task's checkout.
 `--worktree <path>` selects a checkout without requiring a Session. Promotion
 keeps files, branch, provider history and live input attachment; it starts no
 Graph and approves no Auto-Ship. Repeats keep the existing Task. Use
 `lf task create --new` to file independent backlog work from an owned checkout.
-Main/Wave checkouts stay shared; a selected Session there binds without moving.
+Creation keeps main/Wave checkouts shared and binds the selected Session in place.
 A selected repository/Wave primary conversation transfers to the Task, freeing
 its former scope to open a new conversation. Remote sources must
 already exist on the selected Machine; promotion never copies live work.

@@ -612,6 +612,9 @@ fn run_native_session(
     })?;
 
     drop(activation);
+    if owned.is_none() {
+        crate::transport::report_directory(&command.cwd);
+    }
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
@@ -881,6 +884,7 @@ fn run_opencode_native(
                 }
                 drop(launch_lock);
                 let mut child = process.spawn()?;
+                crate::transport::report_directory(&command.cwd);
                 let _native = native_return(&owner);
                 let status = (|| -> Result<_> {
                     record_interactive_opened(environment)?;

@@ -61,12 +61,12 @@ struct SessionActionSheet: View {
                         set: { model.navigation.binding?.taskTitle = $0 }))
                         .disabled(draft.submitting)
                         .accessibilityIdentifier("session-promote-title")
-                    Button("Create Task from this Session") {
+                    Button("Create Task from this conversation") {
                         Task { await model.promoteSessionToTask() }
                     }
                     .disabled(draft.submitting || draft.taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("session-promote-create")
-                    Text("Makes this the primary Task conversation.")
+                    Text("Keep this chat, worktree, branch and unfinished edits.")
                     Divider()
                     TextField("Task identifier or stable ID", text: Binding(
                         get: { model.navigation.binding?.selector ?? "" },
@@ -77,7 +77,7 @@ struct SessionActionSheet: View {
                         .disabled(draft.submitting || draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("session-bind-preview")
                 }
-                Text("Making this conversation primary adopts its unassociated linked checkout. Main and Wave checkouts stay shared. The conversation stays in place.")
+                Text("Creation keeps this conversation in place. If an existing Task has another worktree, its next connection continues there after the current client exits. Files stay where they are.")
                 if let error = draft.error {
                     Text(error).foregroundStyle(palette.warning)
                         .accessibilityIdentifier("session-bind-error")

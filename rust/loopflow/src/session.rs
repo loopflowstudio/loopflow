@@ -250,6 +250,7 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
+    pub requested_cwd: Option<std::path::PathBuf>,
     pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
     /// Its execution owner runs with no viewer attached.

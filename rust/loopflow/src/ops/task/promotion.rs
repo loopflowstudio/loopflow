@@ -25,6 +25,7 @@ pub struct TaskPromotionOptions {
 pub(super) struct Source {
     pub task: Option<Task>,
     checkout: Option<PathBuf>,
+    explicit_checkout: bool,
     session: Option<LfSession>,
     // Serialize source resolution and the local commit, including concurrent retries.
     _admission: Vec<Arc<std::fs::File>>,
@@ -42,6 +43,7 @@ pub(super) async fn resolve_source(
         return Ok(Source {
             task: None,
             checkout: None,
+            explicit_checkout: false,
             session: None,
             _admission: Vec::new(),
         });
@@ -145,6 +147,7 @@ pub(super) async fn resolve_source(
     Ok(Source {
         task,
         checkout,
+        explicit_checkout: options.worktree.is_some(),
         session: selected,
         _admission: admission,
     })
@@ -157,6 +160,7 @@ pub(super) async fn save(
     creation: Option<NewTask>,
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
+    continue_in_task: bool,
 ) -> OpsResult<Task> {
     if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
         return Err(task_error(format!(
@@ -172,7 +176,9 @@ pub(super) async fn save(
             ));
         }
         if let Some(checkout) = &source.checkout {
-            if task.worktree.as_ref().is_some_and(|path| path != checkout) {
+            if (source.explicit_checkout || source.session.is_none())
+                && task.worktree.as_ref().is_some_and(|path| path != checkout)
+            {
                 return Err(task_error(format!(
                     "{} already has a different checkout; its work is unchanged",
                     task.identifier
@@ -180,6 +186,18 @@ pub(super) async fn save(
             }
         }
     }
+    let requested_cwd = if continue_in_task {
+        existing
+            .as_ref()
+            .and_then(|task| task.worktree.clone())
+            .filter(|root| {
+                source.session.as_ref().is_some_and(|session| {
+                    crate::git::worktree_root(&session.cwd).ok().as_ref() != Some(root)
+                })
+            })
+    } else {
+        None
+    };
     let placement = match (
         &source.checkout,
         existing.as_ref().and_then(|task| task.worktree.as_ref()),
@@ -192,9 +210,19 @@ pub(super) async fn save(
     };
     // No checkout restoration here: the selected files and branch already exist.
     let task = store
-        .promote_task(&id, creation, placement, source.session, acquisition)
+        .promote_task(
+            &id,
+            creation,
+            placement,
+            source.session,
+            requested_cwd.clone(),
+            acquisition,
+        )
         .await
         .map_err(task_error)?;
+    if let Some(cwd) = requested_cwd {
+        eprintln!("Conversation selected. After its current client exits, the next connection continues in {}. Files stay in their original checkout.", cwd.display());
+    }
     drop(source._admission);
     Ok(task)
 }
@@ -250,7 +278,16 @@ pub fn task_promote(repo: &Path, issue: &str, options: TaskPromotionOptions) -> 
             Some(wave) => Some(crate::ops::planning_sync::lock_wave_planning(&wave).await?),
             None => None,
         };
-        let task = save(&store, main.as_path(), task.id, None, source, acquisition).await?;
+        let task = save(
+            &store,
+            main.as_path(),
+            task.id,
+            None,
+            source,
+            acquisition,
+            true,
+        )
+        .await?;
         crate::ops::planning_sync::sync_after_save(&store, &main.to_string()).await;
         store
             .get_task(&task.id)

@@ -2,7 +2,7 @@
 
 use crate::id::AgentSessionId;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
@@ -253,7 +253,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         p.started_at,
         COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),
-        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread)
+        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),a.requested_cwd
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -342,6 +342,7 @@ fn read_summary(
             agent_process_id,
             task_terminal: row.get(28)?,
             task_primary: row.get(29)?,
+            requested_cwd: row.get::<_, Option<String>>(40)?.map(PathBuf::from),
             captured: row.get(16)?,
             id: row.get(0)?,
             artifact_key: row
@@ -1350,19 +1351,19 @@ impl SqliteStore {
     }
 
     /// Called under the Session launch lock after proving there is no live client.
-    pub(crate) fn move_primary_workspace(
+    pub(crate) fn admit_session_workspace(
         &self,
         session: &LfSession,
         cwd: &Path,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
-            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
+            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (requested_cwd IS ?3 OR primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
             return Err(StoreError::InvalidAuthority(
-                "primary Session changed before workspace admission".into(),
+                "Session changed before workspace admission".into(),
             ));
         }
         Ok(())

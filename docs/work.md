@@ -49,10 +49,16 @@ gives the Task a separate home. Selecting a repository or Wave primary Session
 transfers that conversation to the Task; its former scope can open a new one.
 A remote command uses the selected Machine's existing paths and Sessions; it does not transfer local live work.
 
-Desktop offers **Create Task from this Session** in the Session's Task-assignment
+Desktop offers **Create Task from this conversation** in the Session's Task-assignment
 action. Selecting an existing Task also offers **Make primary Task
 conversation**. Already-assigned Sessions offer the same action in the palette
 and Task menu. The current terminal and composer stay in place.
+
+When an existing Task already has a worktree, `lf task promote <task> --session <id>`
+keeps that worktree and schedules the same conversation's next connection there.
+The current client stays in its directory until it exits. Status and Desktop show
+the pending directory; reconnect to continue. Files remain in their original
+checkout. An explicit `--worktree` cannot replace the Task's existing checkout.
 
 ## Steer it while it runs
 

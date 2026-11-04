@@ -137,11 +137,8 @@ lf task create --title "Finish prototype"
 lf task promote LOO-12 --session SESSION
 ```
 
-Creation adopts an unassociated linked checkout. Its invoking Session or an
-explicit `--session` becomes primary; a shell selects no conversation implicitly.
-Find the Loopflow Session ID with `lf session list --json`.
-Promotion gives an existing Task that work. Both preserve files, branch, native
-history and live input; neither starts a Graph. Repeating creation in the adopted
-checkout returns its Task. Use `lf task create --new` for separate backlog work.
-Shared main/Wave checkouts stay shared; a selected Session there can bind without
-moving. See [Work](../../../../docs/work.md#keep-work-already-in-progress).
+Creation keeps the existing chat and linked checkout. Select a conversation
+explicitly from a shell; `lf session list --json` supplies its ID. Use
+`lf task create --new` for separate backlog work. See
+[Work](../../../../docs/work.md#keep-work-already-in-progress) for shared checkouts,
+existing-Task continuation and recovery.

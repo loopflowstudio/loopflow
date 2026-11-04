@@ -102,7 +102,8 @@ pub(crate) fn spawn_native(
     let (store, session, attachment) = owner;
     crate::agent_input_timing::record("provider_spawn_begin", session);
     steer_environment(&mut command, owner)?;
-    store
+    let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
+    let child = store
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
@@ -121,7 +122,11 @@ pub(crate) fn spawn_native(
             // Preserve the OS error (including NotFound) for the caller's message.
             Ok(spawned)
         })?
-        .map_err(Into::into)
+        .map_err(anyhow::Error::from)?;
+    if let Some(cwd) = cwd {
+        crate::transport::report_directory(&cwd);
+    }
+    Ok(child)
 }
 
 fn steer_environment(

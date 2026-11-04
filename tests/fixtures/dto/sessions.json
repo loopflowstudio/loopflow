@@ -68,6 +68,7 @@
       "observed_at": 1700000000,
       "source": "codex",
       "text": "Current provider output"
-    }
+    },
+    "requested_cwd": null
   }
 ]

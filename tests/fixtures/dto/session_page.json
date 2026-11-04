@@ -71,7 +71,8 @@
         ]
       },
       "agent_process_id": "44444444-4444-4444-8444-444444444444",
-      "preview": null
+      "preview": null,
+      "requested_cwd": null
     }
   ],
   "next": null

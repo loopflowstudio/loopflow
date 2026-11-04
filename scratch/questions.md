@@ -1,5 +1,8 @@
-# LOO-582 decisions
+# LOO-582 assumptions
 
-No unresolved implementation choice. Jack Heart's November 3 Session-selection
-and Run-lifecycle decisions are consolidated in `scratch/loo-582.md`.
-Configured-provider, installed and rendered continuity remain demo/review work.
+No open product choice remains; Jack Heart's accepted direction and unresolved
+acceptance evidence live in `scratch/loo-582.md`.
+
+Implementation assumption (2026-11-03): an explicit move waits until the live
+client exits and the next connection starts. Promotion never stops a live client
+or submits/replays input. CLI and Desktop explain that continuation boundary.

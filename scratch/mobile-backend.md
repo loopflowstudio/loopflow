@@ -55,9 +55,9 @@ demo evidence.
 Remaining work:
 
 - Gate the affected command, protocol, relay, Swift and packaging boundaries,
-  reusing applicable focused passes. Repeat the renamed composed signed installed
-  replacement with an editable draft and Graph live; run the broader Xcode link
-  check. Formatting and Clippy already passed for this code.
+  reusing applicable focused passes. The renamed composed signed installed
+  replacement passed during publication review; the broader Xcode link check
+  was stopped by the host security-pressure limit and remains unproven. Formatting and Clippy already passed for this code.
 - Publish the cutover to existing PR #1813 and return to interactive demo. Native
   recovery, quit/reopen, reading/copy/Find/scroll and Move here remain unverified.
   Linux supervisor replacement remains Linux-host acceptance.
@@ -287,8 +287,8 @@ recovery record. Existing usage and skill guidance need no further redesign.
 
 The failed-start and lost-takeover-acknowledgement counterexamples above remain
 acceptance constraints. Source review confirms the corrected boundary; it adds
-no runtime or rendered proof. The next proof remains the renamed installed
-replacement composition and the existing gate/demo acceptance below. GUI-less
+no runtime or rendered proof. The later publication check below supplies the
+renamed installed replacement evidence; gate/demo acceptance remains below. GUI-less
 distribution, before-login hosting, active-work removal and the phone takeover
 gesture remain outside this accepted local scope, with no implied approval.
 The review page now shows the corrected behavior rather than proposing it again.
@@ -334,8 +334,8 @@ The pre-cutover evidence at `2b9ecd9790` and `8c54f5e08a` includes eleven Rust
 transport checks, three Swift connection tests, a headless app build and the
 opt-in installed replacement composition. The fixture’s updater completion result
 replaced an unreliable `open -W` short-process watch; no registration retry was
-added. Those passes do not validate the renamed installation path. Gate owns that
-rerun and the broader Xcode link; demo owns rendered continuity.
+added. Those earlier passes do not validate the renamed installation path; the
+publication rerun below does. Demo owns rendered continuity.
 
 Gate/demo still own these acceptance checks after the local cutover:
 
@@ -343,8 +343,8 @@ Gate/demo still own these acceptance checks after the local cutover:
   server and one local endpoint. LOO-718’s paired credentials/settings must survive
   the combined integration; this local branch has none to migrate.
   CLI help and every supervisor/client caller use the new command ownership.
-- Repeat composed signed replacement with a draft and Graph live. Prove the
-  equivalent Linux supervisor path; preserve normal cgroup cleanup.
+- Prove the equivalent Linux supervisor replacement path with a draft and Graph
+  live; preserve normal cgroup cleanup. The renamed macOS composition passed.
 - Demonstrate rendered Desktop quit/reopen, native recovery, local copy/Find/scroll
   and visible Move here. Show disabled background items and version mismatch
   truthfully. Headless model tests do not prove that interaction.
@@ -372,4 +372,33 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Check: `git diff --check` passed; saved `cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims` at `5f140091b6` and `scripts/test_desktop.sh --filter ServerClientTests --jobs 4 -Xswiftc -gnone` after compression at `4c5ea88a47` passed and remain applicable; gate owns composed installed replacement/broader checks, demo owns rendered acceptance.
+Check: `git diff --check` passed; saved `cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims` at `5f140091b6` and `scripts/test_desktop.sh --filter ServerClientTests --jobs 4 -Xswiftc -gnone` after compression at `4c5ea88a47` passed and remain applicable; the publication rerun below covers composed installed replacement, gate owns broader checks and demo owns rendered acceptance.
+
+## Publication verification (November 4)
+
+At `61389c3007`, the renamed
+`installed_server_preserves_owner_and_graph_across_replacement` passed explicitly
+outside the network sandbox. The signed installed helper retained the exact
+owner/provider, held draft and running Graph through replacement, a fresh relay
+acknowledgement, draft submission and Graph progress. This remains same-build
+replacement, not released-version migration or rendered acceptance.
+
+The publication check found two architecture-map errors: the server row repeated
+the CLI binary owner, and installation omitted the absolute launchctl edge. The
+map now passes all seven coverage categories after correcting those descriptions.
+An accidentally broad gate invocation was stopped during its Python build phase;
+it is not a gate pass. Existing focused implementation passes remain applicable.
+Publication is for the interactive demo; the later delivery gate and native/Linux
+acceptance remain required. No merge or Auto-Ship approval is given.
+
+The focused publication run (`scripts/test.py --base HEAD --loopflow
+--reuse-passing`, with only documentation edits uncommitted) passed architecture
+and all 72 website checks. Website reference generation used the installed CLI,
+so that pass does not validate the candidate command tree. Xcode generation passed;
+`build-for-testing` was interrupted after 94 seconds when `syspolicyd` held 257%
+CPU for three samples. The runner classified this as host security pressure,
+not a compiler failure. No checkout Xcode compilers remained after cleanup.
+Xcode app/test-runner linking remains unproven and belongs to delivery gate before
+merge. Evidence: `.lf/tmp/gate/run-86568/loopflow/xcodebuild.log`. The host guard
+was not bypassed. Publication proceeds to Jack Heart's authorized interactive
+demo boundary, with this limit stated in the PR.

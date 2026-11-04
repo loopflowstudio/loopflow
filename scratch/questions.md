@@ -23,8 +23,8 @@ already protect their owners. The split adds no retention policy.
    server. This local pursuit supplies the migration handoff without adding remote
    functionality or editing the other checkout.
 2. Local supervisor migration is implemented with one stable socket/lock and
-   disabled choices preserved. The renamed composed replacement proof remains
-   with gate; credential/config preservation belongs to LOO-718 integration.
+   disabled choices preserved. The renamed composed replacement proof passed during
+   publication review; credential/config preservation belongs to LOO-718 integration.
 3. GUI-less distribution, before-login Mac hosting, removal during active work
    and the phone takeover gesture remain separate product choices.
 
@@ -34,10 +34,10 @@ already protect their owners. The split adds no retention policy.
   visible Move here action. Headless mailbox tests do not establish these.
 - Linux installed replacement; broader Xcode, subscription saturation/cancellation
   cleanup, defaults/attribution beyond tested parity and unchanged provider-usage totals.
-- Real LOO-718 integration and the composed replacement check after this local
+- Real LOO-718 integration. The composed replacement check passed after this local
   command/source cutover. The earlier
   signed proof uses the same candidate at a new executable inode, not a released
-  version migration. Gate owns that rerun after the namespace cutover.
+  version migration. The namespace-cutover rerun passed during publication review.
 
 The decisive recovery counterexample remains a lost takeover acknowledgement
 followed by a newer viewer's claim. Consume the generation-bound action once;

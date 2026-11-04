@@ -743,10 +743,10 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
     )?))
 }
 
-/// Get back to a Session. Whatever holds it gives it up: a terminal showing
-/// it hands over control, a provider client lf started stops. With `fork`,
-/// the holder keeps it and a new Session continues from its log. A Run is
-/// refused; it is never taken over or resumed.
+/// Get back to a Session. A terminal showing it hands over control; a provider
+/// client lf started stops only when no live turn, draft or request needs it.
+/// With `fork`, the holder keeps it and a new Session continues from its log. A
+/// Run is refused; it is never taken over or resumed.
 pub(crate) async fn open(
     store: &SharedStore,
     session_id: &str,

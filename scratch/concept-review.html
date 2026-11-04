@@ -35,18 +35,19 @@
     <code>ops/human_session.rs</code>, <code>lf/commands/rollover.rs</code>,
     <code>store/sqlite/{sessions,native_input}.rs</code>,
     <code>transport/{README.md,input.rs,lifetime.rs}</code>, <code>tests/transport_tests.rs</code>,
-    <code>docs/sessions.md</code> and builtin <code>task/skill/{demo,verify}.md</code>.
+    <code>docs/{sessions,subscriptions}.md</code>, <code>docs/architecture/execution.md</code>,
+    <code>lf/mod.rs</code> and builtin <code>task/skill/{demo,verify}.md</code>.
   </header>
 
   <h1>Return to the same conversation, with its work intact.</h1>
-  <p class="decision"><strong>Review decision: make the public resume promise match the preservation contract.</strong>
+  <p class="decision"><strong>Review outcome: no further design change or open product choice.</strong>
     Jack Heart already required drafts and pending requests to survive. Resume may report an attachment failure
-    while keeping their provider alive; the guide now describes that outcome.</p>
-  <p><small>Public wording implemented. No open product choice.
+    while keeping their provider alive; the guide, CLI help and architecture now describe that outcome.</p>
+  <p><small>Preservation contract implemented in the branch. No additional behavior proposed.
     Configured recovery remains unverified. This headless review requests no response or live handoff.</small></p>
 
   <div class="mismatch">
-    <p><strong>The consequential mismatch</strong></p>
+    <p><strong>The consequential mismatch, resolved in the design</strong></p>
     <p>The guide previously promised resume “always gets you back.” The branch preserves an unreachable protected owner
       and can fail to attach. Saved history can reopen a conversation; it cannot reconstruct the native
       editor or an unanswered provider request. Preservation and successful recovery need separate evidence.</p>
@@ -94,6 +95,7 @@
     failure without selecting the paused goal or replaying input.</p>
 
   <h2>Review questions and disposition</h2>
+  <p>Both answers follow accepted requirements. No response is needed; loop-or-next decides the next step.</p>
   <ol>
     <li><strong>Does attachment failure permit discarding pending work?</strong><br>
       <strong>1a — Preserve it:</strong> required by accepted scope.<br>

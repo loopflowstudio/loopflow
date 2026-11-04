@@ -560,7 +560,7 @@ fn asana_tasks_coworkers_delete_leave_the_plan() {
 fn asana_wave_projects_become_team_projects_holding_their_tasks() {
     with_asana(|runtime, fixture, repo, state| {
         runtime
-            .block_on(crate::ops::project::ensure(repo, "product"))
+            .block_on(crate::ops::wave_lifecycle::add(repo, "product", None))
             .unwrap();
         let saved = crate::ops::task::task_create(
             repo,

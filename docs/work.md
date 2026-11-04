@@ -194,11 +194,14 @@ starts with that context.
 ### Give it a goal and memory
 
 ```bash
-mkdir -p .lf/wave/billing
+lf wave add billing                    # register it, commit .lf/wave/billing/ on main
 $EDITOR .lf/wave/billing/GOAL.md       # who benefits, and what improves
-lf wave ensure billing                 # register it and prepare its Project
 lf task create --wave billing --title "Meter usage events"
 ```
+
+A clone's committed `.lf/wave/` directories register when the repository joins
+the Desktop portfolio, and on `lf wave add` or `lf wave connect --all`; Desktop
+and `lf wave list` read the same rows. A removed Wave's directory stays removed.
 
 ```markdown
 <!-- .lf/wave/billing/GOAL.md -->
@@ -219,6 +222,24 @@ like code. With two contributors, keep memory as short, independent sections so
 pull requests merge.
 
 `lf context --wave billing` shows each file's share of the context budget.
+
+### Rename or remove it
+
+```bash
+lf wave rename billing payments          # same Wave, Tasks and chapters; files move on main
+lf wave remove payments --preview        # what happens to its Tasks, chapters and Sessions
+lf wave remove payments                  # open Tasks move to the parent Wave or the repository
+lf wave remove payments --delete-backlog # delete unstarted Tasks instead; started ones always move
+```
+
+Removal retires the Wave and its child Waves: chapters, completed Tasks and
+conversations stay readable with `lf wave show payments` until a new Wave takes
+the name. A child's `MEMORY.md` folds into its parent's. Running it again
+finishes an interrupted removal; adding the name again starts a fresh Wave.
+Repeat a failed rename with the same old and new names to finish its pending
+files and Initiative title. Retries keep later edits uncommitted. An unfinished
+request retains the original Wave even if its name has been reused; address the
+replacement by its ID for a new removal or rename.
 
 ### Run a pass, or keep a conversation
 

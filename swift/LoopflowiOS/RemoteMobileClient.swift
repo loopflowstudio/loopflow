@@ -107,11 +107,15 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient {
 @MainActor
 final class RemoteAttachment: MobileAttachment {
     let sessionID: String
-    let events: AsyncStream<MobileTerminalEvent>
-    private let continuation: AsyncStream<MobileTerminalEvent>.Continuation
+    lazy var events = AsyncStream<MobileTerminalEvent>(unfolding: { [weak self] in
+        await self?.nextEvent()
+    }, onCancel: { [weak self] in
+        Task { @MainActor in self?.close() }
+    })
     private let connection: MachineConnection
     private var decoder = OwnerStream()
-    private var reader: Task<Void, Never>?
+    private var pendingEvents: ArraySlice<MobileTerminalEvent> = []
+    private var failure: String?
     private var writer: Task<Void, Never>?
     private let writes: AsyncStream<Data>
     private let outgoing: AsyncStream<Data>.Continuation
@@ -123,7 +127,6 @@ final class RemoteAttachment: MobileAttachment {
     private init(sessionID: String, connection: MachineConnection) {
         self.sessionID = sessionID
         self.connection = connection
-        (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingOldest(16))
         (writes, outgoing) = AsyncStream.makeStream(bufferingPolicy: .bufferingOldest(64))
     }
 
@@ -134,9 +137,9 @@ final class RemoteAttachment: MobileAttachment {
         link.decoder.expectAttachment(1)
         try await connection.send(link.attachRequest(id: 1, control: false, size: TerminalGeometry(columns: 80, rows: 24)))
         while !link.decoder.ready && !link.decoder.ended {
-            for event in try link.decoder.receive(await connection.receiveBytes()) { try link.emit(event) }
+            link.pendingEvents.append(contentsOf: try link.decoder.receive(await connection.receiveBytes()))
         }
-        link.start()
+        link.startWriter()
         return link
     }
 
@@ -164,41 +167,46 @@ final class RemoteAttachment: MobileAttachment {
         guard !closed else { return }
         closed = true
         connection.close()
-        reader?.cancel()
         writer?.cancel()
         controlDeadline?.cancel()
+        pendingEvents = []
         outgoing.finish()
-        continuation.finish()
     }
 
-    private func start() {
-        reader = Task { [weak self] in
-            guard let self else { return }
+    /// The renderer pulls the next event. Keep only one decoded network batch;
+    /// do not turn packet coalescing into an artificial slow-consumer failure.
+    private func nextEvent() async -> MobileTerminalEvent? {
+        while !closed && !Task.isCancelled {
+            if let event = pendingEvents.popFirst() {
+                if pendingEvents.isEmpty { pendingEvents = [] }
+                if case .control = event, decoder.awaitingAttachment { continue }
+                return event
+            }
+            if decoder.ended { close(); return nil }
             do {
-                while !closed {
-                    for event in try decoder.receive(await connection.receiveBytes()) { try emit(event) }
-                    if decoder.ready && !decoder.awaitingAttachment { controlDeadline?.cancel() }
-                    if decoder.ended { close(); return }
-                    await Task.yield()
-                }
+                let bytes = try await connection.receiveBytes()
+                guard !closed, !Task.isCancelled else { break }
+                pendingEvents = ArraySlice(try decoder.receive(bytes))
+                if decoder.ready && !decoder.awaitingAttachment { controlDeadline?.cancel() }
+                await Task.yield()
             } catch { fail("Session connection closed. Reconnect for a fresh screen; input was not retried.") }
         }
+        guard !Task.isCancelled else { close(); return nil }
+        defer { failure = nil }
+        return failure.map(MobileTerminalEvent.disconnected)
+    }
+
+    private func startWriter() {
         writer = Task { [weak self] in
             guard let self else { return }
             do {
                 for await bytes in writes {
                     guard !closed else { return }
                     try await connection.send(bytes)
+                    guard !closed else { return }
                     pendingBytes -= bytes.count
                 }
             } catch { fail("Input delivery is uncertain. Reconnect and inspect the prompt before resubmitting.") }
-        }
-    }
-
-    private func emit(_ event: MobileTerminalEvent) throws {
-        if case .control = event, decoder.awaitingAttachment { return }
-        if case .dropped = continuation.yield(event) {
-            throw RegistryQueryError("The phone fell behind Session output; reconnect for a fresh screen")
         }
     }
 
@@ -214,7 +222,7 @@ final class RemoteAttachment: MobileAttachment {
 
     private func fail(_ reason: String) {
         guard !closed else { return }
-        continuation.yield(.disconnected(reason))
+        failure = reason
         close()
     }
 

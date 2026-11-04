@@ -4175,6 +4175,28 @@ printf '\r\naccepted: %s\r\n' "$answer"
     // Wait until the PTY has echoed it; attaching too early could snapshot the
     // screen before input queued by this viewer has reached the child.
     until_out(&mut desktop, "desktop draft");
+    // Pace 32 MiB with the active phone while a second phone stops reading.
+    // The retained owner, not an unbounded phone queue, owns slow-viewer policy.
+    std::fs::write(fixture.home.path().join("output-chunk"), vec![b'x'; 65536]).unwrap();
+    let output_owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        r#"stty -echo < /dev/tty
+printf 'output-ready\r\n'
+read -r start < /dev/tty
+i=0
+while [ "$i" -lt 512 ]; do
+  cat "$HOME/output-chunk"
+  read -r next < /dev/tty
+  i=$((i+1))
+done
+printf '\r\noutput-complete\r\n'
+read -r finish < /dev/tty
+printf 'output-final\r\n'
+"#,
+    ]);
+    let _output_cleanup = StopOwner(&fixture, output_owner.clone());
+    let output_session = fixture.session(&output_owner);
     let mut service = MachineServiceProof {
         fixture: &fixture,
         child: None,
@@ -4236,7 +4258,7 @@ printf '\r\naccepted: %s\r\n' "$answer"
     );
     std::fs::write(
         setup_dir.join("session.json"),
-        json!({"session":session,"creationRepository":fixture.repo.path().canonicalize().unwrap()})
+        json!({"session":session,"outputSession":output_session,"creationRepository":fixture.repo.path().canonicalize().unwrap()})
             .to_string(),
     )
     .unwrap();

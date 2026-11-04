@@ -85,7 +85,9 @@ a recorded Machine reading. The live adapter uses authenticated WSS to the
 Machine service’s separate remote admission boundary. Its private Unix socket
 is never forwarded to remote callers. OwnerStream consumes Rust’s binary frames
 and nonce-qualified events; snapshots are assembled before rendering at the
-owner’s geometry. Every reconnect requests a fresh screen. Output/input queues,
+owner’s geometry. Every reconnect requests a fresh screen. The renderer requests
+the next output event as it consumes the stream; the adapter retains only the
+current decoded batch instead of filling a second event queue. Input queues,
 message sizes and connection deadlines are bounded.
 The deterministic peer owns its draft and consumes actual terminal bytes.
 Its small line editor is test/demo code, not another server or Session runtime.
@@ -153,7 +155,7 @@ and reconnect have also passed through a real retained owner, including a newer
 viewer holding input and 120×40 geometry. The child receives the combined draft
 exactly once and no reconnect starts a provider. These peers use the actual
 protocol; this is not yet a manual Desktop-to-physical-phone demonstration.
-Sustained output, real-network outages and physical-phone use remain acceptance work. Contextual approvals/Stop stay absent until the
+Sustained rendering, real-network outages and physical-phone use remain acceptance work. Contextual approvals/Stop stay absent until the
 backend supplies trustworthy state and action semantics; terminal prompts remain
 answerable through ordinary typing.
 
@@ -186,6 +188,11 @@ into it. It also saves that request for later, reloads it and opens it while
 preserving a separate unsent draft. Rust asserts exactly two provider launches (one existing, one explicitly
 created) and both exact submissions. The native log is `swift/.build/mobile-acceptance.log`. Remove
 only the temporary Serve route afterward; never reset unrelated host routes.
+
+The same acceptance includes a 32 MiB output stream paced by an active viewer.
+A second viewer stops reading, disconnects under the owner's bounded policy, then
+reattaches to the current screen without taking control. This tests native stream
+delivery and recovery; it does not measure rendering throughput or phone energy.
 
 `MachineConnectionIntegrationTests` skips unless the installed simulator app’s
 Documents directory contains `LoopflowIntegration/setup.json`. Supply a fresh

@@ -60,7 +60,7 @@ protocol MobileAttachment: AnyObject {
 
 // Renderer-facing events after the transport has validated identity and ownership.
 // These are intentionally not Codable; LOO-593 owns the actual framing and codec.
-enum MobileTerminalEvent {
+enum MobileTerminalEvent: Sendable {
     case geometry(columns: Int, rows: Int)
     case snapshot(Data)
     case output(Data)

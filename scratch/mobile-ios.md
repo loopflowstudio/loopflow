@@ -68,10 +68,12 @@ cells without sending remote geometry changes.
 ## Next work and acceptance
 
 1. Continue live acceptance with actual Desktop and a separate physical phone,
-   service/network interruptions and sustained/slow output. Native UIKit editing,
+   service/network interruptions and sustained rendered workloads. Native UIKit editing,
    passive reconnect, competing control/geometry and owner exit now pass over
    actual Tailscale WSS. The proof uses a real owner and a local stand-in program;
    it does not establish provider-specific IME behavior or manual Desktop UX.
+   Raw sustained-output acceptance now delivers 32 MiB to an active phone stream,
+   disconnects a stalled viewer and restores it passively; see the evidence below.
 2. Finish installed Desktop-to-phone onboarding acceptance. Desktop now delegates
    automatic host setup and device management to the CLI and displays the existing
    ticket as a QR code; iOS validates scans before explicit Connect. Verify actual
@@ -406,3 +408,28 @@ This proves saved confirmed-result opening over the carrier; lost-result recover
 is exercised by the separate native admission tests. The temporary Serve route
 was removed and the original empty configuration verified. Broader multi-Machine
 selection and the physical-phone acceptance above remain.
+
+### Consumer-driven terminal output — November 4, 03:44
+
+RemoteAttachment now reads as its renderer consumes events. Its eager reader
+Task and 16-event queue are removed: a legal coalesced packet containing many small
+frames cannot overflow that artificial event-count limit. Only the current decoded
+batch is retained, then released; framing/snapshot limits remain in OwnerStream.
+Cancellation closes the connection, writer failures retain their uncertainty
+message, and input is still bounded and never replayed. No server queue or owner
+policy changed.
+
+The actual host-Tailscale fixture now includes an independent retained terminal
+which sends 512 × 64 KiB, paced by the active phone's acknowledgements. The active
+native adapter received all 33,554,432 bytes while a second connection deliberately
+stopped reading. That stalled connection disconnected after 1,061,888 output bytes;
+its replacement received the current screen as an observer. The original controller
+could still finish the terminal. The preceding draft/handoff/create tests also
+pass, with exactly the two intended provider launches.
+
+Final carrier result: `Test-LoopflowiOS-2026.11.04_03-44-31--0800.xcresult`;
+outer log `/tmp/mobile-output-final.log`. The temporary Serve route was removed
+and its original empty configuration verified. Twenty-six native terminal/decoder
+tests passed in `/tmp/mobile-pull-tests.log`; cargo fmt and all-target Clippy passed.
+This sustained load exercises the real adapter and carrier, not SwiftTerm drawing
+32 MiB or physical-phone energy/latency. Those acceptance items remain open.

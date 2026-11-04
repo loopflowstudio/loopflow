@@ -9,7 +9,11 @@ import XCTest
 /// neither the test nor its assertions print ticket or credential contents.
 @MainActor
 final class MachineConnectionIntegrationTests: XCTestCase {
-    private struct SessionProof: Decodable { let session: String; let creationRepository: String? }
+    private struct SessionProof: Decodable {
+        let session: String
+        let creationRepository: String?
+        let outputSession: String?
+    }
     private var window: UIWindow?
 
     func testPairAndReadThroughHostTailscale() async throws {
@@ -55,6 +59,83 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         observation.close()
         if let proof { try await exerciseSession(proof, client: reopened, tasks: refreshed) }
         if let directory = proof?.creationRepository { try await exerciseCreation(client: reopened, directory: directory) }
+        if let session = proof?.outputSession { try await exerciseOutput(client: reopened, session: session) }
+    }
+
+    private func exerciseOutput(client: RemoteMobileClient, session: String) async throws {
+        let stalled = try await client.attach(sessionID: session)
+        defer { stalled.close() }
+        let active = try await client.attach(sessionID: session)
+        defer { active.close() }
+        let expected = 512 * 65536
+        var received = 0
+        var acknowledged = 0
+        var controlled = false
+        var complete = false
+        var tail = ""
+        var ended = false
+        var problem: String?
+        let reader = Task {
+            for await event in active.events {
+                switch event {
+                case .control(let held, _): controlled = held
+                case .output(let bytes):
+                    received += bytes.filter { $0 == 120 }.count
+                    while acknowledged < received / 65536 {
+                        do { try active.send(Data("next\n".utf8)); acknowledged += 1 }
+                        catch { problem = error.localizedDescription; return }
+                    }
+                    tail = String((tail + String(decoding: bytes.suffix(128), as: UTF8.self)).suffix(128))
+                    if tail.contains("output-complete") { complete = true }
+                case .ended: ended = true
+                case .disconnected(let reason): problem = reason
+                default: break
+                }
+            }
+        }
+        defer { reader.cancel() }
+        try active.requestControl(size: TerminalGeometry(columns: 80, rows: 24))
+        try await wait("Output fixture did not grant control") { controlled || problem != nil }
+        XCTAssertNil(problem)
+        try active.send(Data("start\n".utf8))
+        try await wait("Sustained output did not complete", seconds: 60) { complete || problem != nil }
+        XCTAssertNil(problem)
+        XCTAssertEqual(received, expected, "The active phone must receive every output byte")
+
+        var staleBytes = 0
+        var stalledFinished = false
+        let draining = Task {
+            for await event in stalled.events {
+                if case .output(let bytes) = event { staleBytes += bytes.count }
+                if case .disconnected = event { stalledFinished = true; return }
+            }
+            stalledFinished = true
+        }
+        defer { draining.cancel() }
+        try await wait("Stalled phone buffered the entire output instead of disconnecting", seconds: 15) { stalledFinished }
+        XCTAssertLessThan(staleBytes, expected / 2, "A stopped reader must not accumulate the entire stream")
+        print("Mobile output proof: active \(received) bytes, stalled \(staleBytes) bytes")
+        let returning = try await client.attach(sessionID: session)
+        defer { returning.close() }
+        var freshScreen = false
+        var passive = false
+        let returningReader = Task {
+            for await event in returning.events {
+                if case .snapshot(let bytes) = event {
+                    freshScreen = String(decoding: bytes, as: UTF8.self).contains("output-complete")
+                }
+                if case .control(let input, let geometry) = event {
+                    XCTAssertFalse(input)
+                    XCTAssertFalse(geometry)
+                    passive = true
+                }
+            }
+        }
+        defer { returningReader.cancel() }
+        try await wait("Stalled phone did not recover the current screen passively") { freshScreen && passive }
+        try active.send(Data("done\n".utf8))
+        try await wait("Output fixture did not end") { ended || problem != nil }
+        XCTAssertTrue(ended)
     }
 
     private func exerciseCreation(client: RemoteMobileClient, directory: String) async throws {
@@ -168,8 +249,8 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         XCTAssertTrue(screen().contains("accepted:"))
     }
 
-    private func wait(_ reason: String, until predicate: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(10)
+    private func wait(_ reason: String, seconds: TimeInterval = 10, until predicate: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(seconds)
         while !predicate() {
             guard Date() < deadline else { throw RegistryQueryError(reason) }
             try await Task.sleep(for: .milliseconds(20))

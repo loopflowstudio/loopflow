@@ -50,7 +50,11 @@ running.
 and any current `error`. It reads the existing service without starting it. Saved
 approval alone does not mean the Machine is reachable. Desktop displays the QR
 when ready, preserves the address when unavailable, and can recover an uncertain
-setup result by reading status without replaying the command.
+setup result by reading status without replaying the command. Automatic recovery
+keeps the saved address. If another program has taken its port, choose **Set up
+again** to select an available port, then scan the new QR code on your phone.
+Explicit setup also replaces obsolete mobile settings; **Turn off mobile access**
+removes them. Both preserve unrelated Machine configuration.
 
 For each connection, the host's `tailscale whois --json` identifies the actual TCP
 peer. Only another untagged device belonging to the approved owner is admitted.

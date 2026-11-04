@@ -81,6 +81,10 @@ impl Configuration {
 pub fn configured() -> Result<Option<Configuration>> {
     let value =
         crate::config::read_global_config_at(&crate::store::lf_home_dir().join("config.yaml"))?;
+    configuration(&value)
+}
+
+fn configuration(value: &serde_yaml_ng::Value) -> Result<Option<Configuration>> {
     value
         .get("mobile")
         .cloned()
@@ -129,7 +133,11 @@ pub fn enable() -> Result<Configuration> {
     let _lock = lock()?;
     let host = Host::discover()?;
     let owner = host.identity()?.0;
-    let previous = configured()?;
+    let value =
+        crate::config::read_global_config_at(&crate::store::lf_home_dir().join("config.yaml"))?;
+    // Explicit setup replaces obsolete mobile settings. Whole-file read/parse
+    // errors still surface so unrelated Machine settings cannot be discarded.
+    let previous = configuration(&value).ok().flatten();
     let port = previous
         .as_ref()
         .filter(|c| c.owner == owner)
@@ -145,12 +153,22 @@ pub fn enable() -> Result<Configuration> {
 }
 
 pub(super) fn save_disabled() -> Result<Option<Configuration>> {
-    let mut configuration = configured()?;
-    if let Some(config) = &mut configuration {
-        config.enabled = false;
-        save(config)?;
-    }
-    Ok(configuration)
+    crate::config::update_global_config_at(&crate::store::lf_home_dir(), |value| {
+        let mut saved = configuration(value).ok().flatten();
+        let mapping = value
+            .as_mapping_mut()
+            .context("Machine configuration is not a mapping")?;
+        let key = serde_yaml_ng::Value::String("mobile".into());
+        if let Some(config) = &mut saved {
+            config.enabled = false;
+            mapping.insert(key, serde_yaml_ng::to_value(config)?);
+        } else {
+            // An explicit disable also removes obsolete mobile settings. It
+            // does not migrate their authority into the current configuration.
+            mapping.remove(&key);
+        }
+        Ok(saved)
+    })
 }
 
 pub fn disable() -> Result<()> {

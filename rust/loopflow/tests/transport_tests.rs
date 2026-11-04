@@ -4917,6 +4917,127 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
 }
 
 #[test]
+fn machine_service_mobile_setup_repairs_obsolete_settings_and_occupied_ports() {
+    let fixture = Fixture::new();
+    let certificate =
+        rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+    let status = json!({"BackendState":"Running", "Self":{"ID":"node1", "DNSName":"fixture.tail.ts.net.", "UserID":1, "TailscaleIPs":["127.0.0.1"]}, "User":{"1":{"LoginName":"owner@example.com"}}});
+    mobile_host(
+        &fixture,
+        &status,
+        &format!(
+            "{}{}",
+            certificate.cert.pem(),
+            certificate.signing_key.serialize_pem()
+        ),
+    );
+    let saved = fixture.home.path().join("config.yaml");
+    let unrelated = json!({"shell":"/bin/zsh"});
+    let mut settings = unrelated.clone();
+    settings["mobile"] = json!({"enabled":true,"endpoint":"https://obsolete.tail.ts.net:8443"});
+    std::fs::write(&saved, serde_yaml_ng::to_string(&settings).unwrap()).unwrap();
+    let service = MachineServiceProof::start(&fixture, false);
+    let instance = service.ready();
+    let (_, initial) = service.request("status", json!({"kind":"mobile_status"}));
+    assert_eq!(initial["result"]["status"]["ready"], false);
+    assert!(initial["result"]["status"]["error"].is_string());
+    let setup = || {
+        let output = fixture
+            .command(&["machine", "service", "mobile"])
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin",
+                    fixture.home.path().join("bin").display()
+                ),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let first = setup();
+    assert_eq!(service.ready(), instance);
+    assert_eq!(first["owner"], json!({"node":"node1","user":1}));
+    let mut persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"], first);
+    persisted.as_object_mut().unwrap().remove("mobile");
+    assert_eq!(persisted, unrelated);
+
+    let port = reqwest::Url::parse(first["endpoint"].as_str().unwrap())
+        .unwrap()
+        .port()
+        .unwrap();
+    drop(service);
+    let occupied = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let service = MachineServiceProof::start(&fixture, false);
+    let instance = service.ready();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let (_, response) = service.request("status", json!({"kind":"mobile_status"}));
+        let mobile = &response["result"]["status"];
+        if mobile["error"].is_string() {
+            assert_eq!(mobile["ready"], false);
+            assert_eq!(
+                mobile["configuration"], first,
+                "Restoration must keep the saved address"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Occupied port was not reported: {response}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let repaired = setup();
+    assert_ne!(repaired["endpoint"], first["endpoint"]);
+    assert_eq!(repaired["owner"], first["owner"]);
+    assert_eq!(service.ready(), instance);
+    let (_, ready) = service.request("status", json!({"kind":"mobile_status"}));
+    assert_eq!(ready["result"]["status"]["ready"], true);
+    assert_eq!(ready["result"]["status"]["configuration"], repaired);
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"], repaired);
+    assert_eq!(occupied.local_addr().unwrap().port(), port);
+
+    drop(service);
+    std::fs::write(&saved, serde_yaml_ng::to_string(&settings).unwrap()).unwrap();
+    let off = fixture
+        .command(&["machine", "service", "mobile", "--off"])
+        .output()
+        .unwrap();
+    assert!(
+        off.status.success(),
+        "{}",
+        String::from_utf8_lossy(&off.stderr)
+    );
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(
+        persisted, unrelated,
+        "Offline disable removes only obsolete mobile settings"
+    );
+    assert!(!fixture.home.path().join("machine-service.plist").exists());
+
+    // A damaged whole file cannot be repaired without losing unrelated data.
+    let invalid = "shell: [unfinished";
+    std::fs::write(&saved, invalid).unwrap();
+    let off = fixture
+        .command(&["machine", "service", "mobile", "--off"])
+        .output()
+        .unwrap();
+    assert!(!off.status.success());
+    assert_eq!(std::fs::read_to_string(saved).unwrap(), invalid);
+}
+
+#[test]
 fn machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart() {
     machine_service_continuity(false);
 }

@@ -1,5 +1,6 @@
 //! HTTPS on the host's tailnet addresses. Tailscale identifies the socket peer;
 //! the mobile boundary never inherits the private Unix socket's authority.
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -81,7 +82,7 @@ pub(super) async fn manage(
                 let result: Result<Option<Configuration>> = async {
                     status.configuration = disabled.context("Mobile access stopped, but disabled state could not be saved")?;
                     let Some(requested) = requested else { return Ok(None) };
-                    let bound = bind(requested).await?;
+                    let bound = bind(requested, true).await?;
                     let selected = bound.config.clone();
                     tokio::task::spawn_blocking(move || super::mobile::save(&selected)).await?
                         .context("Could not save mobile access; no listener was enabled")?;
@@ -106,7 +107,7 @@ pub(super) async fn manage(
             }
             _ = retry.tick(), if !status.ready && status.configuration.as_ref().is_some_and(|config| config.enabled) => {
                 if let Some(config) = status.configuration.clone() {
-                    match bind(config).await {
+                    match bind(config, false).await {
                         Ok(bound) => {
                             status.configuration = Some(bound.config.clone());
                             status.ready = true;
@@ -135,7 +136,7 @@ struct Listener {
     tls: TlsAcceptor,
 }
 
-async fn bind(mut config: Configuration) -> Result<Listener> {
+async fn bind(mut config: Configuration, allow_port_change: bool) -> Result<Listener> {
     let expected = config.clone();
     let (host, addresses, tls) = tokio::task::spawn_blocking(move || {
         let host = Host::discover()?;
@@ -152,12 +153,39 @@ async fn bind(mut config: Configuration) -> Result<Listener> {
         Ok::<_, anyhow::Error>((host, addresses, tls))
     })
     .await??;
-    let mut port = config.port()?;
+    let port = config.port()?;
+    let sockets = match bind_sockets(&addresses, port).await {
+        Ok(sockets) => sockets,
+        Err(error)
+            if allow_port_change
+                && port != 0
+                && error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AddrInUse) =>
+        {
+            // Only explicit setup can change the saved address. Restoration
+            // keeps retrying the original port so existing phones can recover.
+            bind_sockets(&addresses, 0).await?
+        }
+        Err(error) => return Err(error),
+    };
+    let port = sockets[0].local_addr()?.port();
+    config.endpoint = format!("https://{}:{port}", host.dns);
+    config.enabled = true;
+    Ok(Listener {
+        sockets,
+        host,
+        config,
+        tls,
+    })
+}
+
+async fn bind_sockets(addresses: &[IpAddr], mut port: u16) -> Result<Vec<TcpListener>> {
     let mut sockets = Vec::new();
     for ip in addresses {
         // Never bind wildcard or LAN addresses. The exact addresses come from
         // the installed Tailscale daemon, not a caller's hostname or HTTP header.
-        let socket = match TcpListener::bind((ip, port)).await {
+        let socket = match TcpListener::bind((*ip, port)).await {
             Ok(socket) => socket,
             // Hosts can disable IPv6 while Tailscale still reports its node's
             // IPv6 allocation. Keep the usable family; never broaden the bind.
@@ -173,14 +201,7 @@ async fn bind(mut config: Configuration) -> Result<Listener> {
         !sockets.is_empty(),
         "Tailscale has no available local address"
     );
-    config.endpoint = format!("https://{}:{port}", host.dns);
-    config.enabled = true;
-    Ok(Listener {
-        sockets,
-        host,
-        config,
-        tls,
-    })
+    Ok(sockets)
 }
 
 async fn maintain(host: Host, config: Configuration, tls: mpsc::Sender<TlsAcceptor>) -> Result<()> {

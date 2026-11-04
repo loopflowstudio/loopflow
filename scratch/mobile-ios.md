@@ -1054,8 +1054,36 @@ automatic recovery, changed-account rejection, live disable and offline disable.
 - `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-readiness-clippy.log`.
 - `cargo fmt -- --check` and `git diff --check`: pass.
 
-Remaining setup edges: explicit setup should recover an occupied saved port and
-obsolete mobile configuration while preserving unrelated settings. Physical-phone
-network transitions and installed Desktop update survival remain acceptance work.
+The next section resolves occupied saved ports and obsolete mobile configuration.
+Physical-phone network transitions and installed Desktop update survival remain
+acceptance work.
 The preceding native editing proof still applies to unchanged phone/carrier code;
 no new physical-device, real-provider, voice or VoiceOver claim is made.
+
+## Explicit setup recovery — November 4
+
+Jack Heart's QR-first flow now repairs two recoverable setup failures. Explicit
+Set up again selects a new port when another process occupies the saved port;
+automatic restoration keeps retrying the approved address. Explicit setup replaces
+obsolete mobile settings, and Turn off removes them. Both preserve unrelated
+Machine configuration under its existing file lock. Invalid whole-file YAML
+remains an error and is left untouched.
+
+Review kept fallback limited to an occupied port during explicit setup. Identity,
+certificate, permission and unavailable-address failures cannot broaden the bind
+or bypass approval. The same certificate and identity check serve both socket
+attempts; partially bound sockets drop before choosing another port. The new test
+uses the real CLI against an isolated foreground service and confirms that its
+local incarnation survives setup changes.
+
+- `cargo test -p loopflow --test transport_tests machine_service_mobile_ -- --nocapture`: 2 pass; `/tmp/mobile-setup-repair.log`; obsolete setup, unchanged unrelated settings, stable restoration address, explicit port repair, offline disable and damaged-YAML preservation.
+
+Phone source review found the remaining UX cost: changing an address requires
+Forget Machine before scanning again. Keychain stores the endpoint and verified
+Machine ID, and drafts are keyed by Machine ID, but replacement should be possible
+without first discarding the working saved connection. A direct Change address
+flow that verifies the existing Machine ID before replacement is useful next work. No physical-phone
+or new native UI acceptance is claimed by these backend tests.
+
+- `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-setup-repair-clippy.log`.
+- `cargo fmt -- --check` and `git diff --check`: pass; no Swift changes or native test rerun for this backend-only repair.

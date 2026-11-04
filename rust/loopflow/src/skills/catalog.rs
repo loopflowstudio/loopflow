@@ -105,7 +105,7 @@ impl SkillSource {
 
     pub fn read(&self) -> Result<String, LoadError> {
         match &self.path {
-            Some(path) => Ok(fs::read_to_string(path)?),
+            Some(path) => Ok(crate::config::observation::read_to_string(path)?),
             None => Ok(builtins::get_builtin_skill(&self.name)
                 .expect("embedded catalog entry names a builtin")
                 .to_string()),
@@ -230,6 +230,7 @@ impl SkillCatalog {
         files: bool,
         ancestors: &mut HashSet<PathBuf>,
     ) -> Result<(), LoadError> {
+        crate::config::observation::directory(dir);
         if !dir.is_dir() {
             return Ok(());
         }
@@ -310,7 +311,7 @@ impl SkillCatalog {
 }
 
 pub(crate) fn is_generated(path: &Path) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
+    let Ok(content) = crate::config::observation::read_to_string(path) else {
         return false;
     };
     split_frontmatter(&content)

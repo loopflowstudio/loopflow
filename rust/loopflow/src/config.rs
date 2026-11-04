@@ -5,7 +5,6 @@
 //! then scope and target; see `settings` for precedence and provenance.
 
 use std::collections::{BTreeSet, HashMap};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -19,6 +18,7 @@ pub mod api;
 pub mod catalog;
 pub mod files;
 pub mod migrate;
+pub(crate) mod observation;
 pub(crate) mod placement;
 pub mod remote;
 pub mod settings;
@@ -504,10 +504,11 @@ pub fn parse_agent(agent: &str) -> (String, Option<String>) {
 
 /// Load YAML file, returning None if not present or empty.
 fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content = fs::read_to_string(path)?;
+    let content = match observation::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
     if content.trim().is_empty() {
         return Ok(None);
     }
@@ -760,13 +761,7 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
 
 /// Read a Machine-local configuration mapping; absent or empty is an empty mapping.
 pub(crate) fn read_global_config_at(path: &Path) -> anyhow::Result<serde_yaml_ng::Value> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(anyhow::Error::new(error).context(format!("Read {}", path.display())))
-        }
-    };
+    let text = files::read_text(path)?;
     match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text)? {
         serde_yaml_ng::Value::Null => Ok(serde_yaml_ng::Value::Mapping(Default::default())),
         value if value.is_mapping() => Ok(value),

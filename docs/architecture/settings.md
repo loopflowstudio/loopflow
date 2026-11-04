@@ -19,7 +19,7 @@ CLI / Desktop edits ── catalogue validation ── authoritative file writer
 specifies its ownership and implementation boundaries. Both are the LOO-714
 implementation contract; the checked inventory in the
 [architecture reference](../architecture-reference.md#complete-ownership-map)
-continues to describe current code until its consumers are migrated.
+records the current owners. The LOO-714 plan retains outstanding acceptance work.
 
 ## Independent dimensions
 
@@ -42,11 +42,10 @@ source and differ in scope. Personal skill definitions also use Personal source.
 A Graph occurrence keeps its defining Graph and authored local step ID through
 composition, repetition and capture.
 
-The old ConfigLayer mixes these dimensions. Remove its Global-versus-Personal
-file/DB split and its Repo-versus-Wave source split. Migrate every consumer,
-serializer, DTO and test to the same model. No legacy alias, conversion chain or
-second rank table preserves those distinctions after cutover. A source name must
-mean the same thing in Rust, Swift, inspection, help and documentation.
+ConfigSource replaces ConfigLayer's Global-versus-Personal file/DB split and its
+Repo-versus-Wave source split. Consumers, serializers and DTOs use the independent
+dimensions. No legacy alias or second rank table preserves the old distinctions.
+A source name means the same thing in Rust, Swift, inspection, help and documentation.
 
 ## One settings catalogue
 
@@ -94,6 +93,14 @@ serialize compare-and-write. The same invalidation path covers CLI, Desktop and
 external file edits. Resolve private files through Git metadata, not a database
 registry of whichever checkouts happened to be observed. Wave selectors preserve
 Wave identity through rename/relocation and distinguish reuse of an old name.
+
+Subscriptions capture the configuration files their reading uses, including absent
+paths, definition directories and bounded Task workers. The shared watch reader
+checks those inputs on its one-second observation clock. Content comparison detects
+hand edits, atomic replacement and removal without a store commit or Git change.
+Only changed inputs schedule another Work reading, through the existing coalescing
+and cost-based rest policy; unchanged results emit no frame. The planning refresh
+clock remains separate.
 
 No DB preference reader remains after migration. Configuration and bootstrap
 inspection work without a compatible store. A missing runtime account or machine

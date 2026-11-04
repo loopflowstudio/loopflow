@@ -112,22 +112,27 @@ pub fn validate_scope(
 /// Return the preference path after its optional skill/occurrence selector.
 pub fn preference_path(key: &str) -> Result<Vec<&str>, LoadError> {
     let parts: Vec<_> = key.split('.').collect();
+    preference_parts(&parts).map(<[_]>::to_vec)
+}
+
+pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b str], LoadError> {
+    let key = parts.join(".");
     if parts.iter().any(|part| part.is_empty()) {
         return Err(invalid(format!("invalid setting key {key}")));
     }
-    let path = match parts.as_slice() {
-        ["skills", _, rest @ ..] if !rest.is_empty() => rest.to_vec(),
-        ["graphs", _, "steps", _, rest @ ..] if !rest.is_empty() => rest.to_vec(),
+    let path = match parts {
+        ["skills", _, rest @ ..] if !rest.is_empty() => rest,
+        ["graphs", _, "steps", _, rest @ ..] if !rest.is_empty() => rest,
         ["skills" | "graphs", ..] => {
             return Err(invalid(
                 "name a setting under skills.<name> or graphs.<name>.steps.<id>",
             ))
         }
-        _ => parts.clone(),
+        _ => parts,
     };
     let definition = super::catalog::definition(path[0])
         .ok_or_else(|| invalid(format!("unknown setting {key}")))?;
-    if !definition.accepts(&path)
+    if !definition.accepts(path)
         || (path.len() != parts.len()
             && definition.applicability != super::catalog::Applicability::Launch)
     {
@@ -396,27 +401,26 @@ fn skill_values(skill: &Skill) -> Value {
     values
 }
 
-fn leaves(value: &Value, prefix: &str, result: &mut Vec<(String, Value)>) {
+fn leaves(value: &Value, path: &mut Vec<String>, result: &mut Vec<(Vec<String>, Value)>) {
     if value.is_null() {
         return;
     }
-    if super::catalog::definition(prefix).is_some_and(|definition| {
-        definition.key == prefix && definition.combination == super::catalog::Combination::Replace
-    }) {
-        result.push((prefix.into(), value.clone()));
+    if path.len() == 1
+        && super::catalog::definition(&path[0]).is_some_and(|definition| {
+            definition.combination == super::catalog::Combination::Replace
+        })
+    {
+        result.push((path.clone(), value.clone()));
     } else if let Some(map) = value.as_mapping() {
         for (key, value) in map {
             if let Some(key) = key.as_str() {
-                let key = if prefix.is_empty() {
-                    key.into()
-                } else {
-                    format!("{prefix}.{key}")
-                };
-                leaves(value, &key, result);
+                path.push(key.into());
+                leaves(value, path, result);
+                path.pop();
             }
         }
-    } else if !value.is_null() {
-        result.push((prefix.into(), value.clone()));
+    } else {
+        result.push((path.clone(), value.clone()));
     }
 }
 
@@ -578,6 +582,7 @@ pub fn resolve_layers(
     candidates
         .sort_by_key(|candidate| (candidate.source, candidate.scope, candidate.target.clone()));
     let mut explanations: BTreeMap<String, EffectiveSetting> = BTreeMap::new();
+    let mut merged = Value::Mapping(Default::default());
     for mut candidate in candidates {
         let mut values = std::mem::replace(&mut candidate.value, Value::Null);
         if let Some(map) = values.as_mapping_mut() {
@@ -608,8 +613,9 @@ pub fn resolve_layers(
             });
         }
         let mut flat = Vec::new();
-        leaves(&values, "", &mut flat);
-        for (key, value) in flat {
+        leaves(&values, &mut Vec::new(), &mut flat);
+        for (path, value) in flat {
+            let key = path.join(".");
             let entry = explanations
                 .entry(key.clone())
                 .or_insert_with(|| EffectiveSetting {
@@ -634,6 +640,12 @@ pub fn resolve_layers(
             } else {
                 value
             };
+            // Keep literal map keys; dotted display names cannot reconstruct an address.
+            insert(
+                &mut merged,
+                &path.iter().map(String::as_str).collect::<Vec<_>>(),
+                entry.value.clone(),
+            );
         }
     }
     // A Tasks destination and a capacity select the same placement. The same
@@ -658,16 +670,13 @@ pub fn resolve_layers(
             .get_mut(removed)
             .expect("matched placement")
             .value = Value::Null;
-    }
-    // Execution and inspection share the final values, including list resets.
-    let mut merged = Value::Mapping(Default::default());
-    for (key, setting) in &explanations {
         insert(
             &mut merged,
-            &key.split('.').collect::<Vec<_>>(),
-            setting.value.clone(),
+            &removed.split('.').collect::<Vec<_>>(),
+            Value::Null,
         );
     }
+    // Execution and inspection share the final values, including list resets.
     let mut config: Config =
         serde_yaml_ng::from_value(merged).map_err(|error| invalid(error.to_string()))?;
     config.setting_layers = Some(layers.to_vec());

@@ -8,6 +8,8 @@
 //! A read whose outside facts can be observed cheaply probes them on its clock
 //! and reads only when they moved. An unchanged result sends nothing. A slow
 //! reading rests `BUSY_SHARE` times its duration before a change is read again.
+//! Configuration inputs are captured during each reading and checked on the
+//! short observation clock, independently of Git and planning refreshes.
 //!
 //! Each stdin line is a request, `{"id": 1, "args": {...}}`. `args` replaces
 //! the read's arguments; without it the request confirms the current result.
@@ -34,6 +36,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::config::observation;
 use crate::store::changes::StoreChanges;
 use crate::store::sqlite::{SqliteStore, StoreRevisions};
 use crate::store::{SharedStore, StorageConfig};
@@ -423,6 +426,8 @@ struct Reader<A, F> {
     args: A,
     runtime: tokio::runtime::Runtime,
     checkouts: checkouts::Checkouts,
+    configuration: observation::Files,
+    configuration_checked: Option<Instant>,
     followed_at: Option<i64>,
     stale: bool,
     store: Option<SharedStore>,
@@ -473,6 +478,8 @@ where
             args,
             runtime: tokio::runtime::Runtime::new()?,
             checkouts: checkouts::Checkouts::default(),
+            configuration: observation::Files::default(),
+            configuration_checked: None,
             followed_at: None,
             stale: false,
             store: None,
@@ -539,6 +546,13 @@ where
             }
         }
         let now = Instant::now();
+        if self
+            .configuration_checked
+            .is_none_or(|at| now - at >= CHECK)
+        {
+            self.stale |= self.configuration.changed();
+            self.configuration_checked = Some(now);
+        }
         let due = self.force
             || match self.read_on {
                 None => true,
@@ -555,12 +569,13 @@ where
             };
         let mut frame = None;
         if due {
-            if !self.force && self.read_at.is_some() && self.read_at != revisions {
+            if !self.force && (self.stale || (self.read_at.is_some() && self.read_at != revisions))
+            {
                 settle(&self.shared);
             }
             // The first revision query pins the snapshot the whole reading uses.
-            let snapshot = self
-                .store
+            let store = self.store.clone();
+            let snapshot = store
                 .as_ref()
                 .map(|store| store.sqlite.read_snapshot())
                 .transpose()?;
@@ -570,13 +585,19 @@ where
                 .map(|store| store.sqlite.revisions())
                 .transpose()?;
             let began = Instant::now();
-            self.probed = self.probe();
-            let reading = match &self.refused {
-                Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
-                None => self
-                    .runtime
-                    .block_on((self.read)(self.store.clone(), self.args.clone())),
-            };
+            let ((probed, reading), configuration) = observation::Files::capture(|| {
+                let probed = self.probe();
+                let reading = match &self.refused {
+                    Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
+                    None => self
+                        .runtime
+                        .block_on((self.read)(self.store.clone(), self.args.clone())),
+                };
+                (probed, reading)
+            });
+            self.probed = probed;
+            self.configuration = configuration;
+            self.configuration_checked = Some(began);
             let (unavailable, body) = match reading {
                 Ok(body) => (None, Some(body)),
                 Err(error) => (Some(format!("{error:#}")), None),
@@ -835,10 +856,131 @@ fn settle<A>(shared: &Shared<A>) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
     use std::time::{Duration, Instant};
 
-    use super::{changed, identity, retry_due};
+    use super::{changed, identity, retry_due, subscribe, Subscription, Watched, PLANNING_CLOCK};
     use crate::store::sqlite::StoreRevisions;
+
+    fn next_frame(subscription: &Subscription, wakes: &mpsc::Receiver<()>) -> serde_json::Value {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            wakes
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap();
+            if let Some(frame) = subscription.pull() {
+                return serde_json::from_slice(&frame).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn configuration_changes_reach_an_existing_subscription_without_store_writes() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let checkout = home.path().join("task");
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["worktree", "add", "-b", "task"])
+            .arg(&checkout)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        std::fs::create_dir_all(checkout.join(".lf")).unwrap();
+        std::fs::write(checkout.join(".lf/config.yaml"), "agent: claude\n").unwrap();
+
+        let (sender, wakes) = mpsc::channel();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counted = reads.clone();
+        let directory = checkout.clone();
+        let subscription = subscribe(
+            (),
+            Watched::every(PLANNING_CLOCK),
+            move |_, ()| {
+                counted.fetch_add(1, Ordering::Relaxed);
+                let directory = directory.clone();
+                async move {
+                    // Task summaries resolve configuration in bounded workers.
+                    std::thread::scope(|scope| {
+                        scope
+                            .spawn(crate::config::observation::inherit(|| {
+                                Ok(crate::config::load_wave_config(
+                                    Some(&directory),
+                                    Some("product"),
+                                )?
+                                .unwrap()
+                                .agent()
+                                .to_owned())
+                            }))
+                            .join()
+                            .unwrap()
+                    })
+                }
+            },
+            Box::new(move || {
+                let _ = sender.send(());
+            }),
+        )
+        .unwrap();
+        let agent = |expected: &str| {
+            let frame = next_frame(&subscription, &wakes);
+            assert!(frame["unavailable"].is_null(), "{frame}");
+            assert_eq!(frame["body"], expected);
+        };
+        agent("claude");
+
+        crate::config::files::set(&checkout, None, true, false, "agent", Some("codex")).unwrap();
+        agent("codex");
+        crate::config::files::set(&checkout, None, false, false, "agent", Some("pi")).unwrap();
+        agent("pi");
+        let private = crate::config::files::private_path(&checkout).unwrap();
+        assert_eq!(
+            private,
+            crate::config::files::private_path(repo.path()).unwrap()
+        );
+        // An external editor's atomic replacement, then removal: neither writes SQLite.
+        let replacement = private.with_extension("tmp");
+        std::fs::write(&replacement, "agent: opencode\n").unwrap();
+        std::fs::rename(&replacement, &private).unwrap();
+        agent("opencode");
+        std::fs::remove_file(&private).unwrap();
+        agent("codex");
+        std::fs::remove_file(home.path().join("config.yaml")).unwrap();
+        agent("claude");
+
+        // The Wave directory did not exist when observation started.
+        let wave = checkout.join(".lf/wave/product/config.yaml");
+        std::fs::create_dir_all(wave.parent().unwrap()).unwrap();
+        std::fs::write(&wave, "agent: pi\n").unwrap();
+        agent("pi");
+        std::fs::write(&wave, "agent: [\n").unwrap();
+        assert!(!next_frame(&subscription, &wakes)["unavailable"].is_null());
+        std::fs::write(&wave, "agent: codex\n").unwrap();
+        agent("codex");
+
+        let before = reads.load(Ordering::Relaxed);
+        for index in 0..20 {
+            std::fs::write(&wave, format!("agent: pi # edit {index}\n")).unwrap();
+        }
+        agent("pi");
+        assert_eq!(reads.load(Ordering::Relaxed), before + 1);
+
+        let before = reads.load(Ordering::Relaxed);
+        std::fs::write(checkout.join("unrelated.txt"), "changed\n").unwrap();
+        let until = Instant::now() + Duration::from_millis(1200);
+        while Instant::now() < until {
+            wakes.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(subscription.pull().is_none());
+        }
+        assert_eq!(reads.load(Ordering::Relaxed), before);
+        assert!(!home.path().join("loopflow.db").exists());
+    }
 
     #[test]
     fn a_failing_read_waits_longer_before_each_retry() {
@@ -851,6 +993,52 @@ mod tests {
         assert!(due(3, 4));
         assert!(!due(40, 59));
         assert!(due(40, 60));
+    }
+
+    #[test]
+    fn new_and_edited_skill_overrides_reach_an_existing_subscription() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = tempfile::tempdir().unwrap();
+        let (sender, wakes) = mpsc::channel();
+        let directory = repo.path().to_owned();
+        let personal = home.path().to_owned();
+        let subscription = subscribe(
+            (),
+            Watched::every(PLANNING_CLOCK),
+            move |_, ()| {
+                let (directory, personal) = (directory.clone(), personal.clone());
+                async move {
+                    Ok(crate::skills::catalog::SkillCatalog::load(
+                        Some(&directory),
+                        Some(&personal),
+                        false,
+                    )?
+                    .load_skill("implement")?
+                    .agent)
+                }
+            },
+            Box::new(move || {
+                let _ = sender.send(());
+            }),
+        )
+        .unwrap();
+        let agent = |expected: serde_json::Value| {
+            let frame = next_frame(&subscription, &wakes);
+            assert!(frame["unavailable"].is_null(), "{frame}");
+            assert_eq!(frame["body"], expected);
+        };
+        agent(serde_json::Value::Null);
+        let path = repo.path().join(".lf/skills/implement/SKILL.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "---\nagent: codex\n---\nImplement.").unwrap();
+        agent("codex".into());
+        std::fs::write(&path, "---\nagent: claude\n---\nImplement.").unwrap();
+        agent("claude".into());
+        std::fs::remove_file(&path).unwrap();
+        agent(serde_json::Value::Null);
     }
 
     #[test]

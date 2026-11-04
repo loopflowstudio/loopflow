@@ -156,22 +156,7 @@ pub(crate) fn write(
         .map(String::as_str)
         .chain(key.iter().copied())
         .collect();
-    super::files::update(&path, |document| {
-        let changed = match value {
-            Some(value) => {
-                super::settings::insert(document, &path_parts, value);
-                true
-            }
-            None => super::files::remove(document, &path_parts),
-        };
-        let scoped = prefix
-            .iter()
-            .try_fold(&*document, |value, part| value.get(part));
-        if let Some(value) = scoped.and_then(|value| value.get(key[0])) {
-            super::settings::validate_value(&[key[0]], value)?;
-        }
-        Ok(changed)
-    })
+    super::files::edit(&path, &path_parts, value)
 }
 
 pub(crate) fn route_location(

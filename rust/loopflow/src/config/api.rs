@@ -41,7 +41,8 @@ pub fn run(request: Request) -> Result<serde_json::Value> {
                 } else {
                     path
                 };
-            let key = if scope == super::settings::SettingScope::Wave && !shared {
+            let (prefix, effective_key) = if scope == super::settings::SettingScope::Wave && !shared
+            {
                 let (wave, suffix) = key
                     .strip_prefix("waves.")
                     .and_then(|key| key.split_once('.'))
@@ -53,19 +54,9 @@ pub fn run(request: Request) -> Result<serde_json::Value> {
                         .ok_or_else(|| anyhow::anyhow!("Wave settings need a repository"))?,
                     wave,
                 )?;
-                format!("waves.{id}.{suffix}")
+                (format!("waves.{id}."), suffix)
             } else {
-                key
-            };
-            let effective_key = if scope == super::settings::SettingScope::Wave && !shared {
-                key.strip_prefix("waves.")
-                    .and_then(|rest| rest.split_once('.'))
-                    .map(|(_, key)| key)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("personal Wave keys begin waves.<name-or-id>.")
-                    })?
-            } else {
-                &key
+                (String::new(), key.as_str())
             };
             super::settings::validate_scope(
                 effective_key,
@@ -80,7 +71,8 @@ pub fn run(request: Request) -> Result<serde_json::Value> {
                 .as_deref()
                 .map(|value| super::settings::parse_value(effective_key, value))
                 .transpose()?;
-            let parts: Vec<_> = key.split('.').collect();
+            let authored_key = format!("{prefix}{effective_key}");
+            let parts: Vec<_> = authored_key.split('.').collect();
             if parsed.is_some() || unset {
                 super::files::edit(&path, &parts, parsed)?;
             }
@@ -91,7 +83,7 @@ pub fn run(request: Request) -> Result<serde_json::Value> {
                 .cloned()
                 .unwrap_or(Value::Null);
             Ok(
-                serde_json::json!({"path":path,"key":key,"value":value,"lifecycle":super::catalog::definition(super::settings::preference_path(effective_key)?[0]).expect("validated key").lifecycle}),
+                serde_json::json!({"path":path,"key":authored_key,"value":value,"lifecycle":super::catalog::definition(super::settings::preference_path(effective_key)?[0]).expect("validated key").lifecycle}),
             )
         }
     }

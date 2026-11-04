@@ -436,27 +436,30 @@ impl<'a> DefinitionLoader<'a> {
     }
 
     pub(crate) fn load_graph(&mut self, name: &str) -> Result<GraphDefinition, LoadError> {
-        let (resolved_name, content) = match self
+        let (name, content, source) = match self
             .repo
             .map(|repo| find_repo_graph(name, repo))
             .transpose()?
             .flatten()
         {
-            Some((key, path)) => (key, fs::read_to_string(path)?),
+            Some((key, path)) => (
+                key,
+                crate::config::observation::read_to_string(&path)?,
+                crate::config::settings::definition_source(Some(&path)),
+            ),
             None => {
                 let key = crate::builtins::resolve_builtin_graph(name)
                     .ok_or_else(|| LoadError::GraphNotFound(name.to_string()))?;
                 let content =
                     crate::builtins::get_builtin_graph(key).expect("resolved builtin graph exists");
-                (key.to_string(), content.to_string())
+                (
+                    key.to_string(),
+                    content.to_string(),
+                    crate::config::ConfigSource::Builtin,
+                )
             }
         };
-        self.parse_source(resolved_name, &content)
-    }
-
-    /// Parse authored Graph text as the definition named `name`.
-    fn parse_source(&mut self, name: String, content: &str) -> Result<GraphDefinition, LoadError> {
-        let value: Value = serde_yaml_ng::from_str(content)
+        let value: Value = serde_yaml_ng::from_str(&content)
             .map_err(|err| LoadError::InvalidGraph(err.to_string()))?;
         validate_graph_nesting(&self.sources, &name)?;
         self.sources.push(name.clone());
@@ -466,11 +469,6 @@ impl<'a> DefinitionLoader<'a> {
         // top-level fallback to a same-named local or cached skill.
         let mut items =
             items.map_err(|error| LoadError::InvalidGraph(format!("{name}: {error}")))?;
-        let source = self
-            .repo
-            .map(|repo| find_graph_source_path(&name, repo))
-            .transpose()?
-            .flatten();
         fn retain_origin(
             steps: &mut [Step],
             graph: &str,
@@ -498,11 +496,7 @@ impl<'a> DefinitionLoader<'a> {
             }
             Ok(())
         }
-        retain_origin(
-            &mut items,
-            &name,
-            crate::config::settings::definition_source(source.as_deref()),
-        )?;
+        retain_origin(&mut items, &name, source)?;
         Ok(GraphDefinition { name, items })
     }
 }
@@ -695,6 +689,7 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
 
 fn repo_graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
     let root = repo.join(".lf/graphs");
+    crate::config::observation::directory(&root);
     let mut sources = BTreeMap::<String, PathBuf>::new();
     if !root.exists() {
         return Ok(sources);
@@ -707,6 +702,9 @@ fn repo_graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadErro
     {
         let entry = entry.map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         let path = entry.path();
+        if path.is_dir() {
+            crate::config::observation::directory(path);
+        }
         if !path.is_file()
             || !path
                 .extension()

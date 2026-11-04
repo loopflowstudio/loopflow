@@ -1,7 +1,10 @@
 //! Set up each area of work once: a Wave's committed `config.yaml` and your
 //! own `lf set` values choose how its work runs, with no flags.
+use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::ProviderAccountId;
@@ -9,7 +12,15 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
 fn lf(repo: &Path, home: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_lf"))
+    command(repo, home, args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home)
@@ -20,10 +31,77 @@ fn lf(repo: &Path, home: &Path, args: &[&str]) -> std::process::Output {
         // the native home, which is the Keychain on macOS.
         .env("LF_ACCOUNT_ISOLATION", "isolated")
         .current_dir(repo)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap()
+        .args(args);
+    command
+}
+
+struct Watch(Child);
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/config.yaml", "agent: claude\n");
+    repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
+    repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n");
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    store
+        .ensure_wave(repo.path().to_str().unwrap(), "infra")
+        .unwrap();
+    let mut watch = Watch(
+        command(
+            repo.path(),
+            home.path(),
+            &["wave", "status", "infra", "--json", "--watch"],
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap(),
+    );
+    let stdout = watch.0.stdout.take().unwrap();
+    let (sender, frames) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let frame: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            if sender.send(frame).is_err() {
+                break;
+            }
+        }
+    });
+    let agent = |value: &str, source: &str| {
+        let frame = frames.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(frame["unavailable"].is_null(), "{frame}");
+        assert_eq!(frame["body"]["setup"]["agent"]["value"], value, "{frame}");
+        assert_eq!(frame["body"]["setup"]["agent"]["source"], source);
+    };
+    agent("claude", "repository");
+    let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let revision = || {
+        connection
+            .query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    };
+    let before = revision();
+    repo.create_file("lf.config.local.yaml", "agent: codex\n");
+    agent("codex", "personal");
+    repo.create_file("lf.config.local.yaml", "agent: pi\n");
+    agent("pi", "personal");
+    std::fs::remove_file(repo.path().join("lf.config.local.yaml")).unwrap();
+    agent("claude", "repository");
+    std::fs::write(home.path().join("config.yaml"), "agent: opencode\n").unwrap();
+    agent("opencode", "personal");
+    assert_eq!(revision(), before);
+    drop(watch);
+    reader.join().unwrap();
 }
 
 fn json(output: std::process::Output) -> Value {

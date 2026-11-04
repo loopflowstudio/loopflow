@@ -62,3 +62,8 @@ On-demand declarations created through a generic file edit default to zero permi
 machines and a zero hourly limit until explicitly configured. Pool availability,
 rental templates/limits and authentication browser selection are file preferences;
 observed browser identities and acquired-machine commitments remain runtime facts.
+
+Configuration observation: reuse the watch reader's one-second tick to compare
+the files actually read, including missing paths. This avoids platform-specific
+file event loss and inode replacement races; expensive Work reads retain their
+existing coalescing and rest policy. Bounded Task workers inherit the observation.

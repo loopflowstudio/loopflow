@@ -57,7 +57,6 @@ pub fn destination(
         ));
     }
     let path = private_path(repo)?;
-    protect_private_file(&path)?;
     Ok((
         path,
         wave.map(|name| wave_key(repo, name).map(|id| vec!["waves".into(), id]))
@@ -134,7 +133,7 @@ pub(crate) fn lock(path: &Path) -> Result<File> {
 }
 
 pub(crate) fn read_text(path: &Path) -> Result<String> {
-    match fs::read_to_string(path) {
+    match super::observation::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),
@@ -282,9 +281,10 @@ pub fn remove(root: &mut Value, path: &[&str]) -> bool {
     removed
 }
 
-pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<()> {
+/// Set or remove an authored key; report whether it was set or found for removal.
+pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<bool> {
     update(path, |document| {
-        match value {
+        let changed = match value {
             Some(value) => {
                 if parts.len() >= 2 && parts[parts.len() - 2] == "machine" {
                     let sibling = match parts.last() {
@@ -298,19 +298,18 @@ pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<
                         remove(document, &path);
                     }
                 }
-                super::settings::insert(document, parts, value)
+                super::settings::insert(document, parts, value);
+                true
             }
-            None => {
-                remove(document, parts);
-            }
-        }
+            None => remove(document, parts),
+        };
         let offset = if parts.first() == Some(&"waves") {
             2
         } else {
             0
         };
         let settings = &parts[offset..];
-        let preference = super::settings::preference_path(&settings.join("."))?.len();
+        let preference = super::settings::preference_parts(settings)?.len();
         let root_index = parts.len() - preference;
         if let Some(value) = parts[..=root_index]
             .iter()
@@ -318,7 +317,7 @@ pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<
         {
             super::settings::validate_value(&[parts[root_index]], value)?;
         }
-        Ok(())
+        Ok(changed)
     })
 }
 

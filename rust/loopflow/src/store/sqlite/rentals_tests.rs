@@ -59,13 +59,18 @@ fn file_edits_change_admission_without_rewriting_live_rentals() {
 #[test]
 fn pools_and_ondemands_share_one_namespace() {
     let (_dir, store) = store();
-    store.add_pool("lab").unwrap();
+    store.add_pool("lab.west").unwrap();
     store.add_ondemand(&code(1)).unwrap();
     assert_eq!(store.ondemand("code").unwrap(), Some(code(1)));
     assert!(store.add_pool("code").is_err());
     let mut lab = code(1);
-    lab.name = "lab".into();
+    lab.name = "lab.west".into();
     assert!(store.add_ondemand(&lab).is_err());
+    store.set_pool_off("lab.west", true).unwrap();
+    assert!(store.pool("lab.west").unwrap().unwrap().off);
+    store.remove_pool("lab.west").unwrap();
+    assert!(store.pool("lab.west").unwrap().is_none());
+    assert!(store.remove_pool("lab.west").is_err());
 }
 
 #[test]

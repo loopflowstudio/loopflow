@@ -381,11 +381,11 @@ pub fn inspect(replace: bool, keep: bool) -> Result<serde_json::Value> {
     let mut records = read_receipts(&metadata)?;
     let mut output = Vec::new();
     for (path, record) in &mut records {
-        let current = project(&super::read_global_config_at(path)?);
+        let mut current = project(&super::read_global_config_at(path)?);
         if record.status == "conflict" && replace {
-            super::files::update(path, |document| {
+            current = super::files::update(path, |document| {
                 replace_projection(document, &record.incoming);
-                Ok(())
+                Ok(project(document))
             })?;
             record.applied = Some(record.incoming.clone());
             record.applied_origin = Some(record.origin.clone());
@@ -483,7 +483,9 @@ mod tests {
         }
         assert_eq!(selected(), "codex:executor");
         // Explicit adoption saves authored fallback strength, not an effective CLI choice.
-        super::inspect(true, false).unwrap();
+        let adopted = super::inspect(true, false).unwrap();
+        assert_eq!(adopted[0]["saved"]["default_agent"], "codex:origin");
+        assert!(adopted[0]["saved"].get("agent").is_none());
         assert_eq!(selected(), "claude:shared");
         repo.create_file(".lf/skills/probe.md", "Probe.");
         assert_eq!(selected(), "codex:origin");

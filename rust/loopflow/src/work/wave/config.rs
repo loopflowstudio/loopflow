@@ -124,7 +124,7 @@ pub(crate) fn wave_graph(repo: &Path, name: &str) -> Result<Option<String>, Wave
 /// this fallback once a release reading `config.yaml` is installed.
 fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>, WaveConfigError> {
     let path = config_path(repo, name);
-    match std::fs::read_to_string(&path) {
+    match crate::config::observation::read_to_string(&path) {
         Ok(content) => {
             let mapping = parse_mapping(&path, &content)?;
             return Ok(Some((path, mapping)));
@@ -133,7 +133,7 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     }
     let path = goal_path(repo, name);
-    let content = match std::fs::read_to_string(&path) {
+    let content = match crate::config::observation::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(WaveConfigError::Read { path, source }),

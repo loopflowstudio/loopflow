@@ -27,9 +27,9 @@ serializer labels, rank tables, compatibility aliases and inspector vocabulary.
 Use one catalogue, resolver, writer and explanation across interfaces. Demonstrate
 that the documented examples agree with real launch preparation before publishing.
 
-The independent-clone account-scope answer is now recorded below. Finish the
-documentation contract first, then implement it end to end. Do not preserve old
-storage concepts merely to satisfy tests for the removed architecture.
+The documentation-first checkpoint and independent-clone account-scope decision
+are complete. The file-backed cut now implements that contract; acceptance below
+retains the remaining proof obligations.
 
 Documentation presentation follow-up: Jack Heart requested varied, outcome-first
 recipes across global/repository/Wave, skill/Graph occurrence, choice/fallback,
@@ -71,8 +71,11 @@ admission/history, acquired machine costs, discovered browser profiles, credenti
 observations and actual saved layouts remain runtime records. No existing reusable
 layout-template setting was found; this cut introduces no new template product.
 
-Jack Heart requested `lf sync` and Desktop Wave rename inspection. `lf sync --manual`
-completed conflict-free; main remains `aef0c0a5cd`, already merged in `de23763a03`.
+Jack Heart requested `lf sync` and Desktop Wave rename inspection. The latest
+conflict-free sync merged main `ac8e088f5f` in `ff8eb9a7f6`, after checkpoint
+`b0a2b108a9`. LOO-720 now preserves native turn status across reconnects and emits
+Loopflow's Working record only for headless launches. This changes no preference
+authority; launch acceptance must preserve that native/headless distinction.
 Desktop RenameWaveSheet delegates to the shared rename operation, which preserves
 Wave identity and moves authored files. Private preferences use the Wave ID and
 follow renames without applying to old-name reuse. Cross-repository relocation
@@ -83,9 +86,15 @@ Origin profiles preserve authored declarations and executor-local bindings. Read
 have no retention effect; inbound execution retains unchanged projections, tracks
 revisions by origin, and exposes keep/replace for divergence. Actual launch preparation
 and direct retained reads remain the behavioral proof, distinct from transport itself.
+Reconciliation found that `config retained --replace` saved the incoming declarations
+but returned the pre-adoption `saved` projection. The response now reports the projection
+written by the common editor; the existing preparation/adoption test checks both the
+returned fallback and subsequent resolution.
 
 Earlier implementation evidence is retained at `03c678c676:scratch/settings-catalog.md`
-and in settings-scope.md. It is not proof of the current extension.
+and in settings-scope.md. It is not proof of the current extension. The extension's
+pre-sync focused Rust/Swift and lint results are retained at
+`b0a2b108a9:scratch/settings-catalog.md`; they are not full post-sync acceptance.
 
 ## Outcome and scope
 
@@ -266,8 +275,8 @@ The completed independent capture reduction removed `graph::StoredSkill` and the
 `Skill.settings["docs"]` representation. `Skill.docs: Option<Vec<String>>` keeps
 omission, empty-list reset and authored paths on one surviving field, including
 retained JSON captures. Export ownership checks live in `skills::writable_target`;
-the caller no longer repeats them. These changes do not select a repository scope
-policy or perform the preference migration that can now proceed.
+the caller no longer repeats them. The separate file migration now implements the
+accepted independent-clone scope.
 
 Deletion cut (verify no live preference owner remains):
 
@@ -289,18 +298,34 @@ Copied Session list/history reads also drop the obsolete machine-table join and
 NULL label placeholder; configured aliases supply their names, including renames.
 
 Removed `route_edits_invalidate_wave_setup`: it asserted revisions on the retired
-provider_routes table. File and route behavior remain covered by configuration,
-Wave setup and provider inspection tests. Concrete remaining gap: Wave watches
-reread on the five-minute planning clock (`lf/commands/watch.rs:PLANNING_CLOCK`),
-so file-only edits have no prompt invalidation signal. DB trigger counts no longer
-prove that behavior. Gate must verify and repair file-watch propagation across
-interfaces before publication.
+provider_routes table. Fresh file and route reads remain covered by configuration,
+Wave setup and provider inspection tests. Subscription regressions now exercise
+file propagation without writing those retired revisions.
+
+Domain setters now delegate to `files::edit`, removing their duplicate mutation path.
+The common editor owns validation, removal results and private-file protection.
+Setting addresses retain literal map-key components through editing and resolution;
+dotted inspector labels are display text, not a path to parse back into YAML.
+Graph loading retains the source it read instead of rediscovering that source after
+parsing. The Desktop editor parses private Wave selectors once.
+
+## Configuration observation
+
+The shared CLI/FFI/Desktop watch captures configuration inputs and checks their
+content on its one-second observation tick, including missing files and the main
+checkout's private file. Bounded Task workers inherit the capture; skill/Graph
+discovery includes directories so new overrides invalidate existing subscriptions.
+Setter writes and external edits use this same path. Replacement, removal and
+invalid-YAML repair retain normal coalescing, cost-based rest and unchanged-frame
+suppression. This removes the five-minute planning clock as the sole observer of
+configuration; Git and independent planning facts retain their own observation.
 
 ## Remaining proof
 
 The repository scope decision is resolved. The rewritten configuration docs precede
 the coherent migration cut and define its expected behavior.
-Catalogue, file ownership, cutover, remote retention and provenance are implemented.
+Catalogue, file ownership, cutover, remote retention, provenance and shared
+file-change propagation are implemented.
 Focused consumer checks cover launch recipes, migration recovery, Wave identity,
 machine/account placement and Desktop/FFI. Bootstrap inspection also exposes retained
 preferences without opening the Work store. Complete affected-suite acceptance and
@@ -329,4 +354,4 @@ Gate owns affected-suite and complete extension acceptance after implementation;
 configured/installed behavior remains distinct from stand-in proof. Automatic
 failure recovery remains unimplemented as PR2.
 
-Check (November 3): `cargo test -p loopflow --lib` with focused filters `config::` (64), `store::sqlite::account_observation_tests::` (3), `store::sqlite::rentals::tests::` (9), `machine_records::tests::` (5), and `automatic_selection_prefers_the_account_with_more_room` (1) passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; `scripts/test_desktop.sh --filter 'ThemeWorkflowTests|NewTaskTests' -Xswiftc -gnone` built Desktop headlessly and passed 5 tests. Gate owns the full affected suites and the file-watch propagation gap above; demo/review owns installed-provider acceptance.
+Check (November 3): `cargo test -p loopflow --lib config::` and `cargo test -p loopflow --lib -- graph::tests:: store::sqlite::rentals::tests:: lf::commands::watch::tests::` passed (133 tests; inherited `LF_*` cleared, stdin closed; linker unwind-size warning). These cover literal dotted pool names, shared setters, Graph provenance and live configuration subscriptions. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; context remains within both limits. Gate owns affected-suite acceptance, including Wave/served_reads/FFI integration; demo/review owns configured-provider acceptance.

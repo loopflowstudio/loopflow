@@ -194,32 +194,35 @@ Task worktrees, machine/account declarations and origin-owned remote preferences
 Remote requests use the origin profile; direct remote work uses saved preferences.
 Retention preserves independent remote edits, separately from execution authority.
 Runtime identity, account observations, secrets and history remain domain-owned.
-The extension remains unimplemented.
+The source cut is implemented; live file-change propagation remains incomplete.
 
 Every applicable `agent` choice precedes all `default_agent` fallbacks. Within each
 class the accepted order is CLI > environment > personal files > repository/Wave
-files > builtins, then scope, then occurrence/skill/general. Current code retains
-lfdb between environment and files. Non-agent merge semantics remain typed.
+files > builtins, then scope, then occurrence/skill/general. Source, scope and
+target are independent; DB preference authority is removed. Non-agent merges remain typed.
 No per-skill accounts or builtin agent recommendations.
 Targets retain defining Graph name and authored ID through composition/export;
 inspection retains the choice/default key. Captures preserve omitted/empty docs.
 
-Session/resume `-a` selects only that conversation; explicit Graph selection reaches
-its steps. History is not future policy. Same-provider fallback model refresh without
-cross-provider import remains a tested assumption, not a new product decision.
-This supersedes LOO-440's inheritance; earlier proof and unresolved lock cause:
+Session/resume `-a` selects that conversation; Graph selection reaches its steps.
+Same-provider fallback refresh without cross-provider import remains an assumption.
+Earlier inheritance proof and unresolved lock cause:
 `d6d7057d97:.lf/wave/infrastructure/MEMORY.md`, Global agent override.
 
-Migration lesson: repository account routes use origin `owner/repo` without checkout
-registration. A main-checkout file cannot alone preserve policy across independent,
-future or absent clones. Selecting a registered clone invents an owner; copying to
-known clones loses shared authority. Checkout scope versus an origin-scoped file
-owner remains an unresolved product choice.
+Jack Heart resolved clone scope November 3: private preferences, including account
+order, belong to independent clones; linked worktrees share. Legacy routes materialize
+after collision checks. Unavailable destinations retain non-executing exports for
+explicit import; future clones inherit nothing. Reads need no checkout registration.
 
-Release's entry-point lesson: resolver tests prove neither launch propagation
-nor installation. Exporting declarations as CLI flags changes authority.
-Stand-ins prove earlier recipe/inspection and Session isolation, not the file-backed
-extension. Publication remains review only. Automatic limit recovery stays PR2:
+File cutover removes SQLite revision triggers. Fresh reads prove no live propagation:
+Git watches miss ignored private/global files. Shared configuration observation remains
+required. Adoption receipts must describe the projection after the write.
+
+Release's entry-point lesson: resolver tests prove no installation. Exporting
+declarations as CLI flags changes authority.
+Focused preparation, file migration and retention fixtures are source evidence;
+complete acceptance and configured installation remain unproved. Publication is review
+only. Automatic limit recovery stays PR2:
 routing and retry must agree, and failed preparation cannot reattribute an old
 thread. November 2's weekly rejection demonstrated that split, not recovery.
 

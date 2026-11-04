@@ -1771,7 +1771,7 @@ fn snapshot_task_details(
     let mut details: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
-                scope.spawn(|| {
+                scope.spawn(crate::config::observation::inherit(|| {
                     let mut details = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
@@ -1786,7 +1786,7 @@ fn snapshot_task_details(
                         ));
                         details.push((index, detail));
                     }
-                })
+                }))
             })
             .collect();
         handles

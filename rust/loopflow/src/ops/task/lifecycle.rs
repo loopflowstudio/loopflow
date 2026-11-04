@@ -1,94 +1,21 @@
 //! Task decisions commit locally; PR and checkout cleanup retain separate authority.
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::durable::{WorkRef, WorkStatus};
 use crate::git::current_branch;
 use crate::git::worktrees::main_repo_root;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
-use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
+use crate::store::SharedStore;
 use crate::work::task::{Task, TaskPr};
 
 use super::{block_on_task, repository_for_task, task_error, task_store};
 
-/// Completion is durable before cleanup; failure never reverses the outcome.
-pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    if super::task_work_status(store, task).await? != WorkStatus::Done {
-        return Ok(());
-    }
-    let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
-        eprintln!(
-            "Task {} is complete; retained its PR-less checkout and artifacts.",
-            task.identifier
-        );
-        return Ok(());
-    };
-    if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
-        eprintln!(
-            "Task {} is complete; retained checkout for unresolved delivery.",
-            task.identifier
-        );
-        return Ok(());
-    }
-    // Removal waits for running work; writing alongside it never does.
-    let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
-    if !blockers.is_empty() {
-        eprintln!(
-            "Task {} is complete; retained checkout: {}",
-            task.identifier,
-            blockers.join("; ")
-        );
-        return Ok(());
-    }
-    let result = async {
-        let repo = main_repo_root(&repository_for_task(store, task)?)?;
-        if task.worktree.as_ref().is_some_and(|path| path == &repo) {
-            eprintln!(
-                "Task {} is complete; retained the primary checkout and branch.",
-                task.identifier
-            );
-            return Ok(());
-        }
-        let _mutation = task
-            .worktree
-            .as_ref()
-            .filter(|path| path.exists())
-            .map(|path| super::lock_task_pr_mutation(path))
-            .transpose()?;
-        // The completion gate above admits only a merged PR with resolved scope.
-        let deletion = crate::ops::wt::prepare_landed_delete(
-            &repo,
-            &pr.branch,
-            pr.head_sha()
-                .ok_or_else(|| task_error("merged PR has no recorded head"))?,
-        )?;
-        crate::ops::wt::apply_delete(deletion, &NullProgress)?;
-        if task.worktree.as_ref().is_some_and(|path| path.exists()) {
-            return Err(task_error(
-                "checkout is on a different branch; retained it for explicit wt delete",
-            ));
-        }
-        Ok(())
-    }
-    .await;
-    result.map_err(|error| {
-        task_error(format!(
-            "Task {} is complete, but cleanup is incomplete: {error}. Inspect the retained checkout with `lf wt list`.",
-            task.identifier,
-        ))
-    })
-}
-
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {
-    let store = match open_registry_for_authority().await {
-        Ok(store) => Arc::new(store),
-        Err(RegistryUnavailable::MissingFile { .. })
-            if crate::journal::agent_caller().is_none() =>
-        {
-            return Ok(None)
-        }
-        Err(error) => return Err(super::task_registry_error(error)),
+    let store = match super::authority_store().await? {
+        Some(store) => store,
+        None if crate::journal::agent_caller().is_none() => return Ok(None),
+        None => return Err(super::missing_task_registry()),
     };
     let Some(task) = historical_branch_task(&store, branch).await? else {
         return Ok(None);

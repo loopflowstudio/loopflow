@@ -7,6 +7,42 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func taskRetirementKeepsCompletionDeadlineAndPendingReason() throws {
+        let data = try loadFixtureData("task_retirement.json")
+        let value = try JSONDecoder().decode(TaskRetirement.self, from: data)
+        #expect(value.dueAt == 1793747700)
+        #expect(value.phase == "waiting")
+        #expect(try JSONDecoder().decode(TaskRetirement.self, from: JSONEncoder().encode(value)) == value)
+    }
+
+    @Test func waveRemovalPreviewDecodesEveryField() throws {
+        let removal = try RegistryQuery.decode(
+            WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
+        #expect(removal.name == "desktop")
+        #expect(removal.destination == nil)
+        #expect(removal.moved.filter(\.started).count == 1)
+        #expect(removal.files == nil)
+        #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)
+    }
+
+    @Test func waveAddedReceiptDecodesItsLeftover() throws {
+        let added = try RegistryQuery.decode(
+            WaveAdded.self, from: String(decoding: loadFixtureData("wave_added.json"), as: UTF8.self))
+        #expect(added.created)
+        #expect(added.project.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
+        #expect(added.files == .uncommitted(reason: "HEAD is detached"))
+        #expect(added.summary.count == 1)
+    }
+
+    @Test func waveRenamedReceiptDecodesItsLeftovers() throws {
+        let renamed = try RegistryQuery.decode(
+            WaveRenamed.self, from: String(decoding: loadFixtureData("wave_renamed.json"), as: UTF8.self))
+        #expect(renamed.to == "prod")
+        #expect(renamed.files == .committed(commit: "0f3c2a1d"))
+        #expect(renamed.initiative?.error == "Linear: rate limited")
+        #expect(renamed.summary.count == 1)
+    }
+
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
         let data = try loadFixtureData("task_files_frames.json")
         let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)

@@ -40,20 +40,109 @@ fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
     Ok(checkout)
 }
 
-pub fn task_shell(issue: &str, expected: &Path) -> Result<()> {
-    let checkout = pinned_checkout(issue, expected)?;
-    if crate::transport::delegate_current(false)? {
-        return Ok(());
-    }
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
-    let status = std::process::Command::new(shell)
-        .arg("-l")
-        .current_dir(checkout.worktree)
-        .status()?;
-    if !status.success() {
-        return Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into());
+pub fn list_shells(issue: &str, expected: &Path) -> Result<()> {
+    let store = file_store()?;
+    let task = store
+        .resolve_task_id(issue, None)?
+        .ok_or_else(|| anyhow!("Task is unknown"))?;
+    for shell in store.task_shells(&task)? {
+        if shell.checkout != expected.to_string_lossy() {
+            continue;
+        }
+        let state = match &shell.owner {
+            None => "startup unknown",
+            Some(owner) => match crate::journal::process_evidence(&store, owner) {
+                crate::journal::ProcessIdentityEvidence::Dead => "ended",
+                _ if shell.close_requested => "closing",
+                crate::journal::ProcessIdentityEvidence::Live => "live",
+                _ => "unknown",
+            },
+        };
+        println!("{}\t{}\t{}", shell.id, state, shell.checkout);
     }
     Ok(())
+}
+
+pub fn task_shell(
+    issue: &str,
+    expected: &Path,
+    id: &str,
+    create: bool,
+    close: bool,
+    initial: &[String],
+) -> Result<()> {
+    let store = crate::journal::process_ledger()?;
+    // Only creation requires the recorded directory to exist. Existing receipts
+    // remain attachable/closable after retirement, and only the insert winner
+    // launches execution, including when concurrent creation loses its reply.
+    if create && store.task_shell(id)?.is_none() {
+        let checkout = pinned_checkout(issue, expected)?;
+        if store.create_task_shell(id, &checkout.task_id, &expected.to_string_lossy())? {
+            let argv = shell_command(id, initial)?;
+            crate::transport::start(&argv, true, expected, &|command| {
+                command.env("LF_DESKTOP_SHELL", id);
+            })?;
+        }
+    }
+    let receipt = store
+        .task_shell(id)?
+        .ok_or_else(|| anyhow!("Shell is unknown; create a new shell explicitly"))?;
+    ensure!(
+        receipt.checkout == expected.to_string_lossy(),
+        "Shell belongs to another Task checkout"
+    );
+    if close {
+        store.close_task_shell(id)?;
+        return Ok(());
+    }
+
+    let owner = receipt.owner.ok_or_else(|| {
+        anyhow!(
+            "Shell startup was not acknowledged; execution is unknown. No replacement was started"
+        )
+    })?;
+    if crate::journal::process_evidence(&store, &owner)
+        == crate::journal::ProcessIdentityEvidence::Dead
+    {
+        crate::transport::shell_history(&owner)?;
+        anyhow::bail!(
+            "Shell ended. Create a new shell explicitly; its commands will not be replayed"
+        );
+    }
+    crate::transport::relay(&owner, None)
+}
+
+fn shell_command(id: &str, initial: &[String]) -> Result<Vec<String>> {
+    let bootstrap = crate::store::lf_home_dir().join("shell-integration");
+    // Embed the same pinned shell integration Desktop ships, so remote owners
+    // need no app bundle or caller-local resource path. Publish each file whole.
+    for (name, contents) in [
+        (".zshenv", include_str!("workspace-zshenv")),
+        ("bash-env", include_str!("workspace-bash-env")),
+        ("ghostty/shell-integration/zsh/.zshenv", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/zsh/.zshenv")),
+        ("ghostty/shell-integration/zsh/ghostty-integration", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/zsh/ghostty-integration")),
+        ("ghostty/shell-integration/bash/ghostty.bash", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/bash/ghostty.bash")),
+        ("ghostty/shell-integration/bash/bash-preexec.sh", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/bash/bash-preexec.sh")),
+        ("ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish")),
+    ] {
+        let destination = bootstrap.join(name);
+        if std::fs::read_to_string(&destination).ok().as_deref() == Some(contents) { continue; }
+        std::fs::create_dir_all(destination.parent().expect("resource has a directory"))?;
+        let temporary = destination.with_extension(format!("{}.draft", uuid::Uuid::new_v4()));
+        std::fs::write(&temporary, contents)?;
+        std::fs::rename(&temporary, &destination)?;
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let mut argv = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        include_str!("workspace-shell.sh").into(),
+        id.into(),
+        shell,
+        bootstrap.to_string_lossy().into_owned(),
+    ];
+    argv.extend_from_slice(initial);
+    Ok(argv)
 }
 
 /// The existing owned-line transport keeps stdin open and closes it on cancellation.

@@ -33,19 +33,29 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
-`binary(name)` matches only the standalone `[[test]]` binaries in
-`rust/loopflow/Cargo.toml`; suites inside `integration` take `test(name::)`, and
-an unknown binary name fails the whole filterset before anything runs.
+On macOS it also builds the CLI before isolated Python cleanup tests, so native
+archives and Cargo dependencies are fetched before networking is disabled.
+`binary(name)` matches the standalone `[[test]]` binaries in
+`rust/loopflow/Cargo.toml` and the CLI's own unit tests as `binary(lf)`;
+suites inside `integration` take `test(name::)`, and an unknown binary name
+fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
+calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
 A filtered run covers `-p loopflow` only: run `cargo test -p loopflow-ffi`
 separately when the app's library changed. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
 `local_planning`) and can exhaust the Rust phase's 1200 s budget; name modules.
-Changes to `swift/project.yml` reach the Xcode build: run `--loopflow`.
+Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
+pin/build reach both Desktop link paths: run `--swift --loopflow`. SwiftPM
+links GhosttyKit alongside the Rust archive; Xcode runs the build phases.
 The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
 with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
 and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
+Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
+After building the candidate, set `LF_BIN` to its absolute path for the gate or
+website command when the installed CLI differs; otherwise the docs check reads
+the installed build's command tree.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
 (`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
 unless the diff reaches them; together they exceed the 1200 s Rust budget, and

@@ -26,9 +26,11 @@ from `LF_AGENT_CALLER` and use `lf session rename <id> '<name>' --suggest` when
 its generated name needs improving. This preserves a human-assigned name.
 Do not rename a branch or worktree to match the conversation.
 
-Answer the user in this conversation. Keep progress in local notes and the final
-response. Refer to people by their supplied names in persisted artifacts and
-as “you” in conversation; never infer authorship from accounts or machine owners.
+Answer the user in this conversation; the person may be viewing another Session
+while you work. Keep progress in local notes and the final response. Never
+`lf resume` your own Session. Refer to people by their supplied names in
+persisted artifacts and as “you” in conversation; never infer authorship from
+accounts or machine owners.
 
 Recursive Markdown under `scratch/` enters this checkout's runs. Files in another
 checkout do not transfer their contents. Historical context is evidence, not

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.loopflow.mac</string>
+    <string>com.loopflow.mac.dev</string>
     <key>CFBundleName</key>
     <string>Loopflow</string>
     <key>CFBundleDisplayName</key>

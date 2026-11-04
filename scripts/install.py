@@ -66,8 +66,10 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
     swift = root / "swift"
     swift_release = swift / ".build" / "release"
     cargo_release = root / "target" / "release"
+    # Spotlight skips `.noindex` directories, so Cmd+Space "loopflow" reaches
+    # only the installed app, never this worktree's build.
     return BundleSpec(
-        app_path=root / "local-bin" / f"{APP_NAME}.app",
+        app_path=root / "local-bin" / "app.noindex" / f"{APP_NAME}.app",
         swift_build_dir=swift_release,
         tools=(cargo_release / "lf",),
         info_plist=swift / "LoopflowMac" / "Info.plist",
@@ -444,7 +446,8 @@ def local(
         planned = [s for s in BUILD_STAGES if s not in skip_set] or ["(nothing)"]
         typer.echo(f"Would build in parallel: {', '.join(planned)}")
         if builds_app:
-            typer.echo(f"Would stage lf + {spec.app_path.name} (v{version}) into {LOCAL_BIN}")
+            typer.echo(f"Would stage lf into {LOCAL_BIN}")
+            typer.echo(f"Would stage {spec.app_path.name} (v{version}) into {spec.app_path.parent}")
             executable_names = ", ".join(path.name for path in spec.macos_binaries())
             typer.echo(f"  Contents/MacOS/: {executable_names}")
         else:
@@ -458,7 +461,9 @@ def local(
 
         _stage_binaries(LOCAL_BIN)
         if builds_app:
-            typer.echo(f"Staging lf + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")
+            # Earlier builds staged the app beside lf, where Spotlight indexed it.
+            shutil.rmtree(LOCAL_BIN / f"{APP_NAME}.app", ignore_errors=True)
+            typer.echo(f"Staging {APP_NAME}.app (v{version}) into {spec.app_path.parent}...")
             _install_loopflow(spec, version)
             typer.echo(f"Built {spec.app_path}")
         else:

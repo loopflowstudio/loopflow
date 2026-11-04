@@ -65,14 +65,14 @@ targets:
           export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
           release=""
           if [ "$CONFIGURATION" = "Release" ]; then release="--release"; fi
-          /usr/bin/python3 "$SRCROOT/../scripts/loopflow-dev.py" ffi $release
+          uv run --project "$SRCROOT/.." python "$SRCROOT/../scripts/loopflow-dev.py" ffi $release
         basedOnDependencyAnalysis: false
     postBuildScripts:
       - name: Bundle Loopflow control tools
         script: |
           set -eu
           export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-          /usr/bin/python3 "$SRCROOT/../scripts/loopflow-dev.py" bundle-control-tools \
+          uv run --project "$SRCROOT/.." python "$SRCROOT/../scripts/loopflow-dev.py" bundle-control-tools \
             --output "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
           uv run --project "$SRCROOT/.." python "$SRCROOT/../scripts/third_party.py" package \
             "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
@@ -105,7 +105,9 @@ targets:
           - -lproc
         INFOPLIST_FILE: LoopflowMac/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.mac
+        # Builds are development apps to Launch Services. Only release packaging
+        # (scripts/release-loopflow.py) stamps the installed app's com.loopflow.mac.
+        PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.mac.dev
         CODE_SIGN_ENTITLEMENTS: LoopflowMac/Loopflow.entitlements
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"

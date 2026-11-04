@@ -276,7 +276,7 @@ pub fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
     let repo = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await else {
+        let Some(store) = crate::store::open_existing_store().await? else {
             return Ok(None);
         };
         crate::ops::resolve_execution_binding(&std::sync::Arc::new(store), &repo)
@@ -684,7 +684,6 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
-    crate::transport::report(crate::program_status::State::Working, false, None);
     if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
@@ -710,7 +709,12 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             config.env = environment.clone();
             let context_file = crate::agent::write_system_prompt_file(&config, &built.log_name)?;
             config.session_attachment = capture.session_attachment();
-            launch_session(&config, agent_session.as_ref(), context_file.as_deref())
+            launch_session(
+                &config,
+                agent_session.as_ref(),
+                context_file.as_deref(),
+                Some(&capture),
+            )
         })();
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())
@@ -729,6 +733,9 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         return result.map(|_| None);
     }
 
+    // Native terminals own their turn status. A separate lf record would remain
+    // Working at their idle prompt until the provider process exits.
+    crate::transport::report(crate::program_status::State::Working, false, None);
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
         return Err(anyhow!(missing_agent_message(&built.harness)));

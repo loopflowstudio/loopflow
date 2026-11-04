@@ -518,6 +518,7 @@ fn prepare_work_binding(selector: &str, repo: &Path) -> anyhow::Result<loopflow:
     runtime.block_on(async {
         let store = loopflow::store::open_existing_store()
             .await
+            .map_err(|error| anyhow::anyhow!("cannot resolve {selector}: {error}"))?
             .ok_or_else(|| {
                 anyhow::anyhow!("cannot resolve {selector}: planning registry unavailable")
             })?;
@@ -927,14 +928,35 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             team_name.as_deref(),
         ),
         WaveCommand::Reteam { apply } => loopflow::lf::commands::ops::reteam(repo, *apply),
-        WaveCommand::Ensure { wave, json } => {
-            let result = tokio::runtime::Runtime::new()?.block_on(project::ensure(repo, wave))?;
+        WaveCommand::Add {
+            wave,
+            objective,
+            json,
+        } => {
+            let added = tokio::runtime::Runtime::new()?.block_on(
+                loopflow::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
+            )?;
             if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                println!("{}", serde_json::to_string_pretty(&added)?);
+            } else {
+                println!("{}", loopflow::ops::wave_lifecycle::render_added(&added));
+            }
+            Ok(())
+        }
+        WaveCommand::Remove {
+            wave,
+            preview,
+            delete_backlog,
+            json,
+        } => {
+            let removal =
+                loopflow::ops::wave_lifecycle::remove(repo, wave, *preview, *delete_backlog)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&removal)?);
             } else {
                 println!(
-                    "Wave {wave}: Project {} ({}) is active locally",
-                    result.name, result.id
+                    "{}",
+                    loopflow::ops::wave_lifecycle::render_removed(&removal)
                 );
             }
             Ok(())
@@ -956,7 +978,31 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
-        WaveCommand::Rename { .. } => loopflow::lf::commands::wave_rename::rename(repo, command),
+        WaveCommand::Rename {
+            wave,
+            new_name,
+            repo: target,
+            title,
+            json,
+        } => {
+            let renamed =
+                tokio::runtime::Runtime::new()?.block_on(loopflow::ops::wave_lifecycle::rename(
+                    repo,
+                    wave,
+                    new_name.as_deref(),
+                    target.as_deref(),
+                    title.as_deref(),
+                ))?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&renamed)?);
+            } else {
+                println!(
+                    "{}",
+                    loopflow::ops::wave_lifecycle::render_renamed(&renamed)
+                );
+            }
+            Ok(())
+        }
         WaveCommand::UpdatePlan { wave, plan } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -1003,10 +1049,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Shell { .. }
+        TaskCommand::Presence { .. }
+        | TaskCommand::Retire { .. }
+        | TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => {
-            unreachable!("location reads precede repository commands")
+            unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync {
@@ -1545,6 +1593,21 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
+    // A terminal relay is exec'd by the process that resolved its connection.
+    // While relaying it opens no store or command tree: socket in, terminal out.
+    let raw_args: Vec<String> = std::env::args().collect();
+    if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
+        journal::mark_effect_free_read();
+        journal::continue_after_exec()?;
+        ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        loopflow::transport::relay(&owner, moved)?;
+        // Only after relaying ends may the command reopen its store/runtime.
+        if let Some(session) = json_session {
+            loopflow::lf::commands::session::print_returned(&session)?;
+        }
+        return Ok(());
+    }
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.
     // A rejected destination must not create even a fallback Process on that Machine.
@@ -1559,7 +1622,6 @@ fn run() -> anyhow::Result<()> {
     // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
     // loop's codex app-server pair and left a stale .wave-endpoint).
-    let raw_args: Vec<String> = std::env::args().collect();
     if let Some((remote, command)) = loopflow::lf::navigation::machine_invocation(&raw_args)
         .map_err(|error| {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
@@ -1771,12 +1833,62 @@ fn run() -> anyhow::Result<()> {
     }
     match &cli.command {
         Some(Commands::Task {
-            cmd: TaskCommand::Shell { issue, checkout },
+            cmd: TaskCommand::Retire { issue },
         }) => {
+            journal::admit_process(&std::env::current_dir()?, &args);
+            return loopflow::ops::task::retirement::run(issue).map_err(Into::into);
+        }
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Presence {
+                    issue,
+                    occurrence,
+                    state,
+                    revision,
+                    native_settled,
+                },
+        }) => {
+            if state.is_some() {
+                journal::admit_process(&std::env::current_dir()?, &args);
+            }
+            println!(
+                "{}",
+                serde_json::to_string(&loopflow::ops::task::retirement::observe(
+                    issue,
+                    occurrence.as_deref(),
+                    *state,
+                    *revision,
+                    *native_settled
+                )?)?
+            );
+            return Ok(());
+        }
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Shell {
+                    issue,
+                    checkout,
+                    id,
+                    list,
+                    create,
+                    close,
+                    command,
+                },
+        }) => {
+            if *list {
+                return loopflow::ops::task::workspace::list_shells(issue, checkout);
+            }
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::task_shell(issue, checkout);
+            return loopflow::ops::task::task_shell(
+                issue,
+                checkout,
+                id.as_deref().expect("Clap requires shell identity"),
+                *create,
+                *close,
+                command,
+            );
         }
         Some(Commands::Task {
             cmd:
@@ -2170,7 +2282,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 id,
                 connection,
                 fork,
-                all: false,
             },
     }) = &cli.command
     {
@@ -2716,8 +2827,8 @@ fn execute_command(
                 },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune, *repo),
         Some(Commands::Wave {
-            cmd: WaveCommand::List { json, all, current },
-        }) => loopflow::lf::commands::waves::ls(*json, *all, *current),
+            cmd: WaveCommand::List { json, all },
+        }) => loopflow::lf::commands::waves::ls(*json, *all),
         Some(Commands::Wave {
             cmd: WaveCommand::Status {
                 wave, watch: true, ..
@@ -2914,18 +3025,32 @@ mod tests {
     use loopflow::lf::{Cli, Commands, OpsCommand, PrCommand, TaskCommand};
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
+    /// `--as` never degrades to raw attribution: an absent registry is named
+    /// as such, and a store lf cannot open names its cause, never "empty".
     #[test]
     fn bound_work_selector_requires_a_readable_registry() {
         let _lock = PROCESS_STATE_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
-        std::fs::create_dir(directory.path().join("loopflow.db")).unwrap();
         let _home = EnvGuard::set("LF_HOME", directory.path().display().to_string());
 
-        let error = super::prepare_work_binding("task:LOO-265", directory.path())
-            .expect_err("--as must not degrade to raw attribution");
-        assert!(error.to_string().contains("planning registry unavailable"));
+        let absent = super::prepare_work_binding("task:LOO-265", directory.path())
+            .expect_err("no registry means no binding")
+            .to_string();
+        assert!(absent.contains("planning registry unavailable"), "{absent}");
+
+        let path = directory.path().join("loopflow.db");
+        std::fs::create_dir(&path).unwrap();
+        let unopenable = super::prepare_work_binding("task:LOO-265", directory.path())
+            .expect_err("an unopenable store must not read as empty")
+            .to_string();
+        assert!(
+            unopenable.contains("cannot resolve task:LOO-265")
+                && unopenable.contains(&path.display().to_string())
+                && !unopenable.contains("planning registry unavailable"),
+            "{unopenable}"
+        );
     }
 
     static PROCESS_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

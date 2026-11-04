@@ -10,8 +10,10 @@ use crate::agent::{
     build_session_command, session_environment, AgentConfig, NativeConnection, ProviderInvocation,
     SessionCommand,
 };
+use crate::harness::native_exit::{attachment_lost, departure};
 use crate::id::AgentSessionId;
 use crate::provider_auth::Provider;
+use crate::session_record::CaptureHandle;
 use crate::store::sqlite::SqliteStore;
 
 pub fn find_repo_root() -> Result<PathBuf> {
@@ -50,6 +52,7 @@ pub(crate) fn launch_session(
     config: &AgentConfig,
     agent_session: Option<&AgentSessionId>,
     context_file: Option<&Path>,
+    capture: Option<&CaptureHandle>,
 ) -> Result<()> {
     let command = build_session_command(
         config,
@@ -65,6 +68,7 @@ pub(crate) fn launch_session(
         agent_session,
         config.provider_account_id.as_ref(),
         None,
+        capture,
     )
 }
 
@@ -125,6 +129,7 @@ pub(crate) fn resume_session_with_env(
         provider_session.map(|provider| &provider.agent_session),
         config.provider_account_id.as_ref(),
         launch_lock,
+        None,
     )
 }
 
@@ -162,6 +167,7 @@ fn spawn_session_command_with_env(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
+    capture: Option<&CaptureHandle>,
 ) -> Result<()> {
     let _planning_sync =
         crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
@@ -171,35 +177,12 @@ fn spawn_session_command_with_env(
         agent_session,
         exact_account_id,
         launch_lock,
+        capture,
     )?;
     if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
-        return Ok(());
     }
-    if outcome.status.success() || outcome.interrupted {
-        Ok(())
-    } else if agent_session.is_some() {
-        Err(anyhow!(
-            "{} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
-            command.program,
-            outcome.status,
-        ))
-    } else {
-        Err(anyhow!(
-            "session launcher exited with status {}",
-            outcome.status
-        ))
-    }
-}
-
-/// Where this launch's conversation went, when a mover ended its attachment.
-fn moved_away(
-    (store, session, attachment): &crate::harness::agent_process::AttachmentOwner,
-) -> Result<Option<String>> {
-    store
-        .attachment_departure(session, attachment)?
-        .map(|departure| departure_notice(store, session, departure))
-        .transpose()
+    outcome.result(&command.program, agent_session.is_some())
 }
 
 pub(crate) fn departure_notice(
@@ -243,11 +226,37 @@ pub(crate) fn departure_notice(
 }
 
 #[derive(Debug)]
-struct SessionCommandOutcome {
-    status: std::process::ExitStatus,
-    interrupted: bool,
+pub(crate) struct SessionCommandOutcome {
+    pub status: std::process::ExitStatus,
+    pub interrupted: bool,
     /// Where the conversation went when a mover took it from this launch.
-    moved: Option<String>,
+    pub moved: Option<String>,
+}
+
+impl SessionCommandOutcome {
+    pub(crate) fn capture_outcome(&self) -> &'static str {
+        if self.status.success() || self.interrupted {
+            "completed"
+        } else {
+            "failed"
+        }
+    }
+
+    pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
+        if self.moved.is_some() || self.status.success() || self.interrupted {
+            Ok(())
+        } else if resuming {
+            Err(anyhow!(
+                "{program} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
+                self.status,
+            ))
+        } else {
+            Err(anyhow!(
+                "session launcher exited with status {}",
+                self.status
+            ))
+        }
+    }
 }
 
 fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<()> {
@@ -326,6 +335,7 @@ fn session_command_status_with_env(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
+    caller_capture: Option<&CaptureHandle>,
 ) -> Result<SessionCommandOutcome> {
     let mut progress = crate::startup::Startup::new(format!("Preparing {}", command.program));
     let argv = std::env::args().collect::<Vec<_>>();
@@ -396,16 +406,12 @@ fn session_command_status_with_env(
             agent_session,
             exact_account_id,
             launch_lock,
+            caller_capture.or(capture.as_ref()),
             &mut progress,
         );
-        let outcome = if result
+        let outcome = result
             .as_ref()
-            .is_ok_and(|outcome| outcome.interrupted || outcome.status.success())
-        {
-            "completed"
-        } else {
-            "failed"
-        };
+            .map_or("failed", SessionCommandOutcome::capture_outcome);
         if let Some((store, session, attachment)) = admitted {
             match crate::session_record::finish_session_attachment(
                 &store,
@@ -430,9 +436,13 @@ fn run_native_session(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
+    capture: Option<&CaptureHandle>,
     progress: &mut crate::startup::Startup,
 ) -> Result<SessionCommandOutcome> {
     let started = std::time::Instant::now();
+    // A connect that exec'd into this launch keeps its Session launch lock held
+    // until the provider is recorded.
+    let launch_lock = launch_lock.or_else(crate::ops::human_session::inherited_launch_lock);
     let attachment = native_provider_attachment(command, environment)?;
     let capture_dir = environment
         .get(crate::session_record::CAPTURE_KEY_ENV)
@@ -486,6 +496,9 @@ fn run_native_session(
         .transpose()
         .map_err(|error| anyhow!("failed to select provider account: {error}"))?
         .flatten();
+    let account = account_route
+        .as_ref()
+        .map(|route| route.account_id().clone());
 
     progress.stage(format!("Opening {} terminal", command.program));
     progress.finish();
@@ -530,13 +543,7 @@ fn run_native_session(
         }
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
-        crate::session_record::write_provider_session(
-            capture_dir,
-            agent_session,
-            account_route
-                .as_ref()
-                .map(|route| route.account_id().clone()),
-        )?;
+        crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
     }
     // Only an explicit remote connection is a client of a surviving AgentProcess.
     let owned = command.remote.is_none().then_some(&attachment);
@@ -546,6 +553,44 @@ fn run_native_session(
     );
     let output = crate::terminal_output::TerminalOutput::enter()?;
     output.configure_child(&mut process)?;
+    record_interactive_opened(environment)?;
+    if let Some(owner) = owned.filter(|_| crate::transport::current().is_some()) {
+        // Hand the wait to the execution owner and become the provider: no
+        // launcher sits beside the agent holding the heap that built it.
+        if let Some(capture) = capture {
+            capture.observe_provider(agent_session.cloned(), account.clone());
+        }
+        let exit = crate::harness::native_exit::NativeExit {
+            session: owner.1.clone(),
+            attachment: owner.2.clone(),
+            provider: command.program.clone(),
+            resuming: agent_session.is_some(),
+            cwd: command.cwd.clone(),
+            capture: capture.map(CaptureHandle::hand_off),
+            capture_key: environment
+                .get(crate::session_record::CAPTURE_KEY_ENV)
+                .cloned(),
+            account,
+            diagnostics: output.diagnostics(),
+        };
+        match crate::transport::hand_exit_record(&exit) {
+            Ok(true) => {
+                let _native = native_return(&attachment);
+                drop(activation);
+                let error = crate::harness::agent_process::exec_native(process, owner, launch_lock);
+                crate::transport::drop_exit_record();
+                return Err(if error.kind() == std::io::ErrorKind::NotFound {
+                    anyhow!(missing_agent_message(&command.program))
+                } else {
+                    error.into()
+                });
+            }
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(%error, "execution owner did not take the provider wait; waiting here");
+            }
+        }
+    }
     let spawned = match owned {
         Some(owner) => crate::harness::agent_process::spawn_native(process, owner),
         None => {
@@ -567,13 +612,6 @@ fn run_native_session(
     })?;
 
     drop(activation);
-    let setup = record_interactive_opened(environment);
-    if let Err(error) = setup {
-        if let Err(cleanup) = crate::harness::agent_process::stop_native(&mut child, owned) {
-            tracing::warn!(%cleanup, "native setup cleanup remains unresolved");
-        }
-        return Err(error);
-    }
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
@@ -596,20 +634,9 @@ fn run_native_session(
             return Err(error.into());
         }
     };
-    let interrupted = if let Some((store, session, attachment)) = owned {
-        match store.with_session_attachment(session, attachment, || {
-            store.record_agent_process_exit(session, attachment, true)
-        }) {
-            Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-            Err(error) => return Err(error.into()),
-        }
-        store
-            .process(&attachment.agent_process_id)?
-            .is_some_and(|process| {
-                process.completed_at.is_some() && process.outcome.as_deref() == Some("interrupted")
-            })
-    } else {
-        false
+    let interrupted = match owned {
+        Some(owner) => crate::harness::native_exit::record_exit(owner)?,
+        None => false,
     };
     // A mover ended this attachment; the conversation's home is now its business.
     let lost = attachment_lost(&attachment).unwrap_or_else(|error| {
@@ -625,26 +652,12 @@ fn run_native_session(
             }
         }
     }
-    let moved = if lost {
-        moved_away(&attachment).unwrap_or_else(|error| {
-            tracing::warn!(%error, "cannot read where this conversation moved");
-            None
-        })
-    } else {
-        None
-    };
+    let moved = lost.then(|| departure(&attachment)).flatten();
     Ok(SessionCommandOutcome {
         status,
         interrupted: interrupted || lost,
         moved,
     })
-}
-
-/// Whether a mover ended this launch's attachment.
-fn attachment_lost(
-    (store, session, expected): &crate::harness::agent_process::AttachmentOwner,
-) -> crate::store::StoreResult<bool> {
-    Ok(store.session_attachment(session)?.as_ref() != Some(expected))
 }
 
 /// A relay client outlives the provider it connects to: Codex keeps
@@ -724,6 +737,7 @@ pub(crate) fn run_native_agent(
         launch.resume_token.as_ref(),
         launch.provider_account_id.as_ref(),
         None,
+        None,
     )?;
     let agent_session =
         launch
@@ -798,9 +812,16 @@ fn run_opencode_native(
                 // The native renderer owns output. Rust still records history and
                 // attention, and drains errors without writing over its screen.
                 tokio::pin!(closed_rx);
+                let mut updates = crate::harness::task_updates::TaskUpdates::default();
+                let mut clock = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     tokio::select! {
                         _ = &mut closed_rx => break,
+                        _ = clock.tick() => {
+                            if let Err(error) = harness.report_task_update(&mut updates).await {
+                                tracing::warn!(%error, "native Task update delivery unavailable");
+                            }
+                        }
                         event = rx.recv() => {
                             if let Some(crate::chat::types::ConversationEvent::Error { message, .. }) = event {
                                 if let Some(path) = observer_diagnostics {
@@ -945,6 +966,7 @@ fn run_codex_native(
                     thread.as_ref(),
                     account.as_ref(),
                     launch_lock,
+                    None,
                     progress,
                 )
             }
@@ -1250,9 +1272,15 @@ mod tests {
             cwd: temp.path().to_path_buf(),
         };
 
-        let error =
-            spawn_session_command_with_env(&command, &capture.environment(), None, None, None)
-                .expect_err("unexplained SIGTERM must remain an error");
+        let error = spawn_session_command_with_env(
+            &command,
+            &capture.environment(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("unexplained SIGTERM must remain an error");
 
         assert!(error.to_string().contains("signal: 15"));
     }
@@ -1454,7 +1482,8 @@ mod tests {
             attachment: None,
             remote: None,
         };
-        let result = spawn_session_command_with_env(&command, &BTreeMap::new(), None, None, None);
+        let result =
+            spawn_session_command_with_env(&command, &BTreeMap::new(), None, None, None, None);
         stop.join().unwrap().unwrap();
         result.unwrap();
         assert!(!home.join("provider-client-stops").exists());
@@ -1475,23 +1504,33 @@ mod tests {
             attachment: None,
             remote: None,
         };
-        assert!(
-            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
-                .unwrap()
-                .status
-                .success()
-        );
+        assert!(session_command_status_with_env(
+            &command,
+            &BTreeMap::new(),
+            None,
+            None,
+            None,
+            None
+        )
+        .unwrap()
+        .status
+        .success());
         let pid: u32 = std::fs::read_to_string(home.join("pid"))
             .unwrap()
             .parse()
             .unwrap();
         command.program = home.join("absent").display().to_string();
-        assert!(
-            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
-                .unwrap_err()
-                .to_string()
-                .contains("not installed")
-        );
+        assert!(session_command_status_with_env(
+            &command,
+            &BTreeMap::new(),
+            None,
+            None,
+            None,
+            None
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("not installed"));
         let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
         let rows = store.processes_since(0).unwrap();
         let agents = rows
@@ -1574,20 +1613,22 @@ mod tests {
                     upstream: endpoint.clone(),
                 }),
             };
-            let result = session_command_status_with_env(&command, &environment, None, None, None);
+            let result =
+                session_command_status_with_env(&command, &environment, None, None, None, None);
             let alive = provider.try_wait()?.is_none();
             let unchanged = store.process(&attached.agent_process_id)? == Some(before);
             command.remote = None;
-            let local = session_command_status_with_env(&command, &environment, None, None, None);
+            let local =
+                session_command_status_with_env(&command, &environment, None, None, None, None);
             command.remote = Some(NativeConnection {
                 relay: home.join("relay.sock"),
                 upstream: home.join("other.sock"),
             });
             let wrong_endpoint =
-                session_command_status_with_env(&command, &environment, None, None, None);
+                session_command_status_with_env(&command, &environment, None, None, None, None);
             command.attachment = None;
             let unadmitted =
-                session_command_status_with_env(&command, &BTreeMap::new(), None, None, None);
+                session_command_status_with_env(&command, &BTreeMap::new(), None, None, None, None);
             crate::harness::agent_process::stop_native(
                 &mut provider,
                 Some(&(store, session.id.to_string(), attached)),
@@ -1656,21 +1697,24 @@ mod tests {
                 args: vec!["60".into()],
                 cwd: home.into(),
             };
-            let error =
-                session_command_status_with_env(&command, &capture.environment(), None, None, None)
-                    .unwrap_err();
+            let error = session_command_status_with_env(
+                &command,
+                &capture.environment(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
             assert!(
                 error.to_string().contains("conflicting interactive_opened"),
                 "{error:#}"
             );
-            let ended = store.process(&attachment.agent_process_id)?.unwrap();
-            assert!(ended.completed_at.is_some());
-            assert_eq!(
-                crate::journal::process_identity_evidence(
-                    ended.pid.unwrap(),
-                    ended.os_started_at.unwrap()
-                ),
-                crate::journal::ProcessIdentityEvidence::Dead,
+            // The conflict is found before any provider runs.
+            let agent = store.process(&attachment.agent_process_id)?;
+            assert!(
+                agent.as_ref().and_then(|process| process.pid).is_none(),
+                "a provider was launched despite the conflict: {agent:?}"
             );
             Ok(())
         })
@@ -1741,6 +1785,7 @@ mod tests {
                 env: BTreeMap::new(),
                 ..Default::default()
             },
+            None,
             None,
             None,
         )
@@ -1828,6 +1873,7 @@ mod tests {
                 env: BTreeMap::new(),
                 ..Default::default()
             },
+            None,
             None,
             None,
         )

@@ -32,6 +32,19 @@ def test_swift_change_runs_every_swift_job(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        "scripts/loopflow-dev.py",
+        "rust/loopflow/build.rs",
+        "rust/loopflow/ghostty-vt.json",
+        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+    ],
+)
+def test_native_build_changes_run_both_desktop_builds(path: str) -> None:
+    assert _jobs(path) == {SWIFT_TEST, LOOPFLOW_UI_TEST}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
         "tests/fixtures/dto/work_first_entry.json",
         "python/tests/test_desktop_performance.py",
         "scripts/swift_test_limit.py",

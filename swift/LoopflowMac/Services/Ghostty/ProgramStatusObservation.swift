@@ -31,19 +31,28 @@ final class ProgramStatusSurface {
     private var writer: ProgramStatusWriter?
     private var publication: Task<Void, Never>?
     private var active = true
+    private var hasAssociatedSession = false
 
     func associate(sessionId: String?, terminalId: String?, provider: SessionProviderReading?) {
         guard self.sessionId != sessionId || self.terminalId != terminalId || self.provider != provider else { return }
         let firstSessionReading = self.sessionId == sessionId && self.terminalId == terminalId && self.provider == nil
+        let firstAssociation = !hasAssociatedSession && sessionId != nil
         writer?.stop()
         writer = nil
         association = UUID()
         self.sessionId = sessionId
         self.terminalId = terminalId
         self.provider = provider
-        if !firstSessionReading { sessionReducer = ProgramStatusReducer() }
+        if firstAssociation {
+            // A restored screen can report before Desktop's Session watch names
+            // its owner. Preserve that first reading; later providers start empty.
+            sessionReducer = reducer
+            hasAssociatedSession = true
+        } else if !firstSessionReading {
+            sessionReducer = ProgramStatusReducer()
+        }
         observationError = nil
-        if firstSessionReading { publish() }
+        if firstSessionReading || firstAssociation { publish() }
     }
 
     /// The callback must capture this surface's incarnation before actor dispatch.

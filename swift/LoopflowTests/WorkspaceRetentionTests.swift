@@ -9,6 +9,94 @@ import ViewInspector
 @Suite("Application workspace retention")
 @MainActor
 struct WorkspaceRetentionTests {
+    @Test("Selection retains, departure releases, and Close preserves history with a closed observation")
+    func hostRetentionFollowsTheNativeWorkspace() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let first = WorkWorkspaceKey(repository: "repo", kind: .task, id: "first")
+        let second = WorkWorkspaceKey(repository: "repo", kind: .task, id: "second")
+        let a = registry.open(first, title: "First", location: nil)
+        a.multiplexer.load(sessionId: "history")
+        #expect(a.hostUse == "retained")
+        #expect(!a.nativeSettled)
+        let b = registry.open(second, title: "Second", location: nil)
+        #expect(a.hostUse == "away")
+        #expect(a.nativeSettled)
+        #expect(b.hostUse == "retained")
+        registry.closePresentation()
+        #expect(a.hostUse == "closed")
+        #expect(b.hostUse == "closed")
+        #expect(a.multiplexer.sessionPane?.sessionId == "history")
+        #expect(registry.retained(first) === a)
+        _ = registry.open(first, title: "First", location: nil)
+        #expect(a.hostUse == "retained")
+        #expect(!a.nativeSettled)
+    }
+
+    @Test("Quit acknowledges settled presentation as away and preserves an existing deadline")
+    func quitReleasesWithoutClose() async throws {
+        let application = RepositoryWorkspaces(localMachineId: "local")
+        let registry = application.registry(for: "repo")
+        let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: UUID().uuidString)
+        let workspace = registry.open(key, title: "Task", location: WorkspaceIdentity(machineId: "local", worktree: "/checkout"))
+        workspace.multiplexer.load(sessionId: "history")
+        workspace.startPersistence(query: RegistryQuery { args, _ in
+            guard args.contains("presence") else { return "null" }
+            func value(_ flag: String) -> String? {
+                args.firstIndex(of: flag).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+            }
+            let deadline = value("--state") == "closed" ? 0 : 900
+            let reason = value("--native-settled") == "true" ? "null" : "\"Native resources remain\""
+            return """
+                {"task_id":"task","completion":"completed","checkout":"/checkout","branch":"task",
+                 "due_at":\(deadline),"phase":"waiting","reason":\(reason)}
+                """
+        }, repoPath: "/repo")
+        application.prepareForQuit()
+        // AppKit may close windows during termination. That is still departure.
+        registry.closePresentation()
+        workspace.retain(true)
+        await application.releaseForQuit()
+        #expect(workspace.hostUse == "away")
+        #expect(workspace.nativeSettled)
+        #expect(workspace.retirement?.dueAt == 900)
+        #expect(workspace.retirement?.reason == nil)
+        #expect(workspace.retentionError == nil)
+        #expect(workspace.multiplexer.sessionPane?.sessionId == "history")
+    }
+
+    @Test("Failed or timed-out quit reporting never invents acknowledgement", arguments: [false, true])
+    func quitReleaseFailure(stalled: Bool) async {
+        let application = RepositoryWorkspaces(localMachineId: "local")
+        let registry = application.registry(for: "repo")
+        let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: UUID().uuidString)
+        let workspace = registry.open(key, title: "Task", location: WorkspaceIdentity(machineId: "local", worktree: "/checkout"))
+        workspace.startPersistence(query: RegistryQuery { args, _ in
+            guard args.contains("presence") else { return "null" }
+            if stalled { try await Task.sleep(for: .seconds(60)) }
+            throw RegistryQueryError("Destination unavailable; release unknown")
+        }, repoPath: "/repo")
+        application.prepareForQuit()
+        let started = ContinuousClock.now
+        await application.releaseForQuit(timeout: .milliseconds(20))
+        #expect(started.duration(to: .now) < .seconds(2))
+        #expect(workspace.hostUse == "away")
+        #expect(workspace.retirement == nil)
+        #expect(workspace.retentionError != nil)
+    }
+
+    @Test("Quitting preserves a prior explicit Close")
+    func quitKeepsExplicitClose() async {
+        let application = RepositoryWorkspaces(localMachineId: "local")
+        let registry = application.registry(for: "repo")
+        let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: "closed")
+        let workspace = registry.open(key, title: "Task", location: nil)
+        workspace.closeWorkspace()
+        application.prepareForQuit()
+        await application.releaseForQuit()
+        #expect(workspace.hostUse == "closed")
+        #expect(workspace.nativeSettled)
+    }
+
     @Test("Known repository entry presents its scene before admitting a new link",
           arguments: ["success", "failure", "cancellation"], [false, true])
     func repositoryEntryDuringResolution(outcome: String, restored: Bool) async throws {

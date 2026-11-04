@@ -255,7 +255,8 @@ impl TerminalTitle {
             "claude" => {
                 // The provider keeps its name; where the Task stands changes.
                 command.args(["--name", &title.provider_name]);
-                command.env("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1");
+                // Claude's title-disable flag also suppresses OSC 7501 reports.
+                // Keep its native activity reporting enabled.
             }
             "codex" => {
                 command.args(["-c", "tui.terminal_title=[]"]);

@@ -96,8 +96,9 @@ impl OpenCodeDecoder {
             if self.baseline.contains(id) {
                 continue;
             }
-            if message["type"] == "user" {
-                if self.interactive && !self.requests.contains_key(id) {
+            if message["type"] == "user" || message["type"] == "synthetic" {
+                if self.interactive && message["type"] == "user" && !self.requests.contains_key(id)
+                {
                     self.requests.insert(
                         id.into(),
                         Request {
@@ -573,6 +574,33 @@ mod tests {
         assert!(!events.iter().any(
             |e| matches!(e, ConversationEvent::TurnCompleted{turn_id,..} if turn_id == &interrupted)
         ));
+    }
+
+    #[test]
+    fn task_update_synthetic_input_settles_without_adopting_unrelated_notices() {
+        let mut decoder = OpenCodeDecoder::new("native".into(), None);
+        decoder.seed(&[], true);
+        let request = decoder.request(false);
+        let messages = vec![
+            json!({"type":"synthetic","id":request,"text":"Worker completed"}),
+            json!({"type":"synthetic","id":"other-notice","text":"Background context"}),
+            json!({"type":"assistant","id":"answer","time":{"completed":2},"content":[{"type":"text","text":"The worker finished."}]}),
+            json!({"type":"idle","id":"idle","outcome":"succeeded","time":{"created":3}}),
+        ];
+        let snapshot = decoder.messages(&messages);
+        assert_eq!(snapshot.messages[0].0, request);
+        assert!(matches!(&display(snapshot.decoded)[..],
+            [ConversationEvent::TurnStarted{turn_id}, ConversationEvent::TextDelta{..},
+             ConversationEvent::TurnCompleted{turn_id:done,status:Lifecycle::Completed}]
+             if turn_id == &request && done == &request));
+        assert!(decoder
+            .messages(&messages)
+            .decoded
+            .iter()
+            .all(|event| !matches!(
+                event.fact(),
+                Some(ProviderFact::TurnAnswered { .. } | ProviderFact::TurnCompleted { .. })
+            )));
     }
 
     #[test]

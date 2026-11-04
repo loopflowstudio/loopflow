@@ -2,6 +2,8 @@ pub mod agent_process;
 pub mod claude;
 mod claude_decode;
 pub(crate) mod claude_trust;
+#[cfg(unix)]
+pub(crate) mod claude_updates;
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
@@ -16,10 +18,12 @@ mod dispatch_tests;
 mod fact;
 mod fact_writer;
 mod lf_tag;
+pub(crate) mod native_exit;
 pub mod opencode;
 mod opencode_decode;
 pub mod pi;
 mod pi_decode;
+pub(crate) mod task_updates;
 
 use crate::id::AgentSessionId;
 /// Name a codex rate-limit window by duration — shared with the subscription

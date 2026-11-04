@@ -1098,6 +1098,9 @@ impl TaskCommand {
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
+            Self::Presence { state, .. } => state.is_some(),
+            Self::Shell { list, .. } => !list,
+            Self::Retire { .. } => true,
             Self::Comment { message, .. } => message.is_some(),
             Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
@@ -1108,7 +1111,6 @@ impl TaskCommand {
             | Self::Create { .. }
             | Self::Claim { .. }
             | Self::Unassign { .. }
-            | Self::Shell { .. }
             | Self::Save { .. }
             | Self::Abandon { .. }
             | Self::Delete { .. }
@@ -1125,8 +1127,9 @@ impl WaveCommand {
             Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
             Self::Status { sync, .. } => *sync,
             Self::NewChapter { dry_run, .. } => !dry_run,
+            Self::Remove { preview, .. } => !preview,
             Self::EditPlan { .. }
-            | Self::Ensure { .. }
+            | Self::Add { .. }
             | Self::BindProject { .. }
             | Self::Rename { .. }
             | Self::UpdatePlan { .. }
@@ -1655,10 +1658,6 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
-        /// Resume every conversation a restart or crash interrupted; never one
-        /// someone left. Terminals attach when they open them.
-        #[arg(long, conflicts_with_all = ["id", "fork", "message", "prepare"])]
-        all: bool,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness
@@ -1778,9 +1777,27 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Ensure the configured Project is active, or create one with a durable identity
-    Ensure {
+    /// Add a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
+    /// and start its first chapter. Adding an existing Wave changes nothing.
+    Add {
         wave: String,
+        /// Objective text for the new Wave's GOAL.md
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
+    /// repository; chapters, completed Tasks and Sessions stay readable in history.
+    #[command(after_help = "Run again to finish an interrupted removal.")]
+    Remove {
+        wave: String,
+        /// Show what removal does without changing anything
+        #[arg(long)]
+        preview: bool,
+        /// Delete unstarted Tasks instead of moving them; started Tasks always move
+        #[arg(long)]
+        delete_backlog: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1791,7 +1808,7 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List authored Waves and retained planning identities without starting work.
+    /// List this repository's Waves; removed Waves stay readable by `lf wave show`.
     List {
         /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
         #[arg(long)]
@@ -1800,9 +1817,6 @@ pub enum WaveCommand {
         /// current repository (worktrees collapse to their main checkout).
         #[arg(long)]
         all: bool,
-        /// Exclude abandoned and retired registrations from current navigation.
-        #[arg(long)]
-        current: bool,
     },
     /// Show one Wave's current plan, Task details, and execution evidence.
     Status {
@@ -1818,13 +1832,15 @@ pub enum WaveCommand {
         #[arg(long, requires = "json")]
         watch: bool,
     },
-    /// Rename or relocate an authored Wave and its provider mapping
+    /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
+    /// chapters and Sessions keep their identity
     Rename {
         wave: String,
+        /// The new name; omit to keep it while changing --repo or --title
+        new_name: Option<String>,
+        /// Move the Wave to another repository
         #[arg(long)]
         repo: Option<PathBuf>,
-        #[arg(long)]
-        name: Option<String>,
         /// Change the linked Initiative display title
         #[arg(long)]
         title: Option<String>,
@@ -1839,7 +1855,7 @@ pub enum WaveCommand {
         #[arg(long)]
         plan: std::path::PathBuf,
     },
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
+    /// Connect a Wave to its Initiative and the repository's Team (Task prefix); a new name is added first
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -2053,7 +2069,39 @@ until `lf ship`."
         issue: String,
         #[arg(long)]
         checkout: std::path::PathBuf,
+        /// Stable Desktop shell identity; attachment never creates execution
+        #[arg(long, required_unless_present = "list")]
+        id: Option<String>,
+        /// List retained shell identities, including ended shells
+        #[arg(long, conflicts_with_all = ["id", "create", "close", "command"])]
+        list: bool,
+        /// Create once, then attach; retrying the same identity never replays it
+        #[arg(long, conflicts_with = "close")]
+        create: bool,
+        /// End this shell and its ordinary jobs
+        #[arg(long)]
+        close: bool,
+        /// Initial command, followed by the destination login shell
+        #[arg(last = true)]
+        command: Vec<String>,
     },
+    /// Report native-host retention or read pending workspace cleanup
+    Presence {
+        issue: String,
+        #[arg(long, requires_all = ["state", "revision", "native_settled"])]
+        occurrence: Option<String>,
+        /// Increasing observation revision, persisted by the host per occurrence
+        #[arg(long, requires = "occurrence")]
+        revision: Option<i64>,
+        #[arg(long, requires = "occurrence")]
+        state: Option<crate::store::sqlite::HostUse>,
+        /// No native resources remain to settle before checkout deletion (true/false)
+        #[arg(long, requires = "occurrence")]
+        native_settled: Option<bool>,
+    },
+    /// Run the Task's recorded workspace retirement
+    #[command(hide = true)]
+    Retire { issue: String },
     /// Stream invalidations from an existing Task checkout (JSON lines)
     WatchFiles {
         issue: String,
@@ -2214,7 +2262,9 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Shell { issue, .. }
+            Self::Presence { issue, .. }
+            | Self::Retire { issue }
+            | Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2242,7 +2292,9 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Shell { issue, .. }
+            Self::Presence { issue, .. }
+            | Self::Retire { issue }
+            | Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -3190,8 +3242,7 @@ mod tests {
             Some(Commands::Wave {
                 cmd: WaveCommand::List {
                     json: true,
-                    all: false,
-                    current: false
+                    all: false
                 }
             })
         ));
@@ -3852,6 +3903,7 @@ mod tests {
             vec!["lf", "session", "resume", "run_123", "--takeover"],
             vec!["lf", "session", "resume", "run_123", "--try"],
             vec!["lf", "session", "resume", "--fresh"],
+            vec!["lf", "session", "resume", "--all"],
         ] {
             assert!(Cli::try_parse_from(removed.clone()).is_err(), "{removed:?}");
         }

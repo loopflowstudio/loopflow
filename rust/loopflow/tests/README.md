@@ -35,6 +35,10 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 For migration changes, run `uv run python scripts/check_migrations.py` before
 the Rust suites. Schema construction can pass even when a released migration
 was edited; this check also verifies immutable history against main and tags.
+Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
+when adding a table: give displayed rows revision triggers and classify operation-only
+receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
+its shared repository publishes authored files that lifecycle operations may already commit.
 
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
@@ -46,6 +50,35 @@ Run this check when changing transport ownership or process journaling: every
 added CLI process pays connection and schema setup costs, including at exit.
 Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
 to preserve completion and interruption receipts after database contention.
+Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
+viewer's OS exit and its original command's recorded result must agree, including
+failed placement, failed shipping and a Graph held at landing.
+
+`session_activity` fixtures that stand for a provider's own facts (open tools,
+pending input, yielded) carry the AgentProcess's `attachment_token`; a row
+without one is a terminal's status observation, which an unviewed owner does
+not read as a turn (`transport_tests::detached_sessions_end_after_their_limit`).
+`transport_tests::silent_native_turns_survive_until_settlement` runs native
+prompt/stop callbacks from the generated hook settings, preserves silent work
+past the detached grace and executable removal, then proves ending after stop.
+`native_background_watches_survive_until_settlement` covers a yielded reply with
+background work, then scheduled wakeups, and ending only after both settle.
+
+`cargo test -p loopflow --test transport_tests ssh_shells::` starts a disposable
+loopback sshd with generated keys, pinned known-hosts and two isolated Machine
+stores. It requires OpenSSH client/server binaries (`/usr/bin/ssh`,
+`/usr/sbin/sshd`, `ssh-keygen`; Ubuntu also needs `/run/sshd`). CI installs the
+server package. On macOS, run that command directly with `-- --ignored`:
+Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
+two tests are explicitly ignored in its default suite. Linux runs them normally
+inside network isolation. No system SSH configuration, keys or installed lf are used.
+Twenty cycles exercise the public Machine route, abrupt transport loss,
+reattachment to the same shell, Close and process/PTY/socket settlement;
+a separate case covers failed authentication, stale checkout and shell exit.
+These are real SSH protocol checks on one Machine, not a two-Machine or installed
+Desktop demonstration. `ops::task::retirement::tests` covers native-host
+acknowledgement, cancellation, unconfirmed job cleanup and retry after partial
+Git deletion with disposable worktrees and a bare remote.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
@@ -317,12 +350,14 @@ broken pipes that interrupt Git after the remote ref moves; background children
 must use stdio that survives their parent's exit.
 
 Builtin skill Markdown is compiled into Rust. After editing it, run the builtin
-contract tests alongside the relevant behavior tests; PR renderer tests alone do
-not cover the prompts that generate their input. Update obsolete assertions to
+and prompt contract tests alongside the relevant behavior tests; prompt tests also
+cover composed Session instructions. PR renderer tests alone do not cover the
+prompts that generate their input. Update obsolete assertions to
 match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
 cargo test -p loopflow --lib builtins::tests
+cargo test -p loopflow --lib prompt::tests
 ```
 
 When changing the builtin catalog or Graph composition, also exercise discovery.

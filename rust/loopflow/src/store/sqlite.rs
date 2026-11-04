@@ -31,6 +31,7 @@ mod linear_migration_tests;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
+mod native_input;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;
@@ -58,10 +59,15 @@ mod steers;
 mod task_comments;
 mod task_content;
 mod task_details;
+mod task_retirement;
+mod task_shells;
+pub use task_retirement::{HostUse, TaskRetirement};
+pub use task_shells::TaskShell;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
 pub(crate) mod wave_definitions;
+mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
 pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
@@ -2002,48 +2008,16 @@ impl SqliteStore {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if collision.as_deref()
-                != update
-                    .retire_collision
-                    .as_ref()
-                    .map(crate::id::WaveId::as_str)
-            {
+            if let Some(collision) = collision {
                 return Err(StoreError::InvalidData(format!(
-                    "target {}/{} collision changed while relocation was staged",
+                    "Wave {}/{} already exists as {collision}",
                     update.target.repo(),
                     update.target.slug()
                 )));
             }
-            if let Some(collision) = &update.retire_collision {
-                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
-                if !blockers.is_empty() {
-                    return Err(StoreError::InvalidData(format!(
-                        "cannot retire destination Wave {collision}: {}",
-                        blockers.join(", ")
-                    )));
-                }
-            }
         }
 
         for update in updates {
-            if let Some(collision) = &update.retire_collision {
-                let retired_at = now_unix();
-                tx.execute(
-                    "UPDATE waves
-                     SET retired_at = ?2,
-                         superseded_by_wave_id = ?3,
-                         retirement_reason = ?4,
-                         work_state = 'abandoned',
-                         work_terminal_at = ?2
-                     WHERE id = ?1 AND retired_at IS NULL",
-                    params![
-                        collision,
-                        retired_at,
-                        update.wave_id,
-                        "registration-only destination shadow retired during relocation"
-                    ],
-                )?;
-            }
             let (parent_slug, name) = update
                 .target
                 .slug()
@@ -2077,73 +2051,6 @@ impl SqliteStore {
                 ),
             )?;
         }
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Self::wave_retirement_blockers_in(&conn, wave_id)
-    }
-
-    fn wave_retirement_blockers_in(
-        conn: &Connection,
-        wave_id: &WaveId,
-    ) -> StoreResult<Vec<String>> {
-        let mut blockers = Vec::new();
-        let projects: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if projects > 0 {
-            blockers.push(format!("{projects} Projects"));
-        }
-        let tasks: i64 = conn.query_row(
-            "SELECT COUNT(*)
-             FROM tasks JOIN projects ON projects.id = tasks.project_id
-             WHERE projects.wave_id = ?1",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if tasks > 0 {
-            blockers.push(format!("{tasks} Tasks"));
-        }
-        let children: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM waves
-             WHERE parent_wave_id = ?1 AND retired_at IS NULL",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if children > 0 {
-            blockers.push(format!("{children} child Waves"));
-        }
-        let snapshots: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM pm_wave_sync WHERE wave_id = ?1",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if snapshots > 0 {
-            blockers.push("PM snapshot".to_string());
-        }
-        let promoted = conn
-            .query_row(
-                "SELECT promoted_at FROM waves WHERE id = ?1",
-                params![wave_id],
-                |row| row.get::<_, Option<i64>>(0),
-            )
-            .optional()?
-            .flatten();
-        if promoted.is_some() {
-            blockers.push("promotion receipt".to_string());
-        }
-        Ok(blockers)
-    }
-
-    pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         tx.commit()?;
         Ok(())
     }
@@ -2429,6 +2336,65 @@ mod frontier_tests {
             refusal.contains(&format!(
                 "this store needs an lf that knows {newer} (it has "
             )) && refusal.ends_with("run `lf install`"),
+            "{refusal}"
+        );
+    }
+
+    /// A Graph holds its store across steps and revalidates it after each one
+    /// (`validate_current_schema`). A newer build that adds a slug migration
+    /// meanwhile leaves that running reader working; one that breaks stops it
+    /// with the skew and `lf install`, never advice to delete the database.
+    #[test]
+    fn a_running_older_reader_survives_an_additive_upgrade_under_it() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
+        let before = Wave::new(WaveId::new(), "Before upgrade".into(), "/repo".into());
+        running.create_wave(&before).unwrap();
+
+        let newer = rusqlite::Connection::open(&path).unwrap();
+        apply_newer_migration(
+            &newer,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;
+             CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
+            true,
+        )
+        .unwrap();
+
+        running
+            .validate_current_schema()
+            .expect("an additive newer migration keeps the running reader valid");
+        let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
+        running.create_wave(&after).unwrap();
+        for wave in [&before, &after] {
+            assert_eq!(
+                running
+                    .get_wave(wave.id())
+                    .unwrap()
+                    .map(|w| w.name().to_string()),
+                Some(wave.name().to_string())
+            );
+        }
+
+        let broken = SharedMachine::new();
+        let path = broken.shared_db();
+        open(&path, &broken.home, Authorized).unwrap();
+        let running = open(&path, &broken.home, Forbidden).unwrap();
+        let newer = apply_newer_migration(
+            &rusqlite::Connection::open(&path).unwrap(),
+            "CREATE TABLE wave_marks (wave_id TEXT NOT NULL);",
+            false,
+        )
+        .unwrap();
+        let refusal = running
+            .validate_current_schema()
+            .expect_err("a breaking newer migration stops the running reader")
+            .to_string();
+        assert!(
+            refusal.contains(&format!("this store needs an lf that knows {newer}"))
+                && refusal.ends_with("run `lf install`")
+                && !refusal.contains("delete"),
             "{refusal}"
         );
     }

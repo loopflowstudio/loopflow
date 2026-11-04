@@ -618,26 +618,59 @@ fn session_token(session: &LfSession) -> HumanSessionToken {
 }
 
 /// Launch the prepared input of a conversation or of a saved Graph's review.
+///
+/// This process becomes the launcher: it execs `lf -i` rather than waiting on
+/// it, so no connect sits beside the conversation. The Session launch lock
+/// crosses the exec and is released once the provider is recorded.
 async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: File) -> Result<()> {
+    use std::os::unix::process::CommandExt;
     let lf = crate::os_process::resolve_lf_binary()?;
-    let mut command = tokio::process::Command::new(lf);
+    let mut command = std::process::Command::new(lf);
     let token = session_token(session);
     command
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
     command.args(conversation_launch_args(store, session).await?);
-    // The launch runs inside this execution's terminal owner, not a nested one.
-    crate::transport::configure_child(command.as_std_mut());
-    let _output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
-    let mut child = spawn_session_process(&mut command, session.input_key()?).await?;
-    drop(launch_lock);
-    // Provider termination never completes a Session.
-    let status = child.wait().await.context("wait for session agent")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("session agent exited with {status}"))
+    let input = session.input_key()?;
+    if capture_is_prepared(input)? {
+        command.env(PREPARED_CAPTURE_ENV, input.as_str());
     }
+    // The launch runs inside this execution's terminal owner, not a nested one.
+    crate::transport::carry_across_exec(&mut command);
+    pass_launch_lock(&mut command, &launch_lock)?;
+    crate::journal::finish_before_exec();
+    let error = command.exec();
+    Err(error).with_context(|| format!("could not start Session input {input}"))
+}
+
+/// Environment naming the inherited descriptor that holds a Session launch lock.
+const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
+
+fn pass_launch_lock(command: &mut std::process::Command, lock: &File) -> Result<()> {
+    use std::os::fd::AsRawFd;
+    let fd = lock.as_raw_fd();
+    // SAFETY: fcntl on a live descriptor this process owns; clearing
+    // close-on-exec lets the exec'd launcher inherit the lock.
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, 0) } < 0 {
+        return Err(std::io::Error::last_os_error()).context("pass Session launch lock");
+    }
+    command.env(LAUNCH_LOCK_ENV, fd.to_string());
+    Ok(())
+}
+
+/// The Session launch lock a connect passed across its exec, if any.
+pub(crate) fn inherited_launch_lock() -> Option<File> {
+    use std::os::fd::FromRawFd;
+    let fd: i32 = std::env::var(LAUNCH_LOCK_ENV).ok()?.parse().ok()?;
+    std::env::remove_var(LAUNCH_LOCK_ENV);
+    // SAFETY: fcntl on the inherited descriptor; close-on-exec keeps it from
+    // reaching the provider.
+    if fd < 3 || unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return None;
+    }
+    // SAFETY: the descriptor was opened by the connect that exec'd into this
+    // process and is referenced nowhere else here.
+    Some(unsafe { File::from_raw_fd(fd) })
 }
 
 async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> Result<Vec<String>> {
@@ -719,6 +752,7 @@ pub(crate) async fn open(
     session_id: &str,
     fork: bool,
     resume: bool,
+    json: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -735,7 +769,7 @@ pub(crate) async fn open(
     }
     if fork {
         drop(progress);
-        return self::fork(store, session, resume).await;
+        return self::fork(store, session, resume, json).await;
     }
     let provider_session = match session.artifact_key.as_deref() {
         Some(key) => store.sqlite.input_provider_session(key)?,
@@ -746,7 +780,7 @@ pub(crate) async fn open(
             conversation_log::read(&store.sqlite, session)?;
         } else {
             drop(progress);
-            new_thread(store, &session.id, Some(&agent), true).await?;
+            new_thread(store, &session.id, Some(&agent), true, json).await?;
             let session = store
                 .session(&session.id)
                 .await?
@@ -806,8 +840,7 @@ pub(crate) async fn open(
         if session.interactive && moving.is_none() {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
-                    && owner_running(&store.sqlite, &owner)?
-                    && answering(&owner)
+                    && attaches(&store.sqlite, session, &owner)?
                 {
                     // This viewer takes control, so the conversation is now
                     // shown where it runs, not where it was launched.
@@ -825,12 +858,20 @@ pub(crate) async fn open(
                         &session.id,
                         departure_here(),
                     )?;
-                    crate::transport::attach(&owner, Some(moved))?;
+                    crate::transport::attach(
+                        &owner,
+                        Some(moved),
+                        json.then_some(session.id.as_str()),
+                    )?;
                     return surface(store, session).await;
                 }
             }
         }
-        if crate::transport::delegate_current(false)? {
+        if crate::transport::delegate_session(
+            false,
+            json.then_some(session.id.as_str()),
+            session.interactive.then_some(session.id.as_str()),
+        )? {
             return surface(store, session).await;
         }
     }
@@ -871,7 +912,12 @@ pub(crate) async fn open(
 
 /// A new conversation in the same Work, seeded with `source`'s log. The
 /// source and whatever holds it are left alone.
-async fn fork(store: &SharedStore, source: &LfSession, launch: bool) -> Result<SessionRecord> {
+async fn fork(
+    store: &SharedStore,
+    source: &LfSession,
+    launch: bool,
+    json: bool,
+) -> Result<SessionRecord> {
     let request = conversation_log::continuation(&store.sqlite, source)?;
     let (provider, model) = match crate::config::agent_override() {
         Some(agent) => {
@@ -914,11 +960,18 @@ async fn fork(store: &SharedStore, source: &LfSession, launch: bool) -> Result<S
     );
     let record = surface(store, &next).await?;
     if launch {
-        let id = next.id.to_string();
-        let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
-        serve_locked(store, &next, launch_lock).await?;
+        open_prepared(store, &next.id, json).await?;
     }
     Ok(record)
+}
+
+/// Preparation has already mutated the Session. Only its resulting identity
+/// crosses to the owner; opening it reacquires the lock and reads current state.
+async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
+    if !crate::transport::delegate_prepared_session(id, json)? {
+        open_waiting(store, id).await?;
+    }
+    Ok(())
 }
 
 /// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
@@ -1030,6 +1083,7 @@ pub(crate) async fn new_thread(
     id: &str,
     agent: Option<&str>,
     launch: bool,
+    json: bool,
 ) -> Result<LfSession> {
     let lock_id = id.to_string();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
@@ -1065,7 +1119,8 @@ pub(crate) async fn new_thread(
         next.title
     );
     if launch {
-        serve_locked(store, &next, launch_lock).await?;
+        drop(launch_lock);
+        open_prepared(store, &next.id, json).await?;
     }
     Ok(next)
 }
@@ -1101,10 +1156,83 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
+/// Whether opening attaches to `owner`, `session`'s running execution owner.
+/// An owner from another build is never negotiated with: once its Sessions
+/// wait for a person it is ended as its own lifetime policy ends it, stopping
+/// its agent and recording its exit, and the conversation resumes on the lf
+/// the entry launches now. A turn in progress is watched instead when the
+/// owner can show it (this viewer attaches, the owner ends itself after the
+/// turn and the viewer follows); one the owner cannot show is cut and
+/// reported, never cut silently. The build is judged against the entry, not
+/// this viewer, so a development build opening a conversation in the main
+/// Home relaunches through the installed lf.
+fn attaches(
+    store: &SqliteStore,
+    session: &LfSession,
+    owner: &crate::id::LfProcessId,
+) -> Result<bool> {
+    if !owner_running(store, owner)? {
+        return Ok(false);
+    }
+    let superseded = crate::journal::live_process_pid(store, owner)
+        .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
+        .filter(|(_, executable)| crate::installation::superseded(executable));
+    let Some((pid, executable)) = superseded else {
+        return Ok(answering(owner));
+    };
+    let turn_cut_off = !store.owner_waits_for_person(owner)?;
+    if turn_cut_off && answering(owner) {
+        return Ok(true);
+    }
+    end_owner(store, owner, pid).with_context(|| {
+        format!(
+            "end the owner on {} so the conversation can move here",
+            executable.display()
+        )
+    })?;
+    eprintln!(
+        "Moved {} off {}; continuing on the installed lf.{}",
+        if session.title.is_empty() {
+            session.id.as_str()
+        } else {
+            session.title.as_str()
+        },
+        executable.display(),
+        if turn_cut_off {
+            " Its last turn was cut off; ask again."
+        } else {
+            ""
+        }
+    );
+    Ok(false)
+}
+
+/// End the execution owner running as `pid` as its lifetime policy does: its
+/// signal handler stops the agent and records the exit. Returns once the
+/// owner is gone.
+pub(crate) fn end_owner(
+    store: &SqliteStore,
+    owner: &crate::id::LfProcessId,
+    pid: u32,
+) -> Result<()> {
+    const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+    crate::platform::kill_process(pid);
+    let deadline = std::time::Instant::now() + STOP_TIMEOUT;
+    while owner_running(store, owner)? {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "pid {pid} did not stop within {}s",
+            STOP_TIMEOUT.as_secs()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
 /// Whether a running owner answers its socket. One that does not, as an owner
 /// from an earlier lf may not after an upgrade, can never hand its terminal to
 /// a viewer, so opening takes the conversation over on the same provider thread.
-fn answering(owner: &crate::id::LfProcessId) -> bool {
+pub(crate) fn answering(owner: &crate::id::LfProcessId) -> bool {
     match crate::transport::controlled(owner) {
         Ok(_) => true,
         Err(error) => {
@@ -1322,85 +1450,6 @@ pub(crate) async fn session_by_id(store: &SharedStore, id: &str) -> Result<Optio
 
 fn session_not_found(id: &str) -> anyhow::Error {
     anyhow!("Session {id} was not found")
-}
-
-pub(crate) async fn spawn_session_process(
-    command: &mut tokio::process::Command,
-    artifact_key: &String,
-) -> Result<tokio::process::Child> {
-    let home = crate::store::lf_home_dir();
-    let executable = Path::new(command.as_std().get_program());
-    let digest = fs::read(executable)
-        .ok()
-        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
-        .unwrap_or_else(|| "unavailable".to_string());
-    let cwd = match command.as_std().get_current_dir() {
-        Some(cwd) => cwd.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
-    let database = crate::store::database_path_from_env()?;
-    // Capture the child before it parses arguments. Its own Session recorder may
-    // never start; the opening command's error must carry enough evidence to
-    // diagnose it. Arguments and environment values can contain prompts or credentials.
-    let launch = format!(
-        "Session input {artifact_key}: executable {} (sha256 {digest}), cwd {}, Machine {}, database {}",
-        executable.display(),
-        cwd.display(),
-        home.display(),
-        database.display()
-    );
-    if capture_is_prepared(artifact_key)? {
-        command.env(PREPARED_CAPTURE_ENV, artifact_key.as_str());
-    }
-    let mut child = command
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("could not start {launch}"))?;
-    // This child owns the visible foreground terminal. First-use trust and
-    // authentication can wait for a person before native history exists; an
-    // elapsed startup deadline must not kill that conversation. Keep the launch
-    // lock until history is resumable or the child exits.
-    loop {
-        match crate::session_record::resolve_manifest(&home, artifact_key.as_str()) {
-            Ok((dir, _manifest)) => {
-                if session_is_resumable(&SqliteStore::open_processes_read_only(&database)?, &dir)? {
-                    return Ok(child);
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-        if let Some(status) = child.try_wait().context("probe human Session input")? {
-            // A finite terminal can publish native history and exit between
-            // probes. Its successful exit does not make that history unusable.
-            if status.success() {
-                if let Ok((dir, _)) = crate::session_record::resolve_manifest(&home, artifact_key) {
-                    if crate::session_record::read_provider_session(&dir)?.is_some() {
-                        return Ok(child);
-                    }
-                }
-            }
-            bail!("{launch}: exited with {status} before becoming resumable");
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-fn session_is_resumable(store: &SqliteStore, dir: &Path) -> Result<bool> {
-    if crate::session_record::read_provider_session(dir)?.is_none() {
-        return Ok(false);
-    }
-    let input = crate::session_record::input_id_from_dir(dir)?;
-    let session = store
-        .session_for_artifact(&input)?
-        .context("Session disappeared")?;
-    let summary = store
-        .session_summary(
-            &session.id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?
-        .context("Session disappeared")?;
-    Ok(summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live)
 }
 
 pub(crate) fn resume_native_session(

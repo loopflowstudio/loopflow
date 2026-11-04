@@ -1,5 +1,5 @@
 pub(crate) mod remote;
-mod workspace;
+pub mod workspace;
 pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
@@ -16,7 +16,8 @@ mod handoff;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
-pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
+pub mod retirement;
+pub(crate) use lifecycle::{notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod delivery;
 pub(crate) use delivery::{
@@ -29,8 +30,8 @@ pub(crate) use delivery::{
     TaskPrContext,
 };
 use delivery::{
-    reconcile_task_pr_observation, resolve_managed_task, resolve_upstream_base,
-    task_registry_error, ManagedTask,
+    authority_store, missing_task_registry, reconcile_task_pr_observation, resolve_managed_task,
+    resolve_upstream_base, ManagedTask,
 };
 mod snapshot;
 pub(crate) use snapshot::task_workspace_context;
@@ -62,7 +63,7 @@ use crate::naming::git_user;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::TaskActionModel;
 use crate::store::sqlite::{SqliteStore, TaskCheckout};
-use crate::store::{open_existing_store, open_registry_for_authority, SharedStore, Store};
+use crate::store::{open_existing_store, SharedStore, Store};
 use crate::work::task::{
     GithubPr, Observation, PrPhase, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
@@ -372,6 +373,7 @@ async fn task_store() -> OpsResult<SharedStore> {
     }
     open_existing_store()
         .await
+        .map_err(task_error)?
         .map(Arc::new)
         .ok_or_else(|| task_error("no Loopflow registry on this machine; run `lf doctor`"))
 }
@@ -473,11 +475,7 @@ pub fn record_stack_sync(
     let task_id = stacked.child.id.clone();
     let new_base = new_base.to_string();
     block_on_task(async move {
-        let store = Arc::new(
-            open_registry_for_authority()
-                .await
-                .map_err(task_registry_error)?,
-        );
+        let store = task_store().await?;
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // sync only repoints the mutable row to the post-merge truth.
@@ -1502,7 +1500,7 @@ pub fn task_create(
                 .map_err(task_error)?
                 .is_none()
             {
-                super::project::ensure(repo, name).await?;
+                super::wave_lifecycle::add(repo, name, None).await?;
             }
         }
         let selected = select_task_creation_wave(&store, &main, wave).await?;
@@ -1940,6 +1938,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        let _retirement = retirement::lock(&task.id, false)?;
         let task = store
             .sqlite
             .reopen_task(&task.id, note)
@@ -2090,7 +2089,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
         let repo = repository_for_task(store, task)?;
         super::planning_sync::sync_after_save(store, &repo.to_string_lossy()).await;
         // Cleanup retains live work and unpublished artifacts independently of status.
-        cleanup_completed_task(store, task).await?;
+        retirement::schedule(store, task).await?;
         Ok(())
     }
     .await;

@@ -603,12 +603,13 @@ struct WorkDestinationTests {
                 work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation, tab: nil)
             try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
             let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content.selectedShell?.location == remoteIdentity })
-            let command = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell?.command)
+            let tab = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell)
+            let command = try remote.shellAttachment(tab)
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
-                "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
+                "task", "shell", remoteID, "--checkout", remoteIdentity.worktree, "--id", tab.id, "--create"])
             let splitID = try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
             #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
-            #expect(remote.multiplexer.layout.pane(for: try #require(splitID.pane))?.content.selectedShell?.command == command)
+            #expect(remote.multiplexer.layout.pane(for: try #require(splitID.pane))?.content.selectedShell?.command == [])
             // A scripted shell tab keeps the caller's focus and zoom.
             #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
             #expect(remote.multiplexer.focusedPaneId == targetPane.id)
@@ -636,7 +637,8 @@ struct WorkDestinationTests {
         let task = try #require(snapshot.waves.first?.tasks.items.first)
         let exact = try oneTask(data, taskId: task.id)
         let barrier = LinkedDestinationBarrier()
-        let (model, _) = destinationModel(query: RegistryQuery { _, _ in
+        let (model, _) = destinationModel(query: RegistryQuery { args, _ in
+            if args.contains("presence") { return "null" }
             await barrier.wait("read")
             return exact
         })

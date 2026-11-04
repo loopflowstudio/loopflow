@@ -79,7 +79,7 @@ struct DesktopPaneControlTests {
         #expect(store.browserPane?.content == browser.content)
     }
 
-    @Test("Companion switches retain the shell and file draft; the next close retires a closed shell")
+    @Test("Companion switches retain the shell and file draft; Close releases the shell")
     func companionSwitchRetainsViews() throws {
         let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
         let store = workspace.multiplexer
@@ -109,9 +109,8 @@ struct DesktopPaneControlTests {
         #expect(store.shellPane?.content.selectedShell == nil)
         #expect(store.collapsedPaneIds.contains(shell.id))
         #if canImport(GhosttyKit)
-        #expect(workspace.surfaces.view(for: terminal) === view)
-        workspace.closePane(browser.id)
         #expect(workspace.surfaces.view(for: terminal) !== view)
+        #expect(workspace.disconnectedShells.contains(try #require(shell.content.selectedShell).id))
         #endif
     }
 
@@ -373,8 +372,8 @@ struct DesktopPaneControlTests {
             object: TerminalIdentity.shell(try #require(shell.content.selectedShell).id, machineId: fixtureMachineId))
         #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
-        #expect(workspace.multiplexer.focusedPane.kind == .session)
-        #expect(workspace.multiplexer.collapsedPaneIds.contains(shell.id))
+        #expect(workspace.multiplexer.focusedPane == shell)
+        #expect(workspace.disconnectedShells.contains(try #require(shell.content.selectedShell).id))
         let unknown = try #require(workspace.multiplexer.newShell())
         #expect(unknown.terminal == nil)
     }
@@ -912,7 +911,7 @@ struct DesktopPaneControlTests {
         #expect(!store.collapsedPaneIds.contains(old.pane))
     }
 
-    @Test("⌘W then ⇧⌘T returns the same shell tab and surface, by key and by Apple event")
+    @Test("⌘W then ⇧⌘T returns the ended shell identity, by key and by Apple event")
     func undoCloseReturnsTheClosedShellTab() throws {
         for byKey in [true, false] {
             let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
@@ -945,7 +944,8 @@ struct DesktopPaneControlTests {
             #expect(reopened.tab == closing.id)
             #expect(store.focusedPane == shell)
             #if canImport(GhosttyKit)
-            #expect(registry.surfaces.view(for: try #require(shell.terminal)) === view)
+            #expect(registry.surfaces.view(for: try #require(shell.terminal)) !== view)
+            #expect(workspace.disconnectedShells.contains(closing.id))
             #endif
             #expect(throws: DesktopTargetError.self) { _ = try press("t", [.command, .shift]) }
         }

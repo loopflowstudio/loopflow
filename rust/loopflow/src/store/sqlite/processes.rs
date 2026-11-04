@@ -40,7 +40,8 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id OR ship_approved_lf_process_id=p.id OR ship_stopped_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)";
+    AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM task_shells WHERE owner=p.id)";
 
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProcess> {
     Ok(LfProcess {
@@ -324,6 +325,20 @@ pub(super) fn attach_in(
             attached.token
         ],
     )?;
+    if let Some(previous) = current.filter(|_| !replace_provider) {
+        // The provider and its pending requests survive attachment handoff.
+        // Only its current reading follows; stale writers retain their old fence.
+        tx.execute(
+            "UPDATE session_activity SET attachment_token=?3
+             WHERE session_id=?1 AND agent_process_id=?2 AND attachment_token=?4",
+            params![
+                session,
+                attached.agent_process_id,
+                attached.token,
+                previous.token
+            ],
+        )?;
+    }
     Ok(attached)
 }
 

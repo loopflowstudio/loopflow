@@ -2,41 +2,48 @@
 //!
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
-//! and version, and flags the ones that aren't the selected install or can't
-//! open the store any more. Rollover moves what can be proven resumable: an idle,
-//! unviewed Session execution owner with saved provider history is ended the way
-//! the detached-Session policy ends it, then each of its Sessions resumes on the
-//! selected lf. A Graph runner isn't stopped: each step resolves the installed
-//! entry when it launches, so its next step already runs on the selected lf and
-//! the runner leaves with the Graph. Everything else is listed with why it stays.
+//! and version, and flags the ones a launch through the entry no longer runs
+//! (`installation::superseded`, the judgement owners and `lf resume` share) or
+//! that can't open the store any more. A superseded owner ends itself once its
+//! Sessions wait for a person and `lf resume` reopens them on the installed lf;
+//! rollover does that for every superseded owner at once, including owners that
+//! predate the policy: an idle owner with saved provider history is ended the
+//! way its lifetime policy ends it, and each of its Sessions resumes on the
+//! selected lf. The sweep signals owners directly, so existing viewers may
+//! need to reopen; the lifetime policy itself sends the successor command.
+//! A busy owner that answers its socket stays until
+//! its turn ends; one that does not answer cannot be watched or trusted to
+//! report idle, so it moves and the cut turn is reported. A Graph runner isn't
+//! stopped: each step resolves the installed entry when it launches, so its next
+//! step already runs on the selected lf and the runner leaves with the Graph.
+//! Everything else is listed with why it stays.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::id::LfProcessId;
-use crate::installation::ArtifactSet;
 use crate::journal::{
     recorded_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
 use crate::ops::human_session::restore::{self, ResumeOutcome, ResumedSession};
+use crate::ops::human_session::{answering, end_owner};
 use crate::process::ProcessKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 // -- Inventory -----------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct BinaryInventory {
-    /// The CLI ordinary launches run; `None` before a receipt-managed install.
+    /// The lf a launch through the entry runs now; `None` when no entry resolves.
     pub selected: Option<SelectedBinary>,
     /// The migration a binary must know to open the store.
     pub store_floor: Option<String>,
@@ -54,7 +61,7 @@ pub struct RunningBinary {
     /// `None` when the kernel withholds the executable.
     pub path: Option<PathBuf>,
     pub version: Option<String>,
-    /// Part of the selected artifact set, by path or content.
+    /// One build with `selected`: the same file, or the same bytes.
     pub selected: bool,
     /// It does not know the store's reader floor, so it fails every store open.
     pub cannot_open_store: bool,
@@ -125,12 +132,9 @@ impl RunningBinary {
 pub fn inventory() -> Result<BinaryInventory> {
     let database = crate::store::database_path_from_env()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let selected_set = crate::installation::root()
-        .and_then(|root| crate::installation::installed_artifacts(&root))
-        .unwrap_or_else(|error| {
-            tracing::warn!(%error, "installed artifact set unreadable");
-            None
-        });
+    let target = crate::installation::launch_target()
+        .inspect_err(|error| tracing::warn!(%error, "the lf a launch runs now is unknown"))
+        .ok();
     let (store_floor, processes) = if database.exists() {
         let store = SqliteStore::open_processes_read_only(&database)?;
         let floor = store.reader_floor().unwrap_or_else(|error| {
@@ -148,20 +152,16 @@ pub fn inventory() -> Result<BinaryInventory> {
             .or_insert_with(|| binary_version(path))
             .clone()
     };
-    let selected = selected_set.as_ref().and_then(|set| {
-        let cli = set.artifact(&crate::installation::ArtifactRole::Cli)?;
-        Some(SelectedBinary {
-            path: cli.path.clone(),
-            version: version_of(&cli.path),
-        })
+    let selected = target.map(|path| SelectedBinary {
+        version: version_of(&path),
+        path,
     });
     let mut binaries = group(processes, |path| {
         let version = path.and_then(&mut version_of);
-        let is_selected = match (&selected_set, path) {
-            (Some(set), Some(path)) => in_artifact_set(set, path),
-            // Without a receipt there is nothing to be behind.
-            (None, _) => true,
-            (Some(_), None) => false,
+        let is_selected = match path {
+            Some(path) => !crate::installation::superseded(path),
+            // Without an entry there is nothing to be behind.
+            None => selected.is_none(),
         };
         (version, is_selected)
     });
@@ -249,19 +249,6 @@ fn group(
         .collect::<Vec<_>>();
     binaries.sort_by_key(|binary| (binary.selected, binary.name()));
     binaries
-}
-
-/// By path, or by content for a copy such as Desktop's `/Applications` bundle.
-fn in_artifact_set(set: &ArtifactSet, path: &Path) -> bool {
-    if set.artifacts.iter().any(|artifact| artifact.path == path) {
-        return true;
-    }
-    let Ok(digest) = crate::installation::file_sha256(path) else {
-        return false;
-    };
-    set.artifacts
-        .iter()
-        .any(|artifact| artifact.sha256 == digest)
 }
 
 /// `lf --version` exits during argument parsing in every released lf, before it
@@ -370,6 +357,9 @@ pub struct MovedOwner {
     /// Empty in a dry run.
     pub sessions: Vec<ResumedSession>,
     pub session_ids: Vec<String>,
+    /// The owner reported a turn in progress but does not answer its socket,
+    /// so moving it cuts that turn.
+    pub turn_cut_off: bool,
     pub error: Option<String>,
 }
 
@@ -382,8 +372,12 @@ pub struct ListedProcess {
 
 #[derive(Debug)]
 enum Disposition {
-    /// An idle, unviewed owner and the Sessions it holds.
-    Moves(Vec<String>),
+    /// A resumable owner and the Sessions it holds; `turn_cut_off` when it
+    /// claims a turn in progress nobody can watch.
+    Moves {
+        sessions: Vec<String>,
+        turn_cut_off: bool,
+    },
     /// A Graph runner, left running; its next step launches on the selected lf.
     NextStep,
     Stays(String),
@@ -398,13 +392,18 @@ async fn disposition(
     if shared.sqlite.runs_graph(&process.id)? {
         return Ok(graph_runner(binary));
     }
-    owner_disposition(shared, process).await
+    owner_disposition(shared, process, answering).await
 }
 
-/// A Session execution owner moves when it is idle, unviewed and resumable.
+/// A Session execution owner moves when it is resumable and either waits for
+/// a person or cannot be watched: a busy owner that answers its socket finishes
+/// its turn and ends itself, as `lf resume` lets it; one that does not answer
+/// has only a claim of a turn in progress. `answering` asks the owner; the unit
+/// test answers for it.
 async fn owner_disposition(
     shared: &SharedStore,
     process: &RunningLfProcess,
+    answering: impl Fn(&LfProcessId) -> bool,
 ) -> Result<Disposition> {
     let store = &shared.sqlite;
     let stays = |reason: &str| Ok(Disposition::Stays(reason.into()));
@@ -412,13 +411,9 @@ async fn owner_disposition(
     if sessions.is_empty() {
         return stays("keeps its lf until it exits");
     }
-    if store.owner_viewed(&process.id)? {
-        return stays(
-            "a terminal is attached; detach it (Ctrl+]) or close it, then roll over again",
-        );
-    }
-    if !store.owner_waits_for_person(&process.id)? {
-        return stays("a turn, Graph step or headless Run is in progress");
+    let turn_cut_off = !store.owner_waits_for_person(&process.id)?;
+    if turn_cut_off && answering(&process.id) {
+        return stays("a turn, pending request, Graph step or headless Run holds the conversation");
     }
     for session in &sessions {
         let key = shared
@@ -435,7 +430,10 @@ async fn owner_disposition(
             )));
         }
     }
-    Ok(Disposition::Moves(sessions))
+    Ok(Disposition::Moves {
+        sessions,
+        turn_cut_off,
+    })
 }
 
 /// A Graph runner's steps resolve the installed entry at each launch, except
@@ -461,11 +459,15 @@ impl RolloverReport {
     fn place(&mut self, binary: String, process: &RunningLfProcess, disposition: Disposition) {
         let process = process.clone();
         match disposition {
-            Disposition::Moves(session_ids) => self.moved.push(MovedOwner {
+            Disposition::Moves {
+                sessions,
+                turn_cut_off,
+            } => self.moved.push(MovedOwner {
                 process,
                 binary,
                 sessions: Vec::new(),
-                session_ids,
+                session_ids: sessions,
+                turn_cut_off,
                 error: None,
             }),
             Disposition::NextStep => self.next_step.push(ListedProcess {
@@ -503,8 +505,10 @@ pub fn run(dry_run: bool, json: bool) -> Result<()> {
 }
 
 async fn rollover(dry_run: bool) -> Result<RolloverReport> {
-    // Concurrent `lf resume --all` would start a second owner for a Session we stop.
-    let _resuming = restore::lock_resume_all().await?;
+    // Concurrent sweeps must not start two owners for the same stopped Session.
+    let _resuming =
+        tokio::task::spawn_blocking(|| crate::ops::human_session::lock_session_process("rollover"))
+            .await??;
     let inventory = inventory()?;
     let store: SharedStore = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
     let mut report = RolloverReport {
@@ -529,16 +533,21 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
         let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
             == ProcessIdentityEvidence::Live;
         let now = if still_running {
-            owner_disposition(&store, &owner.process).await?
+            owner_disposition(&store, &owner.process, answering).await?
         } else {
             Disposition::Stays("exited before rollover reached it".into())
         };
-        let Disposition::Moves(session_ids) = now else {
+        let Disposition::Moves {
+            sessions,
+            turn_cut_off,
+        } = now
+        else {
             report.place(owner.binary, &owner.process, now);
             continue;
         };
-        owner.session_ids = session_ids;
-        if let Err(error) = stop_owner(&store.sqlite, &owner.process) {
+        owner.session_ids = sessions;
+        owner.turn_cut_off = turn_cut_off;
+        if let Err(error) = end_owner(&store.sqlite, &owner.process.id, owner.process.pid) {
             owner.error = Some(format!("{error:#}"));
             report.moved.push(owner);
             continue;
@@ -562,27 +571,10 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
     Ok(report)
 }
 
-/// End an owner as the detached-Session policy does: its signal handler stops
-/// the agent and records the exit.
-fn stop_owner(store: &SqliteStore, process: &RunningLfProcess) -> Result<()> {
-    crate::platform::kill_process(process.pid);
-    let deadline = Instant::now() + STOP_TIMEOUT;
-    while crate::ops::human_session::owner_running(store, &process.id)? {
-        anyhow::ensure!(
-            Instant::now() < deadline,
-            "pid {} did not stop within {}s",
-            process.pid,
-            STOP_TIMEOUT.as_secs()
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Ok(())
-}
-
 fn render_report(report: &RolloverReport) -> String {
     let mut lines = Vec::new();
     let Some(selected) = &report.selected else {
-        return "No receipt-managed installation selects an lf yet; nothing is behind.\n".into();
+        return "Could not resolve the lf entry; no processes were moved.\n".into();
     };
     let target = format!(
         "{} ({})",
@@ -605,8 +597,14 @@ fn render_report(report: &RolloverReport) -> String {
                 owner.process.pid, owner.binary
             )),
             None => lines.push(format!(
-                "{verb} pid {} on {} → {target}: {sessions}",
-                owner.process.pid, owner.binary
+                "{verb} pid {} on {} → {target}: {sessions}{}",
+                owner.process.pid,
+                owner.binary,
+                if owner.turn_cut_off {
+                    " (a turn in progress it cannot show; moving cuts it)"
+                } else {
+                    ""
+                }
             )),
         }
         for session in &owner.sessions {
@@ -645,7 +643,7 @@ pub fn report_after_promote(replaced_app: bool) {
                     );
                 }
                 println!(
-                    "`lf monitor rollover` moves the resumable ones; `--dry-run` lists them first"
+                    "each ends as its Session goes idle and `lf resume` reopens it on this lf; `lf monitor rollover` moves the idle ones now (`--dry-run` lists them)"
                 );
             }
         }
@@ -658,8 +656,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        disposition, group, parse_version, superseded_summary, BinaryInventory, Disposition,
-        RunningBinary, RunningLfProcess,
+        disposition, group, owner_disposition, parse_version, superseded_summary, BinaryInventory,
+        Disposition, RunningBinary, RunningLfProcess,
     };
     use crate::id::LfProcessId;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
@@ -771,6 +769,93 @@ mod tests {
         assert!(matches!(
             of(&installed, &plain).await,
             Disposition::Stays(_)
+        ));
+    }
+
+    /// A superseded owner mid-turn stays while it answers its socket: the turn
+    /// ends in view and the owner ends itself. One that does not answer has
+    /// only a claim of a turn, so it moves and the cut turn is reported.
+    #[tokio::test]
+    async fn a_busy_owner_moves_only_when_it_cannot_show_its_turn() {
+        let directory = tempfile::tempdir().unwrap();
+        let store: SharedStore = std::sync::Arc::new(
+            open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("lf.db")))
+                .await
+                .unwrap(),
+        );
+        let owner = process(7);
+        let session = store
+            .sqlite
+            .test_session("busy", &crate::session_record::new_artifact_key());
+        let input = session.input_key().unwrap().clone();
+        store
+            .sqlite
+            .retain_session_observation(
+                &session,
+                &crate::session::SessionObservation {
+                    artifact_key: input.clone(),
+                    source: "provider-session:fixture".into(),
+                    observed_at: 1,
+                    task_id: None,
+                    wave_id: None,
+                    payload: serde_json::json!({"input_id":input,"source":"provider-session:fixture","evidence":{
+                        "schema_version":1,"provider_session_id":"thread-1","account_id":null,
+                    }}),
+                },
+            )
+            .unwrap();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,'fixture','[\"lf\",\"session\",\"serve\"]',1)",
+                [&owner.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id=?2",
+                rusqlite::params![owner.id, session.id],
+            )
+            .unwrap();
+        }
+        let attachment = store
+            .sqlite
+            .claim_session_attachment(&session.id, None, &owner.id, false)
+            .unwrap();
+        store
+            .sqlite
+            .record_session_activity(
+                &session.id,
+                &attachment,
+                &crate::session::SessionActivity {
+                    preview: None,
+                    observed_at: 1,
+                    open_tools: 1,
+                    pending_input: 0,
+                    yielded: false,
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            owner_disposition(&store, &owner, |_| true).await.unwrap(),
+            Disposition::Stays(_)
+        ));
+        assert!(matches!(
+            owner_disposition(&store, &owner, |_| false).await.unwrap(),
+            Disposition::Moves { ref sessions, turn_cut_off: true } if sessions == &[session.id.as_str().to_owned()]
+        ));
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM session_activity", [])
+            .unwrap();
+        assert!(matches!(
+            owner_disposition(&store, &owner, |_| false).await.unwrap(),
+            Disposition::Moves {
+                turn_cut_off: false,
+                ..
+            }
         ));
     }
 }

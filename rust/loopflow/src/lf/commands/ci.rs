@@ -78,7 +78,7 @@ pub fn run(since: &str, wave: Option<&str>, repo: Option<&str>, json: bool) -> R
     let since_at = parse_since(since, now)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let rows = runtime.block_on(async {
-        let Some(store) = open_existing_store().await else {
+        let Some(store) = open_existing_store().await? else {
             return Ok(Vec::new());
         };
         store

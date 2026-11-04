@@ -174,6 +174,9 @@ When editing `*.rs` files:
 - `lf help <path>` renders Clap's short help; text it must show (exit statuses, caveats) goes in `after_help`, not a second doc-comment paragraph.
 - Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
 - Use `thiserror` for library error types callers need to match on
+- Long-lived deadlines (a Session's grace, a limit measured in minutes or hours) use
+  `SystemTime`: `Instant` stops while a Mac sleeps, so an `Instant` limit of 24h can
+  take days of wall time. `Instant` stays for short pauses and throttles.
 - Use `expect("why this is safe")` over `unwrap()` outside tests
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
@@ -196,7 +199,7 @@ When editing Rust tests:
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`.
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
-- From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin.
+- From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin. In zsh that is `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`; an unquoted `$VAR` does not word-split, and a leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
 - Claims name their person by the Task repository's Git `user.email` and fail without one; fixtures set a repository-local identity (`TestRepo` does), and CI test jobs set only a global fallback.
 - Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
 - `SqliteStore::open_ephemeral` applies the build's whole migration catalog; do not
@@ -322,6 +325,9 @@ cargo clippy --all-targets -- -D warnings                # lint after tests (war
 uv sync                                                  # install Python dependencies
 ```
 
+`build.rs` downloads the pinned `libghostty-vt` archive for the build target once
+per target directory (`rust/loopflow/ghostty-vt.json`, `rust/loopflow/ghostty-vt-patches/README.md`);
+offline, point `LOOPFLOW_GHOSTTY_VT_DIR` at a directory holding `libghostty-vt.a`.
 Run one cargo command at a time: concurrent builds wait on one target lock.
 CI runs the full matrix; locally, run it only to reproduce a CI failure.
 When accepted work needs a developer tool the Machine lacks, install it

@@ -20,13 +20,29 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 MachineServiceCommand::Run { remote_port } => {
                     return crate::machine_service::run(*remote_port)
                 }
+                MachineServiceCommand::Mobile { off } => {
+                    if *off {
+                        crate::machine_service::mobile::disable()?;
+                        println!("Mobile access is off");
+                    } else {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&crate::machine_service::mobile::enable()?)?
+                        );
+                    }
+                    return Ok(());
+                }
                 MachineServiceCommand::Pair {
                     endpoint,
                     name,
                     output,
                 } => {
+                    let endpoint = match endpoint {
+                        Some(endpoint) => endpoint.clone(),
+                        None => crate::machine_service::mobile::enable()?.endpoint,
+                    };
                     return tokio::runtime::Runtime::new()?.block_on(
-                        crate::machine_service::admission::pair(endpoint, name, output),
+                        crate::machine_service::admission::pair(&endpoint, name, output),
                     );
                 }
                 MachineServiceCommand::Devices => {

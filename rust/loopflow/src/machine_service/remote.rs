@@ -9,7 +9,8 @@ use futures_util::{SinkExt, StreamExt};
 use secrecy::{ExposeSecret, SecretString};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Semaphore;
+use tokio::sync::{mpsc, oneshot, Semaphore};
+use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::{
     handshake::server::{ErrorResponse, Request, Response},
     http::StatusCode,
@@ -23,22 +24,98 @@ use crate::store::sqlite::SqliteStore;
 
 const CHUNK: usize = 64 * 1024;
 
-pub(super) async fn run(
-    port: u16,
+#[derive(Debug)]
+pub(super) struct Control {
+    pub port: Option<u16>,
+    pub reply: oneshot::Sender<Result<Option<u16>, String>>,
+}
+
+pub(super) async fn manage(
+    port: Option<u16>,
+    mut requests: mpsc::Receiver<Control>,
     instance: Arc<String>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
 ) -> Result<()> {
+    let mut listeners = JoinSet::new();
+    let mut active = None;
+    if let Some(port) = port {
+        match bind(port).await {
+            Ok((listener, store)) => {
+                active = Some(listener.local_addr()?.port());
+                listeners.spawn(run(
+                    listener,
+                    store,
+                    instance.clone(),
+                    executable.clone(),
+                    slots.clone(),
+                ));
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Saved mobile listener is unavailable; local service remains ready")
+            }
+        }
+    }
+    loop {
+        tokio::select! {
+            request = requests.recv() => {
+                let Some(request) = request else { return Ok(()) };
+                if request.port == active {
+                    let _ = request.reply.send(Ok(active));
+                    continue;
+                }
+                // Bind first, preserving the current carrier if the new port fails.
+                let replacement = match request.port {
+                    Some(port) => match bind(port).await {
+                        Ok(bound) => Some(bound),
+                        Err(error) => { let _ = request.reply.send(Err(error.to_string())); continue; }
+                    },
+                    None => None,
+                };
+                listeners.abort_all();
+                while listeners.join_next().await.is_some() {}
+                active = None;
+                if let Some((listener, store)) = replacement {
+                    active = Some(listener.local_addr()?.port());
+                    listeners.spawn(run(listener, store, instance.clone(), executable.clone(), slots.clone()));
+                }
+                let _ = request.reply.send(Ok(active));
+            }
+            ended = listeners.join_next(), if !listeners.is_empty() => {
+                tracing::warn!(?ended, "Mobile listener stopped; local service remains ready");
+                active = None;
+            }
+        }
+    }
+}
+
+async fn bind(port: u16) -> Result<(TcpListener, Arc<SqliteStore>)> {
     let store = Arc::new(admission::store().await?);
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
+    Ok((listener, store))
+}
+
+async fn run(
+    listener: TcpListener,
+    store: Arc<SqliteStore>,
+    instance: Arc<String>,
+    executable: Arc<String>,
+    slots: Arc<Semaphore>,
+) -> Result<()> {
     tracing::info!(address = %listener.local_addr()?, "Mobile carrier ready for host Tailscale Serve");
+    // Dropping the listener also closes its remote connections, not local viewers
+    // or retained owners. Do not detach these tasks from their admission lifetime.
+    let mut connections = JoinSet::new();
     loop {
-        let (socket, _) = listener.accept().await?;
+        let (socket, _) = tokio::select! {
+            accepted = listener.accept() => accepted?,
+            _ = connections.join_next(), if !connections.is_empty() => continue,
+        };
         let Ok(permit) = slots.clone().try_acquire_owned() else {
             continue;
         };
         let (store, instance, executable) = (store.clone(), instance.clone(), executable.clone());
-        tokio::spawn(async move {
+        connections.spawn(async move {
             let _permit = permit;
             if let Err(error) = connection(socket, store, &instance, &executable).await {
                 tracing::debug!(%error, "Mobile connection ended");
@@ -141,7 +218,7 @@ async fn connection(
     // authority for this dispatch. Cancellation drops only this viewer's stream.
     tokio::select! {
         result = async {
-            tokio::try_join!(super::service::connection(server, instance, executable), bridge(socket, client))?;
+            tokio::try_join!(super::service::connection(server, instance, executable, None), bridge(socket, client))?;
             Ok(())
         } => result,
         result = until_revoked(store, device) => result,
@@ -204,7 +281,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
     use tokio_tungstenite::WebSocketStream;
 
-    use crate::machine_service::wire::{ErrorCode, Operation, Reply, Request, Response, VERSION};
+    use crate::machine_service::wire::{Operation, Request, Response, VERSION};
     use crate::store::sqlite::SqliteStore;
 
     async fn connect(
@@ -269,49 +346,55 @@ mod tests {
             .await
             .is_err());
 
-        let mut client = connect(store.clone(), "/v1/machine", token, false)
-            .await
+        for (version, operation, expected) in [
+            (VERSION + 1, Operation::Bootstrap, "incompatible"),
+            (
+                VERSION,
+                Operation::ConfigureRemote { port: None },
+                "unsupported",
+            ),
+        ] {
+            let mut client = connect(store.clone(), "/v1/machine", token, false)
+                .await
+                .unwrap();
+            let request = serde_json::to_vec(&Request {
+                version,
+                id: "fragmented".into(),
+                operation,
+            })
             .unwrap();
-        let request = serde_json::to_vec(&Request {
-            version: VERSION + 1,
-            id: "fragmented".into(),
-            operation: Operation::Bootstrap,
-        })
-        .unwrap();
-        let mut framed = (request.len() as u32).to_be_bytes().to_vec();
-        framed.extend(request);
-        for chunk in framed.chunks(3) {
-            client
-                .send(Message::Binary(chunk.to_vec().into()))
-                .await
-                .unwrap();
-        }
-        let mut received = Vec::new();
-        loop {
-            if received.len() >= 4 {
-                let length = u32::from_be_bytes(received[..4].try_into().unwrap()) as usize;
-                if received.len() == length + 4 {
-                    break;
+            let mut framed = (request.len() as u32).to_be_bytes().to_vec();
+            framed.extend(request);
+            for chunk in framed.chunks(3) {
+                client
+                    .send(Message::Binary(chunk.to_vec().into()))
+                    .await
+                    .unwrap();
+            }
+            let mut received = Vec::new();
+            loop {
+                if received.len() >= 4 {
+                    let length = u32::from_be_bytes(received[..4].try_into().unwrap()) as usize;
+                    if received.len() == length + 4 {
+                        break;
+                    }
                 }
+                let message = tokio::time::timeout(Duration::from_secs(5), client.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert!(matches!(message, Message::Binary(_)));
+                received.extend(message.into_data());
             }
-            let message = tokio::time::timeout(Duration::from_secs(5), client.next())
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
-            assert!(matches!(message, Message::Binary(_)));
-            received.extend(message.into_data());
+            let response: Response = serde_json::from_slice(&received[4..]).unwrap();
+            assert_eq!(response.id, "fragmented");
+            assert_eq!(response.instance, "test-instance");
+            assert_eq!(
+                serde_json::to_value(&response).unwrap()["result"]["code"],
+                expected
+            );
         }
-        let response: Response = serde_json::from_slice(&received[4..]).unwrap();
-        assert_eq!(response.id, "fragmented");
-        assert_eq!(response.instance, "test-instance");
-        assert!(matches!(
-            response.result,
-            Reply::Error {
-                code: ErrorCode::Incompatible,
-                ..
-            }
-        ));
 
         let id = DeviceId(reply["device"]["id"].as_str().unwrap().into());
         store.revoke_machine_device(&id, now).unwrap();

@@ -3,6 +3,13 @@ import Testing
 @testable import Loopflow
 
 struct MachineProtocolTests {
+    @Test func localMobileSetupUsesRustFixtures() throws {
+        let request = MachineRequest(version: 1, id: "mobile-1", operation: .configureRemote(port: 0))
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("configure_remote")))
+        let response = try JSONDecoder().decode(MachineResponse.self, from: fixture("remote"))
+        guard case .remote(let port) = response.result else { Issue.record("Missing remote port"); return }
+        #expect(port == 49250)
+    }
     private func fixture(_ name: String) throws -> Data {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()

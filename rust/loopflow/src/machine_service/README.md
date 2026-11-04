@@ -28,19 +28,37 @@ Remote callers use the separate device admission below.
 ## Pair a phone through host Tailscale
 
 ```sh
-lf machine service run --remote-port 49250
-# In a second terminal, after choosing an unused HTTPS port:
-tailscale serve --bg --https=8443 http://127.0.0.1:49250
-lf machine service pair --endpoint https://machine.tailnet.ts.net:8443 \
-  --name 'My iPhone' --output /private/tmp/loopflow-phone.json
+lf machine service pair --name 'My iPhone' --output /private/tmp/loopflow-phone.json
 lf machine service devices
 lf machine service revoke DEVICE_ID
+lf machine service mobile --off
 ```
 
-The foreground service also listens on loopback when `--remote-port` is supplied.
-Host Tailscale Serve supplies tailnet-only HTTPS; never use Funnel. Inspect existing
-Serve routes before choosing a port. This first carrier does not change Serve
-configuration or persist the remote-port setting in the installed service yet.
+Sign in to host Tailscale first. Pairing finds a working CLI, derives this Machine’s
+DNS name, obtains the existing Machine service and configures an unused private
+HTTPS port. It enables the loopback carrier in place, without restarting the local
+service or its Desktop connections. Import or paste the generated file into iOS.
+`lf machine service mobile` enables the same endpoint without creating a ticket.
+
+Setup preserves other background and foreground Serve routes. It reuses only the
+complete private route recorded for this Machine; an edited or Funnel-enabled
+former route is left alone and the carrier moves to a new loopback port. It never
+runs Funnel or resets Serve. Private reachability alone never grants Loopflow
+access; the phone still needs its separate device grant.
+
+The enabled setting, endpoint and loopback port live in this Machine’s config.yaml.
+The existing supervisor starts the same service, which restores that listener.
+Failure to bind the mobile port leaves the local service running. `mobile --off`
+stops remote admission and existing remote connections, preserves local viewers,
+and records disabled state before cleanup. It removes only its unchanged owned
+Serve route. If Tailscale is unavailable, the disabled record preserves route
+ownership for a later cleanup retry; a service restart does not re-enable it.
+Device grants remain revocable independently of endpoint enablement.
+
+For isolated integration or an already configured host, `run --remote-port PORT`
+and `pair --endpoint HTTPS_ORIGIN` remain explicit manual controls. Normal pairing
+requires neither. Desktop setup controls and QR transfer are still forthcoming;
+this command is the shared host setup operation they will call.
 
 The private setup file contains a one-use ticket valid for ten minutes. It is
 credential material: transfer it directly to the intended phone, never commit it

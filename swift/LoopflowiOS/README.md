@@ -24,8 +24,8 @@ Disable `--fixture` to connect to a Machine. Sign into host Tailscale on both
 devices, enable the Machine service’s private HTTPS carrier, then import or paste
 its one-use setup file and choose **Connect Machine**.
 [Machine setup commands](../../rust/loopflow/src/machine_service/README.md#pair-a-phone-through-host-tailscale)
-currently require manual host setup; automatic discovery and QR pairing remain
-unfinished. The app saves the device grant in Keychain, pins the Machine identity
+now detect and configure signed-in host Tailscale automatically. Desktop setup
+controls and QR transfer remain unfinished; setup-file import/paste is available. The app saves the device grant in Keychain, pins the Machine identity
 on first bootstrap, reads actual open Tasks and attaches their recorded Session
 owners. It installs no CLI on the phone and never starts a provider.
 

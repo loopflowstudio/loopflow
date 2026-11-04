@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::{mpsc, Notify, Semaphore};
 
 use super::wire::{
     ErrorCode, Operation, Reply, Request, Response, MAX_CONNECTIONS, MAX_FRAME, MAX_REQUEST,
@@ -42,24 +42,25 @@ pub(super) async fn run(remote_port: Option<u16>) -> Result<()> {
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     // Both carriers dispatch the same operations after their own admission.
     // Remote access never connects to the private socket as a proxy Unix user.
-    let remote = async {
-        match remote_port {
-            Some(port) => {
-                super::remote::run(
-                    port,
-                    instance.clone(),
-                    executable_sha256.clone(),
-                    slots.clone(),
-                )
-                .await
-            }
-            None => std::future::pending::<Result<()>>().await,
+    let remote_port = remote_port.or_else(|| match super::mobile::configured() {
+        Ok(saved) => saved.filter(|config| config.enabled).map(|config| config.port),
+        Err(error) => {
+            tracing::warn!(%error, "Mobile configuration is unavailable; local service remains ready");
+            None
         }
-    };
+    });
+    let (remote_control, remote_requests) = mpsc::channel(8);
+    let remote = super::remote::manage(
+        remote_port,
+        remote_requests,
+        instance.clone(),
+        executable_sha256.clone(),
+        slots.clone(),
+    );
     tracing::info!(%instance, socket = %path.display(), "Machine service ready");
     tokio::select! {
         result = remote => result,
-        result = local(listener, instance.clone(), executable_sha256.clone(), slots.clone()) => result,
+        result = local(listener, instance.clone(), executable_sha256.clone(), slots.clone(), remote_control) => result,
     }
 }
 
@@ -68,6 +69,7 @@ async fn local(
     instance: Arc<String>,
     executable_sha256: Arc<String>,
     slots: Arc<Semaphore>,
+    remote_control: mpsc::Sender<super::remote::Control>,
 ) -> Result<()> {
     loop {
         let (socket, _) = listener.accept().await?;
@@ -86,9 +88,12 @@ async fn local(
         );
         let instance = instance.clone();
         let executable_sha256 = executable_sha256.clone();
+        let remote_control = remote_control.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            if let Err(error) = connection(socket, &instance, &executable_sha256).await {
+            if let Err(error) =
+                connection(socket, &instance, &executable_sha256, Some(remote_control)).await
+            {
                 tracing::warn!(%instance, %error, "Machine connection ended");
             }
         });
@@ -99,6 +104,7 @@ pub(super) async fn connection(
     mut socket: impl AsyncRead + AsyncWrite + Unpin,
     instance: &str,
     executable_sha256: &str,
+    remote_control: Option<mpsc::Sender<super::remote::Control>>,
 ) -> Result<()> {
     let bytes =
         tokio::time::timeout(Duration::from_secs(5), receive(&mut socket, MAX_REQUEST)).await??;
@@ -143,6 +149,7 @@ pub(super) async fn connection(
         instance,
         executable_sha256,
         request.operation,
+        remote_control,
     )
     .await;
     tracing::debug!(request = %id, %instance, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Machine request ended");
@@ -168,8 +175,22 @@ async fn operation(
     instance: &str,
     executable_sha256: &str,
     operation: Operation,
+    remote_control: Option<mpsc::Sender<super::remote::Control>>,
 ) -> Result<()> {
     let reply = match operation {
+        Operation::ConfigureRemote { port } => {
+            if let Some(control) = remote_control {
+                let (reply, result) = tokio::sync::oneshot::channel();
+                control.send(super::remote::Control { port, reply }).await?;
+                let port = result.await?.map_err(anyhow::Error::msg)?;
+                Reply::Remote { port }
+            } else {
+                Reply::Error {
+                    code: ErrorCode::Unsupported,
+                    message: "Remote access is configured on the Machine itself".into(),
+                }
+            }
+        }
         Operation::SessionOwner { session } => {
             let owner = tokio::task::spawn_blocking(move || -> Result<_> {
                 let registry = crate::store::read_existing_registry()?
@@ -392,7 +413,7 @@ mod tests {
     async fn incompatible_client_is_rejected_before_private_work_is_read() {
         let (mut client, server) = UnixStream::pair().unwrap();
         let worker =
-            tokio::spawn(async move { connection(server, "incarnation", "fixture").await });
+            tokio::spawn(async move { connection(server, "incarnation", "fixture", None).await });
         let bytes = serde_json::to_vec(&Request {
             id: "request-1".into(),
             version: VERSION + 1,

@@ -2,6 +2,7 @@
 pub mod admission;
 pub mod client;
 pub mod installation;
+pub mod mobile;
 mod remote;
 mod service;
 pub mod wire;

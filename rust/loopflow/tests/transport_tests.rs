@@ -4122,6 +4122,61 @@ fn machine_service_invalid_checkpoints_use_shared_watch_errors() {
 }
 
 #[test]
+fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable() {
+    let fixture = Fixture::new();
+    let mut service = MachineServiceProof::start(&fixture, false);
+    let instance = service.ready();
+    let (mut watch, initial) = service.request(
+        "watch",
+        json!({"kind":"subscribe","query":{
+        "read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":1}),
+    );
+    assert_eq!(initial["result"]["kind"], "reading");
+    let (_, enabled) = service.request("enable", json!({"kind":"configure_remote","port":0}));
+    let port = enabled["result"]["port"].as_u64().unwrap() as u16;
+    let mut remote = std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).unwrap();
+    remote
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let (_, again) = service.request("again", json!({"kind":"configure_remote","port":port}));
+    assert_eq!(again["result"]["port"], port);
+    service.request("off", json!({"kind":"configure_remote","port":null}));
+    match remote.read(&mut [0u8; 1]) {
+        Ok(0) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+        other => panic!("Disabling must close remote peers: {other:?}"),
+    }
+    machine_send(&mut watch, json!({"id":9}));
+    assert_eq!(machine_receive(&mut watch)["result"]["frame"]["answers"], 9);
+    assert_eq!(
+        service.ready(),
+        instance,
+        "Setup must not restart the local service"
+    );
+    drop(watch);
+
+    let config = fixture.home.path().join("config.yaml");
+    std::fs::write(&config, format!("mobile:\n  enabled: true\n  port: {port}\n  endpoint: https://fixture.tail.ts.net:8443\n")).unwrap();
+    service.restart();
+    service.ready();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_ok() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Saved mobile listener was not restored"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::fs::write(&config, format!("mobile:\n  enabled: false\n  port: {port}\n  endpoint: https://fixture.tail.ts.net:8443\n")).unwrap();
+    service.restart();
+    service.ready();
+    assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());
+}
+
+#[test]
 fn machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart() {
     machine_service_continuity(false);
 }

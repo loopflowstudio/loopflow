@@ -68,11 +68,12 @@ grant restores the software keyboard even if the earlier attachment hid it.
    passive reconnect, competing control/geometry and owner exit now pass over
    actual Tailscale WSS. The proof uses a real owner and a local stand-in program;
    it does not establish provider-specific IME behavior or manual Desktop UX.
-2. Make setup automatic when host Tailscale is already signed in: discover the
-   active installation/state, explain the exact missing step, preserve unrelated
-   Serve routes, and persist remote enablement through the existing service
-   installation authority. QR setup can replace manual file transfer. The foreground
-   service flag and setup file are an integration path, not finished onboarding.
+2. Put the automatic host setup operation into Desktop and add QR transfer on
+   iOS. The CLI now discovers signed-in host Tailscale, preserves existing routes,
+   enables the carrier in place and saves remote settings for supervised restart.
+   File import/paste works, but requiring a CLI command and file transfer is still
+   unfinished onboarding. Check first-certificate provisioning latency and real
+   permission/sign-in failures rather than assuming a running CLI means readiness.
 3. Replace per-repository sequential Task reads with a measured efficient path and
    connect shared replacement subscriptions. Keep stale/error state honest and
    cancel offscreen work. Do not create a second Work projection or event log.
@@ -144,3 +145,54 @@ skipped without its consumed ticket; its separate live pass is above). Five
 Machine-service transport tests passed; the isolated launchd test remains an
 explicit opt-in. The final diff contains the readiness fix, repeatable acceptance
 fixture and reconciled documentation, not a new Session execution path.
+
+### Automatic host setup implementation
+
+Keep one service installation authority. Add a same-user-only control operation
+for enabling/disabling its loopback carrier without restarting local Desktop
+connections. The remote carrier must reject this operation even for paired devices.
+Save the owned loopback port and Tailscale endpoint in Machine-local configuration
+for the next supervised launch. Setup detects a working signed-in host CLI (including
+renamed Mac app bundles), derives its DNS name and selects an unused HTTPS port.
+Reuse only a route matching Loopflow's recorded endpoint and backend; never reset
+Serve or overwrite an unrelated route, and reject Funnel on the selected endpoint.
+Persist only after the route is verified. Keep ticket generation in the existing
+admission code; no new listener, installation owner or pairing protocol.
+
+
+### Automatic setup proof — November 4, 01:00
+
+`lf machine service pair --name ... --output ...` now detects the working host
+Tailscale CLI and private DNS endpoint, obtains the selected existing service,
+enables its loopback carrier through a local-only operation, selects an unused
+HTTPS port and saves its configuration. The service restores enabled settings on
+startup; disabled state is saved before route cleanup. The paired remote protocol
+explicitly rejects configuration changes. Listener teardown closes only remote
+connections; local Work watches and retained owners keep running.
+
+The real-host proof used a private registry and a deliberate unrelated text route
+on 8443. Setup found the renamed Tailscale 2.app despite the broken PATH wrapper,
+selected 443 and preserved the unrelated route. Native pairing, Keychain identity
+pinning and repeated Work reads passed through the automatically configured
+endpoint: `swift/.build/ios/Logs/Test/Test-LoopflowiOS-2026.11.04_01-00-20--0800.xcresult`.
+Repeating setup kept the same local service instance; restarting the foreground
+service without a remote-port flag restored its saved listener. Disable removed
+only Loopflow’s route. The test grant was revoked, service stopped and the test
+route removed; Serve is back to its original empty configuration. The installed
+launchd registration path itself was not changed by this work.
+
+Focused Rust checks prove six Machine-service behaviors, route ownership including
+Funnel and foreground collisions, and local subscription continuity during
+listener changes. Native suite: 25 passed, one opt-in test skipped before its
+separate real-host run. Protocol fixtures round-trip in Rust and Swift. The
+complete native retained-owner proof passed again with the listener manager at
+01:06 (`Test-LoopflowiOS-2026.11.04_01-05-59--0800.xcresult`), including draft
+editing, passive reconnect, control handoff and one exact submission. Desktop's
+five shared protocol tests passed at 01:08. The final route-selection test and
+all-target Clippy check also passed. Temporary Serve routes were removed.
+
+Sources used for setup semantics:
+https://tailscale.com/docs/reference/tailscale-cli/serve
+https://github.com/tailscale/tailscale/blob/main/ipn/serve.go
+These establish persistent background routes and separate foreground configuration;
+Loopflow’s ownership/persistence behavior is verified by its own tests above.

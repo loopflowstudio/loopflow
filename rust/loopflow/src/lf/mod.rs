@@ -1313,10 +1313,17 @@ pub enum MachineServiceCommand {
     Ensure,
     /// Report local readiness without registering or starting anything.
     Status,
-    /// Write a one-use phone setup ticket to a new private file (valid for ten minutes).
-    Pair {
+    /// Configure private mobile access using this host's signed-in Tailscale installation.
+    Mobile {
+        /// Stop remote access and remove only Loopflow's unchanged Serve route.
         #[arg(long)]
-        endpoint: String,
+        off: bool,
+    },
+    /// Set up host Tailscale and write a one-use phone ticket (valid for ten minutes).
+    Pair {
+        /// Already configured HTTPS endpoint; omit to detect and set up this host.
+        #[arg(long)]
+        endpoint: Option<String>,
         #[arg(long)]
         name: String,
         #[arg(long)]

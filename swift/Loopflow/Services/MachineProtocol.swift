@@ -15,16 +15,20 @@ public struct MachineRequest: Encodable, Sendable {
 
 public enum MachineOperation: Encodable, Sendable {
     case bootstrap
+    case configureRemote(port: UInt16?)
     case sessionOwner(session: String)
     case read(ServedRead)
     case subscribe(ServedRead, generation: UInt64)
     case command(ServedWrite)
     case attach(owner: String)
 
-    private enum Keys: String, CodingKey { case kind, query, generation, change, owner, session }
+    private enum Keys: String, CodingKey { case kind, query, generation, change, owner, session, port }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
+        case .configureRemote(let port):
+            try box.encode("configure_remote", forKey: .kind)
+            try box.encode(port, forKey: .port)
         case .sessionOwner(let session):
             try box.encode("session_owner", forKey: .kind)
             try box.encode(session, forKey: .session)
@@ -53,6 +57,7 @@ public struct MachineResponse: Decodable, Sendable {
 }
 
 public enum MachineReply: Decodable, Sendable {
+    case remote(port: UInt16?)
     case bootstrap(version: Int, build: String, executableSHA256: String, machine: JSONValue, capabilities: [String], maxFrame: Int, maxConnections: Int)
     case read(String)
     case reading(generation: UInt64, frame: JSONValue)
@@ -62,13 +67,14 @@ public enum MachineReply: Decodable, Sendable {
     case error(code: String, message: String)
 
     private enum Keys: String, CodingKey {
-        case kind, version, build, machine, capabilities, output, generation, frame, stderr, code, message, owner
+        case kind, version, build, machine, capabilities, output, generation, frame, stderr, code, message, owner, port
         case traceID = "trace_id"
         case maxFrame = "max_frame", maxConnections = "max_connections", executableSHA256 = "executable_sha256"
     }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .kind) {
+        case "remote": self = .remote(port: try box.decodeIfPresent(UInt16.self, forKey: .port))
         case "bootstrap":
             self = .bootstrap(version: try box.decode(Int.self, forKey: .version), build: try box.decode(String.self, forKey: .build),
                               executableSHA256: try box.decode(String.self, forKey: .executableSHA256),

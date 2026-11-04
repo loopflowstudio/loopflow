@@ -1,9 +1,21 @@
 import Foundation
+import Loopflow
 import XCTest
 @testable import LoopflowiOS
 
 @MainActor
 final class MachinePairingTests: XCTestCase {
+    func testLocalMobileSetupCodecMatchesTheBackendFixture() throws {
+        let bundle = Bundle(for: Self.self)
+        let requestURL = try XCTUnwrap(bundle.url(forResource: "configure_remote", withExtension: "json", subdirectory: "machine"))
+        let request = MachineRequest(version: 1, id: "mobile-1", operation: .configureRemote(port: 0))
+        XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
+                       try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: requestURL)))
+        let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "machine"))
+        let response = try JSONDecoder().decode(MachineResponse.self, from: Data(contentsOf: replyURL))
+        guard case .remote(let port) = response.result else { return XCTFail("Expected listener port") }
+        XCTAssertEqual(port, 49250)
+    }
     func testTicketPreservesThePrivateEndpointAndRejectsOtherDestinations() throws {
         let token = String(repeating: "a", count: 64)
         let ticket = try PairingTicket.decode(data(endpoint: "https://machine.example.ts.net:8443", token: token))

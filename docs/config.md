@@ -219,10 +219,18 @@ there for later use.
 
 ```bash
 lf config catalog --json
-lf config show --skill implement --json
+lf config show --skill implement           # compact table of authored preferences
+lf config show --skill implement --explain # candidates, files, and winning reasons
+lf config show --skill implement --all     # include built-in defaults
 lf config show --graph release --step write-code --json
 lf context --json
 ```
+
+The table shows effective values and readable sources and targets. Color follows
+the terminal and respects `NO_COLOR`; piped output is plain text. Built-in-only
+settings stay hidden unless you pass `--all`; the effective agent always appears.
+Use `--explain` for each candidate, its authored key, file and winning reason.
+`--json` always includes every setting and candidate, unchanged by display filtering.
 
 Inspection shows the effective value, authored key, source, scope, target and file
 location. It explains why candidates won, lost, contributed or cleared earlier

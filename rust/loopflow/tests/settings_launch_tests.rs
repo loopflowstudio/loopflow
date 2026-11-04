@@ -1113,3 +1113,55 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
     assert_eq!(fs::read(home.path().join("config.yaml")).unwrap(), global);
     assert!(!child.join("lf.config.local.yaml").exists());
 }
+
+#[test]
+fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    fs::write(home.path().join("config.yaml"), "default_agent: codex\n").unwrap();
+    repo.create_file(".lf/skills/config-table-proof.md", "Inspect settings.\n");
+    repo.create_file(
+        ".lf/config.yaml",
+        "skills:\n  config-table-proof:\n    agent: claude\n    chrome: false\n",
+    );
+    let show = |flags: &[&str]| {
+        let mut args = vec!["config", "show", "--skill", "config-table-proof"];
+        args.extend_from_slice(flags);
+        let output = command(repo.path(), home.path(), &args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let table = show(&[]);
+    assert!(table.contains("SETTING") && table.contains("VALUE") && table.contains("FROM"));
+    assert!(
+        table.contains("claude") && table.contains("Shared project · skill config-table-proof")
+    );
+    assert!(table.contains("false"));
+    assert!(!table.contains("context_budgets.memory_bytes"));
+    assert!(!table.contains("\u{1b}[") && !table.contains("{\"kind\""));
+    assert!(!table.contains("an applicable agent choice wins"));
+    let explanation = show(&["--explain"]);
+    assert!(
+        explanation.contains("selected") && explanation.contains("an applicable agent choice wins")
+    );
+    assert!(
+        explanation.contains(".lf/config.yaml") && explanation.contains("$LF_HOME/config.yaml")
+    );
+    let all = show(&["--all"]);
+    assert!(all.contains("context_budgets.memory_bytes"));
+    let json: serde_json::Value = serde_json::from_str(&show(&["--json"])).unwrap();
+    assert_eq!(json[0]["settings"]["agent"]["value"], "claude");
+    assert_eq!(json[0]["settings"]["chrome"]["value"], false);
+    assert!(json[0]["settings"]["context_budgets.memory_bytes"].is_object());
+    assert_eq!(
+        json[0]["settings"]["agent"]["candidates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}

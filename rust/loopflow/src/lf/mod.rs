@@ -2611,7 +2611,7 @@ pub enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Explain effective preferences and their candidates without launching
+    /// Show effective preferences without launching
     Show {
         #[arg(long)]
         skill: Option<String>,
@@ -2619,8 +2619,8 @@ pub enum ConfigCommand {
         graph: Option<String>,
         #[arg(long, requires = "graph")]
         step: Option<String>,
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        output: commands::config::ShowOptions,
     },
     /// Print the configured participant display name.
     User {

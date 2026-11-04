@@ -1697,7 +1697,7 @@ fn run() -> anyhow::Result<()> {
                                 skill,
                                 graph,
                                 step,
-                                json,
+                                output,
                             },
                     }) => {
                         journal::mark_effect_free_read();
@@ -1710,7 +1710,7 @@ fn run() -> anyhow::Result<()> {
                             skill.as_deref(),
                             graph.as_deref(),
                             step.as_deref(),
-                            *json,
+                            output,
                         );
                     }
                     _ => {}
@@ -2860,7 +2860,7 @@ fn execute_command(
                 skill,
                 graph,
                 step,
-                json,
+                output,
             } => in_directory_runtime(args, |repo| {
                 loopflow::lf::commands::config::show(
                     repo,
@@ -2868,7 +2868,7 @@ fn execute_command(
                     skill.as_deref(),
                     graph.as_deref(),
                     step.as_deref(),
-                    *json,
+                    output,
                 )
             }),
             loopflow::lf::ConfigCommand::User { json } => {

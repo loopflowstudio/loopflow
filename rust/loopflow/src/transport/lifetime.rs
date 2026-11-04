@@ -20,14 +20,13 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 
 use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
-use crate::store::sqlite::SqliteStore;
 
 /// How often an owner looks at the clock and its executable.
 const POLL: Duration = Duration::from_secs(2);
@@ -79,7 +78,7 @@ impl Ending {
             return Ok(None);
         }
         let store = crate::journal::process_ledger()?;
-        if !store.owner_waits_for_person(owner)? {
+        if store.owner_retention(owner)?.is_some() {
             return Ok(None);
         }
         let (notice, successor) = match &self.change {
@@ -182,8 +181,13 @@ fn watch(
     end: &mpsc::Sender<Ending>,
     mut waker: &UnixStream,
 ) {
-    let mut store = Store::default();
+    let mut store = None;
+    let mut store_failure = None;
     let mut recorded_viewed = None;
+    let mut viewer_failure = None;
+    let mut repository_failure = None;
+    let mut decision = None;
+    let mut next_poll = Instant::now() + POLL;
     let mut last_output = SystemTime::now();
     let mut grace = Grace {
         limit: None,
@@ -191,7 +195,7 @@ fn watch(
         quiet_since: last_output,
     };
     loop {
-        match changes.recv_timeout(POLL) {
+        match changes.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
             Ok(activity) => {
                 let now = SystemTime::now();
                 if activity.output != grace.activity.output {
@@ -202,25 +206,51 @@ fn watch(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
+        // Activity updates the clock immediately but never accelerates file or
+        // store work. Output can arrive much faster than the policy's poll.
+        if Instant::now() < next_poll {
+            continue;
+        }
+        next_poll = Instant::now() + POLL;
+        if store.is_none() {
+            match crate::journal::process_ledger() {
+                Ok(opened) => {
+                    store = Some(opened);
+                    store_failure = None;
+                }
+                Err(error) => {
+                    failure(&mut store_failure, owner, "open Session store", &error);
+                }
+            }
+        }
+        let Some(store) = store.as_ref() else {
+            continue;
+        };
         let viewed = grace.activity.viewed;
         if recorded_viewed != Some(viewed) {
-            if let Some(store) = store.open(owner) {
-                match store.record_owner_viewers(owner, viewed) {
-                    Ok(()) => recorded_viewed = Some(viewed),
-                    Err(error) => {
-                        tracing::warn!(%error, %owner, viewed, "cannot record Session viewers; retrying");
-                    }
+            match store.record_owner_viewers(owner, viewed) {
+                Ok(()) => {
+                    recorded_viewed = Some(viewed);
+                    viewer_failure = None;
+                }
+                Err(error) => {
+                    failure(&mut viewer_failure, owner, "record Session viewers", &error);
                 }
             }
         }
         if terminal && grace.limit.is_none() {
-            if let Some(store) = store.open(owner) {
-                match store.process(owner) {
-                    Ok(Some(process)) => grace.limit = Some(limit(process.repo.as_deref())),
-                    Ok(None) => {}
-                    Err(error) => {
-                        tracing::warn!(%error, %owner, "cannot load Session repository for detached limit; retrying");
-                    }
+            match store.process(owner) {
+                Ok(process) => {
+                    grace.limit = process.map(|process| limit(process.repo.as_deref()));
+                    repository_failure = None;
+                }
+                Err(error) => {
+                    failure(
+                        &mut repository_failure,
+                        owner,
+                        "load Session repository",
+                        &error,
+                    );
                 }
             }
         }
@@ -237,21 +267,26 @@ fn watch(
             None => grace.expired(now),
         };
         if !quiet {
+            if let Some((change, path)) = &change {
+                retention(&mut decision, owner, *change, path, "command output".into());
+            } else {
+                decision = None;
+            }
             continue;
         }
-        let Some(store) = store.open(owner) else {
-            continue;
-        };
-        match store.owner_waits_for_person(owner) {
-            Ok(true) => {}
+        match store.owner_retention(owner) {
+            Ok(None) => decision = None,
             // A turn or a running Graph holds it: activity, and the grace
             // runs again from here.
-            Ok(false) => {
+            Ok(Some(reason)) => {
+                if let Some((change, path)) = &change {
+                    retention(&mut decision, owner, *change, path, format!("{reason:?}"));
+                }
                 grace.quiet_since = now;
                 continue;
             }
             Err(error) => {
-                tracing::warn!(%error, %owner, "cannot judge whether the Session waits for a person");
+                failure(&mut decision, owner, "judge Session retention", &error);
                 continue;
             }
         }
@@ -270,32 +305,30 @@ fn watch(
     }
 }
 
-/// The process ledger, opened when first needed and again after a failure.
-#[derive(Default)]
-struct Store {
-    open: Option<SqliteStore>,
-    failed: Option<String>,
+pub(super) fn failure(
+    previous: &mut Option<String>,
+    owner: &LfProcessId,
+    operation: &str,
+    error: &impl std::fmt::Display,
+) {
+    let message = format!("{operation}: {error}");
+    if previous.as_ref() != Some(&message) {
+        tracing::warn!(%owner, %message, "Session policy failed; retrying at the next poll");
+        *previous = Some(message);
+    }
 }
 
-impl Store {
-    fn open(&mut self, owner: &LfProcessId) -> Option<&SqliteStore> {
-        if self.open.is_none() {
-            match crate::journal::process_ledger() {
-                Ok(store) => {
-                    self.open = Some(store);
-                    self.failed = None;
-                }
-                Err(error) => {
-                    let text = error.to_string();
-                    // The same failure every poll is one line, not a flood.
-                    if self.failed.as_ref() != Some(&text) {
-                        tracing::warn!(%error, %owner, "Session owner cannot read the store; judging again later");
-                        self.failed = Some(text);
-                    }
-                }
-            }
-        }
-        self.open.as_ref()
+fn retention(
+    previous: &mut Option<String>,
+    owner: &LfProcessId,
+    change: Change,
+    path: &Path,
+    reason: String,
+) {
+    let message = format!("{change}: {reason}");
+    if previous.as_ref() != Some(&message) {
+        tracing::warn!(%owner, ?path, %change, %reason, "retaining Session with obsolete lf");
+        *previous = Some(message);
     }
 }
 

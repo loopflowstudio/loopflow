@@ -12,6 +12,16 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
+/// Why a Session owner cannot retire without losing work or native input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnerRetention {
+    NativeInput,
+    RunningGraph,
+    MissingSession,
+    HeadlessRun,
+    LiveTurn,
+}
+
 /// The Graph whose process recorded, as a step, the Process that captured session
 /// `s`'s current input. Sessions carry no Graph column of their own.
 macro_rules! session_graph {
@@ -591,23 +601,22 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Whether every Session execution owner `owner` holds is a standalone
-    /// interactive conversation waiting for a person. A step of a running
-    /// Graph, a headless Run, or a turn in progress keeps it running; a Graph
-    /// that finished holds nothing.
-    pub(crate) fn owner_waits_for_person(
+    /// What keeps execution owner `owner` running. None means its Sessions are
+    /// standalone interactive conversations waiting for a person; finished
+    /// Graphs hold nothing.
+    pub(crate) fn owner_retention(
         &self,
         owner: &crate::id::LfProcessId,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<OwnerRetention>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         if super::native_input::pending(&conn, owner)? {
-            return Ok(false);
+            return Ok(Some(OwnerRetention::NativeInput));
         }
         // A running Graph started inside an owner, as from a terminal, holds
         // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
         // every Process.
-        Ok(conn.query_row(
+        let reason: Option<i64> = conn.query_row(
             &format!(
                 "WITH RECURSIVE graph_ancestors(id) AS (
                      SELECT p.parent_lf_process_id FROM graph_processes f
@@ -615,19 +624,35 @@ impl SqliteStore {
                          WHERE p.completed_at IS NULL
                      UNION SELECT p.parent_lf_process_id FROM processes p
                          JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT ?1 NOT IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                 AND EXISTS(SELECT 1 FROM agent_sessions s
+                 SELECT CASE
+                 WHEN ?1 IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
+                     OR EXISTS(SELECT 1 FROM agent_sessions s
+                         JOIN processes g ON g.id={SESSION_GRAPH}
+                         WHERE s.transport_lf_process_id=?1 AND g.completed_at IS NULL)
+                     THEN 1
+                 WHEN NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
-                 AND NOT EXISTS(SELECT 1 FROM agent_sessions s
+                     THEN 2
+                 WHEN EXISTS(SELECT 1 FROM agent_sessions s
+                     WHERE s.transport_lf_process_id=?1 AND s.interactive=0)
+                     THEN 3
+                 WHEN EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1
-                     AND (s.interactive=0
-                         OR EXISTS(SELECT 1 FROM processes g
-                             WHERE g.id={SESSION_GRAPH} AND g.completed_at IS NULL)
-                         OR (s.completed_at IS NULL AND {TURN_LIVE})))"
+                         AND s.completed_at IS NULL AND {TURN_LIVE})
+                     THEN 4
+                 END"
             ),
             [owner.as_str()],
             |row| row.get(0),
-        )?)
+        )?;
+        Ok(match reason {
+            None => None,
+            Some(1) => Some(OwnerRetention::RunningGraph),
+            Some(2) => Some(OwnerRetention::MissingSession),
+            Some(3) => Some(OwnerRetention::HeadlessRun),
+            Some(4) => Some(OwnerRetention::LiveTurn),
+            Some(value) => return Err(invalid(format!("unknown owner retention reason {value}"))),
+        })
     }
 
     /// The unfinished Sessions execution owner `owner` holds, by id.

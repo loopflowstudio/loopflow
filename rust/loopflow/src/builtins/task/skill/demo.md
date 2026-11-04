@@ -45,7 +45,21 @@ The page is a view; the Markdown note keeps the record.
 
 Discuss the feedback, revised artifact paths and remaining work in the ongoing
 conversation. Save their exact paths and a short takeaway with the review evidence.
-The caller chooses further work; this demo closes no Session and restarts no Graph.
+The caller chooses further work; preserve their Session and Graph.
+
+Before launching a disposable demo, copy its complete runtime (the whole app
+bundle when applicable) to a unique private fixture root outside rebuildable
+output. Keep its private Machine, repository and provider history there too.
+Record the root, Session, exact owner identities and teardown command in the demo
+note. Leave that root intact while its owners live, including during rebuilds.
+
+After review, stop only the demo's verified owners through the existing Session
+or process controls and confirm they have exited before removing generated output.
+Keep durable conversation history. If review keeps a draft or pending request, or
+teardown fails or is interrupted, retain the fixture in place and record the
+remaining owners and next teardown action. Closing a viewer is not teardown.
+Cleanup-selected output uses the existing cleanup owner's stop-before-delete
+policy; do not add a cleaner or signal by name.
 
 On a headless surface, run the same demonstration autonomously. If required
 product judgment or absent-user action prevents the proof, explain the exact

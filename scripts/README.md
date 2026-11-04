@@ -164,7 +164,9 @@ a warning and never replaces the underlying test result. Schema-3 records also
 carry child CPU, minimum observed free disk, build bytes, and source-attributed
 growth. A product assertion remains a product failure; a stopped phase under
 sustained macOS `syspolicyd`/`trustd`/`amfid`/`taskgated` pressure is reported as
-host-security pressure with the product result explicitly unproven.
+host-security pressure with the product result explicitly unproven. Remaining
+suites stay unstarted and recorded as `not_run`; rerun after the pressure clears.
+An ordinary product failure still allows independent suites to run.
 
 Read the same gate evidence through the daily operator graph:
 

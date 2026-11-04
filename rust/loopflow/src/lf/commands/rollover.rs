@@ -411,7 +411,7 @@ async fn owner_disposition(
     if sessions.is_empty() {
         return stays("keeps its lf until it exits");
     }
-    let turn_cut_off = !store.owner_waits_for_person(&process.id)?;
+    let turn_cut_off = store.owner_retention(&process.id)?.is_some();
     if turn_cut_off && answering(&process.id) {
         return stays("a turn, pending request, Graph step or headless Run holds the conversation");
     }

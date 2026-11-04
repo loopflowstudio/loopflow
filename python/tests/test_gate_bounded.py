@@ -206,6 +206,35 @@ def test_failing_phase_reports_actionable_failure(tmp_path):
     assert outcome.failure_kind == "product"
 
 
+@pytest.mark.parametrize("security_pressure", [True, False])
+def test_security_pressure_stops_later_suites_but_product_failure_does_not(
+    tmp_path, monkeypatch, capsys, security_pressure
+):
+    evidence_root = tmp_path / "evidence"
+    marker = tmp_path / "later-suite-ran"
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: evidence_root)
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+    monkeypatch.setattr(
+        gate,
+        "RESOURCE_ENVELOPE",
+        dict(gate.RESOURCE_ENVELOPE, sample_interval_seconds=0.05, host_security_samples=2),
+    )
+    monkeypatch.setattr(gate, "_host_security_pressure", lambda: ("syspolicyd", 350.0))
+    first = _plan(_cmd(["sleep", "60"] if security_pressure else ["false"], "first"))
+    later = _plan(_cmd(["touch", str(marker)], "later"))
+    later.suite.name = "later"
+
+    assert gate.run_plans([first, later]) == 1
+
+    record = json.loads(next((evidence_root / "changed").glob("*.json")).read_text())
+    assert [phase["status"] for phase in record["phases"]] == (
+        ["host_pressure", "not_run"] if security_pressure else ["failed", "passed"]
+    )
+    assert marker.exists() is not security_pressure
+    assert "later/later" in capsys.readouterr().out
+
+
 def test_passing_phase_returns_measured_outcome(tmp_path):
     outcome = gate._run_command(_cmd(["bash", "-c", "exit 0"], "ok-probe"), tmp_path, "probe")
     assert outcome.status == "passed"

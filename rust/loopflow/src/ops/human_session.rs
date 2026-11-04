@@ -1180,7 +1180,7 @@ fn attaches(
     let Some((pid, executable)) = superseded else {
         return Ok(answering(owner));
     };
-    let turn_cut_off = !store.owner_waits_for_person(owner)?;
+    let turn_cut_off = store.owner_retention(owner)?.is_some();
     if turn_cut_off && answering(owner) {
         return Ok(true);
     }

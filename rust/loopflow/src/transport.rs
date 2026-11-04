@@ -1,6 +1,8 @@
 //! A detached terminal owns an execution, including its capture and native client.
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
+#[cfg(test)]
+mod input_retry_tests;
 mod lifetime;
 #[cfg(test)]
 mod lifetime_tests;
@@ -40,6 +42,8 @@ const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Continuous output tells the lifetime policy once per pause, not per read.
 const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
+/// A failed store must not spin on the PTY's write readiness.
+const INPUT_RETRY: Duration = Duration::from_secs(2);
 
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
@@ -751,6 +755,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut size = (24, 80);
     let mut pending_input = VecDeque::new();
     let mut recorded_input = 0;
+    let mut input_retry_at = None;
+    let mut input_failure = None;
+    let mut ending_failure = None;
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -776,6 +783,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut planning = None;
     loop {
+        #[cfg(test)]
+        input_retry_tests::poll();
         #[cfg(test)]
         lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
         let mut replaced = Vec::new();
@@ -1118,14 +1127,32 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             });
         }
         place_events(&output, &mut viewers, announced);
-        if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
+        if let Some(input) = input.as_mut().filter(|_| {
+            !pending_input.is_empty() && input_retry_at.is_none_or(|at| Instant::now() >= at)
+        }) {
             let recorded = if terminal && recorded_input < pending_input.len() {
                 let bytes = &pending_input.make_contiguous()[recorded_input..];
-                crate::journal::process_ledger()
+                match crate::journal::process_ledger()
                     .and_then(|store| store.record_owner_input(&id, bytes))
-                    .map(|()| recorded_input = pending_input.len())
-                    .inspect_err(|error| tracing::warn!(%error, "cannot retain terminal input; retrying before delivery"))
-                    .is_ok()
+                {
+                    Ok(()) => {
+                        recorded_input = pending_input.len();
+                        input_retry_at = None;
+                        if input_failure.take().is_some() {
+                            tracing::info!(owner = %id, "terminal input store recovered; delivering queued input");
+                        }
+                        true
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        if input_failure.as_ref() != Some(&message) {
+                            tracing::warn!(%error, owner = %id, "cannot retain terminal input; retrying in 2s before delivery");
+                            input_failure = Some(message);
+                        }
+                        input_retry_at = Some(Instant::now() + INPUT_RETRY);
+                        false
+                    }
+                }
             } else {
                 true
             };
@@ -1326,13 +1353,16 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         #[cfg(test)]
         lifetime_tests::before_judgment();
         if let Ok(ending) = ending.try_recv() {
-            let event = ending
-                .confirm(&id, observed, !pending_input.is_empty())
-                .inspect_err(|error| {
-                    tracing::warn!(%error, owner = %id, "cannot confirm Session ending; judging again later");
-                })
-                .ok()
-                .flatten();
+            let event = match ending.confirm(&id, observed, !pending_input.is_empty()) {
+                Ok(event) => {
+                    ending_failure = None;
+                    event
+                }
+                Err(error) => {
+                    lifetime::failure(&mut ending_failure, &id, "confirm Session ending", &error);
+                    None
+                }
+            };
             if let Some(event) = event {
                 end_viewers(&mut viewers, event);
                 snapshot::leave(&id, &output);
@@ -1360,13 +1390,16 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 Connection::Open(_) => None,
             })
             .chain(deadline)
+            .chain(input_retry_at)
             .min();
         wait_for_activity(
             &listener,
             &wake,
             &viewers,
             &readers,
-            input.as_ref().filter(|_| !pending_input.is_empty()),
+            input
+                .as_ref()
+                .filter(|_| !pending_input.is_empty() && input_retry_at.is_none()),
             deadline.map(|at| at.saturating_duration_since(Instant::now())),
         );
     }
@@ -1436,7 +1469,10 @@ fn wait_for_activity(
         fds.push(pollfd(input.as_raw_fd(), libc::POLLOUT));
     }
     let timeout = timeout.map_or(-1, |timeout| {
-        libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX)
+        // poll takes whole milliseconds: rounding down spins at the end of
+        // every retry deadline instead of sleeping until it is due.
+        let millis = timeout.as_nanos().div_ceil(1_000_000);
+        libc::c_int::try_from(millis).unwrap_or(libc::c_int::MAX)
     });
     // SAFETY: poll reads a live array of exactly fds.len() descriptors.
     unsafe {

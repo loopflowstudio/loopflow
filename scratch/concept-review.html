@@ -32,11 +32,11 @@
   and <code>swift/LoopflowMac/{DesktopActions,TaskFileDocument}.swift</code>.
 </header>
 <main>
-<h1>Where should docs open automatically?</h1>
-<p><strong>Open product choice.</strong> Jack Heart proposed Desktop-only automatic
-presentation after seeing the original files open in Rex. The accepted contract
-still presents through every supported attached host. This headless review cannot
-accept the proposal; loop-or-next owns the next routing decision.</p>
+<h1>Docs open automatically in Desktop.</h1>
+<p><strong>Accepted November 4.</strong> Jack Heart selected Desktop-only automatic
+presentation in the primary conversation. The workflow presents original docs in
+an already attached Desktop Files view; elsewhere it reports their paths and
+continues. Explicit terminal file opening remains supported.</p>
 
 <blockquote>Opening an editable file does not guarantee a rendered reading view.
 Rex's observed creators provide terminals. Desktop renders Markdown and HTML,
@@ -46,7 +46,7 @@ but full remote asset behavior remains unproved and its client is macOS.</blockq
 <pre>Choose a direction → implement → review → implement again</pre>
 <p>The graph did not begin with an explicit pass writing the original user docs.</p>
 
-<h2>Accepted and implemented on this branch</h2>
+<h2>Original implementation · explicit opening retained</h2>
 <pre>Choose a direction → write the real docs → implement → review
                                              ↑          │
                                              └──────────┘
@@ -70,51 +70,38 @@ No attached host means nothing opens. No extra review approval stop is added.</p
 </dl>
 
 <section>
-<h2>Proposed alternative · not accepted</h2>
+<h2>Accepted automatic workflow</h2>
 <pre>Write the real docs → attached Desktop: show Files
                     → elsewhere: report paths
                     → implementation continues</pre>
-<p>Proposed usage text:</p>
+<p>Usage:</p>
 <blockquote>Review and edit the original docs while work continues. In an attached
 Desktop, they open in Files. Elsewhere, the conversation lists their paths. Save
 corrections for implementation; discuss urgent changes in the Task conversation.</blockquote>
-<p>Proposed skill instruction:</p>
+<p>Skill policy:</p>
 <blockquote>Present the original docs only in an already attached Desktop Files
 view; otherwise report their paths and continue. Never launch a host to show them.</blockquote>
 <p>This changes automatic presentation in the workflow. It does not authorize
 removing explicit terminal file opening or building a universal rendered viewer.
 Both alternatives preserve the original files, drafts, saved corrections, existing
 Sessions, implementation loop and LOO-498 stack.</p>
-<p>If accepted, change the workflow's presentation policy and its usage/skill
-wording. Keep explicit <code>lf open --file</code>, Desktop's existing
+<p>The workflow presentation policy and its usage/skill wording now follow this decision. Keep explicit <code>lf open --file</code>, Desktop's existing
 <code>files(path)</code> action and current-viewer transport ownership. A failed
 or absent Desktop leaves paths available without launching another host. No
-new review record, file store or viewer service follows from this proposal.</p>
+new review record, file store or viewer service follows from this decision.</p>
 </section>
 
 <section>
 <h2>Proof that still matters</h2>
-<p>The direct development CLI visibly opened the files in Rex. The isolated
-candidate-owner probe demonstrated draft preservation and saved-file readback.
-Neither proves the existing configured conversation's repaired agent route.</p>
-<p>Through that configured route: present the original docs, preserve an unsaved
-correction on repeated presentation, save it, and show implementation consuming
-it. Then fail presentation and reopen the intact files. Another checkout, a lost
-draft, passive-viewer redirection or rewriting docs on iteration is a counterexample.
-For Desktop-only automation, an automatically created terminal pane is another.</p>
-</section>
-
-<section>
-<h2>Unresolved decision</h2>
-<p>The current diff implies no further model change under the accepted contract.
-This review reports an <strong>open product choice</strong> to loop-or-next;
-configured-route acceptance remains separate under either answer.</p>
-<ol>
-  <li>Where should <code>write-docs</code> automatically present files?
-  <p><strong>1a.</strong> Every supported attached host, preserving the accepted contract.</p>
-  <p><strong>1b.</strong> Attached Desktop Files only; report paths elsewhere.</p>
-  </li>
-</ol>
+<p>In an attached Desktop, present the original Markdown/HTML, preserve an active
+unsaved draft on repeat, save and read the correction from the original file,
+and recover a failed presentation while continuing the same conversation.
+Elsewhere, report paths without automatically launching a terminal editor,
+host, browser or conversation. Configured Rex automatic presentation is no
+longer an acceptance requirement.</p>
+<p>The earlier direct CLI and isolated Rex probes remain evidence for explicit
+file opening. Headless Files tests cover rendering and draft preservation;
+configured Desktop experience remains for demo/review after compatible installation.</p>
 </section>
 </main>
 </html>

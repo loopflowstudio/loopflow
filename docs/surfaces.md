@@ -48,6 +48,11 @@ command never launches a host as a fallback.
 Terminal file presentation currently requires a local checkout; Desktop Files
 also supports Tasks on another Machine.
 
+The docs-first workflow automatically presents files only in an already attached
+Desktop Files view, which renders Markdown and HTML and preserves active drafts.
+Elsewhere it reports their paths and continues. Explicit `lf open --file` retains
+the current-host behavior above.
+
 ## Share a link
 
 ```bash

@@ -3,9 +3,9 @@
 Jack Heart confirmed the development CLI opened the actual docs, then requested
 better rendered Markdown and HTML viewers. They must work cross-platform and
 cross-machine. Ignore the withdrawn “vim” message; no Vim-specific direction
-was accepted. Jack subsequently proposed making automatic file opening exclusive
-to Loopflow Desktop. That proposal is being decided in the primary conversation;
-it has not yet changed the accepted design or shipping scope.
+was accepted. Jack subsequently selected Desktop-only automatic file opening in the primary
+conversation on November 4. This is accepted workflow scope; explicit
+`lf open --file` remains available in the current host.
 
 ## Evidence
 
@@ -30,7 +30,7 @@ it has not yet changed the accepted design or shipping scope.
   reader. It does not meet the general HTML/CSS/interactive-page requirement.
   Mac-only preview apps do not satisfy Jack's platform constraint.
 
-## Proposed boundary
+## Accepted boundary — November 4
 
 Write and preserve the real docs on every Machine. Automatically present only
 inside an already attached Desktop Files view; otherwise provide paths while

@@ -47,7 +47,7 @@ The parent retains these unresolved obligations:
 
 The newer parent reduces host storage to locators and creation receipts, revises
 the draft migration, and keeps following append-only during its subscription.
-It includes LOO-723's coherent installer. These changes are integrated here; fresh focused verification is pending. Dropping named-copy reuse or coordinated handoff remains an unaccepted
+It includes LOO-723's coherent installer. These changes are integrated here; `write-docs-first.md` records focused verification. Dropping named-copy reuse or coordinated handoff remains an unaccepted
 proposal; the ownership simplification did not remove those obligations.
 
 The failed configured demo and prepared native split Session are retained in

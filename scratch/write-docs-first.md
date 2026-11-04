@@ -3,9 +3,9 @@
 Jack Heart requested integration on November 4, 2026, preserving the source
 branch, checkout, conversation and draft PR #1810 at
 `5e6d3b1fc1ad23bb0fed51f4c0ad9815fed67648`. LOO-728 remains stacked on LOO-498
-(PR #1814); its own PR #1817 is open. Merge
-`c136addfad33b65a4080f609f12da2c1a663b85c` includes parent
-`b8aac2ef139ff34213685a10137572e1498f5e4f` and upstream `ac8e088f5f` (#1809).
+(PR #1814); its own PR #1817 is open. Loopflow merge `0cb4421cb8` integrates
+published parent `df3b5e810d3841a19bc5911c332fb42f23193d46`, including the
+coherent installer and revised draft workspace schema.
 This records integration, not parent acceptance or authorization to land it.
 
 ## Accepted experience and owners
@@ -22,7 +22,16 @@ Implementation reads saved docs initially and before finishing, preserving
 corrections. Unsaved drafts belong to the editor. Immediate direction belongs
 in the Task conversation; no live synchronization is promised.
 
-`lf open --file PATH`, repeatable, presents the original files through
+Jack Heart accepted Desktop-only automatic presentation on November 4 in
+comment `50456e16-156c-424e-8fa1-67030496483f`, superseding automatic terminal
+presentation. `write-docs` uses `lf open --host desktop --file PATH` for the
+original files. An already attached Desktop Files view renders Markdown/HTML
+and preserves its draft/attention policy. Absent, unavailable or unmatched
+Desktop means report the actual paths and continue, without a terminal/editor,
+browser, host or conversation fallback. This changes workflow presentation only.
+No universal rendered viewer or new approval stop is included.
+
+Explicit `lf open --file PATH`, repeatable, still presents the original files through
 `open::files::run` without starting a host or conversation:
 
 - Desktop's `files(path)` action uses `TaskFilesStore::presentFile` and the
@@ -56,6 +65,9 @@ Completed cuts and their surviving owners:
   one Desktop batch/pane and shared Rex traversal. Reports borrow paths;
   canonical paths are for comparison, recorded checkout spelling for execution.
 
+The superseded automatic current-host command and its terminal-demo acceptance
+requirement are removed from the skill, user docs and active plan. Explicit
+terminal file opening and its regression tests remain required behavior.
 No code predecessor or exclusive fixture remains to delete. The current diff
 review found no further worthwhile code reduction. Repeated demo instructions
 and diagnoses now live once in `docs-first-demo.md`; superseded iteration
@@ -64,67 +76,47 @@ host launcher or persisted review lifecycle.
 
 ## Remaining delivery and acceptance
 
-November 4 reconciliation found parent PR #1814 still OPEN, now at
-`df3b5e810d3841a19bc5911c332fb42f23193d46`. This checkout still contains
-`b8aac2ef13`. The newer parent includes LOO-723's coherent installer and revises
-the draft `rex_workspaces` schema, native creation receipts, follower behavior
-and workspace documentation. Synchronizing that parent through Loopflow and
-resolving the overlapping file-presentation code/docs remains substantial
-integration work. The finished parent migration and rebuilt catalog must agree
-before promotion; the existing candidate's preflight describes the older schema.
+November 4 integration synchronized published parent
+`df3b5e810d3841a19bc5911c332fb42f23193d46` through `lf sync --manual`.
+Local contributions were checkpointed first. The parent's coherent installer,
+finished draft `rex_workspaces` schema, native locators/creation receipts and
+append-only follower are retained. Presentation helpers continue to use current
+viewer placement and the shared editor policy; they add no host-record authority.
+The surfaces conflict removes the superseded duplicate workspace guide while
+retaining original-file presentation. `docs/workspaces.md` owns workspace behavior.
+Parent scratch is preserved at that revision; this checkout retains concise
+LOO-728 notes and its own concept review. Focused verification is recorded below.
 
-The configured route still fails before opening an editor. The previous
-implementation pass repaired the candidate's migration order by restoring full
-Git history and rebuilding. Promotion now fails solely on LOO-498's unmerged
-`rex_workspaces` migration; this Task cannot land that parent or bypass the
-shared-store boundary. Exact commands, owner reply and historical failures:
-[docs-first-demo.md](docs-first-demo.md).
+Parent delivery still precedes supported shared-store promotion; its unmerged
+migration cannot be bypassed or landed under LOO-728's approval. The coherent
+installer is integrated but not installed. Source and parent PRs remain intact.
+Configured terminal auto-presentation is no longer an acceptance prerequisite;
+its failed attempts and bounded direct/native successes remain historical evidence
+in `docs-first-demo.md`.
 
-After parent delivery, the existing installation path must deliver a coherent
-build containing this stack and transition the same Session to a compatible
-owner/viewer. LOO-723's `dfd454cfc783b5ff3014d5a398ccf1627b427d11`
-(#1815, present in local `origin/main`) promotes matching Desktop/CLI artifacts
-while retaining running helpers and Graphs. Its `release/README.md` distinguishes
-installed bytes from owner processes; eligible owners use existing idle rollover.
-That source is now in the newer parent, but has not been integrated or installed
-in LOO-728. Newer main alone does
-not contain this stack or prove viewer placement. LOO-723 also records Jack
-Heart's report of lost input/crashes after reopening, with cause unresolved and
-hooks/reconnect owned by LOO-724. Require a completing conversation turn, not
-just helper survival, to establish continuity.
-
-Demo/review must use the configured agent route with provenance intact:
-
-1. Open the original docs beside the retained conversation.
-2. Repeat presentation while an unsaved edit exists; preserve its editor/draft.
-3. Save and show implementation reading that correction from the original file.
-4. Recover a failed presentation using those files; complete a conversation turn.
-
-Preserve Session identity, provider history, active work and drafts through the
-transition. Another checkout, removed agent provenance, startup-placement
-fallback, passive-viewer redirection or rerunning `write-docs` invalidates proof.
-Jack Heart reserved interactive Rex demo for the primary conversation. Existing
-ship authorization is unchanged. Do not repeat an unchanged implementation/demo
-loop before the delivery prerequisite is met.
+Remaining demo/review proof follows the accepted Desktop-only workflow: present
+original Markdown/HTML in an already attached Files view, preserve an active draft
+on repeat, save and read the correction from the same original, recover a failed
+presentation, and continue the same conversation. Outside attached Desktop,
+report paths and keep working without launching anything. Headless checks cover
+rendering/drafts and no-Desktop behavior; mounted/configured proof belongs to the
+primary conversation when a compatible installation is available. Existing
+Sessions, provider history, source work and recovery bytes remain preserved.
 
 ## Direction and dependency boundaries
 
-Delegated judgment retained Jack Heart's accepted current-host design. His
-later Desktop-only automatic-presentation proposal remains unaccepted and does
-not block this implementation. [rendered-file-viewers.md](rendered-file-viewers.md)
-retains the research; `concept-review.html` contains proposed wording. Terminal
-editing is not rendered viewing. Desktop's macOS client and unproved remote
-relative assets do not establish universal rendering. If the proposal is later
-accepted, change automatic workflow presentation and its docs while preserving
-explicit `lf open --file` and existing Files/transport owners; it authorizes no
-new viewer server today.
+The primary conversation accepted the Desktop-only choice; there is no unresolved
+presentation-policy blocker. `rendered-file-viewers.md` retains research and
+`concept-review.html` records the accepted choice. Explicit terminal editing
+remains distinct from rendered viewing. Desktop's macOS client and unproved
+remote relative assets establish no universal renderer.
 
 Jack Heart's November 4 parent decision assigns native restoration and shells
 to Rex: LF launches templates, preserves retained destinations and never closes
 Rex shells. Retained Task Session terminals prevent cleanup regardless of focus;
 confirmed final removal releases that hold, while unknown inventory does not.
 This supersedes the inherited full-restoration and Rex-settlement requirements,
-without narrowing docs presentation or accepting the Desktop-only proposal.
+without changing the separate Desktop-only docs-workflow decision.
 LOO-498 still owns native split, shared retention integration, remote routing
 and configured reuse proof. `rex-workspace.md` records the revised dependency;
 `workspace-demo.md` retains dated evidence. LOO-728 preserves source PR #1810, parent PR #1814 and
@@ -139,7 +131,7 @@ the parent's November 3 Program Status from `b8aac2ef13` verbatim; see
 
 ## Validation
 
-Applicable merged-tree evidence: graph compilation/Task progression (13 tests),
+Earlier integration evidence (before the new parent sync): graph compilation/Task progression (13 tests),
 two changed world scenarios, prompt goldens, action DTO and README/index sync
 passed. Headless Desktop passed 55 TaskFiles/pane/DTO tests; optional display
 diagnostics were skipped. The isolated real-Rex candidate probe passed opening,
@@ -148,10 +140,7 @@ draft preservation, saved-file readback and missing-file recovery. Jack Heart's
 agent-route acceptance; [docs-first-dev-demo.md](docs-first-dev-demo.md) retains
 that demo, screenshots and its limits.
 
-Check (realign, November 4): `git diff --check` and `lf context` pass;
-production code is unchanged, so prior focused results apply. Gate owns affected
-suites and Clippy after a code change; demo/review owns configured proof after
-parent delivery, compatible installation and same-Session owner transition.
+Check (implement, November 4): `cargo build -p loopflow --bin lf`, migration-history check, fmt, and `cargo clippy --all-targets -- -D warnings` pass; `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1` passed 20 checks and skipped 2 native probes, with one flaky mock-argv fixture removed after its 2s timeout; the focused `work_open_tests::desktop_file_presentation_without_desktop_never_falls_back_to_a_terminal -- --exact` rerun passes after cleanup; `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`, `git diff --check`, and `lf context` pass. Existing unchanged Files rendering/draft checks remain applicable; gate owns broader affected suites and demo/review owns configured Desktop experience after compatible installation.
 
 Historical plan/checks: `13e7d5dac8:scratch/write-docs-first.md`; publication:
 `c136addfad33b65a4080f609f12da2c1a663b85c:scratch/write-docs-first.md`.

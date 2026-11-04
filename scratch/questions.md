@@ -6,9 +6,10 @@ explicit target because sync selects the stack parent. A local Git merge of the
 pinned source prepared integration without changing that parent; Loopflow
 finalized it in `13e7d5dac8`. No source branch, checkout or PR was removed.
 
-Retain the accepted current-host design. Jack Heart's Desktop-only automatic
-presentation proposal is unaccepted; delegated judgment confirmed that it does
-not block implementation. `rendered-file-viewers.md` retains the proposal.
+Jack Heart accepted Desktop-only automatic presentation in the primary
+conversation on November 4 (comment `50456e16-156c-424e-8fa1-67030496483f`).
+It supersedes the earlier current-host workflow; explicit `lf open --file` remains.
+`write-docs-first.md` records the accepted scope; no policy choice remains open.
 The 12:50 PST steer reserves interactive Rex demo for the primary conversation;
 existing ship authorization and parent boundaries remain unchanged.
 
@@ -44,3 +45,15 @@ dependency notes. Full parent notes and concept review remain at
 `df3b5e810d3841a19bc5911c332fb42f23193d46:scratch/`. The surfaces conflict
 keeps `docs/workspaces.md` as the sole workspace guide and retains LOO-728's
 original-file presentation section. The recovery swap remains ignored locally.
+
+Proposed Wave-memory correction for its authorized owner: the inherited LOO-728
+paragraph still describes automatic current-host presentation. Jack Heart's
+November 4 decision limits automatic presentation to attached Desktop Files
+while preserving explicit terminal file opening. Wave memory is otherwise
+unchanged by this implementation step beyond the parent merge.
+
+Focused integration exposed the existing tmux window fixture's two-second
+subprocess deadline (20 other checks passed, 2 native probes skipped). Its
+assertions inspect a mock command's argv, so the flaky wiring test was removed
+under AGENTS.md rather than adding retries or changing production timeouts.
+The automatic routing and original-file tmux behavior tests remain.

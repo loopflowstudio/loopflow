@@ -1,7 +1,7 @@
 ---
 description: Write the intended user documentation before implementation, ready to read and edit while work continues.
 requires: a chosen direction
-produces: user documentation edited in place and presented in the current host
+produces: user documentation edited in place, with paths shared and presentation in an attached Desktop
 action_style: procedural
 ---
 Write the docs someone will use when the change ships.
@@ -35,10 +35,15 @@ Write the docs someone will use when the change ships.
    working design and report it; do not invent acceptance. Keep any independent
    documentation useful and distinguish proposals from settled behavior.
 
-4. **Open the relevant files.** Run `lf open --file <path>` for the actual docs;
-   repeat `--file` to present several. The current host supplies its Files view
-   or configured editor. With no host, the command does nothing. Do not create
-   a scratch wrapper, launch another host or open a conversation to show a file.
+4. **Present in an attached Desktop.** Run
+   `lf open --host desktop --file <path>` for the actual docs; repeat `--file`
+   to present several. This uses only an existing Loopflow Desktop Files view,
+   with rendered Markdown/HTML and its draft/attention policy. It never launches
+   Desktop. If Desktop is absent, unavailable or has no matching Files view,
+   report the actual paths and continue. Never fall back to a terminal editor,
+   host, browser or conversation, including from Rex, Herdr, tmux or cmux.
+   Explicit user requests to open files in another host remain separate from
+   this automatic presentation. Do not create a scratch wrapper.
    Record the changed documentation paths in the existing implementation plan
    so the next worker reads them from this checkout.
 

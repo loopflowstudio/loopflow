@@ -111,6 +111,51 @@ fn files_without_a_host_are_a_noop_even_outside_a_repository() {
 }
 
 #[test]
+fn desktop_file_presentation_without_desktop_never_falls_back_to_a_terminal() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let path = repo.path().join("guide.md");
+    std::fs::write(&path, "saved correction").unwrap();
+    let launches = ["rex", "herdr", "tmux", "cmux", "open"]
+        .map(|name| host(bin.path(), name, "unexpected host launch", 1));
+    for context in [
+        vec![],
+        vec![
+            ("REX_SESSION", "session:current"),
+            ("REX_BLOCK", "block:current"),
+        ],
+        vec![("HERDR_SOCKET_PATH", "/fixture/herdr.sock")],
+        vec![("TMUX", "fixture"), ("TMUX_PANE", "%1")],
+        vec![
+            ("CMUX_WORKSPACE_ID", "workspace:current"),
+            ("CMUX_SOCKET_PATH", "/fixture/cmux.sock"),
+        ],
+    ] {
+        let result = json(&lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &context,
+            &[
+                "open", "--host", "desktop", "--task", "INF-123", "--file", "guide.md", "--json",
+            ],
+        ));
+        assert_eq!(result["opening"], false);
+        assert!(result["host"].is_null());
+        assert_eq!(
+            result["paths"],
+            serde_json::json!([path.canonicalize().unwrap()])
+        );
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "saved correction");
+    assert_eq!(sessions(home.path()), 0);
+    assert!(launches.iter().all(|path| !path.exists()));
+}
+
+#[test]
 fn opening_files_in_tmux_edits_each_original_once() {
     let repo = TestRepo::new();
     let checkout = repo.create_named_worktree("docs-first");
@@ -468,38 +513,6 @@ fn herdr_without_server_context_creates_no_session() {
         .unwrap()
         .contains("HERDR_SOCKET_PATH"));
     assert_eq!(sessions(home.path()), 0);
-}
-
-#[test]
-fn tmux_opens_a_named_window_after_the_callers() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let log = host(bin.path(), "tmux", "%7", 0);
-    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
-    let report = json(&lf_with(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &[("TMUX", "/tmp/tmux-1000/default,1,0"), ("TMUX_PANE", "%3")],
-        &["open", &url, "--json"],
-    ));
-    assert_eq!(report["receipts"][0]["host"], "tmux");
-    assert_eq!(report["receipts"][0]["status"], "opening");
-    assert_eq!(report["receipts"][0]["destination"], "%7");
-    let call = std::fs::read_to_string(log).unwrap();
-    assert!(
-        call.starts_with(
-            "new-window -a -t %3 -P -F #{pane_id} -n Prove Task PR transitions · INF-123 -c "
-        ),
-        "{call}"
-    );
-    assert!(
-        call.trim_end().ends_with(" session resume --task INF-123"),
-        "{call}"
-    );
 }
 
 #[test]

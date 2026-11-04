@@ -1,5 +1,9 @@
 # LOO-728 development CLI demo — 2026-11-04
 
+Historical explicit-opening evidence. Jack Heart subsequently accepted Desktop-only
+automatic presentation; `write-docs-first.md` owns current scope. The pending
+choice recorded below is resolved and adds no current acceptance blocker.
+
 Jack Heart requested a demo using development lf. He subsequently observed:
 “ok it opened”. This confirms visible opening, not acceptance of every remaining
 Task claim. Earlier ship authorization remains in effect; the live Graph owns

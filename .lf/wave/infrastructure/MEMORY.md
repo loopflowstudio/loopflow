@@ -107,13 +107,13 @@ stopping verified owners before reclaiming eligible output; LOO-722 owns that
 cleanup. Its laptop-only marker assumes evidence elsewhere, so unmarked demos
 with history inside remain outside its backstop. That boundary is unresolved.
 
-Store failure exposed writable-PTY retry spin. A short retry deadline must also
-remove write readiness; blocking retention still stalls control under contention
-(LOO-724 owns the nonblocking path). Retention diagnostics share the retirement
-judgment. Security pressure stops later verification suites as unproven, without
-changing ordinary product-failure behavior. Release's entry-point lesson applies:
-combined teardown, rebuild, recovery and installed proof remain distinct from
-isolated fixture passes.
+Store failure exposed writable-PTY retry spin; contention stalled control.
+LOO-724's nonblocking writer and input queue are integrated: defer write readiness
+during retry, retain before delivery, preserve other writers' timeouts. Fixtures
+prove control and recovery, not the assessment cause.
+Diagnostics share retirement's judgment. Security pressure stops later suites;
+product failures do not. Release's entry-point lesson applies: combined cleanup,
+rebuild and installed acceptance remain distinct from fixture passes.
 
 ## Session viewer wire (LOO-712, 2026-11-02)
 

@@ -47,19 +47,19 @@ Discuss the feedback, revised artifact paths and remaining work in the ongoing
 conversation. Save their exact paths and a short takeaway with the review evidence.
 The caller chooses further work; preserve their Session and Graph.
 
-Before launching a disposable demo, copy its complete runtime (whole app bundle
-when applicable) to a unique private root outside rebuildable output. Keep its
-private Machine, repository and provider history there. Use that private `LF_HOME`
-and the absolute copied CLI path as `LF_BIN` for launch, fixture commands and
-teardown. Record the root, Session, exact owner identities and teardown command
-in the demo note. Keep the root intact while its owners live, including rebuilds.
+For disposable demos, copy the complete runtime (whole app bundle when applicable)
+to a unique private root outside rebuildable output. Keep the private Machine,
+repository and provider history there. Use its `LF_HOME` and absolute copied CLI path
+as `LF_BIN` for launch, fixture commands and teardown. Record the root, Session,
+exact owner identities, teardown command and private-Machine history reopening
+instructions in the demo note. Keep the root intact through rebuilds while owners
+live; never mark a history-bearing root for automatic cleanup.
 
-After review, stop only the demo's verified owners through the existing Session
-or process controls and confirm they have exited before removing generated output.
-Preserve durable conversation history. If review retains a draft or pending
-request, or teardown is incomplete, keep the fixture and record remaining owners
-and the next teardown action. Closing a viewer is not teardown. Do not add a
-cleaner or signal by name.
+After review, stop only verified demo owners through existing Session/process
+controls and confirm exit before removing generated output. Preserve durable
+history. If a draft or pending request is retained, or teardown is incomplete,
+keep the fixture; record remaining owners and the next teardown action. Closing a viewer
+is not teardown. Use no competing cleaner or process-name signaling.
 
 On a headless surface, run the same demonstration autonomously. If required
 product judgment or absent-user action prevents the proof, explain the exact

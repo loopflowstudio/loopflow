@@ -29,3 +29,8 @@ Accepted behavior is unchanged.
 Historical pre-infrastructure proposals (detached quota, old budget, Claude-only
 Fork and snapshot construction) are superseded. Their full source is preserved at
 `a32c385044:scratch/research/loo-672-pre-infrastructure-plan.md`.
+
+Sync reconciliation — November 4: retain LOO-672’s accepted warm-conversation
+policy and review page. Parent LOO-717’s latest design and Rex coordination remain
+available through the historical pointers at `b81df60579`; its release/settlement
+contract remains integrated. This documentation-only sync changes no runtime policy.

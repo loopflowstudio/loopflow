@@ -1320,38 +1320,20 @@ impl WtCommand {
 #[derive(Debug, Subcommand)]
 pub enum MachineServiceCommand {
     /// Serve the private socket in the foreground (for the OS supervisor).
-    Run {
-        /// Also accept paired phones through host Tailscale Serve on this loopback port.
-        #[arg(long)]
-        remote_port: Option<u16>,
-    },
+    Run,
     /// Register the selected installation's service and wait for local readiness.
     Ensure,
     /// Report local readiness without registering or starting anything.
     Status,
     /// Configure private mobile access using this host's signed-in Tailscale installation.
     Mobile {
-        /// Stop remote access and remove only Loopflow's unchanged Serve route.
+        /// Stop remote access without stopping local Sessions.
         #[arg(long, conflicts_with = "status")]
         off: bool,
         /// Read saved mobile configuration without enabling access.
         #[arg(long)]
         status: bool,
     },
-    /// Set up host Tailscale and write a one-use phone ticket (valid for ten minutes).
-    Pair {
-        /// Already configured HTTPS endpoint; omit to detect and set up this host.
-        #[arg(long)]
-        endpoint: Option<String>,
-        #[arg(long)]
-        name: String,
-        #[arg(long)]
-        output: PathBuf,
-    },
-    /// List admitted phones without exposing credentials.
-    Devices,
-    /// Revoke one phone, including its existing connections.
-    Revoke { device: String },
 }
 
 impl MachineCommand {

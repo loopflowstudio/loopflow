@@ -4,7 +4,8 @@ import SwiftUI
 import VisionKit
 
 struct MachineCodeScanner: View {
-    let accept: (MachinePairingTicket) -> Void
+    let accept: (URL) -> Void
+    let enterAddress: () -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
@@ -25,18 +26,18 @@ struct MachineCodeScanner: View {
                         }
                 } else {
                     ContentUnavailableView {
-                        Label("Scan a pairing code", systemImage: "qrcode.viewfinder")
+                        Label("Scan a QR code", systemImage: "qrcode.viewfinder")
                     } description: {
                         Text(message ?? "Preparing the camera…")
                     } actions: {
                         if denied, let settings = URL(string: UIApplication.openSettingsURLString) {
                             Button("Open Settings") { openURL(settings) }
                         }
-                        Button("Use a setup file instead") { dismiss() }
+                        Button("Enter an address instead", action: enterAddress)
                     }
                 }
             }
-            .navigationTitle("Pair your Machine")
+            .navigationTitle("Connect your Machine")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .onChange(of: scenePhase) { _, phase in
@@ -45,7 +46,7 @@ struct MachineCodeScanner: View {
             .task(id: scenePhase) {
                 guard scenePhase == .active else { return }
                 guard DataScannerViewController.isSupported else {
-                    message = "This device can’t scan codes. Import a setup file or paste its contents on the previous screen."
+                    message = "This device can’t scan codes. Enter or paste its address on the previous screen."
                     return
                 }
                 let granted = await AVCaptureDevice.requestAccess(for: .video)
@@ -54,8 +55,8 @@ struct MachineCodeScanner: View {
                 available = granted && DataScannerViewController.isAvailable
                 if !available {
                     message = granted
-                        ? "The camera is unavailable. You can still import a setup file or paste its contents."
-                        : "Allow camera access in Settings, or import a setup file without using the camera."
+                        ? "The camera is unavailable. You can still enter or paste its address."
+                        : "Allow camera access in Settings, or enter its address without using the camera."
                 }
             }
         }
@@ -63,7 +64,7 @@ struct MachineCodeScanner: View {
 }
 
 private struct CameraScanner: UIViewControllerRepresentable {
-    let accept: (MachinePairingTicket) -> Void
+    let accept: (URL) -> Void
     let issue: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(accept: accept, issue: issue) }
@@ -82,11 +83,11 @@ private struct CameraScanner: UIViewControllerRepresentable {
     }
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-        let accept: (MachinePairingTicket) -> Void
+        let accept: (URL) -> Void
         let issue: (String) -> Void
         private var accepted = false
 
-        init(accept: @escaping (MachinePairingTicket) -> Void, issue: @escaping (String) -> Void) {
+        init(accept: @escaping (URL) -> Void, issue: @escaping (String) -> Void) {
             self.accept = accept
             self.issue = issue
         }
@@ -95,19 +96,19 @@ private struct CameraScanner: UIViewControllerRepresentable {
             for item in addedItems {
                 guard !accepted, case .barcode(let barcode) = item,
                       let text = barcode.payloadStringValue else { continue }
-                guard let ticket = try? MachinePairingTicket.decode(Data(text.utf8)) else {
-                    issue("Use the pairing code in Loopflow’s Mobile settings.")
+                guard let address = try? MachineAddress.decode(text) else {
+                    issue("Use the QR code in Loopflow’s Mobile settings.")
                     continue
                 }
                 accepted = true
                 scanner.stopScanning()
-                accept(ticket)
+                accept(address)
             }
         }
 
         func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
             scanner.stopScanning()
-            issue("The camera became unavailable. Close this sheet and try again, or use a setup file.")
+            issue("The camera became unavailable. Close this sheet and try again, or enter its address.")
         }
     }
 
@@ -130,7 +131,7 @@ private struct CameraScanner: UIViewControllerRepresentable {
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
             do { try scanner.startScanning() }
-            catch { issue?("The camera could not start. Close this sheet and try again, or use a setup file.") }
+            catch { issue?("The camera could not start. Close this sheet and try again, or enter its address.") }
         }
 
         override func viewWillDisappear(_ animated: Bool) {

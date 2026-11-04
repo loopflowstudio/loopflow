@@ -1,16 +1,16 @@
-//! Host Tailscale Serve terminates HTTPS. This loopback-only carrier admits
-//! explicit device grants, then dispatches the same bounded Machine stream.
-use std::net::{Ipv4Addr, SocketAddr};
+//! HTTPS on the host's tailnet addresses. Tailscale identifies the socket peer;
+//! the mobile boundary never inherits the private Unix socket's authority.
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
+use super::mobile::{Configuration, Host};
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use secrecy::{ExposeSecret, SecretString};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio::task::JoinSet;
+use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::tungstenite::{
     handshake::server::{ErrorResponse, Request, Response},
     http::StatusCode,
@@ -19,105 +19,205 @@ use tokio_tungstenite::tungstenite::{
 };
 use tokio_tungstenite::{accept_hdr_async_with_config, WebSocketStream};
 
-use super::admission::{self, DeviceId};
-use crate::store::sqlite::SqliteStore;
-
 const CHUNK: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub(super) struct Control {
-    pub port: Option<u16>,
-    pub reply: oneshot::Sender<Result<Option<u16>, String>>,
+    pub configuration: Option<Configuration>,
+    pub reply: oneshot::Sender<Result<Option<Configuration>, String>>,
 }
 
 pub(super) async fn manage(
-    port: Option<u16>,
+    initial: Option<Configuration>,
     mut requests: mpsc::Receiver<Control>,
     instance: Arc<String>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
 ) -> Result<()> {
+    let mut desired = initial;
+    let mut active: Option<Configuration> = None;
     let mut listeners = JoinSet::new();
-    let mut active = None;
-    if let Some(port) = port {
-        match bind(port).await {
-            Ok((listener, store)) => {
-                active = Some(listener.local_addr()?.port());
-                listeners.spawn(run(
-                    listener,
-                    store,
-                    instance.clone(),
-                    executable.clone(),
-                    slots.clone(),
-                ));
-            }
-            Err(error) => {
-                tracing::warn!(%error, "Saved mobile listener is unavailable; local service remains ready")
-            }
-        }
-    }
+    let mut reported_failure = false;
+    let mut retry = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
             request = requests.recv() => {
                 let Some(request) = request else { return Ok(()) };
-                if request.port == active {
-                    let _ = request.reply.send(Ok(active));
-                    continue;
+                if let (Some(requested), Some(current)) = (&request.configuration, &active) {
+                    if requested.owner == current.owner && requested.endpoint == current.endpoint {
+                        let _ = request.reply.send(Ok(active.clone()));
+                        continue;
+                    }
                 }
-                // Bind first, preserving the current carrier if the new port fails.
-                let replacement = match request.port {
-                    Some(port) => match bind(port).await {
-                        Ok(bound) => Some(bound),
-                        Err(error) => { let _ = request.reply.send(Err(error.to_string())); continue; }
-                    },
-                    None => None,
-                };
                 listeners.abort_all();
                 while listeners.join_next().await.is_some() {}
                 active = None;
-                if let Some((listener, store)) = replacement {
-                    active = Some(listener.local_addr()?.port());
-                    listeners.spawn(run(listener, store, instance.clone(), executable.clone(), slots.clone()));
-                }
-                let _ = request.reply.send(Ok(active));
+                desired = request.configuration;
+                reported_failure = false;
+                let result = if let Some(config) = desired.clone() {
+                    match bind(config).await {
+                        Ok(bound) => {
+                            active = Some(bound.config.clone());
+                            desired = active.clone();
+                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone()));
+                            Ok(active.clone())
+                        }
+                        Err(error) => { desired = None; Err(error.to_string()) }
+                    }
+                } else { Ok(None) };
+                let _ = request.reply.send(result);
             }
             ended = listeners.join_next(), if !listeners.is_empty() => {
                 tracing::warn!(?ended, "Mobile listener stopped; local service remains ready");
                 active = None;
+                reported_failure = false;
+            }
+            _ = retry.tick(), if active.is_none() && desired.is_some() => {
+                if let Some(config) = desired.clone() {
+                    match bind(config).await {
+                        Ok(bound) => {
+                            active = Some(bound.config.clone());
+                            desired = active.clone();
+                            reported_failure = false;
+                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone()));
+                        }
+                        Err(error) if !reported_failure => {
+                            tracing::warn!(%error, "Mobile listener could not start; retrying the saved approval");
+                            reported_failure = true;
+                        }
+                        Err(_) => {}
+                    }
+                }
             }
         }
     }
 }
 
-async fn bind(port: u16) -> Result<(TcpListener, Arc<SqliteStore>)> {
-    let store = Arc::new(admission::store().await?);
-    let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
-    Ok((listener, store))
+struct Listener {
+    sockets: Vec<TcpListener>,
+    host: Host,
+    config: Configuration,
+    tls: TlsAcceptor,
+}
+
+async fn bind(mut config: Configuration) -> Result<Listener> {
+    let expected = config.clone();
+    let (host, addresses, tls) = tokio::task::spawn_blocking(move || {
+        let host = Host::discover()?;
+        let (owner, addresses) = host.identity()?;
+        anyhow::ensure!(
+            owner == expected.owner,
+            "Tailscale account changed; enable mobile access again"
+        );
+        anyhow::ensure!(
+            reqwest::Url::parse(&expected.endpoint)?.host_str() == Some(&host.dns),
+            "Tailscale address changed; enable mobile access again"
+        );
+        let tls = host.certificate()?;
+        Ok::<_, anyhow::Error>((host, addresses, tls))
+    })
+    .await??;
+    let mut port = config.port()?;
+    let mut sockets = Vec::new();
+    for ip in addresses {
+        // Never bind wildcard or LAN addresses. The exact addresses come from
+        // the installed Tailscale daemon, not a caller's hostname or HTTP header.
+        let socket = match TcpListener::bind((ip, port)).await {
+            Ok(socket) => socket,
+            // Hosts can disable IPv6 while Tailscale still reports its node's
+            // IPv6 allocation. Keep the usable family; never broaden the bind.
+            Err(error) if error.kind() == std::io::ErrorKind::AddrNotAvailable => continue,
+            Err(error) => {
+                return Err(error).context("Could not listen on the Machine's Tailscale address")
+            }
+        };
+        port = socket.local_addr()?.port();
+        sockets.push(socket);
+    }
+    anyhow::ensure!(
+        !sockets.is_empty(),
+        "Tailscale has no available local address"
+    );
+    config.endpoint = format!("https://{}:{port}", host.dns);
+    config.enabled = true;
+    Ok(Listener {
+        sockets,
+        host,
+        config,
+        tls,
+    })
+}
+
+async fn maintain(host: Host, config: Configuration, tls: mpsc::Sender<TlsAcceptor>) -> Result<()> {
+    let mut renewed = SystemTime::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let host = host.clone();
+        let refresh = renewed.elapsed().unwrap_or_default() >= Duration::from_secs(6 * 60 * 60);
+        let (owner, certificate) = tokio::task::spawn_blocking(move || {
+            let (owner, _) = host.identity()?;
+            let certificate = if refresh {
+                Some(host.certificate()?)
+            } else {
+                None
+            };
+            Ok::<_, anyhow::Error>((owner, certificate))
+        })
+        .await??;
+        anyhow::ensure!(
+            owner == config.owner,
+            "Tailscale account changed; enable mobile access again"
+        );
+        if let Some(certificate) = certificate {
+            tls.send(certificate).await?;
+            renewed = SystemTime::now();
+        }
+    }
 }
 
 async fn run(
-    listener: TcpListener,
-    store: Arc<SqliteStore>,
+    bound: Listener,
     instance: Arc<String>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
 ) -> Result<()> {
-    tracing::info!(address = %listener.local_addr()?, "Mobile carrier ready for host Tailscale Serve");
-    // Dropping the listener also closes its remote connections, not local viewers
-    // or retained owners. Do not detach these tasks from their admission lifetime.
+    tracing::info!(endpoint = %bound.config.endpoint, "Mobile HTTPS ready on host Tailscale");
     let mut connections = JoinSet::new();
+    let (renewed, mut renewals) = mpsc::channel(1);
+    let maintenance = maintain(bound.host.clone(), bound.config.clone(), renewed);
+    tokio::pin!(maintenance);
+    let mut tls = bound.tls;
     loop {
-        let (socket, _) = tokio::select! {
-            accepted = listener.accept() => accepted?,
+        let accepted = futures_util::future::select_all(
+            bound.sockets.iter().map(|socket| Box::pin(socket.accept())),
+        );
+        let (socket, peer) = tokio::select! {
+            (accepted, _, _) = accepted => accepted?,
             _ = connections.join_next(), if !connections.is_empty() => continue,
+            result = &mut maintenance => return result,
+            Some(certificate) = renewals.recv() => { tls = certificate; continue; }
         };
         let Ok(permit) = slots.clone().try_acquire_owned() else {
             continue;
         };
-        let (store, instance, executable) = (store.clone(), instance.clone(), executable.clone());
+        let (host, owner, tls, instance, executable) = (
+            bound.host.clone(),
+            bound.config.owner.clone(),
+            tls.clone(),
+            instance.clone(),
+            executable.clone(),
+        );
         connections.spawn(async move {
             let _permit = permit;
-            if let Err(error) = connection(socket, store, &instance, &executable).await {
+            let result = async {
+                let permitted =
+                    tokio::task::spawn_blocking(move || host.permits(peer, &owner)).await??;
+                let socket =
+                    tokio::time::timeout(Duration::from_secs(5), tls.accept(socket)).await??;
+                connection(socket, permitted, &instance, &executable).await
+            }
+            .await;
+            if let Err(error) = result {
                 tracing::debug!(%error, "Mobile connection ended");
             }
         });
@@ -127,116 +227,53 @@ async fn run(
 fn reject(status: StatusCode) -> ErrorResponse {
     Response::builder()
         .status(status)
-        .body(Some("Machine admission rejected".into()))
+        .body(Some(
+            "Connect using the Machine owner's Tailscale account".into(),
+        ))
         .expect("fixed HTTP response is valid")
 }
 
 // Tungstenite's handshake callback requires an unboxed HTTP ErrorResponse.
 #[allow(clippy::result_large_err)]
-async fn connection(
-    socket: TcpStream,
-    store: Arc<SqliteStore>,
-    instance: &str,
-    executable: &str,
-) -> Result<()> {
-    let mut credential: Option<SecretString> = None;
-    let mut pairing = false;
+async fn connection<S>(socket: S, permitted: bool, instance: &str, executable: &str) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let config = WebSocketConfig::default()
         .max_message_size(Some(CHUNK))
         .max_frame_size(Some(CHUNK));
-    let mut socket = tokio::time::timeout(
+    let socket = tokio::time::timeout(
         Duration::from_secs(5),
         accept_hdr_async_with_config(
             socket,
             |request: &Request, response: Response| {
-                // Native clients carry an Authorization header. Browser origins and
-                // URL/query credentials are intentionally not an admission path.
-                if request.headers().contains_key("origin") || request.uri().query().is_some() {
+                if !permitted
+                    || request.headers().contains_key("origin")
+                    || request.uri().query().is_some()
+                {
                     return Err(reject(StatusCode::FORBIDDEN));
                 }
-                pairing = match request.uri().path() {
-                    "/v1/pair" => true,
-                    "/v1/machine" => false,
-                    _ => return Err(reject(StatusCode::NOT_FOUND)),
-                };
-                let value = request
-                    .headers()
-                    .get("authorization")
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.strip_prefix("Bearer "))
-                    .filter(|value| {
-                        value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    })
-                    .ok_or_else(|| reject(StatusCode::UNAUTHORIZED))?;
-                credential = Some(SecretString::new(value.into()));
+                if request.uri().path() != "/v1/machine" {
+                    return Err(reject(StatusCode::NOT_FOUND));
+                }
                 Ok(response)
             },
             Some(config),
         ),
     )
     .await??;
-    let hash = admission::hash(
-        credential
-            .context("Missing mobile credential")?
-            .expose_secret(),
-    );
-    if pairing {
-        let token = admission::secret();
-        let token_hash = admission::hash(token.expose_secret());
-        let id = DeviceId(uuid::Uuid::new_v4().to_string());
-        let device = tokio::task::spawn_blocking(move || {
-            store.redeem_machine_pairing(
-                &hash,
-                &token_hash,
-                &id,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )
-        })
-        .await??;
-        if let Some(device) = device {
-            let reply = serde_json::to_vec(&serde_json::json!({
-                "version": 1, "device": device, "token": token.expose_secret()
-            }))?;
-            tokio::time::timeout(
-                Duration::from_secs(5),
-                socket.send(Message::Binary(reply.into())),
-            )
-            .await??;
-        }
-        tokio::time::timeout(Duration::from_secs(5), socket.close(None)).await??;
-        return Ok(());
-    }
-    let authority = store.clone();
-    let device =
-        tokio::task::spawn_blocking(move || authority.admitted_machine_device(&hash)).await??;
-    let Some(device) = device else {
-        tokio::time::timeout(Duration::from_secs(5), socket.close(None)).await??;
-        return Ok(());
-    };
     let (client, server) = tokio::io::duplex(CHUNK);
-    // No proxy connection to the trusted Unix listener. Admission above is the
-    // authority for this dispatch. Cancellation drops only this viewer's stream.
-    tokio::select! {
-        result = async {
-            tokio::try_join!(super::service::connection(server, instance, executable, None), bridge(socket, client))?;
-            Ok(())
-        } => result,
-        result = until_revoked(store, device) => result,
-    }
+    tokio::try_join!(
+        super::service::connection(server, instance, executable, None),
+        bridge(socket, client)
+    )?;
+    Ok(())
 }
 
-async fn until_revoked(store: Arc<SqliteStore>, device: DeviceId) -> Result<()> {
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
-    loop {
-        interval.tick().await;
-        let (store, device) = (store.clone(), device.clone());
-        let check = tokio::task::spawn_blocking(move || store.machine_device_active(&device));
-        let active = tokio::time::timeout(Duration::from_secs(5), check).await???;
-        anyhow::ensure!(active, "Device grant revoked");
-    }
-}
-
-async fn bridge(socket: WebSocketStream<TcpStream>, stream: DuplexStream) -> Result<()> {
+async fn bridge<S>(socket: WebSocketStream<S>, stream: DuplexStream) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let (mut sender, mut receiver) = socket.split();
     let (mut reader, mut writer) = tokio::io::split(stream);
     let upstream = async {
@@ -280,18 +317,13 @@ async fn bridge(socket: WebSocketStream<TcpStream>, stream: DuplexStream) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{admission, bridge, connection, until_revoked, DeviceId, TcpListener, TcpStream};
+    use super::{bridge, connection};
+    use crate::machine_service::wire::{Operation, Request, Response, VERSION};
     use futures_util::{SinkExt, StreamExt};
-    use secrecy::ExposeSecret;
-    use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, UnixStream};
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
-    use tokio_tungstenite::WebSocketStream;
-
-    use crate::machine_service::wire::{Operation, Request, Response, VERSION};
-    use crate::store::sqlite::SqliteStore;
-
     #[tokio::test]
     async fn completed_machine_stream_sends_websocket_close_after_its_last_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -332,78 +364,48 @@ mod tests {
     }
 
     async fn connect(
-        store: Arc<SqliteStore>,
+        permitted: bool,
         path: &str,
-        credential: &str,
         origin: bool,
-    ) -> anyhow::Result<WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let mut request = format!("ws://{}{path}", listener.local_addr()?).into_client_request()?;
+    ) -> anyhow::Result<tokio_tungstenite::WebSocketStream<UnixStream>> {
+        let (client, server) = UnixStream::pair()?;
+        let mut request = format!("ws://localhost{path}").into_client_request()?;
+        // Caller-supplied identity cannot override the host's WhoIs result.
         request
             .headers_mut()
-            .insert("authorization", format!("Bearer {credential}").parse()?);
+            .insert("tailscale-user-login", "owner@example.com".parse()?);
         if origin {
             request
                 .headers_mut()
                 .insert("origin", "https://example.com".parse()?);
         }
-        let server = tokio::spawn(async move {
-            let (socket, _) = listener.accept().await.unwrap();
-            connection(socket, store, "test-instance", "test-executable").await
+        tokio::spawn(async move {
+            let _ = connection(server, permitted, "test-instance", "test-executable").await;
         });
-        let client = tokio_tungstenite::connect_async(request).await;
-        // Keep the server alive after connection; it owns only this test's socket.
-        drop(server);
-        Ok(client?.0)
+        Ok(tokio_tungstenite::client_async(request, client).await?.0)
     }
 
     #[tokio::test]
-    async fn one_use_pairing_admits_framed_requests_and_invalid_grants_get_no_work() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteStore::open_ephemeral(&temp.path().join("test.db")).unwrap());
-        let ticket = admission::secret();
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        store
-            .create_machine_pairing(
-                &admission::hash(ticket.expose_secret()),
-                "Test phone",
-                now,
-                now + 600,
-            )
-            .unwrap();
-        let mut pair = connect(store.clone(), "/v1/pair", ticket.expose_secret(), false)
-            .await
-            .unwrap();
-        let bytes = pair.next().await.unwrap().unwrap().into_data();
-        let reply: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        let token = reply["token"].as_str().unwrap();
-        assert_eq!(reply["version"], 1);
-        assert_eq!(reply["device"]["name"], "Test phone");
-        drop(pair);
-
-        let mut reused = connect(store.clone(), "/v1/pair", ticket.expose_secret(), false)
-            .await
-            .unwrap();
-        assert!(matches!(reused.next().await, Some(Ok(Message::Close(_)))));
-        let mut denied = connect(store.clone(), "/v1/machine", ticket.expose_secret(), false)
-            .await
-            .unwrap();
-        assert!(matches!(denied.next().await, Some(Ok(Message::Close(_)))));
-        assert!(connect(store.clone(), "/v1/machine", token, true)
-            .await
-            .is_err());
-
+    async fn only_owner_identity_can_reach_shared_operations() {
+        for (permitted, path, origin) in [
+            (false, "/v1/machine", false),
+            (true, "/v1/pair", false),
+            (true, "/v1/machine?token=old", false),
+            (true, "/v1/machine", true),
+        ] {
+            assert!(connect(permitted, path, origin).await.is_err());
+        }
         for (version, operation, expected) in [
             (VERSION + 1, Operation::Bootstrap, "incompatible"),
             (
                 VERSION,
-                Operation::ConfigureRemote { port: None },
+                Operation::ConfigureRemote {
+                    configuration: None,
+                },
                 "unsupported",
             ),
         ] {
-            let mut client = connect(store.clone(), "/v1/machine", token, false)
-                .await
-                .unwrap();
+            let mut client = connect(true, "/v1/machine", false).await.unwrap();
             let request = serde_json::to_vec(&Request {
                 version,
                 id: "fragmented".into(),
@@ -442,13 +444,5 @@ mod tests {
                 expected
             );
         }
-
-        let id = DeviceId(reply["device"]["id"].as_str().unwrap().into());
-        store.revoke_machine_device(&id, now).unwrap();
-        let mut revoked = connect(store.clone(), "/v1/machine", token, false)
-            .await
-            .unwrap();
-        assert!(matches!(revoked.next().await, Some(Ok(Message::Close(_)))));
-        assert!(until_revoked(store, id).await.is_err());
     }
 }

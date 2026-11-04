@@ -2,14 +2,10 @@ import Foundation
 import Loopflow
 import os
 
-/// Local saved state, stored only in Keychain. Never include this value in logs.
-struct MachineCredential: Codable {
+/// The verified Machine selected on this phone. No network credential is stored.
+struct SavedMachine: Codable {
     let endpoint: URL
-    let deviceID: String
-    let name: String
-    let token: String
-    // A newly issued grant is saved before its first bootstrap succeeds.
-    let machineID: String?
+    let machineID: String
 }
 
 /// One application operation per WebSocket. Message boundaries are unrelated
@@ -28,17 +24,16 @@ final class MachineConnection {
     private var timedOut = false
     private var heartbeat: Task<Void, Never>?
 
-    init(endpoint: URL, token: String, path: String = "/v1/machine") throws {
+    init(endpoint: URL, path: String = "/v1/machine") throws {
         let url = try Self.socketURL(endpoint: endpoint, path: path)
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         socket = Self.session.webSocketTask(with: request)
         socket.maximumMessageSize = 64 * 1024
         socket.resume()
     }
 
     static func socketURL(endpoint: URL, path: String) throws -> URL {
-        try MachinePairingTicket.socketURL(endpoint: endpoint, path: path)
+        try MachineAddress.socketURL(endpoint: endpoint, path: path)
     }
 
     func close() {
@@ -162,6 +157,9 @@ final class MachineConnection {
     private func connectionError(_ error: any Error) -> any Error {
         if Task.isCancelled { return CancellationError() }
         if timedOut { return RegistryQueryError("The Machine did not respond in time") }
+        if let response = socket.response as? HTTPURLResponse, response.statusCode == 403 {
+            return RegistryQueryError("Connect with the Machine owner’s Tailscale account, then try again.")
+        }
         if closed { return RegistryQueryError("Machine connection closed") }
         return error
     }

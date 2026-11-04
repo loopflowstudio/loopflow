@@ -52,17 +52,18 @@ Machine and current program report. Rotating preserves the draft; observers keep
 the owner's grid. Long Find queries scroll inside their field and keep **Done**
 visible, including at accessibility text sizes.
 
-Disable `--fixture` to connect to a Machine. Sign into host Tailscale on both
-devices. In Desktop, open Settings → Mobile → **Pair a phone**. On iPhone, choose
-**Scan pairing code**, scan the Desktop code, then confirm **Connect Machine**.
+Disable `--fixture` to connect to a Machine. Sign into the same Tailscale account
+on both devices. In Desktop, open Settings → Mobile → **Enable mobile access**.
+On iPhone, choose **Scan QR code**, scan the Desktop code, then **Connect Machine**.
 Desktop detects and configures signed-in host Tailscale automatically. Camera
-access is optional: **Other ways to connect** offers setup-file import/paste for
-the same [Machine setup commands](../../rust/loopflow/src/machine_service/README.md#pair-a-phone-through-host-tailscale).
-The app saves
-the device grant in Keychain, pins the Machine identity
-on first bootstrap, reads actual open Tasks and attaches their recorded Session
-owners. It installs no CLI on the phone. Opening an existing Task observes its
-running Session; it never implicitly starts or resumes a provider.
+access is optional: **Enter address** accepts the same HTTPS address, typed or
+pasted, including a hostname without the `https://` prefix.
+
+The QR contains only the address. Tailscale supplies caller identity; the Machine
+admits its owner. The phone saves the verified endpoint and Machine identity in
+Keychain, with no device token. Future launches reuse that connection. Opening
+an existing Task observes its running Session; it never starts or resumes a
+provider implicitly. No CLI is installed on the phone.
 
 If its terminal has stopped, choose **Open Session** to continue the recorded
 conversation on the Machine. It reuses a running owner or resumes saved history,
@@ -80,7 +81,7 @@ the shared ProgramStatusRecords in its attachment stream; the phone adds no pars
 subscription or status writer. Only the controlling renderer answers feature queries,
 and snapshot replay never answers them again.
 
-Choose **New Task** (+), describe the work, and select a repository on the paired
+Choose **New Task** (+), describe the work, and select a repository on the connected
 Machine. The sheet saves your draft and remembers that destination. Use the
 keyboard’s microphone to dictate, then edit before choosing **Create & start**.
 Tap the destination to search repositories by name or path. The list shows full
@@ -95,9 +96,9 @@ the existing retained owner. A confirmed start opens that Session as an observer
 If the reply is lost, **Check status** recovers the same saved request, including
 after restarting the app. It never files another Task or starts a provider again.
 A failed or uncertain start keeps the created Task available through **Open Task**.
-The request retains its original Machine and repository even after re-pairing;
+The request retains its original Machine and repository even after changing connections;
 reconnect that Machine to recover it. A failed local draft save prevents sending.
-Drafts are protected local files excluded from backup; credentials stay in Keychain.
+Drafts are protected local files excluded from backup; the saved Machine identity stays in Keychain.
 
 Choose **Save for later** to keep an unresolved request and start a different
 draft. This does not cancel work on the Machine. **Saved requests** retains the
@@ -114,8 +115,8 @@ last Tasks visible with an explanation; **Try again** reconnects. This path read
 the Machine’s local Work and does not synchronously refresh an external tracker.
 
 The connected Machine’s hostname replaces the fixture label in both screens.
-**Forget Machine** removes the phone’s saved credential; use Desktop’s **Remove
-access** or the Machine’s device revocation command to withdraw its server grant.
+**Forget Machine** removes the saved connection. Manage device access in Tailscale;
+Desktop’s **Turn off mobile access** disconnects all remote clients.
 Backgrounding closes the attachment. Returning to the app automatically restores
 the same Session as an observer, including its current draft and terminal size.
 If that attempt fails, **Reconnect** tries again; no retry loop runs while away.
@@ -202,7 +203,7 @@ Device demo still owns CJK keyboard/dictation quality, physical key combinations
 VoiceOver navigation and sustained-output energy use. Simulator software-keyboard
 layout and app lifecycle are exercised; that does not prove every IME or hardware
 keyboard. The owner decoder consumes a Rust-generated binary fixture across fragmented
-reads. Actual Tailscale pairing, Keychain persistence, Machine identity and empty
+reads. Address setup, Keychain persistence, Machine identity and empty
 Task reads have passed in Simulator against an isolated service. Native editing
 and reconnect have also passed through a real retained owner, including a newer
 viewer holding input and 120×40 geometry. The child receives the combined draft
@@ -218,23 +219,29 @@ answerable through ordinary typing.
 ### Opt-in host Tailscale acceptance
 
 ```sh
-# Inspect existing routes and choose unused ports before running this proof.
-tailscale serve status --json
-tailscale serve --bg --https=8443 http://127.0.0.1:49250
 env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
   LOOPFLOW_MOBILE_SIMULATOR='<booted simulator UUID>' \
   LOOPFLOW_MOBILE_ENDPOINT=https://machine.tailnet.ts.net:8443 \
-  LOOPFLOW_MOBILE_PORT=49250 \
+  LOOPFLOW_MOBILE_STATUS_FILE='<private host status JSON>' \
+  LOOPFLOW_MOBILE_CERTIFICATE_FILE='<private host certificate/key PEM>' \
   cargo test -p loopflow --test transport_tests mobile_machine_native_acceptance \
     -- --ignored --exact --nocapture < /dev/null
-tailscale serve --https=8443 off
 ```
 
-Generate the project and install the signed app in that simulator first. Substitute
-the host’s real Tailscale DNS name. This opt-in Rust test creates a private registry,
-Task and retained provider fixture, starts the real remote carrier, transfers a
-one-use setup ticket directly into the app container, then runs the native XCTest.
-It stops its owner/service and deletes its registry afterward. The native test
+Generate the project and install the signed app in that simulator first. Use an
+unused host port, its real Tailscale DNS name and a private temporary directory.
+Capture `tailscale status --json` into the status file. Capture
+`tailscale cert --cert-file=- --key-file=- HOST` directly into the private PEM file,
+never a terminal/log; remove both files afterward. No Serve route is needed.
+
+The test creates a private registry, Task and retained provider fixture, starts
+real HTTPS/WebSocket service transport, transfers the address into the app and
+runs native XCTest. The host CLI responses are fixtures: the self-hosted Simulator
+is represented as a second same-owner node. Real production rejects same-host
+network identity because it cannot distinguish local OS accounts. This proof
+therefore covers native TLS, protocol, editing and recovery; it does **not** prove
+physical-device Tailscale identity or cellular/Wi-Fi behavior. It stops its owners
+and service and deletes its registry afterward. The native test
 opens the Task’s Session in UIKit, edits the existing draft, disconnects, lets a
 second viewer take control, reconnects passively at the owner’s geometry, then
 explicitly takes control and submits. While that draft is unfinished, the host
@@ -249,8 +256,7 @@ creation model, recovers the same receipt, opens its recorded terminal, and type
 into it. It also saves that request for later, reloads it and opens it while
 preserving a separate unsent draft. Rust asserts exactly three provider launches
 (initial, explicit continuation, new Task) and every exact submission. The native
-log is `swift/.build/mobile-acceptance.log`. Remove
-only the temporary Serve route afterward; never reset unrelated host routes.
+log is `swift/.build/mobile-acceptance.log`.
 
 The same acceptance includes a 32 MiB output stream paced by an active viewer.
 A second viewer stops reading, disconnects under the owner's bounded policy, then
@@ -264,13 +270,10 @@ The carrier also checks that an expired read
 reports a timeout and an explicitly canceled read stays cancellation.
 
 `MachineConnectionIntegrationTests` skips unless the installed simulator app’s
-Documents directory contains `LoopflowIntegration/setup.json`. Supply a fresh
-setup file generated by an **isolated, empty** development Machine registry and
-its temporary host Tailscale Serve route. Transfer the file directly; never print
-its credential. Then run the signed test command above. The test removes the
-setup file, redeems it, saves/reloads the grant, checks bootstrap identity and
-reads the empty Task list twice. When the Rust fixture also supplies session.json,
-it runs the retained-owner scenario instead. It restores any prior simulator credential.
-Afterward revoke the test device, stop that development service and remove only
-its temporary Serve route. This test deliberately does not assert that an empty
-Task list proves Session attachment.
+Documents directory contains `LoopflowIntegration/address.txt`. Supply only the
+HTTPS address of an **isolated, empty** development Machine registry with the
+identity fixture above. The test removes the setup file, connects, remembers the
+verified Machine identity and reads the empty Task list twice. When the Rust
+fixture also supplies session.json, it runs the retained-owner scenario instead.
+It restores any prior Simulator connection. An empty Task list alone does not
+prove Session attachment.

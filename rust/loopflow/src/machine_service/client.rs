@@ -12,7 +12,13 @@ pub(crate) struct BridgeRefused(String);
 pub fn connect(operation: Operation) -> Result<(UnixStream, Response)> {
     let mut socket = UnixStream::connect(super::socket_path()?)
         .context("Machine service unavailable; run `lf machine service ensure`")?;
-    socket.set_read_timeout(Some(Duration::from_secs(10)))?;
+    // Initial Tailscale certificate issuance can outlast an ordinary read.
+    let timeout = if matches!(operation, Operation::ConfigureRemote { .. }) {
+        60
+    } else {
+        10
+    };
+    socket.set_read_timeout(Some(Duration::from_secs(timeout)))?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     let id = uuid::Uuid::new_v4().to_string();
     let request = Request {

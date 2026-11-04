@@ -1,12 +1,13 @@
 import Loopflow
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct MachineConnectionView: View {
-    @State private var credential: MachineCredential?
-    @State private var ticket: MachinePairingTicket?
-    @State private var pairing = false
-    @State private var importing = false
+    @State private var savedMachine: SavedMachine?
+    @State private var endpoint: URL?
+    @State private var address = ""
+    @State private var enteringAddress = false
+    @FocusState private var addressFocused: Bool
+    @State private var connecting = false
     @State private var scanning = false
     @State private var error: String?
     @Environment(\.colorScheme) private var colorScheme
@@ -14,9 +15,9 @@ struct MachineConnectionView: View {
 
     var body: some View {
         Group {
-            if let credential {
-                MobileTaskList(client: RemoteMobileClient(credential: credential),
-                    connectionLabel: credential.endpoint.host ?? "Paired Machine", onForget: forget)
+            if let savedMachine {
+                MobileTaskList(client: RemoteMobileClient(savedMachine: savedMachine),
+                    connectionLabel: savedMachine.endpoint.host ?? "Machine", onForget: forget)
             } else {
                 NavigationStack {
                     ScrollView {
@@ -35,50 +36,62 @@ struct MachineConnectionView: View {
                                 .font(Typography.body(17))
                                 .foregroundStyle(theme.palette.textSecondary)
                             VStack(alignment: .leading, spacing: 14) {
-                                Label("Sign in to Tailscale on both devices.", systemImage: "1.circle")
+                                Label("Sign in to the same Tailscale account on both devices.", systemImage: "1.circle")
                                 Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
-                                Label("Choose Pair a phone, then scan its code here.", systemImage: "3.circle")
+                                Label("Enable mobile access, then scan its code here.", systemImage: "3.circle")
                             }
                             .font(Typography.body(15))
-                            if let ticket {
-                                Label(ticket.endpoint.host ?? "Machine", systemImage: "checkmark.circle")
+                            if let endpoint {
+                                Label(endpoint.host ?? "Machine", systemImage: "desktopcomputer")
                                     .font(Typography.strong(16))
+                                Text(endpoint.absoluteString)
+                                    .font(Typography.caption(13))
+                                    .foregroundStyle(theme.palette.textSecondary)
+                                    .textSelection(.enabled)
                                 Button {
-                                    Task { await pair(ticket) }
+                                    Task { await connect(endpoint) }
                                 } label: {
                                     HStack {
-                                        if pairing { ProgressView() }
-                                        Text(pairing ? "Connecting…" : "Connect Machine")
+                                        if connecting { ProgressView() }
+                                        Text(connecting ? "Connecting…" : "Connect Machine")
                                     }.frame(maxWidth: .infinity, minHeight: 44)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(theme.palette.accent)
                                 .foregroundStyle(theme.palette.accentText)
-                                .disabled(pairing)
-                                Button("Scan another code") { scanning = true }.disabled(pairing)
+                                .disabled(connecting)
+                                Button("Scan another code") { scanning = true }.disabled(connecting)
                             } else {
                                 Button { scanning = true } label: {
-                                    Label("Scan pairing code", systemImage: "qrcode.viewfinder")
+                                    Label("Scan QR code", systemImage: "qrcode.viewfinder")
                                         .frame(maxWidth: .infinity, minHeight: 44)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(theme.palette.accent)
                                 .foregroundStyle(theme.palette.accentText)
                             }
-                            DisclosureGroup("Other ways to connect") {
-                                Text("In Desktop’s Mobile settings, choose Share setup file.")
-                                    .font(Typography.caption(13))
-                                    .foregroundStyle(theme.palette.textSecondary)
-                                    .padding(.top, 8)
-                                HStack(spacing: 16) {
-                                    Button("Import setup file", systemImage: "doc") { importing = true }
-                                    PasteButton(payloadType: String.self) { values in
-                                        if let value = values.first { accept(Data(value.utf8)) }
-                                    }
+                            if enteringAddress {
+                                TextField("machine.tailnet.ts.net", text: $address)
+                                    .textContentType(.URL)
+                                    .keyboardType(.URL)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .textFieldStyle(.roundedBorder)
+                                    .focused($addressFocused)
+                                    .submitLabel(.continue)
+                                    .onSubmit { accept(address) }
+                                    .accessibilityLabel("Machine address")
+                                Button("Continue") { accept(address) }
+                                    .disabled(connecting || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            } else {
+                                Button("Enter address") {
+                                    address = endpoint?.absoluteString ?? address
+                                    enteringAddress = true
+                                    addressFocused = true
                                 }
-                                .padding(.top, 8)
+                                    .frame(minHeight: 44)
+                                    .disabled(connecting)
                             }
-                            .disabled(pairing)
                             if let error {
                                 Text(error)
                                     .font(Typography.body(14))
@@ -100,57 +113,56 @@ struct MachineConnectionView: View {
         .tint(theme.palette.accentInk)
         .foregroundStyle(theme.palette.text)
         .sheet(isPresented: $scanning) {
-            MachineCodeScanner { scanned in
-                ticket = scanned
+            MachineCodeScanner(accept: { scanned in
+                endpoint = scanned
+                enteringAddress = false
+                addressFocused = false
                 error = nil
                 scanning = false
-            }
+            }, enterAddress: {
+                scanning = false
+                enteringAddress = true
+                addressFocused = true
+            })
         }
         .task {
-            do { credential = try MachineKeychain.load() }
+            do { savedMachine = try MachineKeychain.load() }
             catch { self.error = error.localizedDescription }
         }
         .alert("Machine connection", isPresented: Binding(
-            get: { credential != nil && error != nil },
+            get: { savedMachine != nil && error != nil },
             set: { if !$0 { error = nil } }
         )) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
-            do {
-                let url = try result.get()
-                let granted = url.startAccessingSecurityScopedResource()
-                defer { if granted { url.stopAccessingSecurityScopedResource() } }
-                let file = try FileHandle(forReadingFrom: url)
-                defer { try? file.close() }
-                accept(try file.read(upToCount: 4097) ?? Data())
-            } catch { self.error = "The setup file could not be read. Import the file created by your Machine." }
-        }
     }
 
-    private func accept(_ data: Data) {
+    private func accept(_ text: String) {
         do {
-            ticket = try MachinePairingTicket.decode(data)
+            endpoint = try MachineAddress.decode(text)
+            addressFocused = false
+            enteringAddress = false
             error = nil
         } catch {
-            ticket = nil
-            self.error = "This is not a valid Loopflow setup ticket. Scan a new code or import the file created by your Machine."
+            endpoint = nil
+            self.error = "Enter the Tailscale address shown in Desktop’s Mobile settings."
         }
     }
 
-    private func pair(_ ticket: MachinePairingTicket) async {
-        pairing = true
+    private func connect(_ endpoint: URL) async {
+        connecting = true
         error = nil
-        defer { pairing = false; self.ticket = nil }
-        do { credential = try await MachinePairing.redeem(ticket) }
+        defer { connecting = false }
+        do { savedMachine = try await RemoteMobileClient.connect(endpoint: endpoint) }
         catch let error as RegistryQueryError { self.error = error.message }
-        catch { self.error = "Couldn’t connect. Check that both devices are on Tailscale and the Machine service is running. A ticket expires after ten minutes and can be used once." }
+        catch { self.error = "Couldn’t connect. Check that both devices use the same Tailscale account and mobile access is enabled on the Machine." }
     }
 
     private func forget() {
         do {
             try MachineKeychain.forget()
-            credential = nil
+            savedMachine = nil
+            endpoint = nil
         } catch { self.error = error.localizedDescription }
     }
 }

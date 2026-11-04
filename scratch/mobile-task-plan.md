@@ -5,6 +5,15 @@ November 3, 2026. A reuses LOO-593; B reuses LOO-718, this checkout and primary
 conversation. Both feature Graphs stop for interactive demo; no Auto-Ship.
 C–F are named follow-ups, not newly filed or launched Tasks.
 
+November 4 connection decision: Jack Heart selected QR as the default, with manual
+address entry/paste as fallback. The QR will contain only the Machine HTTPS address;
+host Tailscale identity and Machine authorization replace the one-use ticket/device
+grant flow. Automatic discovery is deferred. The working cutover uses direct HTTPS on host Tailscale addresses and host WhoIs
+for caller admission; the installed macOS app rejected the proposed Serve Unix
+socket. UI, focused backend and native Session checks pass. The native test explicitly
+fixtures a second-node identity; physical-device acceptance remains. See
+[connection decision and research](mobile-tailscale-discovery.md).
+
 | Outcome | Owner / dependency | Acceptance boundary |
 |---|---|---|
 | A: local Machine service | LOO-593 | Installed local service; representative Task subscription, existing command and Session bridge. CLI/socket state and attribution parity. Quit/restart/update preserve independent execution under the actual supervisor. Read errors, cancellation, bounded clients and version/consent failures remain honest. |

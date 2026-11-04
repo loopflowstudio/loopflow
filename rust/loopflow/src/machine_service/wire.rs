@@ -20,9 +20,9 @@ pub struct Request {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Bootstrap,
-    /// Same-user local socket only. None stops remote admission; zero chooses a port.
+    /// Same-user local socket only.
     ConfigureRemote {
-        port: Option<u16>,
+        configuration: Option<super::mobile::Configuration>,
     },
     SessionOwner {
         session: crate::id::LfSessionId,
@@ -55,7 +55,7 @@ pub struct Response {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
     Remote {
-        port: Option<u16>,
+        configuration: Option<super::mobile::Configuration>,
     },
     Bootstrap {
         version: u32,

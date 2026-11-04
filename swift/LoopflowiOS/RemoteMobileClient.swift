@@ -3,9 +3,25 @@ import Loopflow
 
 @MainActor
 final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSessionOpeningClient, MobileSessionListingClient {
-    private(set) var credential: MachineCredential
+    let savedMachine: SavedMachine
 
-    init(credential: MachineCredential) { self.credential = credential }
+    init(savedMachine: SavedMachine) { self.savedMachine = savedMachine }
+
+    static func connect(endpoint: URL) async throws -> SavedMachine {
+        let connection = try MachineConnection(endpoint: endpoint)
+        defer { connection.close() }
+        let reply = try await connection.request(.bootstrap)
+        guard case .bootstrap(let version, _, _, let machine, let capabilities, _, _) = reply.result,
+              version == 1, case .object(let fields) = machine,
+              case .string(let machineID) = fields["id"], !machineID.isEmpty,
+              ["all_view_plans", "session_owner", "owner_bridge"].allSatisfy(capabilities.contains) else {
+            throw RegistryQueryError("Update the Machine service to connect from this phone.")
+        }
+        try Task.checkCancellation()
+        let saved = SavedMachine(endpoint: endpoint, machineID: machineID)
+        try MachineKeychain.save(saved)
+        return saved
+    }
 
     func workingTasks() async throws -> [WorkViewPlan.Content] {
         try await verifyMachine()
@@ -17,7 +33,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     func observeTasks() async throws -> any MobileTaskObservation {
         try await verifyMachine()
-        return try await RemoteTaskObservation.open(credential: credential, query: Self.taskQuery)
+        return try await RemoteTaskObservation.open(savedMachine: savedMachine, query: Self.taskQuery)
     }
 
     func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage {
@@ -33,7 +49,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         let response = try await response(.sessionOwner(session: sessionID))
         guard case .sessionOwner(let owner) = response.result else { throw RegistryQueryError("The Machine did not resolve the Session owner") }
         guard let owner else { throw SessionNotRunning() }
-        let connection = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
+        let connection = try MachineConnection(endpoint: savedMachine.endpoint)
         do {
             let response = try await connection.request(.attach(owner: owner))
             guard case .bridged = response.result else { throw RegistryQueryError("The Machine did not attach the Session") }
@@ -59,8 +75,8 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         try await verifyMachine(required: ["task_create", "portfolio", "view_plan"])
         let portfolio = try JSONDecoder().decode(Portfolio.self, from: Data(try await read(.portfolio).utf8))
         if let error = portfolio.error { throw RegistryQueryError(error) }
-        guard let machineID = credential.machineID else { throw RegistryQueryError("Machine identity is unavailable") }
-        return MobileCreationContext(machineID: machineID, name: credential.endpoint.host ?? "Paired Machine", repositories: portfolio.repos)
+        let machineID = savedMachine.machineID
+        return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
     }
 
     func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
@@ -86,7 +102,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     private func verifySubmission(_ submission: MobileTaskSubmission) async throws {
         try await verifyMachine(required: ["task_create", "view_plan"])
-        guard submission.machineID == credential.machineID else {
+        guard submission.machineID == savedMachine.machineID else {
             throw RegistryQueryError("Reconnect \(submission.machineName) to recover this request. Nothing was sent to this Machine.")
         }
     }
@@ -98,14 +114,8 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
               case .string(let machineID) = fields["id"] else {
             throw RegistryQueryError("The Machine did not return its identity")
         }
-        if let pairedID = credential.machineID, pairedID != machineID {
-            throw RegistryQueryError("This address no longer identifies the paired Machine. Pair it again before continuing.")
-        }
-        if credential.machineID == nil {
-            let confirmed = MachineCredential(endpoint: credential.endpoint, deviceID: credential.deviceID,
-                name: credential.name, token: credential.token, machineID: machineID)
-            try MachineKeychain.save(confirmed)
-            credential = confirmed
+        guard savedMachine.machineID == machineID else {
+            throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
         }
         guard (["all_view_plans", "session_owner", "owner_bridge"] + required).allSatisfy(capabilities.contains) else {
             throw RegistryQueryError("Update the Machine service to use Tasks and Sessions from this phone")
@@ -120,7 +130,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     }
 
     private func response(_ operation: MachineOperation) async throws -> MachineResponse {
-        let connection = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
+        let connection = try MachineConnection(endpoint: savedMachine.endpoint)
         defer { connection.close() }
         return try await connection.request(operation)
     }

@@ -23,74 +23,58 @@ One operation per same-user Unix connection. Every control message is a four-byt
 big-endian length followed by UTF-8 JSON. Requests are capped at 64 KiB, responses
 at 32 MiB and connections at 64. Writes have a five-second deadline. The socket
 and its directory are private; remote proxies must never forward this endpoint.
-Remote callers use the separate device admission below.
+Remote callers use the separate Tailscale admission below.
 
-## Pair a phone through host Tailscale
+## Connect a phone through host Tailscale
 
 ```sh
-lf machine service pair --name 'My iPhone' --output /private/tmp/loopflow-phone.json
-lf machine service devices
+lf machine service mobile            # enable access and print the address
 lf machine service mobile --status
-lf machine service revoke DEVICE_ID
 lf machine service mobile --off
 ```
 
-Sign in to host Tailscale first. Pairing finds a working CLI, derives this Machine’s
-DNS name, obtains the existing Machine service and configures an unused private
-HTTPS port. It enables the loopback carrier in place, without restarting the local
-service or its Desktop connections. Import or paste the generated file into iOS.
-`lf machine service mobile` enables the same endpoint without creating a ticket.
+Sign into the same Tailscale account on the Machine and phone. In Desktop,
+open Settings → Mobile → **Enable mobile access**. In iOS, choose **Scan QR code**,
+then **Connect Machine**. **Enter address** accepts the same HTTPS address without
+camera access. The QR contains only that address; it does not expire or grant access.
 
-Setup preserves other background and foreground Serve routes. It reuses only the
-complete private route recorded for this Machine; an edited or Funnel-enabled
-former route is left alone and the carrier moves to a new loopback port. It never
-runs Funnel or resets Serve. Private reachability alone never grants Loopflow
-access; the phone still needs its separate device grant.
+Setup finds the installed host CLI, obtains the existing Machine service and
+binds HTTPS to the Machine's Tailscale addresses on one available port. No Serve
+or Funnel configuration changes. Its endpoint, approved node/user identity and
+enabled setting live in Machine config.yaml. The supervisor restores that same
+approval; mobile failures leave local Desktop running.
 
-The enabled setting, endpoint and loopback port live in this Machine’s config.yaml.
-The existing supervisor starts the same service, which restores that listener.
-Failure to bind the mobile port leaves the local service running. `mobile --off`
-stops remote admission and existing remote connections, preserves local viewers,
-and records disabled state before cleanup. It removes only its unchanged owned
-Serve route. If Tailscale is unavailable, the disabled record preserves route
-ownership for a later cleanup retry; a service restart does not re-enable it.
-Device grants remain revocable independently of endpoint enablement.
+For each connection, the host's `tailscale whois --json` identifies the actual TCP
+peer. Only another untagged device belonging to the approved owner is admitted.
+The server ignores caller-supplied identity headers. Same-host network callers
+are refused because a Tailscale node cannot distinguish its local OS accounts;
+local Desktop/CLI use their private same-user Unix socket. This also means an iOS
+Simulator on the serving Mac needs an explicit identity fixture for integration
+checks. A physical phone connects as its own Tailscale node.
 
-For isolated integration or an already configured host, `run --remote-port PORT`
-and `pair --endpoint HTTPS_ORIGIN` remain explicit manual controls. Normal pairing
-requires neither. Desktop Settings → Mobile calls the same setup operation and
-shows a QR code for the iPhone app. It also lists phones and removes access.
-`mobile --status` reads the saved configuration without enabling anything.
+HTTPS uses the host's Tailscale certificate, retrieved directly into memory and
+refreshed every six hours with at least 24 hours' requested validity. Keys are
+never written to Loopflow config or logs. MagicDNS and HTTPS certificates must
+be enabled for the tailnet. Tagged hosts/clients are unsupported by this personal
+Machine path. Browser origins, query credentials and foreign identities are refused.
 
-The private setup file contains a one-use ticket valid for ten minutes. It is
-credential material: transfer it directly to the intended phone, never commit it
-or paste it into logs. A phone exchanges it at `/v1/pair` for a device credential;
-the native adapter must keep that credential in Keychain. Only hashes are stored in the Machine's
-SQLite database. A lost pairing reply requires a new ticket; it never reissues the
-same credential. Device listings contain IDs and names, not credentials. Revoking
-a device rejects new connections and terminates existing ones on their next
-authorization check (every five seconds; failed checks also close the connection).
+The service checks host identity every five seconds (CLI calls have a 15-second
+bound). Logout or a failed check closes remote connections. Restoring the same
+account/address retries the saved listener; a different account/node requires
+explicitly enabling access again. `mobile --off` saves disabled state and closes
+remote connections without stopping local viewers or owners. Manage individual
+phone access through Tailscale; Loopflow has no phone tokens or device-grant list.
 
-Both routes use native WebSockets with `Authorization: Bearer …`. `/v1/pair`
-returns one binary JSON `{version,device,token}` message. `/v1/machine` carries the
-unchanged length-prefixed Machine stream, followed by owner frames after `bridged`.
-WebSocket message boundaries have no application meaning. Binary chunks are capped
-at 64 KiB and copy buffers are bounded; slow readers lose their connection without
-stopping execution. Browser origins and credentials in URLs are rejected.
-Ending a stream sends a WebSocket close frame with a bounded five-second flush;
-the carrier also answers ping frames while the Machine stream is idle. Native
-foreground streams use a 20-second ping interval with a five-second response
-deadline so a broken connection cannot leave an idle reading waiting indefinitely.
+`/v1/machine` carries the shared length-prefixed protocol over native WebSockets,
+followed by owner frames after `bridged`. Message boundaries have no application
+meaning. Binary chunks are capped at 64 KiB; slow readers disconnect without
+stopping execution. Ending a stream sends a bounded WebSocket close. Idle streams
+answer pings; the foreground phone checks liveness every 20 seconds with a
+five-second response deadline. Failed input is never replayed.
 
-The remote carrier checks its own device grant before shared operation dispatch.
-It never forwards to the private Unix socket or trusts a reverse proxy's UID or
-identity headers. The same connection capacity covers both carriers.
-The native iOS adapter imports/pastes this setup file and stores its grant in
-Keychain. Pairing and Work reads have passed through actual host Tailscale in
-Simulator. The opt-in native acceptance also exercises a real retained owner,
-editing, competing viewers, passive reconnect and one exact submission without
-provider relaunch. Manual Desktop and separate physical-phone acceptance remain
-open. [Run the native proof](../../../../swift/LoopflowiOS/README.md#opt-in-host-tailscale-acceptance).
+[Run the native proof](../../../../swift/LoopflowiOS/README.md#opt-in-host-tailscale-acceptance).
+The proof declares its host-identity fixture; it does not replace physical-device
+acceptance of installed Tailscale on both ends.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/MachineProtocol.swift`
 mirrors them. Executable fixtures live in `tests/fixtures/dto/machine/`.

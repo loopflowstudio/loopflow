@@ -22,8 +22,8 @@ final class RemoteTaskObservation: MobileTaskObservation {
         (readings, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
 
-    static func open(credential: MachineCredential, query: ServedRead) async throws -> RemoteTaskObservation {
-        let connection = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
+    static func open(savedMachine: SavedMachine, query: ServedRead) async throws -> RemoteTaskObservation {
+        let connection = try MachineConnection(endpoint: savedMachine.endpoint)
         do {
             let first = try await connection.request(.subscribe(query, generation: 1))
             let observation = RemoteTaskObservation(connection: connection, first: first)

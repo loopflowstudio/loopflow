@@ -1135,7 +1135,7 @@ open swift/LoopflowMobile.xcodeproj
 ```
 
 The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
-Disable its `--fixture` argument to pair a Machine over host Tailscale.
+Disable its `--fixture` argument to connect a Machine over host Tailscale.
 [Native client and focused input tests](LoopflowiOS/README.md) describe its build,
 renderer choice and remaining device/live-integration proof. Desktop's project
 and package remain unchanged.

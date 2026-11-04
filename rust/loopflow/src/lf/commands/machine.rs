@@ -17,9 +17,7 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             crate::machine_service::installation::delegate_selected()?;
             use crate::lf::MachineServiceCommand;
             let status = match cmd {
-                MachineServiceCommand::Run { remote_port } => {
-                    return crate::machine_service::run(*remote_port)
-                }
+                MachineServiceCommand::Run => return crate::machine_service::run(),
                 MachineServiceCommand::Mobile { off, status } => {
                     if *status {
                         println!(
@@ -36,27 +34,6 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                         );
                     }
                     return Ok(());
-                }
-                MachineServiceCommand::Pair {
-                    endpoint,
-                    name,
-                    output,
-                } => {
-                    let endpoint = match endpoint {
-                        Some(endpoint) => endpoint.clone(),
-                        None => crate::machine_service::mobile::enable()?.endpoint,
-                    };
-                    return tokio::runtime::Runtime::new()?.block_on(
-                        crate::machine_service::admission::pair(&endpoint, name, output),
-                    );
-                }
-                MachineServiceCommand::Devices => {
-                    return tokio::runtime::Runtime::new()?
-                        .block_on(crate::machine_service::admission::list());
-                }
-                MachineServiceCommand::Revoke { device } => {
-                    return tokio::runtime::Runtime::new()?
-                        .block_on(crate::machine_service::admission::revoke(device));
                 }
                 MachineServiceCommand::Ensure => crate::machine_service::installation::ensure()?,
                 MachineServiceCommand::Status => crate::machine_service::installation::status()?,

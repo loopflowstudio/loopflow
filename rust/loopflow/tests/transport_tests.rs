@@ -3771,10 +3771,10 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
 // Machine adapter proofs keep the existing owner/provider fixture and its
 // protocol. The service must never become another execution authority.
 struct MachineServiceProof<'a> {
+    remote_address: Option<std::net::SocketAddr>,
     fixture: &'a Fixture,
     child: Option<Child>,
     supervised: bool,
-    remote_port: Option<u16>,
 }
 
 impl<'a> MachineServiceProof<'a> {
@@ -3783,7 +3783,7 @@ impl<'a> MachineServiceProof<'a> {
             fixture,
             child: None,
             supervised,
-            remote_port: None,
+            remote_address: None,
         };
         if supervised {
             let results = std::thread::scope(|scope| {
@@ -3821,8 +3821,12 @@ impl<'a> MachineServiceProof<'a> {
 
     fn launch(&self) -> Child {
         let mut command = self.fixture.command(&["machine", "service", "run"]);
-        if let Some(port) = self.remote_port {
-            command.args(["--remote-port", &port.to_string()]);
+        let tailscale = self.fixture.home.path().join("bin/tailscale");
+        if tailscale.exists() {
+            command.env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", tailscale.parent().unwrap().display()),
+            );
         }
         command
             .env_remove("RUST_LOG")
@@ -3845,7 +3849,12 @@ impl<'a> MachineServiceProof<'a> {
                 );
                 let response = machine_receive(&mut socket);
                 assert_eq!(response["result"]["kind"], "bootstrap", "{response}");
-                return response["instance"].as_str().unwrap().to_owned();
+                if self.remote_address.is_none_or(|address| {
+                    std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100))
+                        .is_ok()
+                }) {
+                    return response["instance"].as_str().unwrap().to_owned();
+                }
             }
             assert!(
                 Instant::now() < deadline,
@@ -4119,7 +4128,7 @@ fn start_only_lost_reply_preserves_the_started_session_for_passive_inspection() 
     let service = MachineServiceProof {
         fixture: &fixture,
         supervised: false,
-        remote_port: None,
+        remote_address: None,
         child: Some(
             fixture
                 .command(&["machine", "service", "run"])
@@ -4288,14 +4297,17 @@ fn simultaneous_session_openers_share_one_retained_owner() {
 /// Tailscale route and installed Simulator. Ordinary CI never needs either.
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires LOOPFLOW_MOBILE_SIMULATOR, ENDPOINT and PORT, plus host Tailscale Serve"]
+#[ignore = "requires LOOPFLOW_MOBILE_SIMULATOR, ENDPOINT, STATUS_FILE and CERTIFICATE_FILE; host identity is a fixture"]
 fn mobile_machine_native_acceptance() {
     let simulator = std::env::var("LOOPFLOW_MOBILE_SIMULATOR").unwrap();
     let endpoint = std::env::var("LOOPFLOW_MOBILE_ENDPOINT").unwrap();
-    let port: u16 = std::env::var("LOOPFLOW_MOBILE_PORT")
-        .unwrap()
-        .parse()
-        .unwrap();
+    let host_status: Value = serde_json::from_slice(
+        &std::fs::read(std::env::var("LOOPFLOW_MOBILE_STATUS_FILE").unwrap()).unwrap(),
+    )
+    .unwrap();
+    let certificate =
+        std::fs::read_to_string(std::env::var("LOOPFLOW_MOBILE_CERTIFICATE_FILE").unwrap())
+            .unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -4392,21 +4404,39 @@ printf 'output-final\r\n'
     ]);
     let _output_cleanup = StopOwner(&fixture, output_owner.clone());
     let output_session = fixture.session(&output_owner);
+    let ip: std::net::IpAddr = host_status["Self"]["TailscaleIPs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|ip| !ip.contains(':'))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let remote_address = std::net::SocketAddr::new(
+        ip,
+        reqwest::Url::parse(&endpoint)
+            .unwrap()
+            .port_or_known_default()
+            .unwrap(),
+    );
+    mobile_host(&fixture, &host_status, &certificate);
+    let config = json!({"enabled":true,"endpoint":endpoint,"owner":{
+        "node":host_status["Self"]["ID"],"user":host_status["Self"]["UserID"]}});
+    let config_path = fixture.home.path().join("config.yaml");
+    let mut saved: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    saved["mobile"] = serde_yaml_ng::to_value(config).unwrap();
+    std::fs::write(config_path, serde_yaml_ng::to_string(&saved).unwrap()).unwrap();
     let mut service = MachineServiceProof {
         fixture: &fixture,
         child: None,
         supervised: false,
-        remote_port: Some(port),
+        remote_address: Some(remote_address),
     };
     let launch = || {
         fixture
-            .command(&[
-                "machine",
-                "service",
-                "run",
-                "--remote-port",
-                &port.to_string(),
-            ])
+            .command(&["machine", "service", "run"])
             .env("PATH", &path)
             .env("HTTPS_PROXY", "http://127.0.0.1:1")
             .env("HTTP_PROXY", "http://127.0.0.1:1")
@@ -4435,26 +4465,8 @@ printf 'output-final\r\n'
     };
     let mut setup_dir = integration_directory();
     std::fs::create_dir_all(&setup_dir).unwrap();
-    let setup = setup_dir.join("setup.json");
-    let pairing = fixture
-        .command(&[
-            "machine",
-            "service",
-            "pair",
-            "--endpoint",
-            &endpoint,
-            "--name",
-            "Native Session acceptance",
-            "--output",
-            setup.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        pairing.status.success(),
-        "{}",
-        String::from_utf8_lossy(&pairing.stderr)
-    );
+    let setup = setup_dir.join("address.txt");
+    std::fs::write(&setup, &endpoint).unwrap();
     let control_name = format!("service-{}", uuid::Uuid::new_v4());
     let mut control = setup_dir.join(&control_name);
     std::fs::create_dir(&control).unwrap();
@@ -4532,9 +4544,9 @@ printf 'output-final\r\n'
         }
         std::thread::sleep(Duration::from_millis(20));
     };
-    // Failed runs must not leave a one-use grant available to another test.
+    // Do not leave fixture setup/control state for another test.
     let _ = std::fs::remove_file(setup);
-    let _ = std::fs::remove_file(setup_dir.join("setup.json"));
+    let _ = std::fs::remove_file(setup_dir.join("address.txt"));
     let _ = std::fs::remove_file(setup_dir.join("session.json"));
     let _ = std::fs::remove_dir_all(control);
     let created_owners: Vec<String> = fixture.sql()
@@ -4632,9 +4644,61 @@ fn machine_service_invalid_checkpoints_use_shared_watch_errors() {
     }
 }
 
+// The host CLI is the network-identity boundary. Fixtures supply its responses;
+// TLS, HTTP/WebSocket, service dispatch and owner lifetimes remain real.
+fn mobile_host(fixture: &Fixture, status: &Value, pem: &str) {
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let cli = bin.join("tailscale");
+    std::fs::write(
+        &cli,
+        r#"#!/bin/sh
+case "$1" in
+status) cat "$HOME/tailscale-status.json" ;;
+cert) cat "$HOME/tailscale-certificate.pem" ;;
+whois) cat "$HOME/tailscale-peer.json" ;;
+*) exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        fixture.home.path().join("tailscale-status.json"),
+        status.to_string(),
+    )
+    .unwrap();
+    let certificate = fixture.home.path().join("tailscale-certificate.pem");
+    std::fs::write(&certificate, pem).unwrap();
+    std::fs::set_permissions(certificate, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(
+        fixture.home.path().join("tailscale-peer.json"),
+        json!({
+            "Node":{"StableID":"fixture-phone", "User":status["Self"]["UserID"]},
+            "UserProfile":{"ID":status["Self"]["UserID"]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
 #[test]
 fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable() {
+    use tokio_rustls::rustls::{
+        self,
+        pki_types::{pem::PemObject, CertificateDer, ServerName},
+    };
+    use tokio_tungstenite::tungstenite::Message;
     let fixture = Fixture::new();
+    let certificate =
+        rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+    let pem = certificate.cert.pem();
+    let status = json!({"BackendState":"Running", "Self":{"ID":"node1", "DNSName":"fixture.tail.ts.net.", "UserID":1, "TailscaleIPs":["127.0.0.1", "2001:db8::1"]}, "User":{"1":{"LoginName":"owner@example.com"}}});
+    mobile_host(
+        &fixture,
+        &status,
+        &format!("{pem}{}", certificate.signing_key.serialize_pem()),
+    );
     let mut service = MachineServiceProof::start(&fixture, false);
     let instance = service.ready();
     let (mut watch, initial) = service.request(
@@ -4643,20 +4707,54 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
         "read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":1}),
     );
     assert_eq!(initial["result"]["kind"], "reading");
-    let (_, enabled) = service.request("enable", json!({"kind":"configure_remote","port":0}));
-    let port = enabled["result"]["port"].as_u64().unwrap() as u16;
-    let mut remote = std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).unwrap();
-    remote
-        .set_read_timeout(Some(Duration::from_secs(3)))
+    let proposed = json!({"enabled":true,"endpoint":"https://fixture.tail.ts.net:0","owner":{"node":"node1","user":1}});
+    let (_, enabled) = service.request(
+        "enable",
+        json!({"kind":"configure_remote","configuration":proposed}),
+    );
+    let config = enabled["result"]["configuration"].clone();
+    let port = reqwest::Url::parse(config["endpoint"].as_str().expect("enabled endpoint"))
+        .unwrap()
+        .port()
         .unwrap();
-    let (_, again) = service.request("again", json!({"kind":"configure_remote","port":port}));
-    assert_eq!(again["result"]["port"], port);
-    service.request("off", json!({"kind":"configure_remote","port":null}));
-    match remote.read(&mut [0u8; 1]) {
-        Ok(0) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
-        other => panic!("Disabling must close remote peers: {other:?}"),
-    }
+    let connect = || {
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(CertificateDer::from_pem_slice(pem.as_bytes()).unwrap())
+            .unwrap();
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let client = rustls::ClientConnection::new(
+            std::sync::Arc::new(config),
+            ServerName::try_from("fixture.tail.ts.net").unwrap(),
+        )
+        .unwrap();
+        let socket = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        let tls = rustls::StreamOwned::new(client, socket);
+        tokio_tungstenite::tungstenite::client("wss://fixture.tail.ts.net/v1/machine", tls)
+            .map_err(|error| error.to_string())
+    };
+    let (mut reader, _) = connect().unwrap();
+    let bytes = serde_json::to_vec(&json!({"version":1,"id":"remote-watch","operation":{
+        "kind":"subscribe","query":{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":1}})).unwrap();
+    let mut frame = (bytes.len() as u32).to_be_bytes().to_vec();
+    frame.extend(bytes);
+    reader.send(Message::Binary(frame.clone().into())).unwrap();
+    assert!(matches!(reader.read().unwrap(), Message::Binary(_)));
+    let (_, again) = service.request(
+        "again",
+        json!({"kind":"configure_remote","configuration":config}),
+    );
+    assert_eq!(again["result"]["configuration"], config);
+    service.request(
+        "off",
+        json!({"kind":"configure_remote","configuration":null}),
+    );
+    assert!(reader.read().is_err());
     machine_send(&mut watch, json!({"id":9}));
     assert_eq!(machine_receive(&mut watch)["result"]["frame"]["answers"], 9);
     assert_eq!(
@@ -4664,15 +4762,36 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
         instance,
         "Setup must not restart the local service"
     );
-    drop(watch);
-
-    let config = fixture.home.path().join("config.yaml");
-    std::fs::write(&config, format!("mobile:\n  enabled: true\n  port: {port}\n  endpoint: https://fixture.tail.ts.net:8443\n")).unwrap();
+    service.request(
+        "enable",
+        json!({"kind":"configure_remote","configuration":config}),
+    );
+    let (mut reader, _) = connect().unwrap();
+    reader.send(Message::Binary(frame.into())).unwrap();
+    assert!(matches!(reader.read().unwrap(), Message::Binary(_)));
+    let status_path = fixture.home.path().join("tailscale-status.json");
+    std::fs::write(&status_path, r#"{"BackendState":"NeedsLogin"}"#).unwrap();
+    assert!(
+        reader.read().is_err(),
+        "Logout must close existing remote connections"
+    );
+    machine_send(&mut watch, json!({"id":10}));
+    assert_eq!(
+        machine_receive(&mut watch)["result"]["frame"]["answers"],
+        10
+    );
+    assert_eq!(service.ready(), instance);
+    std::fs::write(&status_path, status.to_string()).unwrap();
+    let saved = fixture.home.path().join("config.yaml");
+    std::fs::write(
+        &saved,
+        serde_yaml_ng::to_string(&json!({"mobile":config})).unwrap(),
+    )
+    .unwrap();
     service.restart();
-    service.ready();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_ok() {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
             break;
         }
         assert!(
@@ -4681,10 +4800,35 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    std::fs::write(&config, format!("mobile:\n  enabled: false\n  port: {port}\n  endpoint: https://fixture.tail.ts.net:8443\n")).unwrap();
+    assert!(connect().is_ok());
+    // Foreign device identity is rejected even with a valid HTTPS connection.
+    std::fs::write(
+        fixture.home.path().join("tailscale-peer.json"),
+        r#"{"Node":{"StableID":"foreign","User":2},"UserProfile":{"ID":2}}"#,
+    )
+    .unwrap();
+    assert!(connect().is_err());
+    let mut disabled = config.clone();
+    disabled["enabled"] = json!(false);
+    std::fs::write(
+        &saved,
+        serde_yaml_ng::to_string(&json!({"mobile":disabled})).unwrap(),
+    )
+    .unwrap();
     service.restart();
-    service.ready();
-    assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+    // A saved approval does not migrate to a new Tailscale owner after restart.
+    std::fs::write(
+        &saved,
+        serde_yaml_ng::to_string(&json!({"mobile":config})).unwrap(),
+    )
+    .unwrap();
+    let mut changed = status;
+    changed["Self"]["UserID"] = json!(2);
+    changed["User"]["2"] = json!({"LoginName":"other@example.com"});
+    std::fs::write(status_path, changed.to_string()).unwrap();
+    service.restart();
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
 }
 
 #[test]

@@ -33,11 +33,12 @@ struct MachineProtocolTests {
         #expect(query.cwd == nil)
     }
     @Test func localMobileSetupUsesRustFixtures() throws {
-        let request = MachineRequest(version: 1, id: "mobile-1", operation: .configureRemote(port: 0))
+        let configuration = try JSONDecoder().decode(MachineMobileConfiguration.self, from: fixture("mobile_configuration"))
+        let request = MachineRequest(version: 1, id: "mobile-1", operation: .configureRemote(configuration: configuration))
         #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("configure_remote")))
         let response = try JSONDecoder().decode(MachineResponse.self, from: fixture("remote"))
-        guard case .remote(let port) = response.result else { Issue.record("Missing remote port"); return }
-        #expect(port == 49250)
+        guard case .remote(let configuration) = response.result else { Issue.record("Missing remote configuration"); return }
+        #expect(configuration?.endpoint == "https://host.tail.ts.net:8443")
     }
     private func fixture(_ name: String) throws -> Data {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()

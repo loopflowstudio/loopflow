@@ -5,8 +5,7 @@ import XCTest
 @testable import LoopflowiOS
 
 /// Opt-in acceptance against an isolated Machine registry through host
-/// Tailscale Serve. The runner transfers a one-use ticket directly to Documents;
-/// neither the test nor its assertions print ticket or credential contents.
+/// HTTPS with a host identity fixture. The runner transfers only the address to Documents.
 @MainActor
 final class MachineConnectionIntegrationTests: XCTestCase {
     private struct SessionProof: Decodable {
@@ -17,14 +16,14 @@ final class MachineConnectionIntegrationTests: XCTestCase {
     }
     private var window: UIWindow?
 
-    func testPairAndReadThroughHostTailscale() async throws {
-        let setup = URL.documentsDirectory.appending(path: "LoopflowIntegration/setup.json")
+    func testConnectAndReadThroughHostTailscale() async throws {
+        let setup = URL.documentsDirectory.appending(path: "LoopflowIntegration/address.txt")
         guard FileManager.default.fileExists(atPath: setup.path) else {
-            throw XCTSkip("No isolated Machine setup ticket supplied")
+            throw XCTSkip("No isolated Machine address supplied")
         }
         let data = try Data(contentsOf: setup)
         try FileManager.default.removeItem(at: setup)
-        let ticket = try MachinePairingTicket.decode(data)
+        let endpoint = try MachineAddress.decode(String(decoding: data, as: UTF8.self))
         let proofURL = setup.deletingLastPathComponent().appending(path: "session.json")
         let proof: SessionProof?
         if FileManager.default.fileExists(atPath: proofURL.path) {
@@ -36,18 +35,18 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             do {
                 if let previous { try MachineKeychain.save(previous) }
                 else { try MachineKeychain.forget() }
-            } catch { XCTFail("Could not restore the simulator's previous Machine credential") }
+            } catch { XCTFail("Could not restore the simulator's previous Machine connection") }
         }
-        let credential = try await MachinePairing.redeem(ticket)
-        XCTAssertNil(credential.machineID)
-        let client = RemoteMobileClient(credential: try XCTUnwrap(MachineKeychain.load()))
+        let savedMachine = try await RemoteMobileClient.connect(endpoint: endpoint)
+        XCTAssertFalse(savedMachine.machineID.isEmpty)
+        let client = RemoteMobileClient(savedMachine: try XCTUnwrap(MachineKeychain.load()))
         let tasks = try await client.workingTasks()
         if proof == nil { XCTAssertTrue(tasks.isEmpty, "An empty registry is required without a Session fixture") }
         let confirmed = try XCTUnwrap(MachineKeychain.load())
         XCTAssertNotNil(confirmed.machineID)
-        XCTAssertTrue(confirmed.token == credential.token, "Bootstrap must preserve the issued grant")
-        try await exerciseConnectionLifecycle(credential: confirmed)
-        let reopened = RemoteMobileClient(credential: confirmed)
+        XCTAssertEqual(confirmed.machineID, savedMachine.machineID)
+        try await exerciseConnectionLifecycle(savedMachine: confirmed)
+        let reopened = RemoteMobileClient(savedMachine: confirmed)
         let refreshed = try await reopened.workingTasks()
         XCTAssertEqual(refreshed.map(\.work), tasks.map(\.work))
         let observation = try await reopened.observeTasks()
@@ -66,10 +65,10 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         }
     }
 
-    private func exerciseConnectionLifecycle(credential: MachineCredential) async throws {
+    private func exerciseConnectionLifecycle(savedMachine: SavedMachine) async throws {
         // Admit a real socket but send no operation. The service waits for its
         // request; our earlier deadline must report a timeout, not URL cancellation.
-        let idle = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
+        let idle = try MachineConnection(endpoint: savedMachine.endpoint)
         defer { idle.close() }
         let deadline = idle.deadline(seconds: 1)
         defer { deadline.cancel() }
@@ -86,7 +85,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             XCTAssertEqual(error.localizedDescription, "The Machine did not respond in time")
         }
 
-        let canceled = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
+        let canceled = try MachineConnection(endpoint: savedMachine.endpoint)
         defer { canceled.close() }
         var reading = false
         let reader = Task {

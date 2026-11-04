@@ -1,23 +1,40 @@
-//! Host setup owns only its recorded Serve route. The existing Machine service
-//! owns the listener, and the host's Tailscale installation owns networking.
+//! Installed Tailscale owns identity, routing and certificate issuance.
+//! The Machine exposes HTTPS only on its tailnet addresses.
 use std::fs;
+use std::net::{IpAddr, SocketAddr};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 
+use super::wire::{Operation, Reply};
 use anyhow::{Context, Result};
 use fs2::FileExt;
+use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
+use tokio_rustls::{rustls, TlsAcceptor};
 
-use super::wire::{Operation, Reply};
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Owner {
+    pub node: String,
+    pub user: u64,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Configuration {
     pub enabled: bool,
-    pub port: u16,
     pub endpoint: String,
+    pub owner: Owner,
+}
+
+impl Configuration {
+    pub(super) fn port(&self) -> Result<u16> {
+        reqwest::Url::parse(&self.endpoint)?
+            .port_or_known_default()
+            .context("Missing HTTPS port")
+    }
 }
 
 pub fn configured() -> Result<Option<Configuration>> {
@@ -36,8 +53,10 @@ fn save(configuration: &Configuration) -> Result<()> {
         let mapping = value
             .as_mapping_mut()
             .context("Machine configuration is not a mapping")?;
-        let key = serde_yaml_ng::Value::String("mobile".into());
-        mapping.insert(key, serde_yaml_ng::to_value(configuration)?);
+        mapping.insert(
+            serde_yaml_ng::Value::String("mobile".into()),
+            serde_yaml_ng::to_value(configuration)?,
+        );
         Ok(())
     })
 }
@@ -56,10 +75,10 @@ fn lock() -> Result<fs::File> {
     Ok(lock)
 }
 
-fn configure(port: Option<u16>) -> Result<Option<u16>> {
-    let (_, response) = super::client::connect(Operation::ConfigureRemote { port })?;
+fn configure(configuration: Option<Configuration>) -> Result<Option<Configuration>> {
+    let (_, response) = super::client::connect(Operation::ConfigureRemote { configuration })?;
     match response.result {
-        Reply::Remote { port } => Ok(port),
+        Reply::Remote { configuration } => Ok(configuration),
         Reply::Error { message, .. } => anyhow::bail!(message),
         _ => anyhow::bail!("Update the Machine service before enabling mobile access"),
     }
@@ -68,74 +87,29 @@ fn configure(port: Option<u16>) -> Result<Option<u16>> {
 pub fn enable() -> Result<Configuration> {
     let _lock = lock()?;
     let host = Host::discover()?;
-    let mut before = host.json(&["serve", "status", "--json"])?;
+    let owner = host.identity()?.0;
     let previous = configured()?;
-    let https_port = select_port(&before, previous.as_ref(), &host.dns)?;
-    let endpoint = format!("https://{}:{https_port}", host.dns);
-    // Retire a still-owned old address before replacing its ownership record.
-    // An independently edited route belongs to its editor and is left alone.
-    if let Some(old) = previous
+    let port = previous
         .as_ref()
-        .filter(|old| old.endpoint != endpoint && owns_route(&before, old))
-    {
-        host.remove(old)?;
-        before = host.json(&["serve", "status", "--json"])?;
-    }
-    super::installation::ensure()?;
-    // An edited or publicly forwarded former route must not keep reaching the
-    // carrier through its old loopback port. Move the listener, leave that route.
-    let desired = previous
-        .as_ref()
-        .filter(|config| owns_route(&before, config))
-        .map_or(0, |config| config.port);
-    let port = match configure(Some(desired)) {
-        Ok(port) => port,
-        Err(_) if desired != 0 => configure(Some(0))?,
-        Err(error) => return Err(error),
-    }
-    .context("The Machine did not start its mobile listener")?;
-    let mut selected = Configuration {
-        enabled: false,
-        port,
-        endpoint,
+        .filter(|c| c.owner == owner)
+        .and_then(|c| c.port().ok())
+        .unwrap_or(0);
+    let proposed = Configuration {
+        enabled: true,
+        endpoint: format!("https://{}:{port}", host.dns),
+        owner,
     };
-    // Record a disabled, retryable setup before publishing a route. A lost CLI
-    // response or failed persistence must not orphan a route or enable it at boot.
-    if let Err(error) = save(&selected) {
-        let _ = configure(
-            previous
-                .as_ref()
-                .filter(|config| config.enabled)
-                .map(|config| config.port),
-        );
-        return Err(error);
-    }
-    let result = (|| {
-        if !owns_route(&before, &selected) {
-            host.run(&[
-                "serve",
-                "--bg",
-                &format!("--https={https_port}"),
-                "--yes",
-                &format!("http://127.0.0.1:{port}"),
-            ])?;
+    super::installation::ensure()?;
+    let selected = match configure(Some(proposed)) {
+        Ok(Some(selected)) => selected,
+        result => {
+            // A lost response may still have started the listener. Close
+            // admission before reporting a setup that was never saved.
+            let _ = configure(None);
+            return result?.context("The Machine did not start its mobile listener");
         }
-        let after = host.json(&["serve", "status", "--json"])?;
-        anyhow::ensure!(
-            owns_route(&after, &selected),
-            "Tailscale did not establish the private Loopflow endpoint"
-        );
-        anyhow::ensure!(
-            other_routes(&before, &selected.endpoint) == other_routes(&after, &selected.endpoint),
-            "Tailscale changed another route; inspect Serve configuration before continuing"
-        );
-        selected.enabled = true;
-        save(&selected)?;
-        Ok(())
-    })();
-    if let Err(error) = result {
-        // Keep the disabled record so a retry recognizes any route a timed-out
-        // Tailscale command may have created. Stop admission immediately.
+    };
+    if let Err(error) = save(&selected) {
         let _ = configure(None);
         return Err(error);
     }
@@ -144,15 +118,10 @@ pub fn enable() -> Result<Configuration> {
 
 pub fn disable() -> Result<()> {
     let _lock = lock()?;
-    let previous = configured()?;
-    if let Some(previous) = &previous {
-        let mut disabled = previous.clone();
-        disabled.enabled = false;
-        // Keep route ownership even if Tailscale cannot remove it right now,
-        // while preventing a supervised restart from re-enabling admission.
-        save(&disabled)?;
+    if let Some(mut config) = configured()? {
+        config.enabled = false;
+        save(&config)?;
     }
-    // Stop local admission first, even if Tailscale is currently offline.
     if let Err(error) = configure(None) {
         let stopped = error.downcast_ref::<std::io::Error>().is_some_and(|io| {
             matches!(
@@ -164,28 +133,17 @@ pub fn disable() -> Result<()> {
             return Err(error);
         }
     }
-    if let Some(previous) = previous {
-        let cleanup = (|| -> Result<()> {
-            let host = Host::discover()?;
-            if owns_route(&host.json(&["serve", "status", "--json"])?, &previous) {
-                host.remove(&previous)?;
-            }
-            Ok(())
-        })();
-        if let Err(error) = cleanup {
-            eprintln!("Mobile access is off; Tailscale route cleanup is pending ({error}). Run `lf machine service mobile --off` again when Tailscale is available.");
-        }
-    }
     Ok(())
 }
 
-struct Host {
+#[derive(Debug, Clone)]
+pub(super) struct Host {
     binary: PathBuf,
-    dns: String,
+    pub dns: String,
 }
 
 impl Host {
-    fn discover() -> Result<Self> {
+    pub(super) fn discover() -> Result<Self> {
         let mut candidates = Vec::new();
         if let Some(binary) = crate::os_process::which_on_path(Path::new("tailscale")) {
             candidates.push(binary);
@@ -250,197 +208,155 @@ impl Host {
         })
     }
 
+    pub(super) fn identity(&self) -> Result<(Owner, Vec<IpAddr>)> {
+        let status = self.json(&["status", "--json"])?;
+        let owner = owner_from_status(&status)?;
+        let ips = status["Self"]["TailscaleIPs"]
+            .as_array()
+            .context("Tailscale has no addresses")?
+            .iter()
+            .map(|ip| {
+                ip.as_str()
+                    .context("Invalid Tailscale address")?
+                    .parse()
+                    .context("Invalid Tailscale address")
+            })
+            .collect::<Result<Vec<IpAddr>>>()?;
+        anyhow::ensure!(!ips.is_empty(), "Tailscale has no addresses");
+        anyhow::ensure!(
+            status["Self"]["DNSName"]
+                .as_str()
+                .map(|s| s.trim_end_matches('.'))
+                == Some(&self.dns),
+            "Tailscale Machine address changed; enable mobile access again"
+        );
+        Ok((owner, ips))
+    }
+
+    pub(super) fn permits(&self, peer: SocketAddr, owner: &Owner) -> Result<bool> {
+        let who = self.json(&["whois", "--json", "--proto=tcp", &peer.to_string()])?;
+        Ok(permits_peer(&who, owner))
+    }
+
+    pub(super) fn certificate(&self) -> Result<TlsAcceptor> {
+        // The sandboxed macOS CLI cannot write arbitrary paths. Keep the key only
+        // in memory; never put it in an argument, config, error or log.
+        let pem = self.run(&[
+            "cert",
+            "--min-validity=24h",
+            "--cert-file=-",
+            "--key-file=-",
+            &self.dns,
+        ])?;
+        let certificates = CertificateDer::pem_slice_iter(&pem)
+            .collect::<Result<Vec<_>, _>>()
+            .context("Tailscale returned an invalid certificate")?;
+        let key = PrivateKeyDer::from_pem_slice(&pem)
+            .context("Tailscale returned an invalid certificate key")?;
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certificates, key)
+            .context("Tailscale certificate does not match its key")?;
+        Ok(TlsAcceptor::from(Arc::new(config)))
+    }
+
     fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
         let output = crate::os_process::bounded_output(
             Command::new(&self.binary).args(args),
             Duration::from_secs(15),
         )
         .context("Tailscale did not respond; open it and check its connection")?;
-        anyhow::ensure!(output.status.success(), "Tailscale could not complete setup. Check that it is signed in and private HTTPS/Serve is enabled for this tailnet");
+        anyhow::ensure!(output.status.success(), "Tailscale could not complete setup. Check that it is signed in and HTTPS certificates are enabled for this tailnet");
         Ok(output.stdout)
     }
 
     fn json(&self, args: &[&str]) -> Result<Value> {
         serde_json::from_slice(&self.run(args)?).context("Tailscale returned an unsupported status")
     }
-
-    fn remove(&self, config: &Configuration) -> Result<()> {
-        let url = reqwest::Url::parse(&config.endpoint)?;
-        self.run(&[
-            "serve",
-            &format!(
-                "--https={}",
-                url.port_or_known_default().context("Missing HTTPS port")?
-            ),
-            "off",
-        ])?;
-        Ok(())
-    }
 }
 
-fn endpoint_key(endpoint: &str) -> Result<String> {
-    let url = reqwest::Url::parse(endpoint)?;
-    Ok(format!(
-        "{}:{}",
-        url.host_str().context("Missing Machine hostname")?,
-        url.port_or_known_default().context("Missing HTTPS port")?
-    ))
+fn owner_from_status(status: &Value) -> Result<Owner> {
+    anyhow::ensure!(
+        status["BackendState"] == "Running",
+        "Sign in to Tailscale on this Machine"
+    );
+    let node = &status["Self"];
+    anyhow::ensure!(
+        !node["Tags"].as_array().is_some_and(|tags| !tags.is_empty()),
+        "Mobile access requires a user-owned Tailscale Machine, not a tagged device"
+    );
+    let user = node["UserID"]
+        .as_u64()
+        .filter(|id| *id != 0)
+        .context("Tailscale did not identify this Machine's owner")?;
+    anyhow::ensure!(
+        status["User"][user.to_string()]["LoginName"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
+        "Tailscale did not identify this Machine's owner"
+    );
+    Ok(Owner {
+        node: node["ID"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .context("Tailscale did not identify this Machine")?
+            .into(),
+        user,
+    })
 }
 
-fn owns_route(status: &Value, config: &Configuration) -> bool {
-    let Ok(key) = endpoint_key(&config.endpoint) else {
-        return false;
-    };
-    let Some((_, port)) = key.rsplit_once(':') else {
-        return false;
-    };
-    status["TCP"][port] == json!({"HTTPS":true})
-        && status["Web"][&key]
-            == json!({"Handlers":{"/":{"Proxy":format!("http://127.0.0.1:{}",config.port)}}})
-        && status["AllowFunnel"][&key] != true
-        && !status["Foreground"]
-            .as_object()
-            .is_some_and(|sessions| sessions.values().any(|config| port_used(config, port)))
-}
-
-fn port_used(status: &Value, port: &str) -> bool {
-    let suffix = format!(":{port}");
-    status["TCP"].get(port).is_some()
-        || ["Web", "AllowFunnel"].iter().any(|section| {
-            status[section]
-                .as_object()
-                .is_some_and(|entries| entries.keys().any(|key| key.ends_with(&suffix)))
-        })
-        || status["Foreground"]
-            .as_object()
-            .is_some_and(|sessions| sessions.values().any(|config| port_used(config, port)))
-}
-
-fn select_port(status: &Value, previous: Option<&Configuration>, dns: &str) -> Result<u16> {
-    if let Some(previous) = previous {
-        if let Ok(url) = reqwest::Url::parse(&previous.endpoint) {
-            if let Some(port) = url.port_or_known_default() {
-                if url.host_str() == Some(dns)
-                    && (owns_route(status, previous) || !port_used(status, &port.to_string()))
-                {
-                    return Ok(port);
-                }
-            }
-        }
-    }
-    for port in [443, 8443]
-        .into_iter()
-        .chain(10000..=u16::MAX)
-        .chain(1024..10000)
-    {
-        if !port_used(status, &port.to_string()) {
-            return Ok(port);
-        }
-    }
-    anyhow::bail!("No unused private HTTPS port is available in Tailscale Serve")
-}
-
-fn other_routes(status: &Value, endpoint: &str) -> Value {
-    let mut other = status.clone();
-    if let Ok(key) = endpoint_key(endpoint) {
-        if let Some((_, port)) = key.rsplit_once(':') {
-            for (section, entry) in [
-                ("TCP", port),
-                ("Web", key.as_str()),
-                ("AllowFunnel", key.as_str()),
-            ] {
-                if let Some(map) = other.get_mut(section).and_then(Value::as_object_mut) {
-                    map.remove(entry);
-                }
-                if other[section].as_object().is_some_and(|map| map.is_empty()) {
-                    if let Some(map) = other.as_object_mut() {
-                        map.remove(section);
-                    }
-                }
-            }
-        }
-    }
-    other
+fn permits_peer(who: &Value, owner: &Owner) -> bool {
+    // Network identity belongs to the device, not its local OS accounts. A
+    // same-host connection cannot prove which account opened it; use the private
+    // Unix socket on this Machine instead. Phones arrive as a distinct node.
+    who["Node"]["StableID"]
+        .as_str()
+        .is_some_and(|id| !id.is_empty() && id != owner.node)
+        && who["UserProfile"]["ID"].as_u64() == Some(owner.user)
+        && who["Node"]["User"].as_u64() == Some(owner.user)
+        && !who["Node"]["Tags"]
+            .as_array()
+            .is_some_and(|tags| !tags.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{other_routes, owns_route, select_port, Configuration};
+    use super::{owner_from_status, permits_peer, Configuration};
     use serde_json::json;
 
     #[test]
-    fn setup_preserves_other_routes_and_never_selects_funnel() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+    fn admission_requires_a_different_user_owned_device_of_the_saved_owner() {
+        let mut status = json!({"BackendState":"Running", "Self":{"ID":"host", "UserID":1}, "User":{"1":{"LoginName":"owner@example.com"}}});
+        let owner = owner_from_status(&status).unwrap();
+        let mut who = json!({"Node":{"StableID":"phone", "User":1}, "UserProfile":{"ID":1}});
+        assert!(permits_peer(&who, &owner));
+        who["Node"]["StableID"] = json!("host");
+        assert!(!permits_peer(&who, &owner));
+        who["Node"]["StableID"] = json!("phone");
+        who["Node"]["Tags"] = json!(["tag:ci"]);
+        assert!(!permits_peer(&who, &owner));
+        who["Node"]["Tags"] = json!([]);
+        who["UserProfile"]["ID"] = json!(2);
+        assert!(!permits_peer(&who, &owner));
+        assert!(!permits_peer(&json!({}), &owner));
+        status["Self"]["Tags"] = json!(["tag:server"]);
+        assert!(owner_from_status(&status).is_err());
+        status["Self"]["Tags"] = json!([]);
+        status["BackendState"] = json!("NeedsLogin");
+        assert!(owner_from_status(&status).is_err());
+        status["BackendState"] = json!("Running");
+        status["Self"]["UserID"] = json!(2);
+        assert!(owner_from_status(&status).is_err());
+    }
+
+    #[test]
+    fn configuration_round_trips_the_approved_owner() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/machine/mobile_configuration.json"
         ))
         .unwrap();
-        let config: Configuration = serde_json::from_value(fixture.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&config).unwrap(), fixture);
-        let devices = vec![super::super::admission::Device {
-            id: super::super::admission::DeviceId("test-phone".into()),
-            name: "My iPhone".into(),
-            created_at: 1793740000,
-            revoked_at: None,
-        }];
-        assert_eq!(
-            serde_json::to_value(devices).unwrap(),
-            serde_json::from_str::<serde_json::Value>(include_str!(
-                "../../../../tests/fixtures/dto/machine/devices.json"
-            ))
-            .unwrap()
-        );
-        assert_eq!(
-            select_port(&json!({}), Some(&config), "host.tail.ts.net").unwrap(),
-            8443,
-            "Re-enabling keeps the phone's recorded endpoint when its port is free"
-        );
-        let before = json!({
-            "TCP":{"443":{"HTTPS":true}},
-            "Web":{"host.tail.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}},
-            "AllowFunnel":{"host.tail.ts.net:10000":true}
-        });
-        assert_eq!(
-            select_port(&before, None, "host.tail.ts.net").unwrap(),
-            8443
-        );
-        let mut after = before.clone();
-        after["TCP"]["8443"] = json!({"HTTPS":true});
-        after["Web"]["host.tail.ts.net:8443"] =
-            json!({"Handlers":{"/":{"Proxy":"http://127.0.0.1:49250"}}});
-        assert!(owns_route(&after, &config));
-        assert_eq!(
-            select_port(&after, Some(&config), "host.tail.ts.net").unwrap(),
-            8443
-        );
-        assert_eq!(
-            other_routes(&before, &config.endpoint),
-            other_routes(&after, &config.endpoint)
-        );
-        after["AllowFunnel"]["host.tail.ts.net:8443"] = json!(true);
-        assert!(!owns_route(&after, &config));
-        assert_eq!(
-            select_port(&after, Some(&config), "host.tail.ts.net").unwrap(),
-            10001
-        );
-        after["AllowFunnel"]["host.tail.ts.net:8443"] = json!(false);
-        after["Foreground"] = json!({"another-session":{"TCP":{"8443":{"HTTPS":true}}}});
-        assert!(!owns_route(&after, &config));
-        assert_eq!(
-            select_port(&after, Some(&config), "host.tail.ts.net").unwrap(),
-            10001
-        );
-        after.as_object_mut().unwrap().remove("Foreground");
-        after["Web"]["host.tail.ts.net:8443"]["Handlers"]["/other"] = json!({"Text":"keep me"});
-        assert!(
-            !owns_route(&after, &config),
-            "An edited route must never be removed as ours"
-        );
-        for port in 10000..10100 {
-            after["TCP"][port.to_string()] = json!({"HTTPS":true});
-        }
-        assert_eq!(
-            select_port(&after, None, "host.tail.ts.net").unwrap(),
-            10100
-        );
+        let config: Configuration = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(config.port().unwrap(), 8443);
+        assert_eq!(serde_json::to_value(config).unwrap(), value);
     }
 }

@@ -28,18 +28,25 @@ The renderer can be revisited on evidence, without changing the Machine protocol
 
 ## Native connection
 
-The service’s opt-in remote listener binds loopback; host Tailscale Serve supplies
-private HTTPS/WSS. Remote authentication dispatches directly to shared operations,
-never through the trusted same-user Unix socket. A local command writes a private,
-one-use, ten-minute setup ticket. SQLite stores ticket/device token hashes. Device
-revocation denies new connections and closes active ones on the bounded check.
+Jack Heart selected **Scan QR code** as the default and **Enter address** as the
+fallback on November 4. The working cutover carries only the HTTPS address and
+remembers the Machine after protocol/identity verification. Automatic discovery
+is deferred. See [connection design and evidence](mobile-tailscale-discovery.md).
 
-The app accepts an imported or pasted setup file and validates the private HTTPS
-origin before connecting. It stores the issued grant immediately in Keychain with
-WhenUnlockedThisDeviceOnly protection, before any fallible bootstrap. First bootstrap
-pins Machine identity; later mismatches fail explicitly. Credentials never enter
-URLs, logs or rendered UI. Forget Machine removes the local credential; server
-revocation remains a separate Machine operation.
+The Machine now binds HTTPS/WSS directly to its host Tailscale addresses. It asks
+the installed host CLI who owns the actual TCP peer and admits a distinct,
+untagged node belonging to the approved owner. The approved node/user are saved
+with the endpoint, so restart does not transfer approval to another account.
+The TLS certificate is retrieved into memory and refreshed through host Tailscale.
+No Serve route, embedded node, phone ticket, token, or device-grant store remains.
+Local clients keep their private same-user Unix socket. Same-host network identity
+is refused because it cannot distinguish OS accounts; Simulator proofs explicitly
+fixture a second node identity.
+
+The app validates a scanned/entered HTTPS address, presents it for confirmation,
+and saves only its endpoint and verified Machine ID in Keychain. Later identity
+mismatches fail rather than repinning. Forget Machine removes the saved connection;
+individual device access is managed through Tailscale.
 
 RemoteMobileClient watches shared all-repository WorkViewPlans for actual Task
 primary Sessions. It rejects unavailable/truncated
@@ -80,6 +87,12 @@ open can resume a provider that has ended, so this is not a durable idempotent
 receipt. Runs remain unavailable through the same shared admission policy.
 
 ## Next work and acceptance
+
+The dated carrier proofs below predate the address-only cutover unless explicitly
+marked otherwise. Current QR UI/address/Keychain checks and TLS lifecycle tests
+pass. An isolated production listener validated the real host certificate and
+rejected same-host identity. Native retained-owner acceptance on the replacement carrier now passes with an
+explicit host-identity fixture. Physical-device identity/network testing remains.
 
 Sustained output now exercises MobileWorkspace and native editing, and a stalled
 viewer recovers after foreground liveness detection; see the dated proof below.
@@ -958,3 +971,53 @@ Logs: `/tmp/mobile-compact-native-final.log`, `/tmp/mobile-compact-controls-fina
 `/tmp/mobile-landscape-large-confirmed.log`. Physical device rotation, VoiceOver
 navigation and actual-provider redraw behavior remain acceptance work. No carrier
 or engine code changed in this layout pass.
+
+
+## QR-first connection cutover — November 4, 12:53
+
+Jack Heart's selected QR/address flow now replaces phone tickets throughout the
+working tree. The failed Serve Unix-socket proposal is removed. Direct HTTPS binds
+the installed host's Tailscale addresses; WhoIs admits another untagged node of
+the approved owner. Saved node/user identity prevents approval from silently
+following an account change at service restart. Certificate material stays in
+memory and refresh uses wall time. Local Unix admission remains separate.
+
+Review findings resolved: the installed macOS client rejected Serve's Unix target;
+the host certificate CLI could not write outside its sandbox; same-host network
+identity could not distinguish OS accounts; an unavailable IPv6 allocation should
+not prevent IPv4 use. The selected path handles these without a second auth mode,
+custom relay, embedded node or phone enrollment database. A local setup response
+has a longer deadline for certificate issuance; failed setup closes admission.
+
+The native runner initially signaled restart after only local readiness. It now
+waits for HTTPS too. Its next failure came from replacing fixture config and
+losing the manual repository selection; setup now changes only the mobile key.
+Neither failure justified changing Session recovery semantics. The final native
+run passed exact provider counts, retained draft editing, passive reconnect,
+Task creation and 32 MiB output with 512 edited acknowledgements. Its p95 native
+input response was 20.4 ms, longest 36.9 ms; scheduler p95 36.5 ms. These are
+Simulator measurements with a stand-in provider and an explicit second-node
+identity fixture, not physical-device or provider-specific acceptance.
+
+- Signed iOS address/Keychain tests and QR-first UI: pass; `/tmp/mobile-qr-onboarding-final.log`.
+- Camera fallback opens editable address entry directly: pass; `/tmp/mobile-qr-fallback.log`.
+- `scripts/test_desktop.sh --filter 'MachineProtocolTests|MobilePairingTests'`: 10 pass; actual QR decodes to the exact address.
+- Installed-host isolated HTTPS probe: real certificate validates and same-host identity returns 403; `/tmp/mobile-direct-live.py`.
+- Exact Desktop enable/status/off CLI workflow: pass, stable address and owner approval, local incarnation unchanged, no supervisor registration; `/tmp/mobile-direct-setup.py`.
+- `mobile_machine_native_acceptance --ignored --exact`: pass; `/tmp/mobile-direct-native.log`, native result `Test-LoopflowiOS-2026.11.04_12-51-18--0800.xcresult`.
+
+Remaining: physical phone over installed Tailscale, network/account transitions
+on both devices, installed Desktop update survival, real provider/dictation and
+VoiceOver judgment. No publication, app account or TestFlight action taken.
+
+- `cargo test -p loopflow --lib machine_service::`: 7 pass; `/tmp/mobile-qr-final-checks.log`.
+- `cargo test -p loopflow --test transport_tests machine_service_`: 7 pass; isolated launchd replacement remains opt-in and was not rerun for this carrier change.
+- `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-qr-clippy.log`; initial lint found a large test-only handshake error, converted to its diagnostic string.
+- `cargo fmt` and `git diff --check`: pass. Dedicated Simulator `Loopflow onboarding proof` was shut down and deleted after acceptance; existing Simulators were preserved.
+
+Restoration failures now log the first error while retrying the saved approval,
+without repeating the same warning every five seconds. QR-first and confirmation
+captures are `scratch/demo-assets/machine-qr-first.png` and
+`scratch/demo-assets/machine-address-confirmation.png`. Existing demo edits were
+preserved. The superseded patch was moved out of scratch; current code is the
+single implementation.

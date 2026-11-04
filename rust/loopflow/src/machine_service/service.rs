@@ -15,7 +15,7 @@ use super::wire::{
 };
 use crate::lf::commands::{read::Read, write::Write};
 
-pub(super) async fn run(remote_port: Option<u16>) -> Result<()> {
+pub(super) async fn run() -> Result<()> {
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -42,16 +42,16 @@ pub(super) async fn run(remote_port: Option<u16>) -> Result<()> {
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     // Both carriers dispatch the same operations after their own admission.
     // Remote access never connects to the private socket as a proxy Unix user.
-    let remote_port = remote_port.or_else(|| match super::mobile::configured() {
-        Ok(saved) => saved.filter(|config| config.enabled).map(|config| config.port),
+    let remote_configuration = match super::mobile::configured() {
+        Ok(saved) => saved.filter(|config| config.enabled),
         Err(error) => {
             tracing::warn!(%error, "Mobile configuration is unavailable; local service remains ready");
             None
         }
-    });
+    };
     let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
-        remote_port,
+        remote_configuration,
         remote_requests,
         instance.clone(),
         executable_sha256.clone(),
@@ -187,12 +187,17 @@ async fn operation(
     remote_control: Option<mpsc::Sender<super::remote::Control>>,
 ) -> Result<()> {
     let reply = match operation {
-        Operation::ConfigureRemote { port } => {
+        Operation::ConfigureRemote { configuration } => {
             if let Some(control) = remote_control {
                 let (reply, result) = tokio::sync::oneshot::channel();
-                control.send(super::remote::Control { port, reply }).await?;
-                let port = result.await?.map_err(anyhow::Error::msg)?;
-                Reply::Remote { port }
+                control
+                    .send(super::remote::Control {
+                        configuration,
+                        reply,
+                    })
+                    .await?;
+                let configuration = result.await?.map_err(anyhow::Error::msg)?;
+                Reply::Remote { configuration }
             } else {
                 Reply::Error {
                     code: ErrorCode::Unsupported,

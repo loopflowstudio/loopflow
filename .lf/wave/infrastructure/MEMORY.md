@@ -316,20 +316,25 @@ Jack Heart's October 11 Kata report (`d4991d61`): prompt timeouts recurred outsi
 Loopflow; the Kata lock holder/cause remain unknown. Evidence:
 `4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Session titles.
 
-## Program Status direction (LOO-398/415, reconciled 2026-10-16)
+## Program Status direction (LOO-398/415/720, reconciled 2026-11-03)
 
-Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
-lf writing only for pipe-driven work/Flow position. Reports override inference
-in Rust's single Waiting judgment; they grant no execution authority.
-Jack Heart assigned emission to LOO-415 on October 7, conditional on lf and
-Flows reporting equally well to external hosts; LOO-398 owns reading. LOO-415's
-brief requires one terminal writer for Flow steps as well as conversations.
-A PTY accepted only 62 of 74 OSC bytes: a parent mutex cannot serialize independent
-step writers. Provider reports pass unchanged, with no reports in JSON/log output.
-LOO-384 retains non-reporters; LOO-402 owns broader presentation. Source proofs
-do not establish installed/native adoption; viewer absence is not provider death.
-Earlier patch evidence and constraints:
-`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, Program Status direction.
+Jack Heart selected every-pane Desktop reading, native passthrough and lf writing
+only for pipe-driven work/Graph position, equally to external hosts. Rust's single
+Waiting judgment uses reports without granting execution authority. One terminal
+writer owns steps and conversations; parent mutexes cannot serialize independent
+writers. Keep reports out of JSON/log output. LOO-384 retains non-reporters;
+LOO-402 owns broader presentation. Viewer absence is not provider death.
+Earlier emission assignment and partial-PTY-write evidence:
+`272f1271df:.lf/wave/infrastructure/MEMORY.md`, this heading.
+
+Jack Heart added Desktop to LOO-720's Rex acceptance on November 3. Native
+launch left `lf/<process>` Working; root idle/done cannot replace another id.
+Removing it preserves headless reports and Desktop summary order. Fresh viewers
+also lost native reports. The owner now reduces validated Ghostty callbacks,
+answers detached detection and replays current records, including clear.
+Fixtures prove restoration, observer/watch and Swift presentation; they prove
+neither configured emission nor mounted Rex/Desktop acceptance. Release's
+entry-point lesson applies: startup and reconnect need provider/host proof.
 
 ## Session continuity (LOO-416/710, reconciled 2026-11-02)
 

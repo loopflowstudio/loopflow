@@ -1,112 +1,127 @@
-# LOO-728 docs-first demo — November 4, 2026
+# LOO-728 configured acceptance — November 4, 2026
 
-Decision pass 1: **iterate**. The configured experience failed. This is the
-agent's decision under the headless delegation, not observed acceptance by
-Jack Heart. No new product choice or scope reduction is proposed.
+Configured acceptance remains unproved. The latest implementation diagnosis
+supersedes earlier instructions to keep patching viewer routing: migration order
+is repaired, but the candidate still requires parent delivery before supported
+installation and same-Session owner transition. Retain Jack Heart's accepted
+current-host design; the Desktop-only proposal is unaccepted. This is delegated
+judgment, not new feedback or acceptance from Jack.
 
-Design: [write-docs-first.md](write-docs-first.md). Integration under review:
-`f20e05d1eb027ed435988b35c5a936f7effaa349`, PR #1817, stacked on LOO-498.
-The preceding pass integrated and published the preserved implementation and
-passed focused checks. It explicitly left configured-host acceptance unverified.
-This pass adds real failure evidence; missing earlier demo evidence does not
-establish a stalled implementation.
+## Delivery prerequisite
 
-## Configured-path observations
+The candidate initially rejected the shared store because shallow Git history
+made `migration_build::merged_order` return no merged order. Its slug tail was
+`native_terminal_input, rex_workspaces, ship_stop, task_regressed_in, wave_removal`.
+Read-only ledger inspection found `ship_stop, task_regressed_in,
+native_terminal_input, wave_removal`, with matching source SQL checksums.
 
-The existing Rex server was reachable without autostart. Its existing
-`loopflow` Session was `session:01a19d85-39a8-7aae-8c83-fa6adc2e1317`.
-The current window was `window:01a1a819-d002-7cb2-8ee8-713b924e42ba`,
-labelled `LOO-728 Docs first`; focused block
-`block:01a1a819-d001-794e-90aa-967b912ab9b5` remained focused after presentation.
-Task inventory identified the active interactive conversation as
-`fd5f2333c5f54054b40c4bb5e574a98a`. A window label alone does not prove that
-conversation's current viewer registration.
+`git fetch --unshallow origin` completed and rebuilding with inherited `LF_*`
+unset succeeded. The catalog now follows the ledger, then `rex_workspaces` as
+its sole unmerged migration. No source-code or shared-store change was required.
+PR #1814 was freshly observed OPEN at `b8aac2ef139ff34213685a10137572e1498f5e4f`
+with no merge timestamp during that diagnosis. `install::decide` rejects pending
+unmerged migrations; ordinary shared-store startup rejects unapplied known
+migrations. LOO-728 cannot land LOO-498 or waive its acceptance.
 
-Commands used the already-built `target/debug/lf`, reporting
-`0.15.1+13e7d5dac.dirty`. This is the preceding validation artifact, not a fresh
-build at the review HEAD. Installed `lf` reported `0.15.1+ac8e088f5`.
+Subsequent November 4 reconciliation observed #1814 OPEN at
+`df3b5e810d3841a19bc5911c332fb42f23193d46`, including the coherent installer
+and a revised draft `rex_workspaces` schema. That parent is not integrated here.
+The following candidate results remain evidence for `c136addfa`; they do not
+validate the newer migration. Parent synchronization, delivery and rebuilding
+precede a fresh compatibility check and configured demo.
 
-1. `target/debug/lf open --task LOO-728 --file docs/orchestration.md --file
-   docs/surfaces.md --explain --json` selected Rex and the two original files
-   under this Task checkout, with `opening:false`.
-2. The same command without `--explain`, retaining this agent's caller
-   identity, exited 1: `Current conversation viewer is unavailable; refusing
-   stale Rex startup placement`. No file pane was created by this attempt.
-3. As a diagnostic only, removing `LF_AGENT_CALLER` from that command produced
-   `opening:true` and two new native file panes in the existing window, without
-   changing its focused block. This uses direct-shell placement and does **not**
-   prove the required agent route.
-4. `rex --autostart=false capture -b <block> --trim` on both new panes showed
-   `error: unrecognized subcommand 'tool'` followed by `Usage: lf task
-   [OPTIONS] <COMMAND>`. The panes were
-   `block:01a1a845-fb5d-702a-b036-8d00184436b4` (orchestration) and
-   `block:01a1a845-fc74-7631-a6fc-5de8277bf5e6` (surfaces). Neither displayed
-   a working editor. Installed `lf help task tool` independently failed with
-   `unknown command: lf task tool`.
-5. A direct-shell retry again reported `opening:true`; its panes also did not
-   persist. This establishes neither editor readiness nor successful reuse.
-6. Presenting `docs/loo-728-does-not-exist.md` failed with `Cannot open ...`
-   and `No such file or directory`. `git diff --exit-code --
-   docs/orchestration.md docs/surfaces.md` passed: the original files remained
-   unchanged and recoverable.
+Rebuilt candidate `0.15.1+c136addfa.dirty`:
 
-The launch mismatch is consistent with `workspace::viewer_argv` using
-`os_process::resolve_lf_binary`, which prefers an installed entry, while this
-unreleased stack introduces `task tool`. Isolated tests pin `LF_BIN` in a
-private Home and therefore do not establish this live installation path.
-The precise installed entry used by each exited pane was not captured.
+- `target/debug/lf install preflight --json`: exit 1, `ahead_pending`, applied
+  frontier `wave_removal`, latest known/raised reader floor `rex_workspaces`,
+  unmerged `["rex_workspaces"]`; executable compatibility passes 19 references.
+  The earlier schema ordering mismatch is resolved; promotion is still rejected.
+- `target/debug/lf session list --json`: shared store lacks the unmerged
+  `rex_workspaces` migration.
+- Installed `lf resume fd5f2333c5f54054b40c4bb5e574a98a --prepare --json`:
+  retains that Session ID; preparation launches nothing and selects no candidate
+  owner. A development CLI alone does not change the selected installation.
+- `git diff --exit-code -- docs/orchestration.md docs/surfaces.md`: pass.
 
-Cleanup inspection found neither demo file pane remaining. An attempted close
-of their original IDs reported that the blocks were already gone. A final
-window inventory showed only the original focused block. Another pre-existing
-shell also disappeared during the observations; this demo issued no close or
-input command to that shell, and its disappearance is not evidence of preservation
-or approval. No server, watcher, provider or editor was left running by this demo.
+No configured store migration, installation, owner transition or editor change
+was performed. A private Home, removed migration, hand-edited ledger, main-only
+owner or stale-placement fallback cannot establish the required experience.
 
-## Remaining proof and next action
+## Configured owner and agent failure
 
-Implementation should repair or configure the existing launch path so a
-docs-writing agent can present original files in the Task's current Rex viewer
-and the resulting Files tool executes from a compatible build. Investigate
-current-viewer registration/selection and executable resolution together;
-do not make stale startup placement authoritative or bypass the failure by
-erasing agent identity. Use the existing installation and Files owners, without
-landing the parent or adding a competing host abstraction.
+Interactive Session: `fd5f2333c5f54054b40c4bb5e574a98a`; owner:
+`0756f737-c051-4905-b51b-f24a4b4b6342` (PID 69363); AgentProcess:
+`2883597e-d8cd-4586-8ed3-c7c6468d97ad`. Read-only inspection of its transport
+returned exactly:
 
-Repeat the unmodified agent command and capture the editor displaying the
-original documentation before advancing. Then verify an unsaved active edit
-survives repeated presentation and that a saved correction is read by the next
-implementation pass. Those checks could not run because no working editor
-opened. Desktop draft behavior retains its prior automated evidence, not live
-acceptance. The pursue source still begins with write-docs and both backward
-edges target implement; this pass did not run a new implementation Graph.
+```json
+{"answers":1,"seq":0,"kind":"controlled","held":true}
+```
 
-Jack Heart supplied no new feedback during this headless demo. His accepted
-in-place docs and current-host requirements supply the decision: a success
-receipt followed by a failed editor does not satisfy them. The gaps are concrete
-and repairable, so iterate rather than request another product decision.
+The owner has a controller but reports no placement. Candidate `viewed_summary`
+correctly leaves placement absent instead of substituting startup environment.
+The background caller and Task's primary conversation supply no destination.
+Availability alone proves no current viewer placement.
 
-## Repair evidence — November 4, 2026
+At 21:17 and 21:30 UTC, from this Task checkout with `LF_AGENT_CALLER` intact:
 
-The implementation pass found that the Task's interactive attachment is inside
-its retained execution PTY, while Rex hosts the outer relay. Its recorded
-`terminal_id` is null. Placement now travels with the transport's controlling
-viewer and is read through the existing Session summary owner. Local Files
-presentation uses the shared editor command directly; it no longer depends on
-an installed `lf` supporting this branch's `task tool` command.
+```sh
+target/debug/lf open --task LOO-728 --file docs/orchestration.md --file docs/surfaces.md --explain --json
+# Rex; both original absolute paths; opening:false
+target/debug/lf open --task LOO-728 --file docs/orchestration.md --file docs/surfaces.md --json
+# exit 1: Current conversation viewer is unavailable; refusing stale Rex startup placement
+```
 
-A headless probe used the real Rex binary with a private socket, config, state,
-LF Home and repository, a candidate execution owner, its actual Rex relay, and
-agent provenance. It opened the repository's original `guide.md` in vi, entered
-an unsaved correction, repeated the same file presentation, and confirmed the
-same editor block, original focus and unsaved text. Saving changed the original
-file; rereading returned the correction. A missing-file request failed without
-changing that saved content. All probe Sessions and process groups were closed.
-No provider, production store or existing pane was altered.
+These attempts used `0.15.1+c136addfa` before the catalog rebuild. No editor
+opened; draft preservation, saved correction consumption and conversation
+continuity could not be demonstrated. Original docs remained unchanged. Installed
+Task status still identified PR #1817 and the same interactive Session.
 
-This proves the candidate's native agent/editor path headlessly. It does not
-upgrade the existing configured owner or establish Jack Heart's live acceptance.
-That owner predates placement reporting; the configured demo still needs the
-candidate owner and viewer through the normal delivery path. The original
-failure above remains evidence for that boundary, not a reason to restore stale
-environment routing or restart an active conversation during implementation.
+## Earlier failure and bounded success
+
+The original configured attempt used `0.15.1+13e7d5dac.dirty`, while installed
+lf was `0.15.1+ac8e088f5`. Agent presentation failed with the same placement
+error. Removing `LF_AGENT_CALLER` diagnostically created two Rex panes, but both
+showed `unrecognized subcommand 'tool'`: the installed lf lacked `task tool`.
+Those panes exited, so `opening:true` did not establish a working editor.
+Missing-file presentation failed without altering docs. Another pre-existing
+shell disappeared without a close/input command from the demo; its cause remains
+unknown and preservation was not established.
+
+The repair routes placement through the controlling transport viewer and
+launches `task_tool::file_editor` directly, avoiding the installed-CLI hop.
+An isolated real-Rex probe with private socket, config, state, Home and repository
+used a candidate owner, its Rex relay and agent provenance. It opened original
+`guide.md` in vi, preserved the same pane/focus/unsaved correction on repeat,
+saved into the original file and reread the correction. A missing-file request
+left saved content intact. Probe Sessions and process groups were closed; no
+production store, provider or existing pane was altered.
+
+Jack Heart later confirmed “ok it opened” in the configured direct development
+CLI demo. That command also removed `LF_AGENT_CALLER`, and did not restart the
+old owner. Native inventory and screenshots showed the original docs beside the
+same conversation; repeat presentation reused the editor. Later missing panes
+have no established cause; local swap recovery bytes remain preserved.
+[docs-first-dev-demo.md](docs-first-dev-demo.md) retains command context, native
+identities, screenshots and feedback. `demo.html` is that historical runbook.
+Neither direct CLI success nor the isolated probe establishes configured agent
+acceptance or permission to narrow the contract.
+
+## Next owner and required proof
+
+After parent delivery: install a coherent build containing this stack, use the
+supported same-Session owner transition, then demo/review the original agent
+command. Preserve Session/provider history and drafts. Show original-file
+opening, an unsaved correction surviving repeat presentation, saved-edit
+consumption by implementation, missing-file recovery and a completing conversation
+turn. Jack Heart reserved interactive Rex demo for the primary conversation.
+No new routing defect is established by the current diagnosis; repeating an
+unchanged candidate/owner through demo cannot supply this proof.
+
+Check: candidate rebuild passed; promotion/startup still fail on the unmerged
+parent migration. Context-only compression reuses prior focused checks;
+`git diff --check` and `lf context` pass. No background process was started.
+
+Complete pre-compression observations, decisions, native pane IDs and commands,
+including unpublished diagnosis, are preserved as Git blob
+`3c105e3f2c64cfdd313e0fd6c0303f1971a4e13d` (`git show <blob>`).

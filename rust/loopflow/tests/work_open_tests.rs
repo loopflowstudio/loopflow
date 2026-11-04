@@ -1033,6 +1033,11 @@ esac
     assert_eq!(created.lines().count(), 1);
     assert!(!created.contains("resume"));
     assert!(created.contains("task") && created.contains("view"));
+    assert_eq!(
+        created.matches("Task & workflow").count(),
+        1,
+        "A Task without a conversation needs one workflow pane, beside its shell"
+    );
     assert_eq!(sessions(home.path()), 0);
 }
 
@@ -1104,6 +1109,18 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&rex_cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Record the actual launch directory, then run the real viewer. Rex's
+    // background process snapshot can retain the initial login process.
+    let viewer = bin.join("lf-viewer");
+    std::fs::write(
+        &viewer,
+        format!(
+            "#!/bin/sh\nif [ \"$3\" = task ] && [ \"$4\" = view ]; then\n pwd -P > '{}/cwd-'\"$5\".pending\n mv '{}/cwd-'\"$5\".pending '{}/cwd-'\"$5\"\nfi\nexec '{}' \"$@\"\n",
+            root.path().display(), root.path().display(), root.path().display(), env!("CARGO_BIN_EXE_lf"),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&viewer, std::fs::Permissions::from_mode(0o755)).unwrap();
     let child = Command::new(&rex)
         .args(["server", "run", "--listen", &endpoint, "--state-dir"])
         .arg(root.path().join("state"))
@@ -1111,6 +1128,7 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         .arg(&config)
         .env_clear()
         .env("HOME", root.path())
+        .env("LF_BIN", &viewer)
         .env(
             "PATH",
             format!(
@@ -1229,7 +1247,8 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         .unwrap_or_else(|error| panic!("Wave workspace was not recorded: {error}; native inventory: {inventory}"));
     let before_arrival = call("session.view", serde_json::json!({"session_id":wave}));
     let sibling = repo.create_named_worktree("arriving-task");
-    support::register_sibling_task(&registered, "INF-124", "arriving-task", &sibling);
+    let sibling_task =
+        support::register_sibling_task(&registered, "INF-124", "arriving-task", &sibling);
     let deadline = Instant::now() + Duration::from_secs(15);
     let arrived = loop {
         let current = call("session.view", serde_json::json!({"session_id":wave}));
@@ -1267,6 +1286,28 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
     assert_eq!(
         block_count, 1,
         "Background arrival creates only the passive Task view"
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let passive_cwd = loop {
+        if let Ok(cwd) =
+            std::fs::read_to_string(root.path().join(format!("cwd-{}", sibling_task.id)))
+        {
+            break cwd;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Passive Task viewer did not record its directory; screen: {}",
+            call(
+                "com.superlogical.terminal.format",
+                serde_json::json!({"session_id":wave,"block_id":passive["layers"][0]["blocks"][0]["block_id"],"args":{"format":"text"}}),
+            )
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(
+        std::fs::canonicalize(passive_cwd.trim()).unwrap(),
+        std::fs::canonicalize(&sibling).unwrap(),
+        "The passive Task view must execute in its Task checkout, not the repository root"
     );
     assert_eq!(sessions(&home), 0);
     let repeated = json(&lf(

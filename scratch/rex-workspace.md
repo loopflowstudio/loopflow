@@ -2,12 +2,22 @@
 
 **LOO-498 · accepted build scope · reconciled November 3, 2026.**
 
+Implementation has reached a host capability review boundary: the installed Rex
+API cannot enforce the accepted Task-specific native split defaults. The scope
+remains accepted and unfinished; no narrower contract has been selected.
+
 Jack Heart approved implementation after readiness review in comment
 `7088ad9c-c923-4fff-acd7-0a261921b0f0`, superseding the mistaken-launch stop.
 The LF Task/workflow terminal view belongs in this Task. Review publication and
 demo are authorized; Auto-Ship, merge and Task completion are not.
 
-The implementation at `cc607dc3e1` provides opening, tools and passive arrivals.
+Jack's later comment `b97b5f14-864e-45e5-8d56-29476bb1e800` prioritizes user
+documentation before further feature implementation or publication.
+`workspace-guide.md`, drafted in the primary conversation, is the reviewable user
+contract. Preserve its distinction between the agreed experience and delivery gaps.
+
+The implementation at `af774cada6` provides opening, tools, passive arrivals,
+one-time arrival activation and follower recovery.
 Full restoration, lifecycle coordination and the complete configured experience
 remain unfinished. Earlier exploration is in [explore.html](explore.html);
 simulations do not establish runtime acceptance. The complete pre-reconciliation
@@ -39,7 +49,9 @@ and a Lua runtime are outside this build.
   No LF ordinary-shell viewer, cross-host shell attachment or continuous Rex
   split-tree mirror is included. Semantic templates are shared, active geometry
   is not. Files/drafts and source shells stay reachable under their owning host.
-- Reopening preserves an existing occurrence unchanged. New occurrences resolve
+- Reopening preserves an activated occurrence unchanged; explicitly opening a
+  passive arrival adds its selected tools once beside existing native panes.
+  New occurrences resolve
   saved Task layout → Wave default → builtin. Wave template changes affect future
   materialization; applying them to existing work requires an explicit action.
   Selected visible tabs materialize, not every background tool or shell.
@@ -60,6 +72,44 @@ and a Lua runtime are outside this build.
   not establish app visibility or input readiness.
 
 ## Shared tools and implementation
+
+### Native new-split directory — accepted November 3
+
+Jack Heart's comment `691eb6f2-0bcc-4054-8625-536f1de23feb` requires splits
+subsequently created through a host's own shortcut, menu or
+native API in an LF-opened Task workspace to start in that Task's recorded
+worktree. Setting cwd only on the panes LF initially creates is insufficient.
+This covers Rex and the other supported adapters, including Desktop and bounded
+Herdr. A Wave session can contain several Tasks: resolve the source Task tab/pane,
+not one Wave/session-wide cwd. New splits must not land in a sibling Task, main
+checkout, provider working directory or home. Keep execution on the recorded
+Machine for remote Tasks. The default is the Task worktree root; explicit directory
+choices remain explicit host actions.
+
+Implementation needs supported per-occurrence split inheritance without changing
+global preferences or unrelated work. Acceptance covers native splits beside
+Conversation, Shell, Files, Changes and Task/workflow tools: two Tasks in one Wave,
+switching between them and checking actual new-shell pwd/checkout identity, then
+reopen and supported remote paths. An unavailable scoped policy is a host capability
+gap requiring explicit evidence, not an accepted reduction in scope.
+
+Rex code supplies cwd only in created block options; Herdr also supplies
+workspace.create cwd. Passive Rex arrivals now validate and use the recorded Task
+checkout before creation, just like activated tools. Activation preserves that
+block. This fixes the initial pane, not subsequent native split inheritance.
+
+The isolated `scratch/rex-host-probe.py` now creates two Task directories in one
+Rex session, then calls native `session.new_split` with each source block as anchor
+and no explicit cwd. Both real new shell processes start in the isolated HOME,
+not their source directory, verified by each shell writing `pwd -P`. The installed revision-8 public schemas for
+`session.create`, `session.new_window`, `session.new_split` and the terminal creator
+offer per-new-block `options.cwd`, but no per-window/session split-default setter;
+the complete method inventory exposes no such operation. Config is account-wide
+Lua, excluded from this design. This is a counterexample to accepted native API
+acceptance, not permission to substitute an LF-only split command. Keyboard/menu,
+Herdr, Desktop and remote parity remain unproved; broader repetition cannot fix
+the missing native API policy. Supported host changes or a revised contract need
+Jack Heart's judgment before dependent implementation continues.
 
 | Intent | Shared meaning | Branch implementation |
 | --- | --- | --- |
@@ -125,6 +175,11 @@ Installed public Rex API evidence (`0.0.1793377904-ge6592f`, revision 8):
   for its configured endpoint and checks the caller block. A custom server whose
   configured default differs still needs `--server`; that falls short of the full
   accepted bare-open requirement, though failure stays on the Rex route.
+  The isolated non-default-server probe reconfirmed `REX_SERVER=unset` in native
+  children. Neither that context nor the public session IDs supplies the socket.
+  The existing current-viewer route can use a recorded endpoint, but the first
+  direct call in an arbitrary custom server remains unresolved; a process/socket
+  scan or a guessed default is not accepted destination evidence.
 
 The isolated native test covers bare open without REX_SERVER, preserved renamed
 windows/blocks, repository scope overriding an ambient Task checkout, passive
@@ -154,37 +209,54 @@ cleanup. That does not settle moved/unmerged committed refs. Task/conversation
 history survives. Automatic deleted-checkout reconstruction was an agent-introduced
 hypothetical and is excluded. Ordinary shell output alone is not retention policy.
 
-LOO-717's coordination comment `67cd130c-9104-48ef-b019-615e3e41e01e`
-(November 3 local date) now names a concrete integration boundary:
+LOO-717's November 3 coordination comment
+`30bf4970-3bb1-481f-8200-83a6734cb26e` supersedes the settlement semantics in
+`67cd130c-9104-48ef-b019-615e3e41e01e`. Its current write contract is:
 
-`lf task presence TASK --occurrence ID --state retained|away|closed|unknown --revision N`
+`lf task presence TASK --occurrence ID --state retained|away|closed|unknown --revision N --native-settled true|false`
 
-The reported receipt pins Task/completion/checkout/branch and includes due_at,
+The receipt pins Task/completion/checkout/branch and includes due_at,
 phase (waiting/closing/retired) and reason. Each occurrence has a stable identity
-and increasing persisted revision. Retained observations renew within 30 seconds;
-expiry becomes unknown and blocks checkout cleanup, while only a live hold retains
-an eligible idle agent. Away starts the workspace deadline; last explicit closed
-permits retirement after work settles. Closing requests native closure of only
-that Task occurrence followed by closed acknowledgement. Another retained copy
-cancels queued cleanup. This is implementation coordination, not an added Jack
-product decision or proof of delivery.
+and increasing persisted revision, including heartbeat renewals within 30 seconds.
+An identical revision retry is idempotent but does not renew the lease. Expired
+retention becomes unknown and blocks checkout cleanup; only a live hold retains
+an eligible idle agent.
 
-The latest shared status read shows LOO-717 in sync, loop 2 pass 2, with no PR.
-Inspection of its checkout found the coordination specification but no implemented
-Task presence command.
-The API is not integrated in this checkout. Here `observation="retained"` records
-successful materialization; it is not a renewed lifetime hold. LOO-498 still owes
-occurrence reporting and scoped native cleanup to LOO-717's owner. No second
-timer, shell registry or checkout deletion owner belongs in this Task. Unknown
-host observations cannot authorize retirement; a Wave container with other
-Tasks must never be closed as a Task cleanup shortcut.
+Release policy and native settlement are separate. Away preserves the fifteen-minute
+deadline; explicit closed skips grace once requested work settles. Neither state
+proves that native resources ended. Rex reports native-settled=false while its
+native shells remain. At phase=closing, only that Task occurrence's resources
+close; a higher revision then acknowledges native-settled=true while preserving
+away/closed policy. Destination Session/shell owners settle independently.
+Retained or unknown cancels queued retirement and clears settlement; delayed old
+revisions cannot undo a newer return. Another retained copy cancels cleanup.
+
+The latest November 3 shared status read shows LOO-717 live in compress, with no PR.
+Its checkout at `2abcfc28cc` plus current edits now contains the Task presence command,
+`ops/task/retirement.rs` and `store/sqlite/task_retirement.rs`, including required
+native settlement, revision fencing and the single retirement executor. This
+supersedes the earlier observation that only a specification existed. It is
+branch-source evidence, not delivered or configured integration proof. The
+locally available `origin/main` remains `aef0c0a5cd`.
+
+The API remains absent from this checkout. Here `observation="retained"` records
+successful materialization, not a renewed lifetime hold. LOO-498 still owes the
+adapter: persisted observation revisions, truthful host policy, receipt polling
+and scoped native settlement. No second timer, shell registry or checkout deletion
+owner belongs here. Unknown observations cannot authorize retirement; a Wave
+container holding other Tasks must never close as a Task cleanup shortcut.
 
 ## Delete — do not maintain
 
 Removed: the Herdr keystroke-resume adapter and its exclusive test; native-window
 and container early returns that bypass activation or follower recovery;
 `run_host`'s wait-before-draining pipe capture; and the workspace reader's
-ID-list/per-ID query round trip. No remaining predecessor path needs maintaining.
+ID-list/per-ID query round trip. Passive layout rendering now also removes its
+early return around checkout validation. The local Task-ID set and second plan
+filter are removed: route once and pass the selected contents to rendering.
+Retained IDs and recovered markers share one activation path; marker recovery
+still grants no replay permission. The builtin layout no longer duplicates
+Task & workflow when no conversation exists. No remaining predecessor path needs maintaining.
 Preserve native blocks, uncertain-outcome receipts and explicit-close behavior.
 No replacement ordinary-shell relay or cleanup authority is introduced.
 
@@ -196,7 +268,10 @@ replay after a lost split reply. Subsequent opens preserve the resulting layout.
 A follower holds an OS lock for its lifetime; reopening can add a fresh follower
 tab after that process exits, without replacing the old native tab. Launch-pending
 receipts prevent blind retries. Repository-created Wave containers now also follow
-independently. These locks describe follower liveness, never Task retention. Host command output
+independently. These locks describe follower liveness, never Task retention.
+Recorded isolated native checks cover activation once, retained block identity,
+repeated no-focus open and follower recovery, with zero LF Sessions created.
+Host command output
 is spooled to temporary files while running, so native inventories larger than a
 pipe buffer cannot deadlock the timed wait. The initial isolated bare-open timeout
 exposed that wait-before-drain failure; the host-inventory regression test passed.
@@ -217,29 +292,33 @@ from tool selection, with one split-axis translation for the Rex renderer.
    contract; neither choice is accepted yet. Arbitrary source commands cannot be
    replayed and native edits cannot be overwritten. Full restoration remains an
    acceptance requirement until Jack accepts a change.
-2. **Recovery evidence.** Activation and follower recovery now have implementation;
-   the isolated native check passes for one-time activation, preserved block identity,
-   repeated no-focus open and follower recovery. A lost follower-launch reply before
-   startup remains explicitly uncertain, rather than authorizing duplicate launch.
-3. **Lifecycle integration.** Consume LOO-717's actual delivered presence contract,
-   persist observation revisions, aggregate copies and implement native scoped
-   closure. Reliable Rex use/away evidence remains unresolved; attachment/window
-   inventory alone cannot supply it. A host release policy without such evidence
+2. **Lifecycle integration.** Integrate LOO-717's presence and settlement contract
+   when available in the shared implementation; its active branch is inspectable
+   but has not been delivered here. Persist revisions, renew holds, aggregate copies
+   through that owner and implement native scoped closure. Away acknowledgement
+   must not become closed merely to satisfy cleanup. Reliable Rex use/away evidence
+   remains unresolved; attachment/window inventory alone cannot supply it.
+   A host release policy without such evidence
    needs explicit review rather than a guessed timer. Disconnect and unknown
    inventory must preserve safety without claiming indefinite retention is accepted.
-4. **Bare-open and remote coverage.** Resolve non-default Rex caller endpoints
+3. **Bare-open and remote coverage.** Resolve non-default Rex caller endpoints
    without required flags. Demonstrate actual LLM tool invocation after viewer
    resume/move, explicit overrides and no local fallback. Existing tests cover
    source placement routing and direct native shell invocation, not that full
    agent path. The local follower skips remote Tasks; newly relevant Machines
    need following/reconciliation, not merely a new explicit open. Real peer/app
    visibility and provider usability remain unproved.
-5. **Move/copy and secondary lifecycle.** Named observing copies and explicit
+4. **Move/copy and secondary lifecycle.** Named observing copies and explicit
    `lf resume` exist. Coordinated destination preparation/handoff receipts and
    scoped lifecycle cleanup are unfinished. Native reorder and source-state
    preservation need end-to-end proof; cross-host ordinary-process migration is
    excluded. Herdr's bounded scope needs the complete configured return/reopen and
    cleanup demonstration, without claiming unsupported Wave/remote parity.
+5. **Native split defaults — capability review required.** The two-directory native
+   probe disproves inheritance for the supported Rex API. Initial passive pane cwd
+   is corrected, but no scoped host default is available in the inspected API.
+   This needs a supported host capability or an accepted design revision; no
+   global Lua patch, alternate split command or scope reduction was introduced.
 6. **Gate and demo evidence.** The complete select/open → work → return →
    close/reopen path must preserve unfinished input and provider history, with
    no duplicate provider or replay. Concurrent/partial/uncertain outcomes must
@@ -248,12 +327,18 @@ from tool selection, with one split-axis translation for the Rex renderer.
 
 ## Verification
 
+Review finding: Rex's background `process` reply retained the root-owned `login`
+wrapper even while captured output showed the running Task viewer. The native
+fixture now records cwd in a launcher that immediately execs the real viewer;
+native telemetry and displayed checkout text cannot substitute for that proof.
+
 Earlier focused passes recorded in `cc607dc3e1` remain evidence for unchanged
 code: 15 work-open tests, 2 workspace unit tests, observer/editor/Task-view/template/
 committed-diff checks, 22 Swift WorkSelection/RegistryQuery tests, format/clippy and
 both opt-in native host tests. Rex passed outside the network sandbox; inside it,
 its caller produced no receipt or exit/error file before the deadline. Herdr passed
 inside. That sandbox failure remains unresolved and the real-agent/remote path
-has not been demonstrated. No live resource cleanup occurred during reconciliation.
+has not been demonstrated. `af774cada6` records the later 17-test work-open pass
+and template check. No live user resources were cleaned up during this pass.
 
-Check: `cargo test -p loopflow --lib wave_task_defaults_only_materialize_unsaved_task_layouts` passed (1); `cargo test -p loopflow --test integration work_open_tests:: -- --include-ignored` passed (17, including isolated Rex/Herdr, with inherited LF variables unset and installed host paths supplied); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed. The library test linker warned about the existing large unwind section. Gate owns broader affected suites; demo owns configured interaction and the unresolved restoration/lifecycle choices.
+Checks: `cargo test -p loopflow --test integration work_open_tests::` passed (15, 2 opt-in tests ignored); the same command with `-- --ignored` passed both isolated Rex/Herdr tests; `cargo test -p loopflow --lib lf::commands::task_view::` passed (1, with the macOS linker unwind-size warning). Inherited LF variables were unset. `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context` passed. Earlier `uv run python scratch/rex-host-probe.py` evidence still establishes native split HOME fallback and restart command replacement. Gate owns broader suites; demo/review owns configured acceptance and unresolved native-split, restoration and release-policy judgment. Both isolated servers stopped.

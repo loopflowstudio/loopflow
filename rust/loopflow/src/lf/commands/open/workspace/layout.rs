@@ -32,14 +32,14 @@ pub(super) fn layout(
         "Task runs on Machine {}; no local tool was created",
         location.machine_id
     );
-    if presentation.passive {
-        return Ok((task_view(content, repo)?, 0));
-    }
     let cwd = Path::new(&location.cwd);
     anyhow::ensure!(
         cwd.is_dir(),
         "Recorded Task checkout is unavailable; no home-directory fallback"
     );
+    if presentation.passive {
+        return Ok((task_view(content, cwd)?, 0));
+    }
     if presentation.session.is_some() || presentation.diff {
         let conversation = conversation(content, cwd, presentation.session)?;
         return Ok((
@@ -69,20 +69,19 @@ pub(super) fn layout(
         if presentation.omit_shells {
             return Ok((conversation, 0));
         }
-        return Ok((
+        let shell = tool(content, cwd, "shell", None, None)?;
+        // Without a conversation the main pane already shows Task & workflow.
+        let tools = if content.primary_session.is_some() {
             split(
-                SplitAxis::Vertical,
+                SplitAxis::Horizontal,
                 0.618,
-                conversation,
-                split(
-                    SplitAxis::Horizontal,
-                    0.618,
-                    task_view(content, cwd)?,
-                    tool(content, cwd, "shell", None, None)?,
-                ),
-            ),
-            1,
-        ));
+                task_view(content, cwd)?,
+                shell,
+            )
+        } else {
+            shell
+        };
+        return Ok((split(SplitAxis::Vertical, 0.618, conversation, tools), 1));
     };
     let mut shells = 0;
     let tree = render_tree(

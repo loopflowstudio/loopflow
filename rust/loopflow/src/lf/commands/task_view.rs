@@ -79,7 +79,7 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
                 b'g' => offset = 0,
                 b'n' => {
                     selected_step =
-                        (selected_step + 1).min(steps(&reading).len().saturating_sub(1));
+                        (selected_step + 1).min(steps(&reading).count().saturating_sub(1));
                     log = None;
                 }
                 b'p' => {
@@ -108,18 +108,16 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
     Ok(())
 }
 
-fn steps(reading: &Value) -> Vec<&Value> {
+fn steps(reading: &Value) -> impl Iterator<Item = &Value> {
     reading["graph_processes"]
         .as_array()
         .into_iter()
         .flatten()
         .flat_map(|graph| graph["steps"].as_array().into_iter().flatten())
-        .collect()
 }
 
 fn step_log(reading: &Value, index: usize) -> Result<String> {
-    let steps = steps(reading);
-    let step = steps.get(index).context("No step selected")?;
+    let step = steps(reading).nth(index).context("No step selected")?;
     let id = crate::id::LfProcessId::parse(word(step, "lf_process_id"))?;
     let store = crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
     let process = store

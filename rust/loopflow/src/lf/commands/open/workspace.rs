@@ -271,7 +271,7 @@ fn open_machines(
     let selected = scope(store, target)?;
     let plan = store.plan_selection(&RepositoryId::parse(repository)?, selected.clone())?;
     let local = store.local_machine()?.id;
-    let mut local_tasks = BTreeSet::new();
+    let mut local_tasks = Vec::new();
     let mut peers = BTreeSet::new();
     let mut receipts = Vec::new();
     let mut unknown = plan.resolution.unavailable.clone();
@@ -282,7 +282,7 @@ fn open_machines(
     {
         match store.task_execution_route(&TaskId::parse(&content.work.id)?) {
             Ok(route) if route.machine_id == local => {
-                local_tasks.insert(content.work.id.clone());
+                local_tasks.push(content);
             }
             Ok(route) => {
                 peers.insert(route.machine_id.to_string());
@@ -316,7 +316,7 @@ fn open_machines(
     // A broad local workspace keeps watching even when its working set is empty.
     if !local_tasks.is_empty() || (target.task.is_none() && !args.local_workspace) {
         let result = Rex::local(args.server.as_deref())
-            .and_then(|rex| open(store, &rex, target, args, plan, &local_tasks));
+            .and_then(|rex| open(store, &rex, target, args, &plan.selection, &local_tasks));
         match result {
             Ok(mut opened) => receipts.append(&mut opened),
             Err(error) => receipts.push(target.receipt(
@@ -509,25 +509,18 @@ fn open(
     rex: &Rex,
     target: &Resolved,
     args: &OpenArgs,
-    plan: ViewPlan,
-    local_tasks: &BTreeSet<String>,
+    selected: &Selection,
+    local_tasks: &[&ViewContent],
 ) -> Result<Vec<OpenReceipt>> {
     let repo = target
         .repository_id
         .as_deref()
         .context("Repository has no Work identity")?;
-    let mut root = workspace(
-        store,
-        rex,
-        repo,
-        plan.selection.clone(),
-        args.copy.as_deref(),
-    )?;
+    let mut root = workspace(store, rex, repo, selected.clone(), args.copy.as_deref())?;
     let explicit = target.task.is_some();
     if explicit && root.observation == "new" {
         let inventory = rex.sessions()?;
-        let work = &plan
-            .contents
+        let work = &local_tasks
             .first()
             .context("Task workspace is unavailable")?
             .work;
@@ -563,11 +556,7 @@ fn open(
     )?;
     let mut receipts = Vec::new();
     let mut groups = HashMap::new();
-    for content in plan
-        .contents
-        .iter()
-        .filter(|content| eligible(content, explicit) && local_tasks.contains(&content.work.id))
-    {
+    for content in local_tasks {
         let task = store
             .task(&TaskId::parse(&content.work.id)?)?
             .context("Task is unavailable")?;
@@ -725,39 +714,36 @@ fn materialize(
         updated_at: now(),
     });
     let inventory = rex.windows(container)?;
-    if let Some(id) = &occurrence.destination_id {
-        if inventory.iter().any(|window| window["window_id"] == *id) {
-            return activate(
-                store,
-                rex,
-                container,
-                &mut occurrence,
-                content,
-                repo,
-                presentation,
-            );
-        }
+    let retained = occurrence
+        .destination_id
+        .as_ref()
+        .and_then(|id| inventory.iter().find(|window| window["window_id"] == *id));
+    if retained.is_none() && occurrence.destination_id.is_some() {
         occurrence.observation = "closed".into();
         occurrence.updated_at = now();
         store.save_host_occurrence(&occurrence)?;
     }
-    if presentation.passive && occurrence.observation == "closed" {
+    if retained.is_none() && presentation.passive && occurrence.observation == "closed" {
         bail!("Task view was explicitly closed; following leaves it closed");
     }
     let marker = format!("[lf:{}]", occurrence.id);
-    if let Some(window) = inventory.iter().find(|window| {
-        window["label"]
-            .as_str()
-            .is_some_and(|label| label.ends_with(&marker))
+    if let Some(window) = retained.or_else(|| {
+        inventory.iter().find(|window| {
+            window["label"]
+                .as_str()
+                .is_some_and(|label| label.ends_with(&marker))
+        })
     }) {
-        let id = window["window_id"]
-            .as_str()
-            .context("Window has no identity")?
-            .to_string();
-        occurrence.destination_id = Some(id);
-        // A lost creation reply does not establish whether tools were started.
-        // Preserve that uncertainty instead of turning it into replay permission.
-        store.save_host_occurrence(&occurrence)?;
+        if retained.is_none() {
+            occurrence.destination_id = Some(
+                window["window_id"]
+                    .as_str()
+                    .context("Window has no identity")?
+                    .to_string(),
+            );
+            // Recover identity without turning an uncertain creation into replay permission.
+            store.save_host_occurrence(&occurrence)?;
+        }
         return activate(
             store,
             rex,
@@ -935,8 +921,8 @@ fn follow(id: &str) -> Result<()> {
                     eprintln!("Work selection unavailable: {error}");
                     continue;
                 }
-                let plan: crate::work::selection::ViewPlan =
-                    serde_json::from_value(frame["body"].clone())?;
+                let plan: ViewPlan = serde_json::from_value(frame["body"].clone())?;
+                let local = store.local_machine()?.id;
                 let mut groups = HashMap::new();
                 for content in plan
                     .contents
@@ -944,7 +930,7 @@ fn follow(id: &str) -> Result<()> {
                     .filter(|content| eligible(content, false))
                 {
                     let route = store.task_execution_route(&TaskId::parse(&content.work.id)?)?;
-                    if route.machine_id != store.local_machine()?.id {
+                    if route.machine_id != local {
                         continue;
                     }
                     let task = store

@@ -584,28 +584,28 @@ absence, so repairs need a fresh authorized read. These records changed no Task.
 ## Native host workspaces (LOO-498/717, accepted 2026-11-03)
 
 Jack Heart selected Rex first, bounded Herdr second, shared Work/conversation
-identity and semantic tools/defaults, with each host owning ordinary shells and
-active layouts. No Rex shell relay or active split-tree mirror into Desktop.
-Existing occurrence wins over Task intent, then Wave default, then builtin.
-Started unfinished Tasks arrive passively; backlog is explicit. Bare open must
-work from Rex and an agent tool shell using current viewer placement, including
-resume/move; stale startup context cannot elect another host or Machine.
+identity and tools/defaults. Hosts own shells/layouts; no Rex relay or Desktop
+split-tree mirror. Existing occurrence → Task intent → Wave default → builtin;
+started Tasks arrive passively, backlog is explicit. Bare open uses current viewer
+placement through agent calls/resume/move. Jack's November 3 clarification requires
+native new splits at the source Task's recorded worktree root/Machine, respecting
+explicit directories; initial pane cwd or a Wave-wide default is insufficient.
 
-Jack accepted equal-host Session retention: each host owns release policy, LF
-honors its holds. Eligible idle agents end at two minutes; completed-and-away
-shells/checkout clean at fifteen total, return cancels, and requested active
-turns/Graphs finish first. Dirty/untracked files do not veto eligible cleanup;
-unfinished checkouts/branches survive closing their view. Deleted-checkout
+Jack accepted equal-host retention: hosts release, LF honors holds. Eligible idle
+agents end at two minutes; completed-and-away shells/checkout at fifteen total.
+Return cancels; requested work finishes first. Dirty/untracked files do not veto
+eligible cleanup; unfinished checkouts/branches survive Close. Deleted-checkout
 reconstruction is excluded; moved/unmerged refs remain unresolved. This supersedes
-older blanket retention statements below, without granting cleanup from unknown
-observations. LOO-717 owns lifetime; LOO-498 owns native occurrence integration.
+older blanket retention. LOO-717 owns lifetime; LOO-498 integrates native occurrences.
+Its November 3 branch contract separates away/explicit-Close policy from native
+settlement: away+settled preserves grace and never
+means Close. Retained/unknown revokes settlement; persisted revisions fence returns.
+Integration remains unproved.
 
-Isolated November 3 Rex evidence: restart retained block IDs but replaced cat
-with a login shell; IDs prove neither command continuity nor safe replay authority.
-Client attachment and active-window snapshots prove no foreground use/away event.
-Native callers can omit REX_SERVER; configured endpoint and actual caller identity
-must agree. Direct-shell tests do not establish an LLM tool call after handoff.
-Fixtures do not prove full restore, remote/provider usability or lifecycle acceptance.
+Isolated Rex restart retained block IDs but replaced cat with a login shell:
+identity authorizes no replay. Client attachment/active-window snapshots prove no
+use/away event; unknown cannot authorize cleanup. Direct-shell fixtures prove no
+agent handoff, split inheritance, full restore or remote/provider/lifecycle acceptance.
 
 
 ## Workspace redesign decisions

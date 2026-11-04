@@ -7,24 +7,25 @@ you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
 
 ```bash
 lf open loopflow://loopflow/task/LOO-12        # LOO-12's conversation, in the host you're in
-lf open loopflow://loopflow/wave/product       # the product Wave's conversation
+lf open loopflow://loopflow/wave/product       # the product Wave
 lf open --available                            # every conversation available for you, at once
 lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (Desktop)
 ```
 
-From Rex, `lf open` opens a native Task workspace on the caller's server. Agent
-tool shells use the conversation's current viewer placement, including after a
-move; unavailable Rex context never falls through to Desktop.
+From Rex, `lf open` opens a native workspace for the selected Work. It uses
+recorded viewer placement when available, otherwise Rex's configured local
+server and caller block. Custom-server discovery and the complete agent-tool
+path remain unfinished; known Rex failures never fall through to Desktop.
 From a Herdr pane, `lf open --task LOO-12` adds a Herdr workspace; from tmux, a new window
 right after this one; from cmux, a new workspace. Otherwise it opens in Desktop on
 macOS, then a plain terminal. It reads only the host's own environment
 (`REX_*`, `HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
 apps. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one explicitly.
 
-A conversation already live in this host is focused, draft intact. One live in
-another client is reported as `elsewhere`, with the `lf resume` command that
-moves it; opening never steals it. Open the same Task twice while its
-workspace starts and you get the one workspace.
+Rex and Herdr open passive conversation views. Other terminal routes focus an
+existing conversation in that host or report it as `elsewhere`, with the
+`lf resume` command that moves input. Opening never steals input. Repeated
+opening reuses the workspace.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
@@ -32,7 +33,7 @@ carries a path or a host, so the same link works on any machine with the reposit
 ## Rex workspaces
 
 ```bash
-lf open --host rex                     # started, unfinished Tasks, grouped by Wave
+lf open loopflow://loopflow --host rex  # repository's started Tasks, grouped by Wave
 lf open --host rex --wave product      # the Wave's working set
 lf open --host rex --task LOO-12        # one Task; no sibling arrivals
 lf open --host rex --task LOO-12 --copy review
@@ -45,6 +46,7 @@ existing LF Sessions; `lf resume <session>` explicitly takes input or resumes sa
 provider history. An observing copy starts no new ordinary shells. Add
 `--new-shells` when creating a copy to include fresh shells; receipts count them.
 The Task viewer uses `n`/`p` to select a step and `l` to inspect its captured log.
+Without a conversation, the builtin layout shows Task & workflow beside a shell.
 Explicitly opening a passive arrival adds its tools beside the existing panes
 once. Reopening a broad workspace recovers an exited follower in a new tab,
 preserving native edits in its old tab.
@@ -55,11 +57,12 @@ layouts remain separate. Only selected, visible tabs materialize. File drafts,
 URL tabs and background tabs remain in the saved source layout. A selected web
 page has no terminal renderer and is reported as unsupported.
 
-The Workspace tab follows shared Work changes. A Task's first start adds a
+The Workspace tab follows local Work changes. A Task's first start adds a
 passive Task view without taking focus or starting a provider or shell. Closing
 that tab stops following; a later explicit open recovers following and reconciles
 missed arrivals. Closing a Task tab leaves it closed during following. Missing
 observations never retire work.
+Passive views start in their Task's recorded checkout.
 
 ```bash
 lf desktop layout wave-default:<wave-id>             # read the default
@@ -80,18 +83,22 @@ Branch and PR intents pin both commit SHAs; `--head <sha>` reads that committed
 comparison without mixing in local changes. Editor settings may launch an
 external GUI. Paths remain separate arguments.
 
-`--server` selects a local Rex Unix server explicitly. A native Rex caller can
-omit its server environment; automatic opening then resolves Rex's configured
-default and checks the caller block. If the caller belongs to another server,
-`--server` is currently required. Remote Tasks open through
+`--server` selects a local Rex Unix server explicitly. Remote Tasks open through
 their recorded Machine's LF route and local Rex server, in separate native
 containers. Unavailable Machines stay unavailable; no local shell substitutes.
 `--no-focus` preserves the host's selected window.
 A successful server mutation does not establish app visibility or provider input
-readiness. Rex server restart can retain block IDs while replacing their commands
-with new shells; reopen preserves those blocks and does not replay commands.
-Rex occurrence reporting and native closure are not yet integrated with the
-shared retention policy; materialization alone does not register a lifetime hold.
+readiness.
+
+The accepted workspace experience still requires these unfinished behaviors:
+
+| Required behavior | Current limit |
+| --- | --- |
+| Native splits start at the selected Task's checkout on its Machine | LF-created panes have the right cwd; the inspected Rex native API starts later splits in home when cwd is omitted. No scoped split default is available in that API. |
+| Reopen restores familiar tools after a server restart | Rex can retain block IDs but replace their commands with login shells. LF preserves those blocks; it cannot safely infer permission to replay commands. |
+| Bare open finds the current Rex server through shell and agent calls | A caller on a non-default server still needs `--server` unless viewer placement supplies its endpoint. Full agent invocation after resume/move remains unverified. |
+| Broad workspaces follow Tasks on every relevant Machine | Explicit open routes remote Tasks; automatic arrival currently follows local Tasks only. |
+| Hosts retain and release Sessions through shared cleanup | Rex occurrence reporting and scoped native closure are not integrated yet. Opening alone registers no lifetime hold; unknown observations authorize no cleanup. |
 
 Herdr support is bounded to a selected Task on the current local server,
 identified by `HERDR_SOCKET_PATH`: create, reuse and focus a workspace, with direct

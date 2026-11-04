@@ -14,6 +14,11 @@ Text selection and VoiceOver reading belong to the native terminal.
 Reading and selecting text do not require keyboard control. Tap an underlined
 program-supplied web link to open the native browser, then Close to return to the
 Session. Ordinary text URLs are not automatically made into touch links.
+Choose **Find in Session** (magnifying glass) to search text loaded on this phone,
+including local scrollback. Type a phrase, then use the arrows or Search key to
+move between matches. **Done** returns to reading. Find works while observing;
+its keyboard never sends the query to the program or takes control. Reconnect
+keeps the query but clears its old highlight; search again against the new screen.
 Search the compact Task list by title or checkout path. A Task without a recorded
 Session opens an explanation instead of an empty terminal.
 

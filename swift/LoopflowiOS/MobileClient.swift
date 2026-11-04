@@ -133,6 +133,7 @@ final class MobileWorkspace {
     private(set) var state: MobileConnectionState = .loading
     // A mounted renderer consumes output immediately; no second scrollback store.
     var render: ((Data, Bool) -> Void)?
+    var findInTerminal: (() -> Void)?
     // Grid dimensions, not pixels. Observers preserve the owner's terminal geometry.
     var setGeometry: ((TerminalGeometry?) -> Void)?
 
@@ -318,6 +319,7 @@ final class MobileWorkspace {
         disconnect()
         selected = nil
         render = nil
+        findInTerminal = nil
         setGeometry = nil
     }
 

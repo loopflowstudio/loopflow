@@ -11,6 +11,185 @@ import XCTest
 final class MobileTerminalTests: XCTestCase {
     private var window: UIWindow?
 
+    func testFindMovesBetweenUnicodeMatchesWithoutSendingInputOrChangingTheGrid() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let between = (0..<100).map { "Line \($0)\r\n" }.joined()
+        workspace.render?(Data("\r\nFirst 你好\r\n\(between)Second 你好\r\n".utf8), false)
+        let sent = client.transport.sent.count
+        let sizes = client.link.sizes.count
+        let grid = controller.terminal.getTerminal()
+        let columns = grid.cols, rows = grid.rows
+        workspace.findInTerminal?()
+        let finder = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }.first {
+            $0.arrangedSubviews.contains { $0.accessibilityIdentifier == "terminal-find-query" }
+        })
+        let field = try XCTUnwrap(finder.arrangedSubviews.first as? UITextField)
+        XCTAssertTrue(field.isFirstResponder)
+        XCTAssertFalse(controller.terminal.canBecomeFirstResponder)
+        XCTAssertFalse(controller.terminal.allowMouseReporting)
+        controller.terminal.insertText("not remote input")
+        controller.terminal.deleteBackward()
+        controller.terminal.pasteText("not a remote paste")
+        XCTAssertEqual(client.transport.sent.count, sent)
+        field.text = "你好"
+        field.sendActions(for: .editingChanged)
+        XCTAssertEqual(controller.terminal.getSelection(), "你好")
+        XCTAssertLessThan(controller.terminal.scrollPosition, 1, "The first match is in local scrollback")
+        let first = controller.terminal.selection.start
+        _ = controller.textFieldShouldReturn(field)
+        XCTAssertEqual(controller.terminal.getSelection(), "你好")
+        XCTAssertNotEqual(controller.terminal.selection.start, first)
+        _ = controller.textFieldShouldReturn(field)
+        XCTAssertEqual(controller.terminal.selection.start, first, "Find wraps through loaded history")
+        let searchBar = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }.first {
+            $0.arrangedSubviews.contains { $0.accessibilityIdentifier == "terminal-find-feedback" }
+        })
+        let feedback = try XCTUnwrap(searchBar.arrangedSubviews.first { $0 is UILabel } as? UILabel)
+        field.text = "missing phrase"
+        field.sendActions(for: .editingChanged)
+        XCTAssertEqual(feedback.text, "No matches")
+        XCTAssertFalse(controller.terminal.hasActiveSelection)
+        controller.view.frame.size.height -= 120
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(grid.cols, columns)
+        XCTAssertEqual(grid.rows, rows)
+        XCTAssertEqual(client.link.sizes.count, sizes)
+        controller.view.frame.size.height += 120
+        controller.view.layoutIfNeeded()
+        let done = try XCTUnwrap(finder.arrangedSubviews.last as? UIButton)
+        done.sendActions(for: .touchUpInside)
+        XCTAssertTrue(finder.isHidden)
+        XCTAssertEqual(workspace.state, .controlling)
+        XCTAssertTrue(controller.terminal.allowMouseReporting)
+        XCTAssertEqual(client.transport.sent.count, sent)
+        XCTAssertEqual(client.link.sizes.count, sizes)
+    }
+
+    func testFindRevealsAnOffscreenObserverMatchWithoutTakingControl() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        client.link.loseControl()
+        client.link.reportGeometry(columns: 120, rows: 80)
+        await settle()
+        controller.update(theme: .light)
+        workspace.render?(Data("\u{1b}[2J\u{1b}[70;101HNeedle".utf8), false)
+        let sent = client.transport.sent.count, sizes = client.link.sizes.count
+        let controls = client.transport.controlRequests
+        workspace.findInTerminal?()
+        let finder = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }.first {
+            $0.arrangedSubviews.contains { $0.accessibilityIdentifier == "terminal-find-query" }
+        })
+        let field = try XCTUnwrap(finder.arrangedSubviews.first as? UITextField)
+        field.text = "needle"
+        field.sendActions(for: .editingChanged)
+        XCTAssertEqual(controller.terminal.getSelection(), "Needle")
+        let viewport = try XCTUnwrap(controller.view.subviews.first { $0.accessibilityIdentifier == "terminal-viewport" } as? UIScrollView)
+        XCTAssertGreaterThan(viewport.contentOffset.x, 0)
+        XCTAssertGreaterThan(viewport.contentOffset.y, 0)
+        XCTAssertEqual(controller.terminal.getTerminal().cols, 120)
+        XCTAssertEqual(controller.terminal.getTerminal().rows, 80)
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.transport.sent.count, sent)
+        XCTAssertEqual(client.link.sizes.count, sizes)
+        XCTAssertEqual(client.transport.controlRequests, controls)
+    }
+
+    func testFindRefreshesAfterNewOutputAndReconnectBeforeExplicitKeyboardTakeover() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        workspace.findInTerminal?()
+        let finder = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }.first {
+            $0.arrangedSubviews.contains { $0.accessibilityIdentifier == "terminal-find-query" }
+        })
+        let field = try XCTUnwrap(finder.arrangedSubviews.first as? UITextField)
+        field.text = "arrived later"
+        field.sendActions(for: .editingChanged)
+        XCTAssertFalse(controller.terminal.hasActiveSelection)
+        workspace.render?(Data("\r\narrived later\r\n".utf8), false)
+        _ = controller.textFieldShouldReturn(field)
+        XCTAssertEqual(controller.terminal.getSelection(), "arrived later")
+
+        workspace.suspend()
+        controller.update(theme: .light)
+        await workspace.restoreForegroundSession()
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(field.text, "arrived later")
+        XCTAssertFalse(controller.terminal.hasActiveSelection, "A replacement screen must not keep a stale highlight")
+        XCTAssertFalse(finder.isHidden)
+        XCTAssertEqual(client.transport.controlRequests, 0)
+        XCTAssertTrue(client.transport.sent.isEmpty)
+        XCTAssertTrue(client.link.sizes.isEmpty)
+        field.text = "Loopflow"
+        field.sendActions(for: .editingChanged)
+        XCTAssertEqual(controller.terminal.getSelection(), "Loopflow")
+        workspace.requestControl()
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertTrue(finder.isHidden)
+        XCTAssertFalse(controller.terminal.hasActiveSelection)
+        XCTAssertTrue(controller.terminal.isFirstResponder)
+        XCTAssertEqual(workspace.state, .controlling)
+        controller.terminal.insertText("actual input")
+        XCTAssertEqual(client.terminal.draft, "actual input")
+    }
+
+    func testFindLayouts() async throws {
+        for (name, theme, size) in [("light", ThemeDefinition.light, UIContentSizeCategory.large),
+                                    ("dark", .dark, .large), ("large-text", .light, .accessibilityExtraLarge)] {
+            let (workspace, client, controller) = try await connected()
+            defer { workspace.leave(); controller.terminal.updateUiClosed() }
+            client.link.loseControl()
+            await settle()
+            controller.update(theme: theme)
+            controller.overrideUserInterfaceStyle = theme.isDark ? .dark : .light
+            controller.traitOverrides.preferredContentSizeCategory = size
+            controller.view.layoutIfNeeded()
+            let window = try XCTUnwrap(window)
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previous = scene.keyWindow
+            window.windowScene = scene
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; previous?.makeKey() }
+            workspace.findInTerminal?()
+            try await Task.sleep(for: .milliseconds(200))
+            controller.view.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "terminal-find-\(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testFindKeyboardDoesNotResizeAControllingTerminalWithItsKeyboardHidden() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let window = try XCTUnwrap(window)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow
+        window.windowScene = scene
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKey() }
+        let keyboard = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }
+            .flatMap(\.arrangedSubviews).first { $0.accessibilityLabel == "Hide keyboard" } as? UIButton)
+        keyboard.sendActions(for: .touchUpInside)
+        try await Task.sleep(for: .milliseconds(500))
+        let sizes = client.link.sizes.count
+        workspace.findInTerminal?()
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(client.link.sizes.count, sizes)
+        let done = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }
+            .flatMap(\.arrangedSubviews).first { $0.accessibilityLabel == "Close Find" } as? UIButton)
+        done.sendActions(for: .touchUpInside)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(client.link.sizes.count, sizes)
+    }
+
     func testReadingHistoryLayouts() async throws {
         for (name, theme, size) in [("light", ThemeDefinition.light, UIContentSizeCategory.large),
                                     ("dark", .dark, .large), ("large-text", .light, .accessibilityExtraLarge)] {
@@ -220,8 +399,8 @@ final class MobileTerminalTests: XCTestCase {
     func testKeyboardCanHideWhileHardwareInputKeepsWorking() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }
-        let bar = try XCTUnwrap(controller.view.subviews.first { $0 is UIStackView } as? UIStackView)
-        let keyboard = try XCTUnwrap(bar.arrangedSubviews.last as? UIButton)
+        let keyboard = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }
+            .flatMap(\.arrangedSubviews).first { $0.accessibilityLabel == "Hide keyboard" } as? UIButton)
         keyboard.sendActions(for: .touchUpInside)
         XCTAssertNotNil(controller.terminal.inputView)
         XCTAssertTrue(controller.terminal.isFirstResponder)
@@ -259,8 +438,8 @@ final class MobileTerminalTests: XCTestCase {
     func testFreshControlGrantRestoresKeyboardAfterHiddenAttachment() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }
-        let bar = try XCTUnwrap(controller.view.subviews.first { $0 is UIStackView } as? UIStackView)
-        let keyboard = try XCTUnwrap(bar.arrangedSubviews.last as? UIButton)
+        let keyboard = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }
+            .flatMap(\.arrangedSubviews).first { $0.accessibilityLabel == "Hide keyboard" } as? UIButton)
         keyboard.sendActions(for: .touchUpInside)
         XCTAssertNotNil(controller.terminal.inputView)
         workspace.send(Data("keep this draft".utf8))

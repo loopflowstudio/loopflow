@@ -242,6 +242,12 @@ struct MobileSessionView: View {
         .foregroundStyle(theme.palette.text)
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Find in Session", systemImage: "magnifyingglass") { workspace.findInTerminal?() }
+                    .disabled(workspace.findInTerminal == nil)
+            }
+        }
         .task { await workspace.open(task) }
         .onDisappear { opening?.cancel(); workspace.leave() }
         .alert("Session activity", isPresented: $showingActivity) {

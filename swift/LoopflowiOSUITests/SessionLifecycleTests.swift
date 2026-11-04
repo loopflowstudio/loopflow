@@ -4,6 +4,32 @@ import XCTest
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testFindUsesThePhoneKeyboardWithoutTakingSessionControl() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let find = app.buttons["Find in Session"]
+        XCTAssertTrue(find.waitForExistence(timeout: 5))
+        find.tap()
+        let query = app.textFields["terminal-find-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.typeText("Loopflow")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Viewing Session"].exists)
+        XCTAssertFalse(app.staticTexts["Keyboard connected"].exists)
+        capture(app, "session-find-observer")
+        query.typeText("\n")
+        app.buttons["Close Find"].tap()
+        XCTAssertFalse(query.exists)
+        XCTAssertTrue(app.buttons["Use keyboard"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        capture(app, "session-find-closed")
+    }
+
     func testObserverOpensAnExplicitTerminalLinkAndReturnsWithoutTakingControl() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture"]

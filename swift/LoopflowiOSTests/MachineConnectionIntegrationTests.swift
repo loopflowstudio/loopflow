@@ -338,6 +338,26 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         controller.terminal.insertText(" + phone")
         try await wait("Phone editing did not reach the owner") { screen().contains("desktop draft + phone") }
 
+        let grid = controller.terminal.getTerminal()
+        let columns = grid.cols, rows = grid.rows
+        workspace.findInTerminal?()
+        let finder = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }.first {
+            $0.arrangedSubviews.contains { $0.accessibilityIdentifier == "terminal-find-query" }
+        })
+        let query = try XCTUnwrap(finder.arrangedSubviews.first as? UITextField)
+        query.text = "desktop draft"
+        query.sendActions(for: .editingChanged)
+        _ = controller.textFieldShouldReturn(query)
+        XCTAssertEqual(controller.terminal.getSelection(), "desktop draft")
+        controller.terminal.pasteText("search must not edit the provider")
+        XCTAssertEqual(grid.cols, columns)
+        XCTAssertEqual(grid.rows, rows)
+        let done = try XCTUnwrap(finder.arrangedSubviews.last as? UIButton)
+        done.sendActions(for: .touchUpInside)
+        XCTAssertFalse(controller.terminal.hasActiveSelection)
+        // The host later checks the exact submitted draft, including no query,
+        // Return or terminal-context paste from this local search interaction.
+
         if let control = proof.serviceControl {
             try await exerciseServiceInterruption(control, client: client, workspace: workspace, controller: controller)
         }

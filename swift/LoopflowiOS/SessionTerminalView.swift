@@ -22,19 +22,20 @@ private final class TerminalViewport: UIScrollView {
 
 final class SessionTerminalView: TerminalView {
     var canWrite = false
+    var allowsReadingFocus = true
     var pasteUnavailable: ((String) -> Void)?
 
     // Selection and link gestures need a local responder even while observing.
     // The controller hides its software keyboard; input still requires canWrite.
-    override var canBecomeFirstResponder: Bool { true }
+    override var canBecomeFirstResponder: Bool { allowsReadingFocus }
 
     override func insertText(_ text: String) {
-        guard canWrite else { return }
+        guard canWrite, allowsReadingFocus else { return }
         super.insertText(text)
     }
 
     override func deleteBackward() {
-        guard canWrite else { return }
+        guard canWrite, allowsReadingFocus else { return }
         super.deleteBackward()
     }
 
@@ -54,7 +55,7 @@ final class SessionTerminalView: TerminalView {
     }
 
     func pasteText(_ text: String) {
-        guard canWrite else { return }
+        guard canWrite, allowsReadingFocus else { return }
         // A paste cannot terminate its own bracket or become a control command.
         let clean = String(text.unicodeScalars.filter {
             !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\r" || $0 == "\t"
@@ -85,12 +86,13 @@ struct SessionTerminal: UIViewControllerRepresentable {
 
     static func dismantleUIViewController(_ controller: SessionTerminalController, coordinator: ()) {
         controller.workspace.render = nil
+        controller.workspace.findInTerminal = nil
         controller.workspace.setGeometry = nil
         controller.terminal.updateUiClosed()
     }
 }
 
-final class SessionTerminalController: UIViewController, @preconcurrency TerminalViewDelegate, UIScrollViewDelegate {
+final class SessionTerminalController: UIViewController, @preconcurrency TerminalViewDelegate, UIScrollViewDelegate, UITextFieldDelegate {
     let workspace: MobileWorkspace
     let terminal = SessionTerminalView(frame: .zero)
     private let viewport = TerminalViewport()
@@ -105,6 +107,15 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private let keyboardButton = UIButton(type: .system)
     private let latestButton = UIButton(type: .system)
     private var keyboardHidden = false
+    private let finder = UIStackView()
+    private let findField = UITextField()
+    private let findDone = UIButton(type: .system)
+    private let findPrevious = UIButton(type: .system)
+    private let findNext = UIButton(type: .system)
+    private let findFeedback = UILabel()
+    private var findHeight: NSLayoutConstraint!
+    private var finding = false
+    private var findGeometry: TerminalGeometry?
 
     init(workspace: MobileWorkspace) {
         self.workspace = workspace
@@ -137,10 +148,15 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         terminal.pasteUnavailable = { [weak self] text in self?.message.text = text }
         workspace.render = { [weak self] bytes, reset in
             guard let self else { return }
-            if reset { terminal.feed(text: "\u{1b}c") }
+            if reset {
+                terminal.clearSearch()
+                terminal.feed(text: "\u{1b}c")
+            }
             terminal.feed(byteArray: Array(bytes)[...])
+            if reset, finding { findFeedback.text = "Search again" }
             updateLatestButton()
         }
+        workspace.findInTerminal = { [weak self] in self?.beginFind() }
         workspace.setGeometry = { [weak self] geometry in
             guard let self else { return }
             self.geometry = geometry
@@ -168,6 +184,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         bar.axis = .horizontal
         bar.distribution = .fillEqually
         for button in [pasteButton, newlineButton, keyboardButton] { bar.addArrangedSubview(button) }
+        configureFind()
         updateAccessoryFonts()
         message.font = .preferredFont(forTextStyle: .caption1)
         message.adjustsFontForContentSizeCategory = true
@@ -181,12 +198,15 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         viewport.addSubview(terminal)
         terminalWidth = terminal.widthAnchor.constraint(equalToConstant: 1)
         terminalHeight = terminal.heightAnchor.constraint(equalToConstant: 1)
-        for subview in [viewport, message, bar, latestButton] {
+        for subview in [finder, viewport, message, bar, latestButton] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
         NSLayoutConstraint.activate([
-            viewport.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            finder.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
+            finder.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            finder.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            viewport.topAnchor.constraint(equalTo: finder.bottomAnchor, constant: 6),
             viewport.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             viewport.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
             viewport.bottomAnchor.constraint(equalTo: message.topAnchor),
@@ -207,6 +227,8 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             latestButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             latestButton.widthAnchor.constraint(lessThanOrEqualTo: viewport.widthAnchor),
         ])
+        findHeight = finder.heightAnchor.constraint(equalToConstant: 0)
+        findHeight.isActive = true
     }
 
     override func viewDidLayoutSubviews() {
@@ -219,7 +241,8 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         super.viewDidAppear(animated)
         // Begin local reading immediately, so the first tap can open a link.
         // Observer inputView is empty and remote input is still gated.
-        _ = terminal.becomeFirstResponder()
+        if finding { _ = findField.becomeFirstResponder() }
+        else { _ = terminal.becomeFirstResponder() }
     }
 
     private var preferredTerminalFont: UIFont {
@@ -255,6 +278,12 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         latest?.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
         latest?.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(font: font)
         latestButton.configuration = latest
+        findField.font = font
+        findDone.titleLabel?.font = font
+        findFeedback.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: base, compatibleWith: traitCollection)
+        for button in [findPrevious, findNext] {
+            button.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(font: font), forImageIn: .normal)
+        }
     }
 
     private func updateTerminalFont() {
@@ -270,7 +299,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         let frame = terminal.getOptimalFrameSize()
         let cell = CGSize(width: frame.width / CGFloat(grid.cols), height: frame.height / CGFloat(grid.rows))
         let size: CGSize
-        if let geometry {
+        if let geometry = geometry ?? findGeometry {
             // Size the actual renderer, so UIKit layout never briefly reflows a
             // desktop snapshot at phone width. The surrounding viewport pans.
             // Leave a point for UIKit's pixel rounding; truncating a fractional
@@ -285,15 +314,18 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             terminalHeight.constant = size.height
             viewport.layoutIfNeeded()
         }
-        workspace.resize(columns: max(1, Int(viewport.bounds.width / cell.width)),
-                         rows: max(1, Int(viewport.bounds.height / cell.height)))
+        if !finding {
+            workspace.resize(columns: max(1, Int(viewport.bounds.width / cell.width)),
+                             rows: max(1, Int(viewport.bounds.height / cell.height)))
+        }
     }
 
     func update(theme: ThemeDefinition) {
         let canWrite = workspace.state == .controlling
         let changed = terminal.canWrite != canWrite
+        if changed, canWrite, finding { endFind(restoreFocus: false) }
         terminal.canWrite = canWrite
-        terminal.allowMouseReporting = canWrite
+        terminal.allowMouseReporting = canWrite && !finding
         for button in [pasteButton, newlineButton, keyboardButton] { button.isEnabled = canWrite }
         if changed {
             if canWrite {
@@ -330,12 +362,130 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         message.textColor = UIColor(theme.palette.textSecondary)
         latestButton.configuration?.baseBackgroundColor = UIColor(theme.palette.surface)
         latestButton.configuration?.baseForegroundColor = UIColor(theme.palette.accentInk)
+        findField.textColor = UIColor(theme.palette.text)
+        findField.backgroundColor = UIColor(theme.palette.surface)
+        findField.attributedPlaceholder = NSAttributedString(string: "Find in Session", attributes: [
+            .foregroundColor: UIColor(theme.palette.textSecondary),
+        ])
+        findField.keyboardAppearance = theme.isDark ? .dark : .light
+        finder.tintColor = UIColor(theme.palette.accentInk)
+        findFeedback.textColor = UIColor(theme.palette.textSecondary)
     }
 
     private func updateLatestButton() {
         let readingHistory = terminal.canScroll && terminal.scrollPosition < 1
         let aboveBottom = viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
         latestButton.isHidden = !(readingHistory || aboveBottom)
+    }
+
+    private func configureFind() {
+        finder.axis = .horizontal
+        finder.alignment = .center
+        finder.spacing = 8
+        finder.isHidden = true
+        findField.placeholder = "Find in Session"
+        findField.accessibilityIdentifier = "terminal-find-query"
+        findField.accessibilityLabel = "Find in Session"
+        findField.borderStyle = .roundedRect
+        findField.clearButtonMode = .whileEditing
+        findField.autocorrectionType = .no
+        findField.autocapitalizationType = .none
+        findField.spellCheckingType = .no
+        findField.returnKeyType = .search
+        findField.delegate = self
+        findField.addAction(UIAction { [weak self] _ in self?.queryChanged() }, for: .editingChanged)
+        findDone.setTitle("Done", for: .normal)
+        findDone.accessibilityLabel = "Close Find"
+        findDone.addAction(UIAction { [weak self] _ in self?.endFind() }, for: .touchUpInside)
+        findDone.setContentHuggingPriority(.required, for: .horizontal)
+        for item in [findField, findDone] {
+            finder.addArrangedSubview(item)
+            let height = item.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+            height.priority = .defaultHigh
+            height.isActive = true
+        }
+        findPrevious.setImage(UIImage(systemName: "chevron.up"), for: .normal)
+        findPrevious.accessibilityLabel = "Previous match"
+        findPrevious.addAction(UIAction { [weak self] _ in self?.find(backward: true) }, for: .touchUpInside)
+        findNext.setImage(UIImage(systemName: "chevron.down"), for: .normal)
+        findNext.accessibilityLabel = "Next match"
+        findNext.addAction(UIAction { [weak self] _ in self?.find(backward: false) }, for: .touchUpInside)
+        findFeedback.textAlignment = .center
+        findFeedback.numberOfLines = 2
+        findFeedback.accessibilityIdentifier = "terminal-find-feedback"
+        for button in [findPrevious, findNext] {
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        }
+    }
+
+    private func beginFind() {
+        if !finding {
+            let grid = terminal.getTerminal()
+            findGeometry = TerminalGeometry(columns: grid.cols, rows: grid.rows)
+            finding = true
+            terminal.allowsReadingFocus = false
+            terminal.allowMouseReporting = false
+            finder.isHidden = false
+            findHeight.isActive = false
+            bar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            bar.distribution = .fill
+            [findPrevious, findFeedback, findNext].forEach { bar.addArrangedSubview($0) }
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            queryChanged()
+        }
+        _ = findField.becomeFirstResponder()
+    }
+
+    private func endFind(restoreFocus: Bool = true) {
+        guard finding else { return }
+        finding = false
+        terminal.allowsReadingFocus = true
+        terminal.allowMouseReporting = workspace.state == .controlling
+        findField.resignFirstResponder()
+        terminal.clearSearch()
+        findGeometry = nil
+        finder.isHidden = true
+        findHeight.isActive = true
+        bar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        bar.distribution = .fillEqually
+        [pasteButton, newlineButton, keyboardButton].forEach { bar.addArrangedSubview($0) }
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        if restoreFocus { _ = terminal.becomeFirstResponder() }
+    }
+
+    private func queryChanged() {
+        terminal.clearSearch()
+        find(backward: false)
+    }
+
+    private func find(backward: Bool) {
+        let query = findField.text ?? ""
+        findPrevious.isEnabled = !query.isEmpty
+        findNext.isEnabled = !query.isEmpty
+        guard !query.isEmpty else {
+            findFeedback.text = "Text loaded on this phone"
+            return
+        }
+        let found = backward ? terminal.findPrevious(query) : terminal.findNext(query)
+        findFeedback.text = found ? "Match found" : "No matches"
+        if found, let selection = terminal.selection {
+            let grid = terminal.getTerminal()
+            let frame = terminal.getOptimalFrameSize()
+            let cell = CGSize(width: frame.width / CGFloat(grid.cols), height: frame.height / CGFloat(grid.rows))
+            let columns = selection.start.row == selection.end.row ? max(1, selection.end.col - selection.start.col) : 1
+            let selected = CGRect(x: CGFloat(selection.start.col) * cell.width, y: CGFloat(selection.start.row) * cell.height,
+                                  width: CGFloat(columns) * cell.width, height: cell.height)
+            viewport.scrollRectToVisible(terminal.convert(selected, to: viewport).insetBy(dx: -8, dy: -8), animated: false)
+        }
+        updateLatestButton()
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        find(backward: false)
+        return false
     }
 
     private func showLatest() {
@@ -363,7 +513,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) { workspace.send(Data(data)) }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        if geometry == nil { workspace.resize(columns: newCols, rows: newRows) }
+        if geometry == nil, !finding { workspace.resize(columns: newCols, rows: newRows) }
     }
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}

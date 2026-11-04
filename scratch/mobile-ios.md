@@ -802,3 +802,59 @@ effects are asserted. Light, dark and large-text captures were inspected under
 captured there. Physical gestures and VoiceOver on a phone remain unverified.
 The final capture-only run at 06:23 also applies the matching UIKit light/dark
 appearance so native disabled controls reflect the selected theme.
+
+### Find in Session — November 4 implementation
+
+Expose a navigation-bar Find action that searches text already loaded in the
+native terminal, including its local scrollback. Use SwiftTerm findNext /
+findPrevious and selection; keep one terminal history and no server endpoint.
+Use a native search field and previous/next controls, with an explicit loaded-text
+scope hint and No matches feedback. Do not scan every match merely to show a count:
+the renderer's count API enumerates a capped result list, which cannot provide an
+honest total for arbitrary terminal sizes without unbounded work.
+
+Find is a local reading action. It may show the phone keyboard while observing,
+but neither the query nor Return goes to the provider. Opening/canceling it must
+not acquire input or geometry or reflow the remote grid; freeze the current local
+grid while the find UI changes available space. A new explicit keyboard takeover
+returns to terminal editing. Reveal found text in both the renderer's scrollback
+and the outer observer viewport, including horizontal panning. Cancel removes
+search decoration and leaves the reading position. Test real touch input, no
+remote bytes/resize/claims, wraparound/Unicode, no matches, new output, Session
+replacement, and large-text/light/dark presentation before committing.
+
+
+Find now uses the renderer's existing search/selection APIs, with no extra history,
+Machine request or parser. Native tests cover Unicode and wraparound, no matches,
+offscreen observer matches, new output, reconnect clearing stale highlights, and
+explicit takeover returning to terminal typing. Query editing, Return, terminal
+context paste and mouse reporting stay local while Find is open. The current grid
+is frozen during search so the local keyboard does not resize a retained program.
+
+The 06:41:53 run passed all four new Find tests and both real-touch UI tests
+(Find and foreground recovery). Two older keyboard tests failed because they
+selected the first stack view, now the Find bar; selecting the named keyboard
+button fixed both, verified at 06:43:12. No product keyboard workaround was needed.
+Light, dark and accessibility-text captures were inspected. The dark placeholder
+now uses the theme's secondary text color; final captures passed at 06:43:44 and
+are under `scratch/demo-assets/terminal-find-*.png`. The real keyboard screenshots
+are `session-find-observer.png` and `session-find-closed.png`. Physical VoiceOver
+and IME use remain device acceptance, not established by these captures.
+
+
+Live Find acceptance passed through host Tailscale at
+`Test-LoopflowiOS-2026.11.04_06-44-34--0800.xcresult` (49.638 seconds native): the
+phone searched the unfinished remote draft, pressed Search and attempted a
+terminal-context paste, then the owner still received the exact expected draft.
+The same run passed service interruption/recovery, current activity, passive
+handoff and 33,554,432 output bytes with 512 edited acknowledgements exactly once.
+Input-to-next-output p95 was 14.6 ms/max 22.7 ms; native feed CPU was 16.562 seconds
+across 32,770 calls. Logs: `/tmp/mobile-find-live.log` and
+`/tmp/mobile-find-live-native.log`. The temporary route was removed and empty
+Serve configuration verified. Unicode search across actual local scrollback also
+passed its focused test at 06:45:44. These remain Simulator and stand-in-provider
+proofs; physical-phone and actual-provider acceptance are still open.
+
+The mounted-window hidden-keyboard case passed at 06:46:44: opening and closing
+Find while the terminal keyboard was hidden sent no geometry updates. This covers
+the local keyboard transition in Simulator, not physical keyboard accessories.

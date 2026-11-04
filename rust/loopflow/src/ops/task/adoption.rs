@@ -171,11 +171,7 @@ pub(super) async fn save(
         existing
             .as_ref()
             .and_then(|task| task.worktree.clone())
-            .filter(|root| {
-                source.session.as_ref().is_some_and(|session| {
-                    crate::git::worktree_root(&session.cwd).ok().as_ref() != Some(root)
-                })
-            })
+            .filter(|root| source.session.is_some() && source.checkout.as_ref() != Some(root))
     } else {
         None
     };

@@ -158,11 +158,10 @@ fn scope_segment(scope: &PrimaryScope) -> Result<crate::git::worktrees::Worktree
 
 /// Adapt only at an idle attachment boundary. Historical captures and native
 /// conversation identity remain attached to the same Session.
-pub(crate) async fn admit_workspace(
-    store: &SharedStore,
-    mut session: LfSession,
-) -> Result<LfSession> {
-    let scope = store.sqlite.primary_scope(&session.id)?;
+pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<LfSession> {
+    let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
+        return Ok(session);
+    };
     let summary = store.sqlite.session_summary(
         &session.id,
         time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -173,19 +172,16 @@ pub(crate) async fn admit_workspace(
     }) {
         return Ok(session);
     }
-    let cwd = match scope.as_ref() {
-        None => return Ok(session),
-        Some(scope @ PrimaryScope::Repository(repo)) => {
-            ensure_scope_worktree(repo.as_path(), scope)?.path
-        }
-        Some(scope @ PrimaryScope::Wave(id)) => {
+    let cwd = match &scope {
+        PrimaryScope::Repository(repo) => ensure_scope_worktree(repo.as_path(), &scope)?.path,
+        PrimaryScope::Wave(id) => {
             let wave = store
                 .get_wave(id)
                 .await?
                 .ok_or_else(|| anyhow!("primary Wave {id} is unavailable"))?;
-            ensure_scope_worktree(Path::new(wave.repo()), scope)?.path
+            ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
         }
-        Some(PrimaryScope::Task(task)) => {
+        PrimaryScope::Task(task) => {
             // Explicit adoption and binding already selected this directory.
             if session.work_source == Some(WorkSource::Bound) {
                 return Ok(session);
@@ -217,7 +213,7 @@ pub(crate) async fn admit_workspace(
         }
     };
     if session.cwd != cwd {
-        session = store.sqlite.admit_session_workspace(&session, &cwd)?;
+        return Ok(store.sqlite.admit_session_workspace(&session, &cwd)?);
     }
     Ok(session)
 }

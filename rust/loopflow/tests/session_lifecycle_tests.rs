@@ -3050,22 +3050,17 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
         id
     });
     // Selecting another primary does not change this Session's selected directory.
-    let other = tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
-            path: fixture.home.path().join("loopflow.db"),
-        })
-        .await
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
-        let mut other = store.session(&id).await.unwrap().unwrap();
-        other.id = uuid::Uuid::new_v4().simple().to_string().into();
-        other.cwd = destination.clone();
-        other.captured = None;
-        other.artifact_key = None;
-        other.caller_artifact_key = None;
-        other.input_published = false;
-        other.completed_at = None;
-        store.create_session(other).await.unwrap()
-    });
+    let mut other = store.session(&id).unwrap().unwrap();
+    other.id = uuid::Uuid::new_v4().simple().to_string().into();
+    other.cwd = destination.clone();
+    other.captured = None;
+    other.artifact_key = None;
+    other.caller_artifact_key = None;
+    other.input_published = false;
+    other.completed_at = None;
+    let other = store.create_session(other, None).unwrap();
     fixture.json(&[
         "session",
         "bind",
@@ -3337,31 +3332,25 @@ fn promotion_continuation_keeps_a_recorded_session_subdirectory() {
                 "--json",
             ])
         });
-        let runtime = tokio::runtime::Runtime::new().unwrap();
         // Desktop/import admission can record a more specific cwd than the CLI's
         // --repo selector, which normalizes its initial launch to the checkout root.
-        let session = runtime.block_on(async {
-            let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
-                path: fixture.home.path().join("loopflow.db"),
-            })
-            .await
-            .unwrap();
-            let mut session = store.session(&original).await.unwrap().unwrap();
-            session.id = uuid::Uuid::new_v4().simple().to_string().into();
-            session.cwd = research.clone();
-            session.captured = None;
-            session.artifact_key = None;
-            session.caller_artifact_key = None;
-            session.input_published = false;
-            session.completed_at = None;
-            if let Some(task) = &existing {
-                session.task_id =
-                    Some(loopflow::durable::TaskId::parse(task["id"].as_str().unwrap()).unwrap());
-                session.work_source = Some(loopflow::session::WorkSource::Declared);
-            }
-
-            store.create_session(session).await.unwrap()
-        });
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+                .unwrap();
+        let mut session = store.session(&original).unwrap().unwrap();
+        session.id = uuid::Uuid::new_v4().simple().to_string().into();
+        session.cwd = research.clone();
+        session.captured = None;
+        session.artifact_key = None;
+        session.caller_artifact_key = None;
+        session.input_published = false;
+        session.completed_at = None;
+        if let Some(task) = &existing {
+            session.task_id =
+                Some(loopflow::durable::TaskId::parse(task["id"].as_str().unwrap()).unwrap());
+            session.work_source = Some(loopflow::session::WorkSource::Declared);
+        }
+        let session = store.create_session(session, None).unwrap();
         let task = fixture.json(&[
             "task",
             "create",

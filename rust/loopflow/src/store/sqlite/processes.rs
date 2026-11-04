@@ -341,18 +341,6 @@ pub(super) fn attach_in(
     Ok(attached)
 }
 
-fn record_session_agent_session_in(
-    conn: &rusqlite::Connection,
-    session: &str,
-    thread: &AgentSessionId,
-) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
-        params![session, thread],
-    )?;
-    Ok(())
-}
-
 impl SqliteStore {
     pub(crate) fn unfinished_processes(&self) -> StoreResult<Vec<LfProcess>> {
         unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
@@ -834,7 +822,10 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
-        record_session_agent_session_in(&tx, session, thread)?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+            params![session, thread],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -882,7 +873,10 @@ impl SqliteStore {
             "UPDATE processes SET endpoint=?2 WHERE id=?1",
             params![expected.agent_process_id, endpoint],
         )?;
-        record_session_agent_session_in(&tx, session, thread)?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+            params![session, thread],
+        )?;
         tx.commit()?;
         Ok(())
     }

@@ -81,6 +81,7 @@ pub struct LfSession {
     /// Causal input reference; grants neither attachment nor Graph authority.
     pub caller_artifact_key: Option<String>,
     pub input_published: bool,
+    /// Selected working directory; existing Process records retain their launch directory.
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
@@ -250,7 +251,6 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
-    pub requested_cwd: Option<std::path::PathBuf>,
     pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
     /// Its execution owner runs with no viewer attached.

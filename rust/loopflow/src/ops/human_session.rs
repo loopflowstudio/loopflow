@@ -288,8 +288,6 @@ pub struct SessionPage<T = SessionRecord> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
-    /// Requested location for the next connection; current clients stay at cwd.
-    pub requested_cwd: Option<String>,
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
@@ -544,10 +542,6 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
-        requested_cwd: session
-            .requested_cwd
-            .as_ref()
-            .map(|cwd| cwd.display().to_string()),
         preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
         availability: session_availability(session),
@@ -1303,10 +1297,6 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         },
     };
     let mut reading = SessionRecord {
-        requested_cwd: metadata
-            .requested_cwd
-            .as_ref()
-            .map(|cwd| cwd.display().to_string()),
         preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
         availability: session_availability(&metadata),

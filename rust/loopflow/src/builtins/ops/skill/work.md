@@ -35,9 +35,9 @@ with or without `--run`; retries recover the selected work's Task.
 `lf session bind <id> --task <task>` permanently binds and selects its primary
 conversation. Use an unfinished interactive Session; closed Sessions and headless
 Runs cannot become primary.
-If the Task already owns another worktree, the same conversation continues there
-after its current client exits. Status and Desktop show the pending directory;
-reconnect to continue. Files stay where they are. If an open Task has no checkout,
+If the Task already owns another worktree, binding immediately sets the Session's
+directory there. Already-running clients may keep their original directory;
+subsequent connections use the selected one. Files stay where they are. If an open Task has no checkout,
 binding adopts the Session’s unowned linked checkout. Bind to a done Task without
 reopening it. With no Task checkout, retain the Session’s directory; do not
 allocate a checkout merely to bind the conversation.

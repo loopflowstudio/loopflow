@@ -73,7 +73,7 @@ struct SessionActionSheet: View {
                         .disabled(draft.submitting || draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("session-bind-preview")
                 }
-                Text("Creation keeps this conversation in place. If an existing Task has another worktree, its next connection continues there after the current client exits. Files stay where they are.")
+                Text("Creation keeps this conversation in place. Binding sets its directory to the Task worktree immediately. Already-running clients may keep their original directory. Files stay where they are.")
                 if let error = draft.error {
                     Text(error).foregroundStyle(palette.warning)
                         .accessibilityIdentifier("session-bind-error")

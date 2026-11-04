@@ -94,10 +94,9 @@ import ViewInspector
             #expect(model.selection == .task(id: "task-exact"))
             let promoted = try #require(model.sessions.value?.first { $0.id == session.id })
             #expect(promoted.work == .task(id: "task-exact"))
-            #expect(promoted.cwd == session.cwd)
+            #expect(promoted.cwd == (existing ? "/src/delivery" : session.cwd))
             #expect(promoted.agentProcessId == session.agentProcessId)
             #expect(promoted.taskPrimary)
-            #expect(promoted.requestedCwd == (existing ? "/src/delivery" : nil))
             #expect(await source.bindCount == (existing ? 1 : 0))
         }
     }
@@ -120,7 +119,7 @@ import ViewInspector
         #expect(await source.bindCount == 1)
         #expect(model.navigation.selectedSessionId == session.id)
         #expect(model.sessions.value?.first?.agentProcessId == session.agentProcessId)
-        #expect(model.sessions.value?.first?.cwd == session.cwd)
+        #expect(model.sessions.value?.first?.cwd == "/src/delivery")
         #expect(model.sessions.value?.first?.taskPrimary == true)
         #expect(model.searchDestinations("Primary").isEmpty)
     }
@@ -195,7 +194,7 @@ private actor ControlsSource {
         if reject { reject = false; throw RegistryQueryError("Session changed before binding") }
         record["work"] = ["kind": "task", "id": "task-exact"]
         record["task_primary"] = true
-        record["requested_cwd"] = "/src/delivery"
+        record["cwd"] = "/src/delivery"
         record["wave_id"] = "wave-exact"
         return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
     }

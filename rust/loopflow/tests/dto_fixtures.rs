@@ -1185,10 +1185,6 @@ fn session_rows_say_each_fact_once_and_require_every_field() {
     let fixture = include_str!("../../../tests/fixtures/dto/session_rows.json");
     let value: serde_json::Value = serde_json::from_str(fixture).unwrap();
     let rows: Vec<SessionRow> = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        rows[0].session.requested_cwd.as_deref(),
-        Some("/src/loopflow.delivery")
-    );
     assert_eq!(serde_json::to_value(&rows).unwrap(), value);
     for field in ["id", "title", "interactive", "state", "available", "cwd"] {
         let mut missing = value[0].clone();

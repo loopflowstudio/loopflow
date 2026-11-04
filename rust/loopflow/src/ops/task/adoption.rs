@@ -167,7 +167,7 @@ pub(super) async fn save(
             )));
         }
     }
-    let requested_cwd = if continue_in_task {
+    let destination = if continue_in_task {
         existing
             .as_ref()
             .and_then(|task| task.worktree.clone())
@@ -203,13 +203,13 @@ pub(super) async fn save(
             creation,
             placement,
             source.session,
-            requested_cwd.clone(),
+            destination.clone(),
             acquisition,
         )
         .await
         .map_err(task_error)?;
-    if let Some(cwd) = requested_cwd {
-        eprintln!("Conversation selected. After its current client exits, the next connection continues in {}. Files stay in their original checkout.", cwd.display());
+    if let Some(cwd) = destination {
+        eprintln!("Conversation directory set to {}. Already-running clients may keep their original directory. Files stay in their original checkout.", cwd.display());
     }
     drop(source._admission);
     Ok(task)

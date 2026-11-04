@@ -2500,7 +2500,7 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
             .unwrap();
             let session_state = || -> String {
                 fixture.db().query_row(
-                    "SELECT json_array(cwd,task_id,primary_scope,requested_cwd,current_capture,input_published,agent_process_id,bound_at) FROM agent_sessions WHERE id=?1",
+                    "SELECT json_array(cwd,task_id,primary_scope,current_capture,input_published,agent_process_id,bound_at) FROM agent_sessions WHERE id=?1",
                     [&id], |row| row.get(0),
                 ).unwrap()
             };
@@ -2673,7 +2673,7 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
                 .into_iter()
                 .find(|s| s["id"] == id)
                 .unwrap();
-            assert!(summary["requested_cwd"].is_null());
+            assert_eq!(summary["cwd"], root.to_str().unwrap());
             assert_eq!(fixture.launches().len(), 1);
             fixture.wait_for_graphs();
             let retry = fixture.json(
@@ -2927,10 +2927,10 @@ fn promotion_binding_done_tasks_preserves_live_work_on_retry_and_open() {
                     task
                 );
                 assert_eq!(
-                    primary["requested_cwd"],
-                    serde_json::to_value(&destination).unwrap()
+                    primary["cwd"],
+                    destination.as_ref().unwrap_or(&origin).to_str().unwrap()
                 );
-                for field in ["id", "cwd", "agent_process_id", "provider"] {
+                for field in ["id", "agent_process_id", "provider"] {
                     assert_eq!(primary[field], before[field], "{field}");
                 }
                 let status = fixture.json(&["task", "status", task, "--json"]);
@@ -2970,7 +2970,7 @@ fn promotion_binding_done_tasks_preserves_live_work_on_retry_and_open() {
 }
 
 #[test]
-fn promotion_continues_in_existing_task_after_live_client_exits() {
+fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
     let fixture = Fixture::new(true);
     let origin = fixture
         .repo
@@ -3027,23 +3027,29 @@ fn promotion_continues_in_existing_task_after_live_client_exits() {
             .into_iter()
             .find(|s| s["id"] == id)
             .unwrap();
-        assert_eq!(after["cwd"], before["cwd"]);
+        assert_eq!(after["cwd"], destination.to_str().unwrap());
         assert_eq!(after["agent_process_id"], before["agent_process_id"]);
-        assert_eq!(after["requested_cwd"], destination.to_str().unwrap());
+        // Binding selects the directory without rewriting the running child's launch.
+        let launch_cwd: String = fixture
+            .db()
+            .query_row(
+                "SELECT cwd FROM processes WHERE id=?1",
+                [before["agent_process_id"].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(launch_cwd, origin.to_str().unwrap());
         let opened = fixture.json(&["resume", "--task", task_id, "--prepare", "--json"]);
         assert_eq!(opened["id"], id);
-        assert_eq!(opened["requested_cwd"], after["requested_cwd"]);
+        assert_eq!(opened["cwd"], after["cwd"]);
         let status = fixture.json(&["task", "status", task_id, "--json"]);
-        assert_eq!(
-            status["sessions"][0]["requested_cwd"],
-            after["requested_cwd"]
-        );
+        assert_eq!(status["sessions"][0]["cwd"], after["cwd"]);
         assert_eq!(fixture.captures(), captures);
         assert_eq!(fixture.launches().len(), 1);
         assert_eq!(fixture.count("task_graphs"), 0);
         id
     });
-    // Selecting another primary does not cancel this Session's accepted move.
+    // Selecting another primary does not change this Session's selected directory.
     let other = tokio::runtime::Runtime::new().unwrap().block_on(async {
         let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
             path: fixture.home.path().join("loopflow.db"),
@@ -3072,20 +3078,6 @@ fn promotion_continues_in_existing_task_after_live_client_exits() {
         &std::fs::read_to_string(fixture.home.path().join("native-sessions.json")).unwrap(),
     )
     .unwrap();
-    // The target can temporarily disappear; the same request remains retryable.
-    let held = destination.with_extension("held");
-    std::fs::rename(&destination, &held).unwrap();
-    let failed = fixture.run(&["resume", &id]);
-    std::fs::rename(&held, &destination).unwrap();
-    assert!(!failed.status.success());
-    assert_eq!(
-        fixture
-            .sessions()
-            .into_iter()
-            .find(|s| s["id"] == id)
-            .unwrap()["requested_cwd"],
-        destination.to_str().unwrap()
-    );
     fixture.finish_on_resume();
     std::fs::write(fixture.home.path().join("reject-move"), "once").unwrap();
     let failed = fixture.run(&["resume", &id]);
@@ -3093,12 +3085,12 @@ fn promotion_continues_in_existing_task_after_live_client_exits() {
         !failed.status.success(),
         "native move failure must not advertise a connection"
     );
-    let pending = fixture
+    let failed_session = fixture
         .sessions()
         .into_iter()
         .find(|s| s["id"] == id)
         .unwrap();
-    assert_eq!(pending["requested_cwd"], destination.to_str().unwrap());
+    assert_eq!(failed_session["cwd"], destination.to_str().unwrap());
     let continued = fixture.run(&["resume", &id]);
     assert!(continued.status.success(), "{continued:?}");
     let received: Value = serde_json::from_str(
@@ -3128,7 +3120,6 @@ fn promotion_continues_in_existing_task_after_live_client_exits() {
         .into_iter()
         .find(|s| s["id"] == id)
         .unwrap();
-    assert!(after["requested_cwd"].is_null());
     assert_eq!(after["cwd"], destination.to_str().unwrap());
     assert_eq!(
         std::fs::read_to_string(origin.join("draft.txt")).unwrap(),
@@ -3380,6 +3371,15 @@ fn promotion_continuation_keeps_a_recorded_session_subdirectory() {
             "Research",
             "--json",
         ]);
+        let bound = fixture.json(&[
+            "session",
+            "bind",
+            session.id.as_str(),
+            "--task",
+            task["id"].as_str().unwrap(),
+            "--json",
+        ]);
+        assert_eq!(bound["cwd"], research.to_str().unwrap());
         let primary = fixture.json(&[
             "resume",
             "--task",

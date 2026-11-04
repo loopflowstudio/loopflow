@@ -277,7 +277,6 @@ pub struct SessionRow {
 /// One Session's own facts; `lf task status` lists its Task's Sessions with them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionFacts {
-    pub requested_cwd: Option<String>,
     pub id: crate::id::LfSessionId,
     pub title: String,
     /// The provider its current input launched with; `null` before a first launch.
@@ -320,7 +319,6 @@ impl SessionFacts {
             available: session.availability.is_some(),
             cwd: session.cwd,
             agent_process_id: session.agent_process_id,
-            requested_cwd: session.requested_cwd,
         }
     }
 }
@@ -554,12 +552,6 @@ async fn list(
                     None => session.title.clone(),
                 }
             );
-            if let Some(cwd) = &session.requested_cwd {
-                println!(
-                    "  Current directory: {}; next connection: {cwd}",
-                    session.cwd
-                );
-            }
             for action in session.actions {
                 println!(
                     "  {} — {}",

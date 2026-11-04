@@ -1,5 +1,10 @@
 # LOO-582 autonomous demo — November 3, 2026
 
+Historical evidence for the deferred-directory candidate. Jack Heart superseded
+that model on November 4: binding now selects cwd immediately. The changed
+candidate still needs its configured demonstration; the observations below do
+not claim a running child changes its OS directory.
+
 ## Follow-up binding demonstration — November 3, 2026, 23:11–23:18
 
 Candidate 057f6bc874 published the accepted always-primary bind correction.

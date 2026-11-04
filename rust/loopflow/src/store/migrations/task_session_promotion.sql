@@ -12,7 +12,3 @@ CREATE TRIGGER validate_conversation_ancestry_update BEFORE UPDATE OF task_id,wa
         AND NOT (OLD.primary_scope IS 'wave' AND NEW.primary_scope IS NULL AND NEW.wave_id IS NULL)
         THEN RAISE(ABORT,'Wave Session binding is permanent') END;
 END;
-
--- A requested workspace is applied only at the next idle attachment boundary.
--- cwd continues to describe the current launch until then.
-ALTER TABLE agent_sessions ADD COLUMN requested_cwd TEXT;

@@ -204,7 +204,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let provider: String?
     /// The login its conversation is pinned to; nil for a shared or unrouted one.
     public let account: String?
-    public let requestedCwd: String?
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
@@ -229,7 +228,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, interactive, work, workspace, title, detail, provider, account, cwd, state, availability
         case preview
-        case requestedCwd = "requested_cwd"
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
         case primaryScope = "primary_scope"
@@ -289,7 +287,6 @@ extension SessionRecord {
         detail = try values.decode(String.self, forKey: .detail)
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         account = try values.decodeIfPresent(String.self, forKey: .account)
-        requestedCwd = try values.decodeIfPresent(String.self, forKey: .requestedCwd)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)

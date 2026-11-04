@@ -244,7 +244,7 @@ impl SqliteStore {
         creation: Option<&NewTask>,
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
-        requested_cwd: Option<&Path>,
+        destination: Option<&Path>,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -301,7 +301,7 @@ impl SqliteStore {
             }
             super::sessions::bind_session_in(&tx, &current, task_id)?;
             super::sessions::choose_task_primary_in(&tx, task_id, &session.id)?;
-            if let Some(cwd) = requested_cwd {
+            if let Some(cwd) = destination {
                 let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
                 if task.worktree.as_deref() != Some(cwd) {
                     return Err(StoreError::InvalidAuthority(
@@ -309,7 +309,7 @@ impl SqliteStore {
                     ));
                 }
                 tx.execute(
-                    "UPDATE agent_sessions SET requested_cwd=?2 WHERE id=?1",
+                    "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
                     params![session.id, cwd.to_string_lossy()],
                 )?;
             }

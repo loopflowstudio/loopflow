@@ -836,7 +836,6 @@ struct DTOFixtureTests {
     @Test("canonical_ids: structured Session IDs decode canonically; native bytes stay exact")
     func canonicalIdsSessionWire() throws {
         let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("canonical_ids_session.json"))
-        #expect(session.requestedCwd == "/src/loopflow.delivery")
         #expect(session.id == "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         #expect(session.taskIds == ["task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"])
         #expect(session.waveId == "dddddddd-dddd-4ddd-8ddd-dddddddddddd")

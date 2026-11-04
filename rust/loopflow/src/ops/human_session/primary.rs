@@ -173,32 +173,20 @@ pub(crate) async fn admit_workspace(
     }) {
         return Ok(session);
     }
-    let cwd = match (
-        summary.and_then(|summary| summary.requested_cwd),
-        scope.as_ref(),
-    ) {
-        (Some(cwd), _) => {
-            anyhow::ensure!(
-                cwd.is_dir(),
-                "Requested Session workspace is missing: {}; restore it and reconnect",
-                cwd.display()
-            );
-            cwd
-        }
-        (None, None) => return Ok(session),
-        (None, Some(scope @ PrimaryScope::Repository(repo))) => {
+    let cwd = match scope.as_ref() {
+        None => return Ok(session),
+        Some(scope @ PrimaryScope::Repository(repo)) => {
             ensure_scope_worktree(repo.as_path(), scope)?.path
         }
-        (None, Some(scope @ PrimaryScope::Wave(id))) => {
+        Some(scope @ PrimaryScope::Wave(id)) => {
             let wave = store
                 .get_wave(id)
                 .await?
                 .ok_or_else(|| anyhow!("primary Wave {id} is unavailable"))?;
             ensure_scope_worktree(Path::new(wave.repo()), scope)?.path
         }
-        (None, Some(PrimaryScope::Task(task))) => {
-            // Promotion associates an existing conversation in place, including
-            // when the Task has a separate checkout of its own.
+        Some(PrimaryScope::Task(task)) => {
+            // Explicit adoption and binding already selected this directory.
             if session.work_source == Some(WorkSource::Bound) {
                 return Ok(session);
             }
@@ -229,8 +217,7 @@ pub(crate) async fn admit_workspace(
         }
     };
     if session.cwd != cwd {
-        store.sqlite.admit_session_workspace(&session, &cwd)?;
-        session.cwd = cwd;
+        session = store.sqlite.admit_session_workspace(&session, &cwd)?;
     }
     Ok(session)
 }

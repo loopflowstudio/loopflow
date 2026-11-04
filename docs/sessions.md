@@ -136,9 +136,10 @@ workspace you renamed in cmux keeps your name.
 Launching in a Task's checkout binds the Session to that Task automatically.
 `bind` permanently associates an unfinished interactive Session and selects it
 as the Task's primary conversation. Repeating it selects that same Session again;
-other conversations stay associated. A Task with a worktree keeps it: the current
-client stays attached, and its next connection continues there. Status shows the
-pending directory until the provider confirms it. Files stay in their old checkout.
+other conversations stay associated. A Task with a worktree keeps it, and binding
+immediately sets the Session's working directory there. Already-running clients
+may keep their original directory; subsequent connections use the selected one.
+Files stay in their old checkout.
 An open Task without a worktree adopts the Session's unowned linked checkout;
 main and Wave checkouts stay shared. Done Tasks can still select an unfinished
 conversation. If the Task has no checkout, the conversation stays in place and

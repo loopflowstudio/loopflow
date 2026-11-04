@@ -19,7 +19,7 @@ impl Store {
         creation: Option<crate::work::task::NewTask>,
         placement: Option<(std::path::PathBuf, TaskPr)>,
         session: Option<crate::session::LfSession>,
-        requested_cwd: Option<std::path::PathBuf>,
+        destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
@@ -29,7 +29,7 @@ impl Store {
                 creation.as_ref(),
                 placement.as_ref(),
                 session.as_ref(),
-                requested_cwd.as_deref(),
+                destination.as_deref(),
             )
         })
         .await

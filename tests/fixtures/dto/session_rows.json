@@ -9,8 +9,7 @@
     "task": "task_00000000000000000000000000000001",
     "wave": "product",
     "cwd": "/src/loopflow.task",
-    "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "requested_cwd": "/src/loopflow.delivery"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "session_00000000000000000000000000000002",
@@ -22,7 +21,6 @@
     "task": null,
     "wave": null,
     "cwd": "/src/loopflow",
-    "agent_process_id": null,
-    "requested_cwd": null
+    "agent_process_id": null
   }
 ]

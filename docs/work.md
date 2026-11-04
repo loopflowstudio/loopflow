@@ -59,10 +59,9 @@ Already-assigned Sessions offer **Make primary Task conversation** in the palett
 and Task menu. The current terminal and composer stay in place.
 
 When an existing Task already has a worktree, `lf session bind <id> --task <task>`
-keeps that worktree and schedules the same conversation's next connection there.
-The current client stays in its directory until it exits. Status and Desktop show
-the pending directory; reconnect to continue. Files remain in their original
-checkout. If an open Task has no checkout, binding adopts the Session’s unowned
+keeps that worktree and immediately sets the Session's working directory there.
+Already-running clients may keep their original directory; subsequent connections
+use the selected one. Files remain in their original checkout. If an open Task has no checkout, binding adopts the Session’s unowned
 linked checkout. Done Tasks can still select an unfinished conversation without
 reopening work. With no Task checkout, the conversation stays in place and no
 checkout is adopted. Closed Sessions and headless Runs cannot become primary.

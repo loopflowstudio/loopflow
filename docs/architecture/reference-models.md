@@ -446,12 +446,13 @@ stays Unknown; absence of evidence does not become Independent.
 A Session's permanent assignment is write-once: null to a Task, validating any
 explicit Wave against its membership. Reassignment and clearing are unavailable.
 Public binding also selects that unfinished interactive Session as primary and
-requests continuation in the Task's worktree; repeating binding reselects it.
+immediately sets its cwd to the Task's worktree; repeating binding reselects it.
 Closed Sessions and headless Runs cannot become primary. Done/landed Tasks remain
 valid without reopening them. CLI states the permanent target; Desktop confirms
 the exact target before writing. CLI adds no confirmation prompt. The writer
-commits assignment, primary choice and pending directory atomically, preserving
-live input and attachment. Binding does not alter Graph membership. A selected
+commits assignment, primary choice and cwd atomically, preserving live input and
+attachment. Session cwd is the selected directory; already-running children may
+keep their original directory. Process records retain their launch directory. Binding does not alter Graph membership. A selected
 repository/Wave primary releases its old primary scope; ordinary Wave assignments
 and conflicting permanent Task bindings remain intact.
 

@@ -366,15 +366,6 @@ struct SessionPaneView: View {
                 strip
                 Rectangle().fill(theme.palette.border).frame(height: 1)
             }
-            if let record = item?.record, let cwd = record.requestedCwd {
-                Text(record.cwd == cwd
-                     ? "Connection to \(cwd) is pending. Reconnect to continue."
-                     : "Current directory: \(record.cwd). After the current client exits, reconnect to continue in \(cwd).")
-                    .font(Typography.caption())
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("session-workspace-continuation")
-            }
             content
                 // Reserve the rounded edge before Ghostty measures its surface.
                 .padding(pane.terminal == nil ? 0 : PaneGeometry.cornerRadius)

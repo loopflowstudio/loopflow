@@ -341,19 +341,13 @@ pub(super) fn attach_in(
     Ok(attached)
 }
 
-// Native identity confirms a connection, including completion of a requested
-// workspace change. A failed or older connection leaves the request retryable.
 fn record_session_agent_session_in(
     conn: &rusqlite::Connection,
     session: &str,
     thread: &AgentSessionId,
 ) -> StoreResult<()> {
     conn.execute(
-        "UPDATE agent_sessions SET provider_thread=?2,
-         requested_cwd=CASE WHEN requested_cwd=(
-             SELECT cwd FROM processes WHERE id=agent_sessions.agent_process_id
-             AND pid IS NOT NULL AND completed_at IS NULL
-         ) THEN NULL ELSE requested_cwd END WHERE id=?1",
+        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
         params![session, thread],
     )?;
     Ok(())

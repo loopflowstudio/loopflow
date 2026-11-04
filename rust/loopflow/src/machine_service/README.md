@@ -23,7 +23,46 @@ One operation per same-user Unix connection. Every control message is a four-byt
 big-endian length followed by UTF-8 JSON. Requests are capped at 64 KiB, responses
 at 32 MiB and connections at 64. Writes have a five-second deadline. The socket
 and its directory are private; remote proxies must never forward this endpoint.
-Remote admission is outside this revision.
+Remote callers use the separate device admission below.
+
+## Pair a phone through host Tailscale
+
+```sh
+lf machine service run --remote-port 49250
+# In a second terminal, after choosing an unused HTTPS port:
+tailscale serve --bg --https=8443 http://127.0.0.1:49250
+lf machine service pair --endpoint https://machine.tailnet.ts.net:8443 \
+  --name 'My iPhone' --output /private/tmp/loopflow-phone.json
+lf machine service devices
+lf machine service revoke DEVICE_ID
+```
+
+The foreground service also listens on loopback when `--remote-port` is supplied.
+Host Tailscale Serve supplies tailnet-only HTTPS; never use Funnel. Inspect existing
+Serve routes before choosing a port. This first carrier does not change Serve
+configuration or persist the remote-port setting in the installed service yet.
+
+The private setup file contains a one-use ticket valid for ten minutes. It is
+credential material: transfer it directly to the intended phone, never commit it
+or paste it into logs. A phone exchanges it at `/v1/pair` for a device credential;
+the native adapter must keep that credential in Keychain. Only hashes are stored in the Machine's
+SQLite database. A lost pairing reply requires a new ticket; it never reissues the
+same credential. Device listings contain IDs and names, not credentials. Revoking
+a device rejects new connections and terminates existing ones on their next
+authorization check (every five seconds; failed checks also close the connection).
+
+Both routes use native WebSockets with `Authorization: Bearer …`. `/v1/pair`
+returns one binary JSON `{version,device,token}` message. `/v1/machine` carries the
+unchanged length-prefixed Machine stream, followed by owner frames after `bridged`.
+WebSocket message boundaries have no application meaning. Binary chunks are capped
+at 64 KiB and copy buffers are bounded; slow readers lose their connection without
+stopping execution. Browser origins and credentials in URLs are rejected.
+
+The remote carrier checks its own device grant before shared operation dispatch.
+It never forwards to the private Unix socket or trusts a reverse proxy's UID or
+identity headers. The same connection capacity covers both carriers.
+Phone adapter, setup UI and actual host-Tailscale/device proof remain integration
+work; this endpoint alone does not make the current iOS fixture live.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/MachineProtocol.swift`
 mirrors them. Executable fixtures live in `tests/fixtures/dto/machine/`.

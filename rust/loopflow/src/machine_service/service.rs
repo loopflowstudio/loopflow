@@ -15,7 +15,7 @@ use super::wire::{
 };
 use crate::lf::commands::{read::Read, write::Write};
 
-pub(super) async fn run() -> Result<()> {
+pub(super) async fn run(remote_port: Option<u16>) -> Result<()> {
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -40,7 +40,35 @@ pub(super) async fn run() -> Result<()> {
     );
     let instance = Arc::new(uuid::Uuid::new_v4().to_string());
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    // Both carriers dispatch the same operations after their own admission.
+    // Remote access never connects to the private socket as a proxy Unix user.
+    let remote = async {
+        match remote_port {
+            Some(port) => {
+                super::remote::run(
+                    port,
+                    instance.clone(),
+                    executable_sha256.clone(),
+                    slots.clone(),
+                )
+                .await
+            }
+            None => std::future::pending::<Result<()>>().await,
+        }
+    };
     tracing::info!(%instance, socket = %path.display(), "Machine service ready");
+    tokio::select! {
+        result = remote => result,
+        result = local(listener, instance.clone(), executable_sha256.clone(), slots.clone()) => result,
+    }
+}
+
+async fn local(
+    listener: UnixListener,
+    instance: Arc<String>,
+    executable_sha256: Arc<String>,
+    slots: Arc<Semaphore>,
+) -> Result<()> {
     loop {
         let (socket, _) = listener.accept().await?;
         // Unix admission is deliberately unavailable to remote proxies.
@@ -67,7 +95,11 @@ pub(super) async fn run() -> Result<()> {
     }
 }
 
-async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &str) -> Result<()> {
+pub(super) async fn connection(
+    mut socket: impl AsyncRead + AsyncWrite + Unpin,
+    instance: &str,
+    executable_sha256: &str,
+) -> Result<()> {
     let bytes =
         tokio::time::timeout(Duration::from_secs(5), receive(&mut socket, MAX_REQUEST)).await??;
     let request: Request = match serde_json::from_slice(&bytes) {
@@ -131,7 +163,7 @@ async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &
 }
 
 async fn operation(
-    socket: &mut UnixStream,
+    socket: &mut (impl AsyncRead + AsyncWrite + Unpin),
     id: &str,
     instance: &str,
     executable_sha256: &str,
@@ -222,7 +254,7 @@ fn supported_read(query: &Read) -> bool {
 }
 
 async fn subscribe(
-    socket: &mut UnixStream,
+    socket: &mut (impl AsyncRead + AsyncWrite + Unpin),
     id: &str,
     instance: &str,
     query: Read,
@@ -235,7 +267,7 @@ async fn subscribe(
     );
     // Keep the in-flight read future across wakes; cancellation cannot discard a
     // partial frame then interpret its payload as the next length prefix.
-    let (mut reader, mut writer) = socket.split();
+    let (mut reader, mut writer) = tokio::io::split(socket);
     let mut input = Box::pin(receive(&mut reader, MAX_REQUEST));
     loop {
         tokio::select! {

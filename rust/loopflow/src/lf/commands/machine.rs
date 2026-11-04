@@ -17,7 +17,26 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             crate::machine_service::installation::delegate_selected()?;
             use crate::lf::MachineServiceCommand;
             let status = match cmd {
-                MachineServiceCommand::Run => return crate::machine_service::run(),
+                MachineServiceCommand::Run { remote_port } => {
+                    return crate::machine_service::run(*remote_port)
+                }
+                MachineServiceCommand::Pair {
+                    endpoint,
+                    name,
+                    output,
+                } => {
+                    return tokio::runtime::Runtime::new()?.block_on(
+                        crate::machine_service::admission::pair(endpoint, name, output),
+                    );
+                }
+                MachineServiceCommand::Devices => {
+                    return tokio::runtime::Runtime::new()?
+                        .block_on(crate::machine_service::admission::list());
+                }
+                MachineServiceCommand::Revoke { device } => {
+                    return tokio::runtime::Runtime::new()?
+                        .block_on(crate::machine_service::admission::revoke(device));
+                }
                 MachineServiceCommand::Ensure => crate::machine_service::installation::ensure()?,
                 MachineServiceCommand::Status => crate::machine_service::installation::status()?,
             };

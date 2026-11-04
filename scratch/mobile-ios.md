@@ -2,6 +2,43 @@
 
 ## Overnight direction — November 3, 2026
 
+### Live connection implementation
+
+The LOO-593 backend dependency is now merged locally into this branch; no PR was
+landed. Source merged without conflicts; iOS review notes were retained, the full
+backend design was brought in and both sets of open decisions were preserved.
+
+For the first live carrier, implementation selects host Tailscale Serve HTTPS/WSS,
+with a separate device credential. This follows Jack Heart's host-Tailscale-only
+direction. It introduces no embedded node, public relay or hub. The service binds
+its remote carrier to loopback only and dispatches the existing Machine protocol
+after remote admission, rather than proxying into the trusted Unix socket.
+
+The local pairing command writes a ten-minute, single-use ticket to a new private
+file. Redemption atomically consumes it and creates a device grant; SQLite stores
+only hashes. Credential replies go over WSS; native Keychain storage, QR/paste setup
+and endpoint discovery are next client work. Revocation denies new connections and
+closes existing ones on a bounded periodic check. No production credential or
+Tailscale configuration was changed during implementation. Automatic signed-in
+host detection and installed-service remote configuration are still required;
+the foreground flag is an integration path, not the finished setup experience.
+
+Sources: [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) and
+[Serve command](https://tailscale.com/docs/reference/tailscale-cli/serve), read
+November 3. Serve supplies private tailnet HTTPS; application admission remains
+Loopflow's responsibility. Preserve unrelated Serve routes and never use Funnel.
+
+Check: `cargo test -p loopflow --lib machine_service::` passed all 5 tests;
+`cargo clippy --all-targets -- -D warnings` passed; `cargo fmt` applied. The Rust
+linker noted the existing large debug unwind section; no test failed. The native
+focused suite passed all 16 tests after dependency integration at 23:56, result
+`swift/.build/ios/Logs/Test/Test-LoopflowiOS-2026.11.03_23-56-39--0800.xcresult`.
+The remote test uses an actual loopback WebSocket and shared dispatch with an
+incompatible-version request, proving admission/framing without claiming a live
+Task or owner attachment. It exercises ticket reuse, expiry (store test), wrong
+credentials, browser-origin rejection and revoked credentials. Next proof is the
+Swift adapter consuming real Work/owner bytes, then host-Tailscale and device use.
+
 Jack Heart asked for sustained autonomous improvement toward an excellent iOS app, expanding toward Desktop capabilities where useful while prioritizing polish, performance and UX over feature count. The offline slice is a starting point, not the completion boundary. Continue in this checkout; neither the earlier demo stop nor absent feedback ends implementation. No request to merge was made.
 
 Next work: improve Task-list density/search and honest unavailable states; make terminal keyboard recovery and spacing comfortable; then join the actual Machine contract and authenticated host-Tailscale transport. LOO-593's current published branch now admits view_plan and repository_path, superseding the missing-view-plan limitation recorded below. Revalidate actual source and fixtures at integration. TestFlight remains LOO-721; physical-device and live-host evidence are still required. Favor a complete Task → usable Session over additional panes. Record observed behavior separately from product acceptance.

@@ -1,6 +1,8 @@
 //! Standalone transport for shared reads and commands; owns no execution.
+pub mod admission;
 pub mod client;
 pub mod installation;
+mod remote;
 mod service;
 pub mod wire;
 
@@ -11,9 +13,9 @@ pub fn socket_path() -> anyhow::Result<PathBuf> {
     Ok(crate::transport::private_directory()?.join("machine.sock"))
 }
 
-pub fn run() -> anyhow::Result<()> {
+pub fn run(remote_port: Option<u16>) -> anyhow::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(service::run())
+        .block_on(service::run(remote_port))
 }

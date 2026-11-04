@@ -1304,11 +1304,28 @@ impl WtCommand {
 #[derive(Debug, Subcommand)]
 pub enum MachineServiceCommand {
     /// Serve the private socket in the foreground (for the OS supervisor).
-    Run,
+    Run {
+        /// Also accept paired phones through host Tailscale Serve on this loopback port.
+        #[arg(long)]
+        remote_port: Option<u16>,
+    },
     /// Register the selected installation's service and wait for local readiness.
     Ensure,
     /// Report local readiness without registering or starting anything.
     Status,
+    /// Write a one-use phone setup ticket to a new private file (valid for ten minutes).
+    Pair {
+        #[arg(long)]
+        endpoint: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// List admitted phones without exposing credentials.
+    Devices,
+    /// Revoke one phone, including its existing connections.
+    Revoke { device: String },
 }
 
 impl MachineCommand {

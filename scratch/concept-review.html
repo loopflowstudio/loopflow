@@ -7,9 +7,10 @@
 @media(prefers-color-scheme:dark){:root{--paper:#191e1b;--ink:#eceee8;--muted:#b5c0b8;--line:#45544a;--accent:#a1d7b4;--wash:#263129}}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 system-ui,sans-serif}main{max-width:770px;margin:auto;padding:30px 24px 54px}header,.note{font-size:.85rem;color:var(--muted)}h1{font-size:clamp(1.9rem,5vw,2.5rem);line-height:1.15;letter-spacing:-.025em;margin:24px 0 14px}h2{font-size:1.15rem;margin:26px 0 10px}p{margin:10px 0}a,summary{color:var(--accent)}summary{cursor:pointer}details{margin:16px 0}code{font:.86em/1.5 ui-monospace,monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--wash);padding:14px 16px}blockquote{margin:18px 0;padding:4px 0 4px 18px;border-left:3px solid var(--accent);font-size:1.15rem}table{width:100%;border-collapse:collapse;font-size:.88rem}th,td{text-align:left;vertical-align:top;padding:10px 8px 10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.decision{border-top:1px solid var(--line);padding-top:12px}.sources{overflow-wrap:anywhere}@media(max-width:520px){main{padding:22px 16px 38px}body{font-size:16px}table{font-size:.8rem}}
 </style></head><body><main>
-<header>LOO-582 · concept-review with Jack Heart · November 3, 2026
-<details class="sources"><summary>Files behind this screen</summary><a href="loo-582.md">scratch/loo-582.md</a>; docs/work.md; rust/loopflow/src/builtins/ops/skill/work.md; ops/task.rs; ops/task/promotion.rs; store/sqlite/children.rs; ops/human_session/primary.rs; swift/LoopflowMac/Views/SessionActionSheet.swift.</details></header>
+<header>LOO-582 · concept-review · November 3, 2026 · headless review of Jack Heart’s accepted direction
+<details class="sources"><summary>Files behind this screen</summary><a href="loo-582.md">scratch/loo-582.md</a>; docs/work.md; rust/loopflow/src/builtins/ops/skill/work.md; rust/loopflow/src/ops/task/promotion.rs; rust/loopflow/src/store/sqlite/children.rs; rust/loopflow/src/store/sqlite/processes.rs; rust/loopflow/src/ops/human_session/primary.rs; rust/loopflow/tests/session_lifecycle_tests.rs; swift/LoopflowMac/Views/SessionActionSheet.swift; swift/LoopflowMac/Views/WorkspacePanesView.swift; swift/LoopflowTests/SessionControlsTests.swift.</details></header>
 <h1>Create a Task around this chat and worktree.</h1>
+<p><strong>Review outcome: no design change and no open product choice.</strong> The branch follows the accepted model. Combined gate checks and the configured demo remain outstanding.</p>
 <p><strong>Accepted priority.</strong> Keep the work already happening. Selecting a conversation for an <em>existing</em> Task should continue it in that Task’s worktree, where supported; creation keeps the existing chat and checkout together.</p>
 <blockquote>“Create a Task for this work and keep this conversation.”</blockquote>
 <pre><code>Before: this chat S · checkout B · branch + unfinished edits
@@ -23,7 +24,7 @@ After:  Task T → this same chat S, in checkout B
 <tr><td>Open and continue</td><td>Same Session and working directory</td><td>Existing open/resume path</td></tr>
 </tbody></table>
 <p class="note">Creation, adoption and binding commit together. No extra chat, checkout, provider process, replayed turn, Graph or Auto-Ship approval. Implemented on the branch; installed/configured-provider and rendered acceptance remain pending.</p>
-<details><summary>Usage and skill draft</summary>
+<details><summary>Implemented usage and skill guidance</summary>
 <pre><code># Issued by the existing chat
 lf task create --title "Finish the prototype"
 
@@ -31,7 +32,7 @@ lf task create --title "Finish the prototype"
 lf session list --json
 lf task create --session SESSION --title "Finish the prototype"</code></pre>
 <p><strong>Desktop wording:</strong> “Create Task from this conversation”<br><span class="note">Keep this chat, worktree, branch and unfinished edits.</span></p>
-<p><strong>Skill draft:</strong> When asked to make current work a new Task, create it using the invoking Session or its exact Loopflow Session ID. Adopt the existing unassociated linked checkout and make that conversation primary. Continue in place.</p>
+<p><strong>Skill guidance:</strong> When asked to make current work a new Task, create it using the invoking Session or its exact Loopflow Session ID. Adopt the existing unassociated linked checkout and make that conversation primary. Continue in place.</p>
 <p class="note">Shared checkouts remain shared. Preserve permanent bindings, target-Machine locality, explicit selection and the separate --new backlog path. Recency never chooses the conversation.</p>
 </details>
 <details><summary>Failure, recovery and next proof</summary>
@@ -40,12 +41,18 @@ lf task create --session SESSION --title "Finish the prototype"</code></pre>
 </details>
 <h2>Existing Task: keep its worktree, continue this chat there</h2>
 <p><strong>Accepted direction:</strong> Task T already owns A; Session S is in B. Make S primary and continue the same chat in A. Keep T’s branch and PR. Files in B stay there.</p>
-<pre><code>Use this conversation for T in A.
-Same chat and history → Task worktree A</code></pre>
-<p><strong>Capability still to verify:</strong> Loopflow has idle Session workspace admission and native resume using the stored cwd and conversation ID. That provides a continuation path, not a universal live-process directory switch.</p>
+<pre><code>lf task promote T --session S
+
+Now:        T opens S · current client stays in B
+Pending:    next connection requested in A
+Reconnect:  same S and history · provider connects in A
+Confirmed:  pending destination clears · files in B stay in B</code></pre>
+<p><strong>The consequential boundary:</strong> creation preserves the current location; explicit selection for an existing Task requests a later connection in its location. Assignment retains all of the Task’s conversations; primary selection chooses which one opens by default.</p>
+<p><strong>Implemented:</strong> <code>task_promote</code> records <code>requested_cwd</code> with binding and primary selection. <code>admit_workspace</code> applies it at the next idle connection; provider identity confirmation clears the matching request. CLI and Desktop expose the pending destination. Configured-provider acceptance remains to be demonstrated.</p>
 <details><summary>Provider evidence and recovery</summary>
 <p>Codex resume requests carry cwd and the saved thread ID. Claude starts a resume from its configured directory. OpenCode now applies its native move on reconnect; an isolated installed probe preserved identity and executed shell pwd at the destination. Configured-provider relocation acceptance remains pending.</p>
 <p>Use a supported idle/attachment boundary, preserve drafts and pending input, and verify the next tool’s actual cwd. Show any required continuation explicitly. A database-only cwd change must not count as a completed move. A conflicting permanent Task bind still requires resolution.</p>
+<p><strong>Recovery counterexample:</strong> A disappears or the provider refuses its move. Keep the destination pending, restore A or resolve the connection failure, then reconnect the same S. Choosing another primary meanwhile must not cancel S’s request. Creating a separate Task checkout later must not move a Session that was promoted in place.</p>
 </details>
 <h2>Cmd-T must know where the Session is working</h2>
 <p><strong>Jack Heart’s observed symptom:</strong> a new tab opens <code>~/src/loopflow</code> instead of the linked worktree in <strong>cmux and Rex</strong>. Warp is possible, not confirmed.</p>
@@ -57,6 +64,6 @@ Cmd-T → pwd: ~/src/loopflow.&lt;worktree&gt;   ← expected</code></pre>
 <h2 class="decision">Review questions, now resolved</h2>
 <p><strong>1. What happens on creation?</strong> Adopt the existing linked worktree and keep the same chat. Nothing moves or restarts.</p>
 <p><strong>2. What happens for an existing Task?</strong> Keep its worktree; continue the selected chat there through a supported move, retaining history and input.</p>
-<p><strong>3. What remains to prove?</strong> Provider relocation and recovery, draft retention, and Cmd-T inheriting the actual Session directory in cmux and Rex; Warp remains unconfirmed.</p>
-<p class="note">No new product decision is requested. Jack Heart accepted this design and requested implementation on November 3. Continue the same Task and PR through implementation to the next demo; Auto-Ship remains unapproved.</p>
+<p><strong>3. What remains to prove?</strong> The combined gate after the Wave lifecycle merge; configured-provider relocation and recovery; draft or pending-input retention across promotion, idle ending and Task progress; and Cmd-T inheriting the actual Session directory in cmux and Rex. Warp remains unconfirmed.</p>
+<p class="note">No new product decision is requested. Jack Heart accepted this design and requested implementation on November 3. This review supplies evidence for loop-or-next; the accepted boundary remains interactive demo without Auto-Ship or landing.</p>
 </main></body></html>

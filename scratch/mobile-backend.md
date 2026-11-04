@@ -46,10 +46,10 @@ No Work or credential state moves. A focused migration check found and fixed the
 old launchctl parser's assumption that overrides print `true`; current macOS
 prints `disabled`.
 
-Compression and sync are complete at `996f16fabb`; main remains
-`ac8e088f5f`. No upstream integration changed the implementation. Source inspection
-confirms native copy/Find and pointer/scroll handlers remain reachable while
-provider input is paused; rendered behavior still needs demo evidence.
+The failed-setup correction is committed at `5f140091b6`, on the cutover at
+`996f16fabb`; main remains `ac8e088f5f`. Copy/Find and pointer/scroll handlers
+remain reachable while provider input is paused; rendered behavior still needs
+demo evidence.
 
 Remaining work:
 
@@ -82,6 +82,10 @@ registration hook. Its source is evidence, not a composed-release proof.
 
 ## Delete — do not maintain
 
+- Removed `ServerLocation`'s separate successful-path cache and readiness flag.
+  The shared lookup task retains the endpoint after success; its initial failure
+  diagnosis selects observational status for later lookups. Concurrent callers
+  share the same result without another installation attempt.
 - Removed readiness from `Status::connect`'s retry loop and replaced
   `ServerLocation.path()`'s repeatable installation path with one initial attempt
   and observational endpoint discovery. Failed startup also discards the original
@@ -246,55 +250,24 @@ Before-login hosting and a separately distributed GUI-less package remain open
 product questions. Removal must preserve Work/credentials and explicitly address
 active execution; deleting Desktop implies no standalone hosting promise.
 
-### Concept review: failed setup must not redefine Retry
+### Failed setup consumes readiness
 
-November 4 review against `996f16fabb`: the Machine/server/installation split and
-the existing owner model remain accepted. Jack Heart's rule that recovery only
-reconnects also applies when the first installation-readiness request fails.
-This is an implementation direction derived from that rule, not new approval.
+Jack Heart's reconnect-only rule applies before the first successful connection.
+Review at `996f16fabb` found that native Retry and reopened Work watches could
+repeat installation after setup failed. The correction at `5f140091b6` consumes
+readiness once per native surface or shared Work client. Later endpoint discovery
+uses observational `server status`; recovery has no registration branch or second
+path resolver. Concurrent waiters retain the initial diagnosis. Installation or
+OS enablement repairs setup; Retry only observes the result. Pane closure still
+cancels setup and recovery, and the last screen remains readable while unavailable.
 
-The consequential mismatch found at that revision was on the failure path. In
-`transport/connection.rs`, `Status::connect` kept `initial = true` after
-`prepare()` failed. Native Retry returned to that branch and launched
-`install server` again. In `ServerClient.swift`, `ServerLocation.path()` retained
-the socket only after successful readiness and cleared its in-flight task on
-failure; the next read or reopened watch requested installation again.
-Successful-start restart tests did not establish this failed-start boundary.
-
-**Implemented correction (November 4):** initial readiness is one attempt per
-native surface or shared Work client, consumed whether it succeeds or fails.
-Endpoint discovery uses the existing observational `server status` command after
-failed setup; there is no second Swift path resolver. Recovery has no registration
-branch. Initial diagnostics remain available to concurrent Work waiters and
-native Retry; the last screen stays visible while unavailable. Installation or
-explicit OS enablement repairs setup, and Retry observes the result. Automatic
-first-use setup, pane-closure cancellation, bounded recovery, exact owner identity,
-newer claims and no-replay guarantees remain. No wire concept, durable retry
-record or registration authority was added.
-
-The failure diagnostic now clarifies the accepted usage:
-
-> Open Desktop normally; local setup is automatic on first connection. If setup
-> fails, use the reported installation or Background Items repair, then Retry.
-> Retry connects to the existing server and Session; it never installs or
-> re-registers the server. Reading/copying the retained screen remains available.
-
-Existing usage docs and skills already assign these responsibilities correctly.
-Only the failure diagnostic needs clarification; ordinary use gains no setup step.
-
-The regression counterexample is initial setup failing before
-any successful connection, then registration becomes possible. A Work refresh or
-native Retry must leave registration unchanged. Once installation independently
-starts the server, the same client must read Work and attach the exact existing
-owner without reopening the pane, replaying input or taking a newer viewer's
-claims. This failed-start proof complements the existing successful-start restart
-and lost-takeover-acknowledgement cases. It does not replace the composed signed
-replacement or rendered acceptance above.
-
-Review outcome: the working design now specifies the failed-start boundary as
-the implemented correction. No unresolved product choice blocks this local
-correction. GUI-less distribution, before-login hosting, active-work removal and
-phone takeover remain separately scoped choices; this review selects none of them.
+The decisive failed-start proof makes registration possible after initial failure,
+then verifies Retry/Work refresh does not invoke it. Independent server startup
+must restore fresh Work and the exact owner on the same client, preserving newer
+input/geometry claims and replaying nothing. This complements successful-start
+restart and lost-takeover-acknowledgement checks; it does not replace signed
+replacement or rendered acceptance. The detailed review and original diagnosis
+remain at `5f140091b6:scratch/mobile-backend.md` and in `concept-review.html`.
 
 ## Evidence and remaining proof
 
@@ -375,4 +348,4 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Check: `cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims`, `scripts/test_desktop.sh --filter ServerClientTests --jobs 4 -Xswiftc -gnone` (two failure cases with concurrent refresh/watch), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed. Gate owns composed installed replacement and broader checks; demo owns rendered acceptance.
+Check: `scripts/test_desktop.sh --filter ServerClientTests --jobs 4 -Xswiftc -gnone` built Desktop; the focused headless tests passed both failure cases after compression. `git diff --check` passed. Unchanged Rust recovery, formatting and Clippy results at `5f140091b6` remain applicable. Gate owns composed installed replacement and broader checks; demo owns rendered acceptance.

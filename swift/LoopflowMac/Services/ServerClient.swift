@@ -44,9 +44,7 @@ enum ServerClient {
 actor ServerLocation {
     static let shared = ServerLocation()
     private let query: @Sendable ([String]) async throws -> String
-    private var obtaining: Task<String, any Error>?
-    private var socketPath: String?
-    private var readinessAttempted = false
+    private var endpoint: Task<String, any Error>?
     private var setupError: String?
 
     init(query: @escaping @Sendable ([String]) async throws -> String = {
@@ -56,12 +54,10 @@ actor ServerLocation {
     }
 
     func path() async throws -> String {
-        if let socketPath { return socketPath }
-        if let obtaining { return try await obtaining.value }
-        // Consume readiness before suspending, including failed setup. Reopened
-        // watches discover the endpoint through observational status only.
-        let prepare = !readinessAttempted
-        readinessAttempted = true
+        if let endpoint { return try await endpoint.value }
+        // The shared task retains a successful endpoint. A failed initial lookup
+        // retains its diagnosis instead; later lookups only observe status.
+        let prepare = setupError == nil
         let previousSetupError = setupError
         let task = Task {
             do {
@@ -83,14 +79,11 @@ actor ServerLocation {
                 throw error
             }
         }
-        obtaining = task
-        defer { obtaining = nil }
+        endpoint = task
         do {
-            let path = try await task.value
-            socketPath = path
-            setupError = nil
-            return path
+            return try await task.value
         } catch {
+            endpoint = nil
             if prepare {
                 setupError = error.localizedDescription
             }

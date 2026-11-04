@@ -170,32 +170,23 @@ claiming missing proof. LOO-397 owns broader explanations/discovery; LOO-391 nat
 Work-tab/input/read, configured remote panes and running-Flow exchange proof;
 LOO-416 relaunch persistence; LOO-452 richer keys; LOO-453 readiness/events.
 
-## Optional Task membership (LOO-505, accepted 2026-10-17)
+## Optional Task membership (LOO-505, reconciled 2026-11-04)
 
-Jack Heart approved shipping after required checks. His October 17 review correction
+Jack Heart approved shipping after required checks. His October 17 correction
 makes creation standalone even in bound Sessions/checkouts: only explicit `--wave`
 selects membership; `--no-wave` equals omission. Repository identity is required;
-optional Project supplies the derived Wave. The read projection is validated on
-save, not a second owner. No synthetic inbox or query-owned workspace.
+Project membership derives the Wave. No synthetic inbox or query-owned workspace.
 
-Jack selected **Task → Wave → repository** Workflow precedence and direct Wave
-default ownership, removing Project defaults/history. Repository `workflow:` uses
-strict local config; invalid selection is an error, absence needs selection.
-Captured graphs survive config, chapter and membership changes. Repository-default
-definitions bypass same-named Wave customizations.
+Jack selected Task → Wave → repository graph precedence and direct Wave defaults.
+AGENTS.md owns current graph semantics; superseded mechanics are archived below.
+Same-repo
+membership changes retain execution, PR, checkout, Sessions and saved panes/drafts.
+Prospective attribution changes never rewrite historical capture ownership.
 
-Jack renamed membership to `task move --wave/--no-wave`; position uses
-`task workflow move`. Same-repository moves may include active work and preserve
-execution, PR, checkout and conversation identity. Current Session membership
-follows the Task; capture/dispatch ownership, including null, remains historical.
-Next capture uses the new home; membership never transfers execution.
-
-Branch tests cover nullable transport, Linear recovery, Workflow defaults, live
-Flow detach/reattach and CLI-stream workspace/file-draft retention. A file draft
-does not prove unsent provider input. Broader gate, between-Wave and configured
-native proof remain; no external-progress credit follows. LOO-489 owns query UI;
-LOO-416 retains lifecycle scope.
-
+Decisions and evidence:
+`996f16fabb5344d6545bf75d94393117694cd489:.lf/wave/product/MEMORY.md`, this heading.
+Those tests prove neither unsent provider input nor mounted between-Wave continuity.
+Broader native acceptance remains with LOO-489/416; no external-progress credit follows.
 
 ## Task delivery boundary (LOO-418, revised 2026-10-11)
 
@@ -930,31 +921,37 @@ Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafab
 
 ## Swift data path — RegistryQuery is the single reader
 
-Jack Heart selected LOO-593's local Machine service through demo without Auto-Ship
-(November 3, 2026). Roadmap read/watch and rename use its private socket without
-FFI fallback; full cutover remains. RegistryQuery retains DTOs; Rust reads, CLI
-commands and execution owners keep authority. UI automation stays app-owned.
-Shared functions did not prevent lfd's lifecycle drift. Keep one installer, no
-new scheduler/retention owner. Unix peer trust cannot authenticate remote proxies.
+Jack Heart selected LOO-593’s Machine/server/installation split November 4, 2026,
+through publication and interactive demo, without Auto-Ship. Machine owns execution
+destinations; `lf server` owns client access; installation owns registration/update.
+Desktop automation stays app-owned. Roadmap read/watch and rename use the local
+socket without FFI fallback; wider cutover belongs to LOO-718. RegistryQuery keeps
+DTOs; shared Rust reads, complete CLI commands and execution owners keep authority.
+Shared functions alone did not prevent lfd drift. No new scheduler/retention owner.
 
-Jack Heart selected automatic exact-owner recovery with native status November 4.
-It preserves newer claims without restarting providers. Temporary surface mailboxes
-carry status/actions outside terminal bytes; closure cancels. Unavailable is not
-ended. Read-only preserves copy/Find/scroll handlers; plain CLI reconnect is deliberate.
+Registration migrates OS labels while retaining the revision-1 socket/lock so live
+old relays reconnect. The old bundle plist only inspects/removes registration;
+disabled choices survive. Status observes; recovery never registers or selects code.
 
-November 4 concept review found unreachable Move here in retained panes. Its
-correction consumes a generation-bound action before replacing claims; input waits for acknowledgement. Lost replies
-recover non-replacing. Never replay takeover, uncertain input or commands.
-Rust/Swift checks cover takeover, newer claims and cancellation, not native interaction.
+Jack selected automatic exact-owner recovery and native status November 4.
+Surface mailboxes carry status/actions outside terminal bytes; closure cancels.
+Unavailable is not ended. Copy/Find/scroll handlers remain reachable; plain CLI
+reconnect stays deliberate. Move here consumes a generation-bound action before
+replacing claims and waits for acknowledgement. Lost replies recover passively,
+preserving newer claims. No provider restart or replay of takeover, input or commands.
+Rust/Swift checks prove components, not native interaction.
 
-Signed same-build replacement proves owner/draft/Graph continuity through submission.
-App-owned LaunchServices updates model App Management; external writes cannot.
-Require new acknowledged generations. Released-version migration, rendered Desktop
-continuity, Linux replacement and unchanged usage totals remain unproved.
+Pre-cutover signed same-build replacement proved owner/draft/Graph continuity
+through submission and a new acknowledgement. App-owned LaunchServices updates
+model App Management; external writes cannot. The renamed composition, released
+migration, rendered continuity, Linux replacement and usage totals remain unproved.
 
-LOO-718 consumes the contract. ViewPlan selects primary Sessions; roadmap cannot.
-Owner lookup starts nothing. Remote carrier, unattended hosting and phone takeover
-remain open.
+LOO-718 owns remote/mobile admission and wider cutover; its parallel implementation
+is not combined-release proof. Keep wire identity/credential storage while moving
+verbs under server. ViewPlan selects primary Sessions; roadmap cannot. Owner lookup
+starts nothing; Unix peer trust cannot authenticate proxies. Unattended hosting
+and phone takeover remain open. LOO-723’s unmerged process-aware retired-bundle
+cleanup complements server replacement, without proving their composition.
 
 LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
 files resurfaced retired Waves. Writes register directories; reads list store

@@ -66,6 +66,12 @@ System text size scales the terminal and accessory controls. Accessibility sizes
 stack the Session header; observer font changes preserve even alternate-screen
 cells without sending remote geometry changes.
 
+The Session header displays the owner's validated program activity. Tapping it
+reads the reported message. It shares the ordered attachment stream and existing
+ProgramStatusRecords, without a second parser or Desktop publication dependency.
+Activity never grants keyboard control or completes a Task. Disconnect clears it;
+passive reconnect restores current evidence.
+
 Open Session delegates the complete `lf resume --start-only --json` operation
 through the shared Machine command. It pins the recorded Session ID, reuses the
 existing startup lock and returns without viewer claims. An uncertain reply
@@ -658,3 +664,74 @@ launchd executable replacement is established by this fixture.
 
 Final checks: cargo fmt, all-target Clippy with warnings denied and diff whitespace
 passed. The current Simulator integration directory is empty after cleanup.
+
+### Session activity on the phone — November 4, 06:00
+
+The native header shows the selected owner's existing ProgramStatusRecords,
+separately from connection/input ownership. Tap for its reported message. The
+owner already parses OSC 7501 with its retained Ghostty terminal; it now sends
+that validated snapshot on fresh attachment and after changes, in the same ordered
+control stream. Ordinary terminal bytes remain unchanged. No second parser,
+subscription, Session store writer or execution authority is added. Disconnect,
+background and Session switch clear the local report; passive reconnect restores
+current evidence. Reporting Done does not end the Session or complete the Task.
+
+The first implementation tried reading SessionRecord through desktop_sessions.
+After a live timeout, source inspection showed that owner terminal reports reach
+that store through Desktop's renderer writer, not the owner alone. The timeout
+itself did not isolate that dependency as its only cause. That additional subscription
+and abstraction were removed. The phone consumes retained-owner evidence directly;
+Desktop's existing store projection and publication remain unchanged. The first
+failed native log is `/tmp/mobile-session-activity-first-native.log`.
+
+The phone's terminal answers the optional OSC 7501 capability query only while
+controlling live output; observer and snapshot query replies remain suppressed.
+The protocol permits BEL or ST termination and the simple `?` reply. Source:
+https://www.superlogical.com/rex/docs/build/program-status#feature-detection
+Reports remain untrusted display evidence, never approval/interruption bindings.
+
+Native regression coverage exercises activity updates, explicit clearing, passive
+recovery and old-attachment fencing. Captures from the owner-event implementation
+were inspected in light, dark and accessibility text sizes and saved under
+`scratch/demo-assets/mobile-session-activity-*.png`. The 05:48 native suite passed
+57 ordinary tests; its capability-query test failed because the test bypassed the
+workspace's snapshot replay path. After injecting the snapshot through the actual
+attachment event, that focused test passed at 05:49. The opt-in live test remains
+separate. Rust checks passed: 50 transport library tests, 66 transport integration
+tests (two opt-in tests ignored), and all-target Clippy with warnings denied.
+
+Status changes flush their ordered events immediately. Merely enqueuing the event
+after output delivery would leave an idle program's final report waiting for more
+terminal bytes. The native live test now requires Done after the output program
+goes quiet, while keyboard control remains held.
+
+The first owner-event live run delivered activity, restored it after service
+restart and reached Done while retaining control. Its output-count assertion
+failed by two bytes: `app=fixture` in the two new raw OSC reports added two `x`
+characters to the fixture's count of payload `x` bytes. The reports now identify
+`app=proof`, keeping that marker exclusive to the payload. The failed native log
+is `/tmp/mobile-owner-status-first-native.log`.
+Source review also moved publication after held native output and exit settlement,
+so their final status precedes ChildExited. Existing native success/failure
+settlement tests now require the corresponding final report before that event.
+
+Final live acceptance passed at
+`Test-LoopflowiOS-2026.11.04_05-59-16--0800.xcresult` (49.240 seconds native;
+68.70 seconds enclosing fixture). Current activity arrived on first attachment,
+cleared on service loss, and returned on passive reconnect. A quiet program's
+Done report arrived while the phone retained keyboard control. All 33,554,432
+payload bytes and 512 native edited acknowledgements arrived exactly once;
+input-to-next-output latency was p95 15.4 ms/max 31.5 ms in this Simulator run.
+The existing handoff, continuation, creation and stalled-viewer proofs also passed.
+Logs: `/tmp/mobile-owner-status-final-live.log`,
+`/tmp/mobile-owner-status-final-native.log`,
+`/tmp/mobile-owner-status-final-checks.log`. The temporary Serve route was removed
+and empty configuration verified. Native completion success/failure assertions,
+formatting, Clippy and diff whitespace pass on the final source. Physical phone,
+actual provider history and installed Desktop update acceptance remain open.
+
+Next terminal polish: make the existing link-opening callback useful, and expose
+a local return-to-latest control when reading scrollback. The current callback is
+empty; SwiftTerm already exposes its scroll position and local scroll API. Preserve
+passive viewing, canonical geometry and selection; neither action should acquire
+input or send terminal bytes.

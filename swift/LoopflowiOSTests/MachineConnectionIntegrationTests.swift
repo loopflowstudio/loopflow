@@ -156,6 +156,8 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             renderSeconds += elapsed
             longestRender = max(longestRender, elapsed)
             feeds += 1
+            // The stand-in's reports and markers deliberately contain no "x";
+            // only its 32 MiB payload contributes to this byte count.
             received += bytes.filter { $0 == 120 }.count
             while acknowledged < received / 65536 {
                 // Native editing, not direct transport writes: the remote PTY
@@ -199,6 +201,10 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         XCTAssertEqual(acknowledged, 512)
         XCTAssertEqual(received, expected, "The active phone must receive every output byte")
         XCTAssertTrue(controller.terminal.accessibilityPageContent()?.contains("output-complete") == true)
+        try await wait("Completed output did not update the program's activity") {
+            workspace.programStatus?.summary?.state == .done
+        }
+        XCTAssertEqual(workspace.state, .controlling, "Reported Done does not end the Session or release its keyboard")
         let gaps = schedulingGaps.sorted()
         XCTAssertFalse(gaps.isEmpty, "The main actor must service other tasks during output")
         if !gaps.isEmpty {
@@ -320,6 +326,10 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         func screen() -> String { controller.terminal.accessibilityPageContent() ?? "" }
         await workspace.open(task)
         try await wait("Initial draft did not reach the native terminal") { screen().contains("desktop draft") }
+        try await wait("Owner activity did not reach the native header") {
+            workspace.programStatus?.summary?.state == .blocked
+        }
+        XCTAssertEqual(workspace.programStatus?.summary?.kind, .question)
         XCTAssertEqual(workspace.state, .viewing)
         workspace.send(Data("must not queue".utf8))
         workspace.requestControl()
@@ -416,6 +426,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         print("Mobile service-loss detection: \(ProcessInfo.processInfo.systemUptime - began) seconds")
         XCTAssertEqual(listing.tasks.map(\.work), cached)
         XCTAssertFalse(listing.isLoadingTasks)
+        XCTAssertNil(workspace.programStatus, "Connection loss must clear old activity claims")
         XCTAssertTrue(screen().contains("desktop draft + phone"))
         controller.update(theme: .light)
         controller.terminal.insertText(" must not survive outage\n")
@@ -437,6 +448,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         await workspace.reconnect()
         try await wait("Service restart did not restore the same unfinished draft") {
             workspace.state == .viewing && screen().contains("desktop draft + phone")
+        }
+        try await wait("Service restart did not restore current Session activity") {
+            workspace.programStatus?.summary?.state == .blocked
         }
         XCTAssertFalse(screen().contains("must not survive outage"))
         controller.update(theme: .light)

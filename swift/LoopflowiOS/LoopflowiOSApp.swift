@@ -210,6 +210,7 @@ struct MobileSessionView: View {
     var connectionLabel: String = "Offline fixture"
     @Environment(\.dynamicTypeSize) private var textSize
     @State private var opening: Task<Void, Never>?
+    @State private var showingActivity = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -243,6 +244,11 @@ struct MobileSessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await workspace.open(task) }
         .onDisappear { opening?.cancel(); workspace.leave() }
+        .alert("Session activity", isPresented: $showingActivity) {
+            Button("Close", role: .cancel) {}
+        } message: {
+            Text(activityDetail)
+        }
     }
 
     private var header: some View {
@@ -251,6 +257,23 @@ struct MobileSessionView: View {
             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
             VStack(alignment: .leading, spacing: 3) {
+                if let activityLabel {
+                    Button { showingActivity = true } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 6))
+                                .accessibilityHidden(true)
+                            Text(activityLabel)
+                        }
+                            .font(Typography.strong(14))
+                            .foregroundStyle(activityColor)
+                            .lineLimit(2)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Read the program's reported activity")
+                }
                 Text(workspace.state.label)
                     .font(Typography.body(15))
                     .foregroundStyle(theme.palette.text)
@@ -273,6 +296,32 @@ struct MobileSessionView: View {
             if workspace.canStartSession { openSessionButton }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var activityLabel: String? {
+        guard let report = workspace.programStatus?.summary else { return nil }
+        let provider = workspace.programStatus?.app(for: report).map { ProgramStatusReport.displaySafe($0.capitalized) }
+        let state = report.state.rawValue.capitalized
+        let kind = report.kind.map { $0.rawValue.capitalized }
+        let progress = report.progress.map { "\($0)%" }
+        return [provider, state, kind, progress].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var activityColor: Color {
+        switch workspace.programStatus?.summary?.state {
+        case .working: return theme.palette.working
+        case .blocked, .error: return theme.palette.warning
+        default: return theme.palette.available
+        }
+    }
+
+    private var activityDetail: String {
+        guard let report = workspace.programStatus?.summary else {
+            return "No current program report."
+        }
+        let title = report.title.map(ProgramStatusReport.displaySafe)
+        return ([title, report.displayText].compactMap { $0 }.joined(separator: "\n"))
+            + "\n\nReported by the program in this Session."
     }
 
     private var openSessionButton: some View {

@@ -245,6 +245,10 @@ pub(super) enum Reply {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(super) enum Event {
+    /// Validated display evidence from the owner's terminal parser. No action authority.
+    ProgramStatus {
+        status: crate::program_status::Records,
+    },
     Resize {
         rows: u16,
         cols: u16,
@@ -436,6 +440,44 @@ mod tests {
         assert_eq!(
             bytes,
             include_bytes!("../../../../tests/fixtures/dto/owner/observer.bin")
+        );
+    }
+
+    #[test]
+    fn mobile_status_fixture_uses_shared_validated_records() {
+        let records = crate::program_status::Records {
+            seen: true,
+            records: vec![crate::program_status::Report {
+                state: crate::program_status::State::Blocked,
+                id: Some("provider".into()),
+                kind: Some(crate::program_status::Kind::Permission),
+                progress: None,
+                app: Some("codex".into()),
+                title: None,
+                msg: Some("Needs a decision".into()),
+            }],
+        };
+        assert!(records.validate());
+        let mut bytes = frame(
+            Tag::Out,
+            &event("fixture-nonce", 3, Event::ProgramStatus { status: records }),
+        );
+        bytes.extend(frame(
+            Tag::Out,
+            &event(
+                "fixture-nonce",
+                4,
+                Event::ProgramStatus {
+                    status: crate::program_status::Records {
+                        seen: true,
+                        records: vec![],
+                    },
+                },
+            ),
+        ));
+        assert_eq!(
+            bytes,
+            include_bytes!("../../../../tests/fixtures/dto/owner/program-status.bin")
         );
     }
 

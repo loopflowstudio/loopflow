@@ -112,6 +112,12 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     override func viewDidLoad() {
         super.viewDidLoad()
         terminal.terminalDelegate = self
+        // The owner parses reports; the active renderer still answers capability
+        // queries. The workspace suppresses replies from observers and snapshots.
+        terminal.getTerminal().parser.oscHandlers[7501] = { [weak workspace] bytes in
+            guard bytes.elementsEqual([UInt8(ascii: "?")]) else { return }
+            workspace?.send(Data("\u{1b}]7501;?\u{7}".utf8))
+        }
         terminal.font = preferredTerminalFont
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: SessionTerminalController, _: UITraitCollection) in
             controller.updateAccessoryFonts()

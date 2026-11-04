@@ -42,6 +42,16 @@ then opens as an observer. **Use keyboard** remains a separate action. If openin
 is not confirmed, **Reconnect** inspects that Session; it never repeats the start.
 An ended screen retains its output and offers the same explicit opening action.
 
+The Session header shows the program's reported activity separately from keyboard
+and connection state. Tap the activity to read its message. Working, blocked and
+done are program reports; they never complete the Task or approve an action.
+Disconnecting or switching Sessions clears the old report; reconnect restores
+the owner’s current report along with the screen. A program that reports nothing
+gets no inferred status. The retained owner validates the reports once and sends
+the shared ProgramStatusRecords in its attachment stream; the phone adds no parser,
+subscription or status writer. Only the controlling renderer answers feature queries,
+and snapshot replay never answers them again.
+
 Choose **New Task** (+), describe the work, and select a repository on the paired
 Machine. The sheet saves your draft and remembers that destination. Use the
 keyboard’s microphone to dictate, then edit before choosing **Create & start**.
@@ -173,7 +183,7 @@ protocol; this is not yet a manual Desktop-to-physical-phone demonstration.
 Native input under sustained output and foreground service interruption are
 exercised in Simulator; physical network changes and phone use remain acceptance
 work. Contextual approvals/Stop stay absent until the
-backend supplies trustworthy state and action semantics; terminal prompts remain
+backend supplies their action semantics; terminal prompts remain
 answerable through ordinary typing.
 
 

@@ -71,6 +71,7 @@ enum MobileTerminalEvent: Sendable {
     case snapshot(Data)
     case output(Data)
     case control(input: Bool, geometry: Bool)
+    case programStatus(ProgramStatusRecords)
     case ended
     case disconnected(String)
 }
@@ -128,6 +129,7 @@ final class MobileWorkspace {
     private(set) var isLoadingTasks = true
     private(set) var tasksError: String?
     private(set) var selected: WorkViewPlan.Content?
+    private(set) var programStatus: ProgramStatusRecords?
     private(set) var state: MobileConnectionState = .loading
     // A mounted renderer consumes output immediately; no second scrollback store.
     var render: ((Data, Bool) -> Void)?
@@ -330,6 +332,7 @@ final class MobileWorkspace {
             render?(data, true)
             replaying = false
         case .output(let data): render?(data, false)
+        case .programStatus(let status): programStatus = status
         case .control(let input, let geometry):
             if ownsGeometry != geometry { sentViewport = nil }
             ownsGeometry = geometry
@@ -350,6 +353,7 @@ final class MobileWorkspace {
 
     private func disconnect() {
         generation += 1
+        programStatus = nil
         ownsGeometry = false
         eventTask?.cancel()
         eventTask = nil

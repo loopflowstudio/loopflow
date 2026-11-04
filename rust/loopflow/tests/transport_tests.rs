@@ -1706,6 +1706,12 @@ fn a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait() {
         "a delayed acknowledgement restored a waiting launcher"
     );
     assert_eq!(events(&frames, "child_exited").last().unwrap()["code"], 0);
+    let reports = events(&frames, "program_status");
+    assert!(reports.last().unwrap()["status"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|report| report["state"] == "done"));
     let settlements: i64 = fixture.sql().query_row(
         "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.source')='terminal.json'",
         [], |row| row.get(0),
@@ -1744,6 +1750,12 @@ exit 99
     let mut viewer = fixture.viewer(&owner, true);
     let frames = viewer.until_event("child_exited");
     assert_eq!(events(&frames, "child_exited").last().unwrap()["code"], 1);
+    let reports = events(&frames, "program_status");
+    assert!(reports.last().unwrap()["status"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|report| report["state"] == "error"));
     fixture.ends(&owner);
     assert!(!fixture.home.path().join("launches").exists());
     let sql = fixture.sql();
@@ -4305,6 +4317,7 @@ if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 stty echo icanon < /dev/tty
 printf '%s\n' "$$" >> "$HOME/launches"
 printf '\033[?2004hmobile-owner-ready\r\n> '
+printf '\033]7501;id=proof:state=blocked:kind=question:app=fixture\033\\'
 read -r answer < /dev/tty
 printf '%s\n' "$answer" >> "$HOME/answers"
 printf '\r\naccepted: %s\r\n' "$answer"
@@ -4362,6 +4375,7 @@ printf '\r\naccepted: %s\r\n' "$answer"
         r#"stty -echo < /dev/tty
 printf 'output-ready\r\n'
 read -r start < /dev/tty
+printf '\033]7501;id=proof:state=working:app=proof\033\\'
 i=0
 while [ "$i" -lt 512 ]; do
   cat "$HOME/output-chunk"
@@ -4371,6 +4385,7 @@ while [ "$i" -lt 512 ]; do
   i=$((i+1))
 done
 printf '\r\noutput-complete\r\n'
+printf '\033]7501;id=proof:state=done:app=proof\033\\'
 read -r finish < /dev/tty
 printf 'output-final\r\n'
 "#,

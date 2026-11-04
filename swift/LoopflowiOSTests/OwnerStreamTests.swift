@@ -40,6 +40,28 @@ final class OwnerStreamTests: XCTestCase {
         XCTAssertThrowsError(try oversized.receive(Data([3, 0, 64, 0, 1])))
     }
 
+    func testOwnerReportsAndClearUseTheSharedStatusShapeWithoutChangingClaims() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "program-status", withExtension: "bin", subdirectory: "owner"))
+        let wire = try Data(contentsOf: url)
+        for size in [1, 7, wire.count] {
+            var stream = try observed()
+            var reports: [ProgramStatusRecords] = []
+            for start in stride(from: 0, to: wire.count, by: size) {
+                for event in try stream.receive(wire.subdata(in: start..<min(start + size, wire.count))) {
+                    if case .programStatus(let status) = event { reports.append(status) }
+                }
+            }
+            XCTAssertEqual(reports.count, 2)
+            XCTAssertEqual(reports.first?.summary?.state, .blocked)
+            XCTAssertEqual(reports.first?.summary?.kind, .permission)
+            XCTAssertEqual(reports.first?.summary?.msg, "Needs a decision")
+            XCTAssertTrue(reports.last?.seen == true)
+            XCTAssertNil(reports.last?.summary)
+            XCTAssertFalse(stream.inputControl)
+            XCTAssertFalse(stream.geometryControl)
+        }
+    }
+
     func testControlGrantWaitsForTheReplacementScreenAndLossRevokesInput() throws {
         var stream = try observed()
         stream.expectAttachment(2)

@@ -89,6 +89,9 @@ final class FixtureAttachment: MobileAttachment {
         continuation.yield(.control(input: false, geometry: false))
     }
 
+    func reportStatus(_ status: ProgramStatusRecords) { continuation.yield(.programStatus(status)) }
+    func replaceScreen(_ bytes: Data) { continuation.yield(.snapshot(bytes)) }
+
     func end() { continuation.yield(.ended) }
     func drop() { continuation.yield(.disconnected("Fixture connection dropped")) }
 

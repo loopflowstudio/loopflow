@@ -820,6 +820,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut planning = None;
+    let mut reported_status = None;
     loop {
         #[cfg(test)]
         lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
@@ -1102,6 +1103,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 viewer.event(event);
             }
             if fresh {
+                if let Some(status) = output.program_status() {
+                    viewer.event(Event::ProgramStatus {
+                        status: status.clone(),
+                    });
+                }
                 if let Some(client) = &client {
                     viewer.event(Event::Return {
                         detach: client.detach.clone(),
@@ -1341,6 +1347,18 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)) as u8
             };
             exit = Some((code, Instant::now()));
+        }
+        // Include held native output and exit reports before announcing the end.
+        if output.ready() && output.program_status() != reported_status.as_ref() {
+            reported_status = output.program_status().cloned();
+            if let Some(status) = &reported_status {
+                for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+                    viewer.event(Event::ProgramStatus {
+                        status: status.clone(),
+                    });
+                }
+                place_events(&output, &mut viewers, announced);
+            }
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
@@ -2068,7 +2086,9 @@ fn attach_with_terminal(
                         wire::Piece::Event(_, event) => event,
                     };
                     match event {
-                        Event::Resize { .. } | Event::Theme { .. } => {}
+                        Event::Resize { .. }
+                        | Event::Theme { .. }
+                        | Event::ProgramStatus { .. } => {}
                         Event::Owner { name, viewer, held } => {
                             if owned && !held {
                                 let who =

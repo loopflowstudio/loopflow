@@ -86,6 +86,22 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(client.terminal.draft, "你好")
     }
 
+    func testProgramStatusDetectionAnswersOnlyLiveControlledOutput() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let before = client.transport.sent.count
+        let query = Data("\u{1b}]7501;?\u{1b}\\".utf8)
+        workspace.render?(query, false)
+        XCTAssertEqual(Array(client.transport.sent.dropFirst(before)), [Data("\u{1b}]7501;?\u{7}".utf8)])
+        client.link.replaceScreen(query)
+        await settle()
+        XCTAssertEqual(client.transport.sent.count, before + 1, "Snapshot queries must never answer again")
+        client.link.loseControl()
+        await settle()
+        workspace.render?(query, false)
+        XCTAssertEqual(client.transport.sent.count, before + 1, "Only the controlling viewer answers")
+    }
+
     func testNativeTextReplacementEditsThePeerDraft() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }
@@ -766,6 +782,7 @@ private final class TestAttachment: MobileAttachment {
     var failNextSendAfterAccept = false
     var delayControl = false
     var controlRequests = 0
+    private(set) var sent: [Data] = []
     var sessionID: String { link.sessionID }
     var events: AsyncStream<MobileTerminalEvent> { link.events }
 
@@ -776,6 +793,7 @@ private final class TestAttachment: MobileAttachment {
         if !delayControl { try link.requestControl(size: size) }
     }
     func send(_ bytes: Data) throws {
+        sent.append(bytes)
         try link.send(bytes)
         if failNextSendAfterAccept {
             failNextSendAfterAccept = false

@@ -141,7 +141,8 @@ viewer counts them; the owner spools the last 1 MiB per viewer.
 ```
 
 The stream then opens with the snapshot (pipes: the retained tail), a `resize`
-event, a `theme` event when one is known, an `owner` event, and live output.
+event, a `theme` event when one is known, an `owner` event, the terminal's current
+`program_status` snapshot, and live output.
 
 Events ride stream 1 as ``ESC _ lf1;<nonce>;<json> ESC \``, inserted only between
 complete terminal sequences. The nonce is the viewer's own, so a program
@@ -149,7 +150,7 @@ printing the same bytes passes through as output. An event may span frames.
 Pending events share the viewer's 4 MiB output queue limit even while waiting
 for a terminal sequence to finish. Each carries a gapless `seq`
 per viewer, and every reply carries the `seq` of the last event queued when it
-was computed. Kinds: `resize {rows,cols}`, `theme {theme}`,
+was computed. Kinds: `resize {rows,cols}`, `theme {theme}`, `program_status {status}`,
 `owner {viewer,name,held}`, `control {held,notice,successor}` (input control
 left this connection), `child_exited {code}`, `detached`, `hint {text}` and
 `return {detach}`. A retiring owner sends `control` with `held: false` and
@@ -216,6 +217,11 @@ The owner answers status-support queries while detached and retains the latest
 records with that current status, including completed work and pending questions.
 Clear removes the named record and its children; a shell prompt retires live
 claims, and a terminal reset removes all records.
+The same validated Records are sent as `program_status` on attachment and after
+changes, coalesced at complete output boundaries. Mobile consumes this shared
+shape without parsing OSC reports again or relying on Desktop to publish them.
+These snapshots confer no control or Task-completion authority; CLI renderers
+continue consuming the original terminal sequences.
 
 Desktop terminal placement is validated on the launching viewer’s PTY, then carried
 across the owner’s private PTY before native admission. Stale inherited placement

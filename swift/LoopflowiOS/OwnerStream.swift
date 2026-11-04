@@ -125,6 +125,8 @@ struct OwnerStream {
             inputControl = false
             geometryControl = false
             events.append(.ended)
+        case .programStatus(let status):
+            events.append(.programStatus(status))
         case .detached:
             ended = true
             inputControl = false
@@ -190,13 +192,14 @@ private struct OwnerEvent: Decodable {
     enum Value {
         case resize(columns: UInt16, rows: UInt16)
         case theme(JSONValue)
+        case programStatus(ProgramStatusRecords)
         case owner(viewer: String?, name: String?, held: Bool)
         case control(held: Bool, notice: String?, successor: [String]?)
         case childExited(UInt8), detached, hint(String), returnToSession(String)
     }
     let sequence: UInt64
     let value: Value
-    enum Keys: String, CodingKey { case seq, type, rows, cols, theme, viewer, name, held, notice, successor, code, text, detach }
+    enum Keys: String, CodingKey { case seq, type, rows, cols, theme, viewer, name, held, notice, successor, code, text, detach, status }
 
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -204,6 +207,7 @@ private struct OwnerEvent: Decodable {
         switch try box.decode(String.self, forKey: .type) {
         case "resize": value = .resize(columns: try box.decode(UInt16.self, forKey: .cols), rows: try box.decode(UInt16.self, forKey: .rows))
         case "theme": value = .theme(try box.decode(JSONValue.self, forKey: .theme))
+        case "program_status": value = .programStatus(try box.decode(ProgramStatusRecords.self, forKey: .status))
         case "owner": value = .owner(viewer: try box.decodeIfPresent(String.self, forKey: .viewer), name: try box.decodeIfPresent(String.self, forKey: .name), held: try box.decode(Bool.self, forKey: .held))
         case "control": value = .control(held: try box.decode(Bool.self, forKey: .held), notice: try box.decodeIfPresent(String.self, forKey: .notice), successor: try box.decodeIfPresent([String].self, forKey: .successor))
         case "child_exited": value = .childExited(try box.decode(UInt8.self, forKey: .code))

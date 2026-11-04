@@ -24,15 +24,17 @@
   Built from <a href="write-docs-first.md">write-docs-first.md</a>,
   <a href="rendered-file-viewers.md">rendered-file-viewers.md</a>,
   <a href="docs-first-demo.md">docs-first-demo.md</a>,
-  <a href="docs-first-dev-demo.md">docs-first-dev-demo.md</a>,
   <code>docs/{orchestration,surfaces}.md</code>,
   <code>builtins/task/{graph/pursue.yaml,skill/write-docs.md,skill/implement.md}</code>
   under <code>rust/loopflow/src/</code>,
-  <code>rust/loopflow/src/{lf/commands/open/files.rs,transport.rs,ops/human_session.rs}</code>,
+  <code>rust/loopflow/src/{lf/commands/open/files.rs,lf/commands/desktop.rs,transport.rs,ops/human_session.rs}</code>,
   and <code>swift/LoopflowMac/{DesktopActions,TaskFileDocument}.swift</code>.
 </header>
 <main>
 <h1>Docs open automatically in Desktop.</h1>
+<p><strong>Review outcome: no design change; no open product choice.</strong>
+The accepted decision already determines the interaction. Configured Desktop
+proof remains for demo/review; this review does not claim delivery acceptance.</p>
 <p><strong>Accepted November 4.</strong> Jack Heart selected Desktop-only automatic
 presentation in the primary conversation. The workflow presents original docs in
 an already attached Desktop Files view; elsewhere it reports their paths and
@@ -83,8 +85,8 @@ corrections for implementation; discuss urgent changes in the Task conversation.
 view; otherwise report their paths and continue. Never launch a host to show them.</blockquote>
 <p>This changes automatic presentation in the workflow. It does not authorize
 removing explicit terminal file opening or building a universal rendered viewer.
-Both alternatives preserve the original files, drafts, saved corrections, existing
-Sessions, implementation loop and LOO-498 stack.</p>
+The accepted workflow preserves the original files, drafts, saved corrections,
+existing Sessions, implementation loop and LOO-498 stack.</p>
 <p>The workflow presentation policy and its usage/skill wording now follow this decision. Keep explicit <code>lf open --file</code>, Desktop's existing
 <code>files(path)</code> action and current-viewer transport ownership. A failed
 or absent Desktop leaves paths available without launching another host. No
@@ -102,6 +104,25 @@ longer an acceptance requirement.</p>
 <p>The earlier direct CLI and isolated Rex probes remain evidence for explicit
 file opening. Headless Files tests cover rendering and draft preservation;
 configured Desktop experience remains for demo/review after compatible installation.</p>
+<p>The consequential gap is evidence: a Desktop action receipt and model checks
+do not prove the configured reading and editing experience. Replacing an active
+draft, rewriting docs on retry, or launching a fallback host would fail the
+accepted contract.</p>
+</section>
+
+<section>
+<h2>Review questions · settled by accepted direction</h2>
+<ol>
+  <li><strong>What happens without a matching Desktop?</strong> Absent Desktop
+  opens nothing; unavailable or unmatched Files may report failure. The workflow
+  lists the original paths and continues. It starts no replacement viewer.</li>
+  <li><strong>How does a saved correction reach implementation?</strong> Through
+  the original file, read initially and before finishing. Unsaved text remains
+  an editor draft; the Task conversation carries immediate direction.</li>
+  <li><strong>What does recovery repeat?</strong> Presentation after repairing
+  the path or destination. It preserves docs, drafts and Session identity;
+  docs writing and implementation do not restart to recover the view.</li>
+</ol>
 </section>
 </main>
 </html>

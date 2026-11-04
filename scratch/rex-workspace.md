@@ -4,9 +4,8 @@ This is inherited context, not LOO-728 work. The revised accepted plan and
 remaining obligations are preserved at
 `df3b5e810d3841a19bc5911c332fb42f23193d46:scratch/rex-workspace.md`.
 November 4 reconciliation observed PR #1814 OPEN at that revision; this checkout
-now integrates that published parent through Loopflow. The newer contract is at that revision's
-`docs/workspaces.md`; LOO-728's active plan is
-`write-docs-first.md`. Jack Heart authorized integration on this stack without
+integrates that published parent through Loopflow. `docs/workspaces.md` owns its
+contract; `write-docs-first.md` owns LOO-728. Jack Heart authorized integration on this stack without
 landing LOO-498 or waiving its acceptance requirements.
 
 LOO-498 supplies native Rex/Herdr workspaces and shared Files/editor policy.
@@ -47,13 +46,45 @@ The parent retains these unresolved obligations:
 
 The newer parent reduces host storage to locators and creation receipts, revises
 the draft migration, and keeps following append-only during its subscription.
-It includes LOO-723's coherent installer. These changes are integrated here; `write-docs-first.md` records focused verification. Dropping named-copy reuse or coordinated handoff remains an unaccepted
+It includes LOO-723's coherent installer. `write-docs-first.md` records integration
+checks. Dropping named-copy reuse or coordinated handoff remains an unaccepted
 proposal; the ownership simplification did not remove those obligations.
 
-The failed configured demo and prepared native split Session are retained in
-`workspace-demo.md`. Isolated opening/activation/follower fixtures do not prove
+The configured demo evidence and prepared native split Session are retained below. Isolated opening/activation/follower fixtures do not prove
 configured acceptance. Publication and review are authorized for the parent;
 Auto-Ship, merge and Task completion are not. These are dependency boundaries,
 not new instructions to operate the parent from LOO-728. Earlier full-restoration
 and settlement scope remains historical at
 `da41d2031f3526df7fab53292b936dcccc699d9b:scratch/rex-workspace.md`.
+
+## Dated dependency evidence
+
+The November 3 configured Rex demo failed before workspace creation on schema
+compatibility. A clean-source rebuild also failed, so executable age alone did
+not explain it. No opening, reuse, native split or agent acceptance followed.
+The app's Split Right action was interrupted when Jack Heart changed the app;
+the raw API's HOME fallback still does not establish UI behavior. The separately
+created native shell started no provider and replaced no existing pane:
+
+- Label/tab: **LOO-498 split demo** / **Task worktree**.
+- Session: `session:01a1a560-b698-73a1-b2ea-7e56a5e8774d`.
+- Window: `window:01a1a560-b699-7324-b0d0-efaf0ad2f01d`.
+- Block: `block:01a1a560-b698-7432-b8de-9e32f10e2da5`.
+- Expected cwd: `/Users/jack/src/loopflow.loo-498-open-and-restore`.
+
+The November 4 synthetic Task demo reused native layout with zero new shells or
+LF Sessions, but automatic display selection failed with Rex 404. Jack Heart
+required real Tasks, Waves and conversations for acceptance. A later real-Task
+private snapshot reused the layout, with manual owner-socket wiring for a passive
+observer. Neither establishes configured installation, native Split acceptance or
+unfinished-input preservation; no new provider or Graph was launched.
+
+Jack Heart separately authorized switching local LF to dev. CLI `ac8e088f5`
+migrated the shared store to `wave_removal` and passed inventory/preflight;
+Desktop replacement failed because a helper's executable identity could not be
+proved. No helpers were manually stopped. CLI success proves no Desktop update
+or LOO-498 acceptance and supplies no new installation instructions here.
+
+Full chronology and earlier references:
+`ef0ca500977a123076cf08f0e114b7fd59d36881:scratch/workspace-demo.md`;
+parent snapshot/runbook: `df3b5e810d3841a19bc5911c332fb42f23193d46:scratch/`.

@@ -254,12 +254,19 @@ fn watch(
             Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
             None => grace.expired(now),
         };
+        let mut retained = |reason: &dyn std::fmt::Display| match change {
+            Some((change, path)) => warn_changed(
+                &mut decision,
+                owner,
+                format!(
+                    "retaining Session whose lf at {} was {change}: {reason}",
+                    path.display()
+                ),
+            ),
+            None => decision = None,
+        };
         if !quiet {
-            if let Some((change, path)) = &change {
-                retention(&mut decision, owner, *change, path, "command output");
-            } else {
-                decision = None;
-            }
+            retained(&"command output");
             continue;
         }
         match store.owner_retention(owner) {
@@ -267,20 +274,13 @@ fn watch(
             // A turn or a running Graph holds it: activity, and the grace
             // runs again from here.
             Ok(Some(reason)) => {
-                if let Some((change, path)) = &change {
-                    retention(
-                        &mut decision,
-                        owner,
-                        *change,
-                        path,
-                        format_args!("{reason:?}"),
-                    );
-                }
+                retained(&reason);
                 grace.quiet_since = now;
                 continue;
             }
             Err(error) => {
-                failure(&mut decision, owner, "judge Session retention", &error);
+                let message = format!("cannot judge Session retention; retrying: {error}");
+                warn_changed(&mut decision, owner, message);
                 continue;
             }
         }
@@ -309,33 +309,20 @@ pub(super) fn report_result<T>(
 ) -> Option<T> {
     result
         .inspect(|_| *previous = None)
-        .inspect_err(|error| failure(previous, owner, operation, error))
+        .inspect_err(|error| {
+            warn_changed(
+                previous,
+                owner,
+                format!("cannot {operation}; retrying: {error}"),
+            );
+        })
         .ok()
 }
 
-fn failure(
-    previous: &mut Option<String>,
-    owner: &LfProcessId,
-    operation: &str,
-    error: &impl std::fmt::Display,
-) {
-    let message = format!("{operation}: {error}");
+/// One line per changed condition, however often a poll or retry repeats it.
+pub(super) fn warn_changed(previous: &mut Option<String>, owner: &LfProcessId, message: String) {
     if previous.as_ref() != Some(&message) {
-        tracing::warn!(%owner, %message, "Session policy failed; retrying at the next poll");
-        *previous = Some(message);
-    }
-}
-
-fn retention(
-    previous: &mut Option<String>,
-    owner: &LfProcessId,
-    change: Change,
-    path: &Path,
-    reason: impl std::fmt::Display,
-) {
-    let message = format!("{change}: {reason}");
-    if previous.as_ref() != Some(&message) {
-        tracing::warn!(%owner, ?path, %change, %reason, "retaining Session with obsolete lf");
+        tracing::warn!(%owner, "{message}");
         *previous = Some(message);
     }
 }

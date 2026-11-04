@@ -69,11 +69,8 @@ impl PendingInput {
         {
             Ok(recorded) => recorded,
             Err(error) => {
-                let message = error.to_string();
-                if self.failure.as_ref() != Some(&message) {
-                    tracing::warn!(%error, %owner, "cannot retain terminal input; retrying before delivery");
-                    self.failure = Some(message);
-                }
+                let message = format!("cannot retain terminal input; retrying: {error}");
+                super::lifetime::warn_changed(&mut self.failure, owner, message);
                 false
             }
         }

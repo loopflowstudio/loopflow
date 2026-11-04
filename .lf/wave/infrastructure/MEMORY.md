@@ -106,11 +106,12 @@ stopping verified owners before reclaiming eligible output; LOO-722 owns cleanup
 Its marker assumes evidence elsewhere; history-bearing roots remain unmarked.
 Separating history from disposable runtime remains a demo/review decision.
 
-Store failure exposed writable-PTY retry spin; contention stalled control.
-LOO-724's integrated nonblocking queue defers write readiness, retains before
-delivery and preserves other writers' timeouts. Fixtures prove recovery, not cause.
-Diagnostics share retirement's judgment. Security pressure stops later suites;
-product failures do not. Cleanup, rebuild and installed acceptance remain unproved.
+LOO-724's nonblocking queue fixes store-induced PTY spin/control stalls, retaining
+before delivery with other writers' timeouts unchanged. Policy operations retry
+without activity; successes clear only their own errors. Fixtures prove recovery,
+not cause. Security pressure stops
+later suites; product failures do not. Cleanup, rebuild and installed acceptance
+remain unproved.
 
 ## Session viewer wire (LOO-712, 2026-11-02)
 

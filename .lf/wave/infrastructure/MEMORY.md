@@ -937,22 +937,23 @@ advancement.
 
 ## Upgrade continuity (LOO-502/723, reconciled 2026-11-04)
 
-LOO-723 (2026-11-04): Jack Heart requested one coherent installation and verified
-desktop/mini rollout. A CLI-only receipt left Desktop's same-version helper unable
-to read the store. Version equality and a working public CLI prove no pairing.
-The headless implementation keeps an existing app in every update, validates the
-complete bundle through receipt-backed promotion, and reconciles even matching
-files before reporting success. CLI-only still omits first-time app setup; this
-policy awaits review, not an additional Jack decision. No helper fallback or
-piecemeal signed-bundle replacement.
+LOO-723: Jack Heart requested coherent installation and desktop/mini rollout.
+A CLI-only receipt left Desktop's helper unable to read the store; version/CLI
+success proves no pairing. Receipt-backed promotion
+validates the complete pair and reconciles matching files. CLI-only omits initial
+app setup, a headless review assumption. No helper fallback or bundle splicing.
 
-Promotion stops only Desktop; running helpers retain their images and renamed
-bundles until retirement. A live-helper fixture proves preservation, not configured
-Session continuity. LOO-724 owns retained hooks and reconnect recovery; its observed
-dead-leader group teardown is not proof of an installation-caused disconnect.
-Release's entry-point lesson applies to scheduled installs too: signed rollout,
-identity/store checks and usable existing Sessions remain separate acceptance on
-both Machines. Landing alone is insufficient.
+Resolve acquisition, freshness and promotion together after receipt recovery:
+explicit destination, public-linked app, then default. Independent environment
+selection loses custom locations under schedules. Recovery keeps its pinned paths;
+downloaded installers need the resolved target even when their scripts are older.
+
+Promotion stops only Desktop; helpers retain images/bundles until retirement.
+Jack's November 4 report of reopened Sessions losing input/crashing supersedes
+liveness as recovery proof. LOO-724 owns hooks/reconnect; causation remains unproved.
+Release's entry-point lesson applies: fixtures and interim main repair prove no
+corrected-build rollout. Both Machines need identity/store/scheduled checks and
+existing Sessions completing turns with continued interaction. Landing is insufficient.
 
 Jack Heart removed executable pinning after #1587 review, accepting natural
 failure and retry in the same Session/checkout; delivery stays review-only.

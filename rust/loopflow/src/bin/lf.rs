@@ -1962,7 +1962,7 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
             Some(InstallCommand::CanOpen { tag }) => loopflow::lf::commands::install::can_open(tag),
             Some(InstallCommand::RecoverSwitch { switch }) => {
-                loopflow::lf::commands::install::recover_switch(switch)
+                loopflow::lf::commands::install::recover_switch(switch.as_deref())
             }
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)

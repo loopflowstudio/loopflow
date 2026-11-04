@@ -79,6 +79,11 @@ replacement changes the AgentProcess and fence. These stand-in fixtures use the
 candidate's wire/schema; released-version and installed-provider recovery need
 separate proof.
 
+`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
+holds a real SQLite writer while input is queued. Control and viewer return
+remain responsive; the provider receives nothing until retention can commit,
+then receives the original request once and accepts continued input.
+
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
 cover startup cost and release retries that share the same Git operations.

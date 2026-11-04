@@ -823,6 +823,61 @@ fn an_owner_that_stops_reading_input_ends_the_viewer_with_a_cause() {
     native_pending_request(Some(SilentOwner::Stalled));
 }
 
+#[test]
+fn contended_input_retention_keeps_control_and_delivers_once_after_unlock() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; printf ready; read -r first; printf '%s' \"$first\" > \"$HOME/received\"; printf 'first:%s\\n' \"$first\"; read -r second; printf 'second:%s\\n' \"$second\"",
+    ]);
+    let result = std::panic::catch_unwind(|| {
+        let mut viewer = fixture.viewer(&owner, true);
+        until_out(&mut viewer, "ready");
+        let sql = fixture.sql();
+        sql.execute_batch("BEGIN IMMEDIATE").unwrap();
+        viewer.input("retained-draft\n");
+        // Let the owner attempt retention before asking it for control status.
+        std::thread::sleep(Duration::from_millis(100));
+        viewer
+            .socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        viewer.request(json!({"kind":"controlled"}));
+        assert_eq!(viewer.until_reply()["held"], true);
+        let saved: Option<String> = sql
+            .query_row(
+                "SELECT native_input FROM processes WHERE id=?1",
+                [&owner],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            saved.is_none(),
+            "uncommitted input reached the durable record"
+        );
+        assert!(!fixture.home.path().join("received").exists());
+        // Return while retention is still blocked. Unlocking alone must wake
+        // delivery; neither a new key nor replay of the queued request is needed.
+        drop(viewer);
+        let mut returned = fixture.viewer(&owner, true);
+        returned.request(json!({"kind":"controlled"}));
+        assert_eq!(returned.until_reply()["held"], true);
+        assert!(!fixture.home.path().join("received").exists());
+        sql.execute_batch("ROLLBACK").unwrap();
+        until_out(&mut returned, "first:retained-draft\r\n");
+        // A replay would consume the second read, so continued input proves
+        // both delivery order and that the queued request arrived only once.
+        returned.input("continued\n");
+        until_out(&mut returned, "second:continued\r\n");
+        returned.finish();
+    });
+    fixture.stop(&owner);
+    if let Err(error) = result {
+        std::panic::resume_unwind(error);
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum SilentOwner {
     /// Accepts the attachment request and never answers it.

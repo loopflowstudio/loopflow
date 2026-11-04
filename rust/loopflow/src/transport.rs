@@ -751,6 +751,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut size = (24, 80);
     let mut pending_input = VecDeque::new();
     let mut recorded_input = 0;
+    let mut input_retry: Option<Instant> = None;
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -1118,18 +1119,23 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             });
         }
         place_events(&output, &mut viewers, announced);
-        if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
+        if let Some(input) = input.as_mut().filter(|_| {
+            !pending_input.is_empty() && input_retry.is_none_or(|at| Instant::now() >= at)
+        }) {
             let recorded = if terminal && recorded_input < pending_input.len() {
                 let bytes = &pending_input.make_contiguous()[recorded_input..];
                 crate::journal::process_ledger()
-                    .and_then(|store| store.record_owner_input(&id, bytes))
-                    .map(|()| recorded_input = pending_input.len())
-                    .inspect_err(|error| tracing::warn!(%error, "cannot retain terminal input; retrying before delivery"))
-                    .is_ok()
+                    .and_then(|store| store.try_record_owner_input(&id, bytes))
+                    .inspect_err(|error| {
+                        tracing::warn!(%error, "cannot retain terminal input; retrying before delivery");
+                    })
+                    .unwrap_or(false)
             } else {
                 true
             };
             if recorded {
+                input_retry = None;
+                recorded_input = pending_input.len();
                 match input.write(pending_input.as_slices().0) {
                     Ok(n) => {
                         pending_input.drain(..n);
@@ -1141,6 +1147,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         recorded_input = 0;
                     }
                 }
+            } else {
+                input_retry = Some(Instant::now() + Duration::from_millis(100));
             }
         }
         if end_input && pending_input.is_empty() {
@@ -1346,8 +1354,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         #[cfg(test)]
         lifetime_tests::after_judgment(&output, observed)?;
-        // Sleep until a descriptor has work; only held exit text and a
-        // pending exit announcement are timed.
+        // Sleep until a descriptor has work or held output, exit announcement,
+        // input retention or disconnected-viewer grace needs another attempt.
         let deadline = match exit {
             Some((_, at)) if announced => Some(at + Duration::from_secs(2)),
             Some((_, at)) if readers.is_empty() => Some(at + Duration::from_millis(50)),
@@ -1360,13 +1368,16 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 Connection::Open(_) => None,
             })
             .chain(deadline)
+            .chain(input_retry)
             .min();
         wait_for_activity(
             &listener,
             &wake,
             &viewers,
             &readers,
-            input.as_ref().filter(|_| !pending_input.is_empty()),
+            input
+                .as_ref()
+                .filter(|_| !pending_input.is_empty() && input_retry.is_none()),
             deadline.map(|at| at.saturating_duration_since(Instant::now())),
         );
     }

@@ -43,6 +43,11 @@ retain typed input because they have no matching acknowledgement here. Clearing
 the screen or showing an idle prompt cannot discard that protection. Pending
 approvals and questions stay with their original provider until answered or canceled.
 
+Input waits in the owner until its retention record commits. A busy store pauses
+delivery to the provider while output, control queries and viewer return remain
+responsive. Delivery continues automatically when the store becomes writable;
+returning to the Session does not resubmit queued input.
+
 Removing, replacing or superseding the owner's lf executable ends it after two
 seconds of command silence, once no input, turn, pending request, running Graph
 or headless Run holds it. Viewers cannot extend this interval. The owner logs the

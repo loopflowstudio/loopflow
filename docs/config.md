@@ -1044,9 +1044,9 @@ Whole-Graph inspection includes composed steps and routers. Targeting
 `outer/work` does not select a step authored only in `inner/work`. Navigation
 labels such as `review#1` do not change setting addresses.
 
-Launch targets support agent selection and context/launch preferences. Planning,
-release policy, a Task's default Graph and context budgets describe broader work;
-they do not acquire skill targets merely because their values are configurable.
+Launch targets support agent selection and context/launch preferences, including
+context budgets. Planning, release policy and a Task's default Graph describe
+broader work; they do not acquire skill targets merely because their values are configurable.
 Theme, installation stream, portfolio and terminal preferences retain their
 appropriate lifecycle. Reserved summary settings do not start a summarization run.
 

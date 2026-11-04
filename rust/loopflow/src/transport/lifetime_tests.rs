@@ -72,6 +72,7 @@ pub(super) fn before_read(
                     rows: 24,
                     cols: 80,
                     name: None,
+                    placement: None,
                     moved: None,
                 },
             };

@@ -963,9 +963,7 @@ fn viewed_placement() -> Option<(OpenHost, String)> {
 
 fn session_placement(session: &str) -> Option<(OpenHost, String)> {
     let store = crate::store::read_existing_registry().ok().flatten()?;
-    let placement = store
-        .sqlite
-        .session_summary(session, time::OffsetDateTime::now_utc().unix_timestamp())
+    let placement = crate::ops::human_session::viewed_summary(&store.sqlite, session)
         .ok()
         .flatten()?
         .terminal_id?;

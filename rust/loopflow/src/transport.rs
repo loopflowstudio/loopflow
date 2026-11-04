@@ -388,6 +388,7 @@ struct Viewer {
     size: (u16, u16),
     theme: Option<serde_json::Value>,
     name: Option<String>,
+    placement: Option<String>,
     leaving: bool,
     /// A resume this connection sent, moved onto the dropped viewer's stream.
     resuming: Option<(u64, Resume)>,
@@ -414,6 +415,7 @@ impl Viewer {
             size: (24, 80),
             theme: None,
             name: None,
+            placement: None,
             leaving: false,
             resuming: None,
             ending: None,
@@ -762,6 +764,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         let mut size_change = false;
         let mut theme_change = false;
         let mut attaching = Vec::new();
+        let mut control_queries = Vec::new();
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
             viewers.push(Viewer::new(socket));
@@ -829,12 +832,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             hint_due = true;
                         }
                         Request::Controlled => {
-                            viewer.reply(
-                                answers,
-                                Reply::Controlled {
-                                    held: control.is_some(),
-                                },
-                            );
+                            control_queries.push((viewer.id.clone(), answers));
                         }
                         Request::ExitRecord { key, pid, record } if key == control_key => {
                             // Graph steps share this terminal, but their Graph
@@ -867,6 +865,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             rows,
                             cols,
                             name,
+                            placement,
                             moved,
                         } => {
                             if wants_control
@@ -880,6 +879,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             attached = true;
                             viewer.size = dimensions(rows, cols);
                             viewer.name = name;
+                            viewer.placement = placement;
                             if wants_control {
                                 hint_due = true;
                                 if viewer.token != control {
@@ -1170,6 +1170,24 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             // The execution's own control connections outlive its viewers.
             viewers.retain(|v| !v.attached);
             detach = false;
+        }
+        // Answer after attachment, replacement and detach have settled. Only
+        // the current input viewer supplies placement; passive panes cannot move it.
+        let controller = viewers
+            .iter()
+            .find(|v| v.live() && v.token.is_some() && v.token == control);
+        let held = controller.is_some();
+        let placement = controller.and_then(|v| v.placement.clone());
+        for (id, answers) in control_queries {
+            if let Some(viewer) = viewers.iter_mut().find(|v| v.id == id) {
+                viewer.reply(
+                    answers,
+                    Reply::Controlled {
+                        held,
+                        placement: placement.clone(),
+                    },
+                );
+            }
         }
         if let Some(held) = client.as_mut().map(native::NativeClient::expire) {
             deliver(
@@ -1776,6 +1794,8 @@ fn attach_with_terminal(
             rows,
             cols,
             name: tty_name(),
+            placement: crate::session_record::current_terminal_id()
+                .or_else(crate::lf::commands::open::host_placement),
             moved,
         },
     )?;
@@ -2036,15 +2056,15 @@ fn follow(command: &[String]) -> Result<()> {
     }
 }
 
-/// Whether a viewer of this execution holds input control. A closed terminal
-/// leaves its execution running with none, ready for the next viewer.
-pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
+/// Input control and placement of the current viewer. A closed terminal leaves
+/// its execution running with neither, ready for the next viewer.
+pub(crate) fn control_state(id: &LfProcessId) -> Result<(bool, Option<String>)> {
     let mut socket = UnixStream::connect(endpoint(id)?)?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     send(&mut socket, Request::Controlled)?;
     match receive_reply(&mut socket)? {
-        Reply::Controlled { held } => Ok(held),
+        Reply::Controlled { held, placement } => Ok((held, placement)),
         other => bail!("unexpected transport reply {other:?}"),
     }
 }

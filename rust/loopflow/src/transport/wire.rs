@@ -135,6 +135,8 @@ pub(super) enum Request {
         cols: u16,
         /// How this viewer is named to others who lose ownership to it.
         name: Option<String>,
+        /// Terminal identity or native host placement of this viewer.
+        placement: Option<String>,
         /// What a controlling viewer this attachment replaces prints as it leaves.
         moved: Option<String>,
     },
@@ -234,6 +236,7 @@ pub(super) enum Reply {
     ReconnectRequired,
     Controlled {
         held: bool,
+        placement: Option<String>,
     },
     NativeEnded,
     Accepted,

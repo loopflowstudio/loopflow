@@ -1233,7 +1233,7 @@ pub(crate) fn end_owner(
 /// from an earlier lf may not after an upgrade, can never hand its terminal to
 /// a viewer, so opening takes the conversation over on the same provider thread.
 pub(crate) fn answering(owner: &crate::id::LfProcessId) -> bool {
-    match crate::transport::controlled(owner) {
+    match crate::transport::control_state(owner) {
         Ok(_) => true,
         Err(error) => {
             tracing::warn!(%error, %owner, "Session owner does not answer; taking the conversation over");
@@ -1255,14 +1255,10 @@ pub(crate) fn viewed_summary(
     let Some(mut summary) = store.session_summary(id, now)? else {
         return Ok(None);
     };
-    let released = !summary.unviewed
-        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
-        && store
-            .session_transport(id)?
-            .is_some_and(|owner| !matches!(crate::transport::controlled(&owner), Ok(true)));
-    if released {
-        summary.unviewed = true;
-        summary.terminal_id = None;
+    if let Some(owner) = store.session_transport(id)? {
+        let (held, placement) = crate::transport::control_state(&owner).unwrap_or((false, None));
+        summary.unviewed = !held;
+        summary.terminal_id = if held { placement } else { None };
     }
     Ok(Some(summary))
 }

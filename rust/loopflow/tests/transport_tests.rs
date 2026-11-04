@@ -537,6 +537,84 @@ fn events<'a>(items: &'a [Item], kind: &str) -> Vec<&'a Value> {
 }
 
 #[test]
+fn files_follow_the_controlling_viewer_and_saved_edits_survive_reopening() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/cat"]);
+    let session = fixture.session(&owner);
+    let path = fixture.repo.path().join("guide.md");
+    std::fs::write(&path, "original docs\n").unwrap();
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let tmux = bin.join("tmux");
+    std::fs::write(&tmux, "#!/bin/sh\nprintf '%s\n' \"$*\" >> \"$HOME/panes\"\nfor last do :; done\nexec /bin/sh -c \"$last\" > \"$HOME/opened\"\n").unwrap();
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let attach = |placement: &str, control: bool| {
+        fixture.attach(
+            &owner,
+            json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80,
+            "placement":placement}),
+        )
+    };
+    let mut first = attach("tmux:%current", true);
+    let mut passive = attach("tmux:%passive", false);
+    let present = || {
+        fixture
+            .command(&["open", "--file", "guide.md", "--json"])
+            .env(
+                "LF_AGENT_CALLER",
+                json!({"session_id":session,"agent_process_id":null,"origin_exec_id":owner})
+                    .to_string(),
+            )
+            .env(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            )
+            .env("TMUX", "stale")
+            .env("TMUX_PANE", "%stale")
+            .env("VISUAL", "cat")
+            .output()
+            .unwrap()
+    };
+    let opened = present();
+    assert!(
+        opened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("opened")).unwrap(),
+        "original docs\n"
+    );
+    std::fs::write(&path, "saved correction\n").unwrap();
+    let mut second = attach("tmux:%moved", true);
+    let reopened = present();
+    assert!(
+        reopened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reopened.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("opened")).unwrap(),
+        "saved correction\n"
+    );
+    let panes = std::fs::read_to_string(fixture.home.path().join("panes")).unwrap();
+    assert!(panes.contains("-t %current"));
+    assert!(panes.contains("-t %moved"));
+    assert!(!panes.contains("%stale") && !panes.contains("%passive"));
+    second.request(json!({"kind":"leave"}));
+    passive.request(json!({"kind":"controlled"}));
+    let released = passive.until_reply();
+    assert_eq!(released["held"], false);
+    assert!(released["placement"].is_null());
+    // The former controller cannot keep its old placement authoritative.
+    first.request(json!({"kind":"controlled"}));
+    assert!(first.until_reply()["placement"].is_null());
+    let mut final_viewer = attach("tmux:%finish", true);
+    final_viewer.input("\u{4}");
+    final_viewer.finish();
+}
+
+#[test]
 fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     let fixture = Fixture::new();
     let owner = fixture.start(&[

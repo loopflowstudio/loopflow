@@ -21,8 +21,12 @@ whether showing a pane reattaches: a `detached` Session reattaches, an `active` 
 waits for Move here, and an ended one waits for an explicit open.
 Preparing asks a running owner whether a viewer holds control, so an owner from an
 earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
-`detached` once Desktop restarts and its pane reattaches. An owner that is running
-but never answers reads `detached` too; reattaching stops its provider and continues
+`detached` once Desktop restarts and its pane reattaches. The controlling viewer
+supplies its native host placement to that same query.
+File presentation follows that viewer after a move; passive viewers and detached
+executions supply no destination. An owner from an earlier build that does not
+report placement needs a new owner and viewer before this route is available.
+An owner that is running but never answers reads `detached` too; reattaching stops its provider and continues
 the same provider thread in a new owner, without replaying input.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,

@@ -49,9 +49,9 @@ fn lf_with(
         );
     }
     command
-        .envs(env.iter().copied())
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .envs(env.iter().copied())
         .current_dir(cwd)
         .args(args)
         .stdin(std::process::Stdio::null())
@@ -178,7 +178,7 @@ fn opening_files_in_tmux_edits_each_original_once() {
 }
 
 #[test]
-fn rex_file_request_opens_the_task_files_tool_beside_its_current_conversation() {
+fn rex_file_request_edits_the_original_without_another_lf() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
@@ -199,6 +199,8 @@ esac
 "#, capture.display())).unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let marker = bin.path().join("edited");
+    let editor = format!("printf '%s\\n' > '{}'", marker.display());
     let result = json(&lf_with(
         home.path(),
         repo.path(),
@@ -207,6 +209,8 @@ esac
             ("REX_SERVER", "unix:///fixture/rex.sock"),
             ("REX_SESSION", "session:current"),
             ("REX_BLOCK", "block:current"),
+            ("VISUAL", &editor),
+            ("LF_BIN", "/usr/bin/false"),
         ],
         &["open", "--task", "INF-123", "--file", "guide.md", "--json"],
     ));
@@ -220,14 +224,7 @@ esac
         .iter()
         .map(|word| word.as_str().unwrap())
         .collect();
-    let marker = bin.path().join("edited");
-    let editor = format!("printf '%s\\n' > '{}'", marker.display());
-    let output = Command::new(argv[0])
-        .args(&argv[1..])
-        .env("VISUAL", editor)
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .output()
-        .unwrap();
+    let output = Command::new(argv[0]).args(&argv[1..]).output().unwrap();
     assert!(
         output.status.success(),
         "{}",

@@ -44,7 +44,7 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
         .first()
         .context("File presentation has no selected Work")?;
     // A background Graph step presents to the Task's currently viewed conversation.
-    let viewed = viewed.or_else(|| target.primary.as_deref().and_then(super::session_placement));
+    let viewed = viewed.or_else(|| target.conversation().and_then(super::session_placement));
     let selected = if args.host == OpenHost::Auto {
         viewed.as_ref().map(|(host, _)| *host).or(current)
     } else {
@@ -73,6 +73,12 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
             "Present files on the Task's recorded Machine; no local editor was opened"
         );
     }
+    // Compare canonical paths, but keep the recorded checkout spelling for launch.
+    let root = if remote {
+        cwd.clone()
+    } else {
+        cwd.canonicalize()?
+    };
     let mut paths = Vec::new();
     for path in &args.files {
         let path = if path.is_absolute() {
@@ -86,6 +92,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
             path.canonicalize()
                 .with_context(|| format!("Cannot open {}", path.display()))?
         };
+        if target.task.is_some() && !remote {
+            anyhow::ensure!(path.starts_with(&root), "File is outside the Task checkout");
+        }
         if !paths.contains(&path) {
             paths.push(path);
         }
@@ -94,11 +103,6 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
         return report(cli, args, Some(host), &paths, true);
     }
     if host == OpenHost::Desktop {
-        let root = if remote {
-            cwd.clone()
-        } else {
-            cwd.canonicalize()?
-        };
         let relative = paths
             .iter()
             .map(|path| {
@@ -116,7 +120,7 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
         return report(cli, args, opened.then_some(host), &paths, false);
     }
     for path in &paths {
-        let argv = file_argv(target, &cwd, path)?;
+        let argv = file_argv(path)?;
         match host {
             OpenHost::Rex => super::workspace::present_file(args, &cwd, path, argv, placement)?,
             OpenHost::Herdr => super::workspace::present_herdr_file(&cwd, path, argv, placement)?,
@@ -129,29 +133,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
     report(cli, args, Some(host), &paths, false)
 }
 
-fn file_argv(target: &super::Resolved, cwd: &Path, path: &Path) -> Result<Vec<String>> {
-    if let Some(task) = &target.task {
-        // The tool's --checkout retains the recorded spelling; only path comparison
-        // uses the canonical root (e.g. /var versus /private/var on macOS).
-        let root = cwd.canonicalize()?;
-        let relative = path
-            .strip_prefix(root)
-            .context("File is outside the Task checkout")?;
-        return super::workspace::viewer_argv(
-            cwd,
-            &[
-                "task",
-                "tool",
-                &task.identifier,
-                "files",
-                "--checkout",
-                cwd.to_str().context("Checkout is not UTF-8")?,
-                "--path",
-                relative.to_str().context("File path is not UTF-8")?,
-            ],
-        );
-    }
-    // Taskless callers use the same editor policy without inventing a Task.
+fn file_argv(path: &Path) -> Result<Vec<String>> {
+    // Files are already resolved on this Machine. Use the shared editor policy
+    // directly, without asking another installed lf to interpret this build's CLI.
     let command = super::super::task_tool::file_editor(path);
     std::iter::once(command.get_program())
         .chain(command.get_args())

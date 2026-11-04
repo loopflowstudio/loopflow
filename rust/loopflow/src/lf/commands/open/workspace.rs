@@ -860,7 +860,7 @@ fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path) -> Result<(
     Ok(())
 }
 
-pub(super) fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
+fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
     let mut argv = vec![
         crate::os_process::resolve_lf_binary()?
             .to_string_lossy()

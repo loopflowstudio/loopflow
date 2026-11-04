@@ -23,7 +23,13 @@ Graph loops still return to implement, preserving saved documentation edits.
 LOO-498's live work remains separate. Its restoration, native split, lifecycle
 and remote-host obligations are not acceptance work for this integration.
 
-Review: a configured-host walkthrough remains required and unverified. Native terminal file
+Review: the configured-host walkthrough failed on November 4; see
+[docs-first-demo.md](docs-first-demo.md). The agent route rejected unavailable
+viewer placement; a direct-shell diagnostic created panes whose installed `lf`
+rejected `task tool`. The repair passes an isolated native agent/editor probe;
+the existing installed owner still requires the candidate owner/viewer for
+configured acceptance. Repeat that demo through the normal delivery path.
+Native terminal file
 presentation requires a local checkout; Desktop retains its remote Files
 transport. LOO-498's native restoration and remote-host gaps remain with that Task.
 
@@ -41,12 +47,41 @@ Desktop presents a batch to one selected pane. Rex's caller validation and file
 presentation share native block traversal. Reports borrow paths instead of copying
 them. Keep recorded checkout spelling for tool execution; canonical paths serve
 comparison only (the macOS alias regression was caught by the existing Rex test).
-No further predecessor is identified. Preserve original files, active drafts,
+The repair removes local file presentation's nested `viewer_argv(task tool)`
+launch; both Task and taskless files use `task_tool::file_editor` after path
+resolution. Transported Sessions resolve placement from their controlling viewer
+through the existing transport query, replacing attached execution-process
+placement as that route's authority. Direct native Sessions retain their existing
+recorded placement. The boolean-only `transport::controlled` wrapper is removed;
+owner readiness and viewer placement use `control_state`. File presentation
+resolves one canonical checkout root for all path comparisons, keeping its
+recorded spelling for launch. `workspace::viewer_argv` is private again now that
+Files no longer uses it. No viewer registry or installation override is added.
+Preserve original files, active drafts,
 existing panes, Session identity and the loop-back-to-implement behavior.
 
 Inherited parent plans/demo evidence are condensed with exact Git references in
 `rex-workspace.md`, `workspace-demo.md` and `questions.md`; they grant no work or
 scope reduction here. The parent checkout and its original artifacts remain intact.
+
+## Repair after configured demo
+
+November 4, 2026: the interactive Session's recorded terminal is absent because
+its attachment is inside a retained execution PTY. Rex hosts the outer relay,
+not that attachment. The transport already owns input claims, replacement,
+reconnection and detach; its current controller now also supplies placement.
+Passive viewers cannot select it, and a detached or unknown owner provides no
+placement. Existing running owners that cannot report placement need a new
+owner/viewer before configured acceptance; no live owner is restarted here.
+Local presentation launches the shared editor directly, eliminating dependence
+on an installed CLI understanding the unreleased `task tool` command.
+
+Jack Heart's primary conversation subsequently confirmed visible opening with
+“ok it opened”; [docs-first-dev-demo.md](docs-first-dev-demo.md) records the
+development CLI opening both original files, reusing the first pane and retaining
+conversation focus. That direct CLI demo removed `LF_AGENT_CALLER`; it does not
+establish the older live owner's agent route. Its editor panes remain available
+for Jack Heart, and no Markdown/HTML viewer replacement scope was accepted.
 
 ## Remaining work
 
@@ -99,8 +134,8 @@ or delivery action is selected by this review.
   changed `world_recipes` scenarios, prompt goldens, Desktop action DTO round-trip,
   and README/index sync. The headless Desktop run passed 55 tests across TaskFiles,
   DesktopPaneControl and the action DTO fixture, with the optional native display
-  diagnostic skipped. The focused Rust, formatting and Clippy results below remain
-  applicable. No migration is added by LOO-728.
+  diagnostic skipped. The new transport repair requires affected transport/Session checks and
+  lint; earlier passes cover only the preceding tree. No migration is added by LOO-728.
 - Publication and configured-host demo/review remain the code Graph's later
   steps. No parent landing or extra approval boundary is authorized here.
   Demo must show the original files in the current host, preserve active edits,
@@ -122,7 +157,7 @@ Affected user docs: `README.md`, `docs/index.md`, `docs/orchestration.md`, and
 Earlier integration checks and unexplained host-response timeouts are preserved
 at `13e7d5dac8:scratch/write-docs-first.md`; isolated reruns passed there.
 
-Check: `git diff --check` and `lf context` passed at realignment; reused the preceding current-tree passes for `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1` (18 passed, 2 opt-in native cases ignored), `cargo test -p loopflow --lib lf::commands::desktop::tests` (13 passed; nonfatal macOS unwind-size linker warning), `cargo +stable fmt --all` and `cargo +stable clippy --all-targets -- -D warnings`. Gate owns broader affected suites; demo owns configured-host behavior.
+Check: with inherited `LF_*` unset, `cargo +stable test -p loopflow --test integration work_open_tests:: -- --test-threads=1` passed (18, two opt-in native cases ignored) and `cargo +stable test -p loopflow --test transport_tests files_follow_the_controlling_viewer_and_saved_edits_survive_reopening` passed (1); formatting, diff and context checks passed. The earlier isolated Rex/vi probe retains draft-preservation and recovery evidence. Gate owns the remaining transport, Session, startup and library checks and Clippy; demo owns the configured current Session.
 
 Publication review, 2026-11-04: `lf sync` completed without conflicts against
 LOO-498 at `da41d2031f`. PR #1817 was created as a draft at `6feff830f2` during

@@ -280,6 +280,82 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(client.terminal.draft, "same Session")
     }
 
+    func testForegroundRestoresScreenWithoutInputOrGeometryTakeover() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        controller.terminal.insertText("phone draft")
+        let session = workspace.selected?.primarySession
+        let opens = client.attachments.count
+        workspace.suspend()
+        workspace.suspend()
+        client.terminal.accept(Data(" + desktop".utf8))
+        client.terminal.columns = 120
+        client.terminal.rows = 40
+        await workspace.restoreForegroundSession()
+        await workspace.restoreForegroundSession()
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertEqual(client.attachments.count, opens + 1)
+        XCTAssertEqual(client.attachments.last, session)
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(controller.terminal.getTerminal().cols, 120)
+        XCTAssertEqual(controller.terminal.getTerminal().rows, 40)
+        XCTAssertTrue(controller.terminal.accessibilityPageContent()?.contains("phone draft + desktop") == true)
+        XCTAssertEqual(client.transport.controlRequests, 0)
+        XCTAssertTrue(client.link.sizes.isEmpty)
+        controller.terminal.insertText("do not send")
+        XCTAssertEqual(client.terminal.draft, "phone draft + desktop")
+        XCTAssertTrue(client.terminal.submissions.isEmpty)
+    }
+
+    func testForegroundFailureWaitsForExplicitRetryAndLeaveCancelsRestoration() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        workspace.suspend()
+        client.attachFailures = 1
+        let count = client.attachments.count
+        await workspace.restoreForegroundSession()
+        guard case .disconnected = workspace.state else { return XCTFail("Expected a retryable connection failure") }
+        await workspace.restoreForegroundSession()
+        XCTAssertEqual(client.attachments.count, count + 1, "No foreground polling loop")
+        await workspace.reconnect()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        workspace.suspend()
+        workspace.leave()
+        let last = client.attachments.count
+        await workspace.restoreForegroundSession()
+        XCTAssertEqual(client.attachments.count, last, "Leaving the screen must cancel return to that Session")
+        XCTAssertNil(workspace.selected)
+    }
+
+    func testBackgroundDuringOpeningDiscardsTheLateAttachment() async throws {
+        let client = TestClient()
+        client.delayNextAttachment = true
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        let task = try await client.workingTasks()[0]
+        let opening = Task { await workspace.open(task) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while client.releaseAttachment == nil && ContinuousClock.now < deadline { await Task.yield() }
+        let release = try XCTUnwrap(client.releaseAttachment)
+        let lateLink = try XCTUnwrap(client.transport).link
+        workspace.suspend()
+        await workspace.restoreForegroundSession()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        release.resume()
+        await opening.value
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(workspace.selected?.primarySession, task.primarySession)
+        XCTAssertThrowsError(try lateLink.requestControl(size: TerminalGeometry(columns: 80, rows: 24)))
+        workspace.requestControl()
+        await settle()
+        workspace.send(Data("new attachment".utf8))
+        XCTAssertEqual(client.terminal.draft, "new attachment")
+    }
+
     func testWrongSessionIsRejectedBeforeRenderingAndHasNoRetry() async throws {
         let client = TestClient()
         client.attachmentSessionID = "another-session"
@@ -330,6 +406,7 @@ final class MobileTerminalTests: XCTestCase {
         let task = try await client.workingTasks()[0]
         await workspace.open(task)
         workspace.suspend()
+        await workspace.restoreForegroundSession()
         XCTAssertEqual(workspace.state, .unavailable("No running owner"))
         let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
         XCTAssertThrowsError(try screen.inspect().find(button: "Reconnect"))
@@ -379,6 +456,7 @@ final class MobileTerminalTests: XCTestCase {
         client.link.end()
         await settle()
         workspace.suspend()
+        await workspace.restoreForegroundSession()
         XCTAssertEqual(workspace.state, .ended)
         let endedScreen = MobileSessionView(task: try XCTUnwrap(workspace.selected), workspace: workspace, theme: .light)
         XCTAssertThrowsError(try endedScreen.inspect().find(button: "Reconnect"))
@@ -387,6 +465,7 @@ final class MobileTerminalTests: XCTestCase {
         let rows = try await FixtureClient().workingTasks()
         await workspace.open(rows[2])
         workspace.suspend()
+        await workspace.restoreForegroundSession()
         XCTAssertEqual(workspace.state, .unavailable("No existing Session is recorded"))
         let missingScreen = MobileSessionView(task: rows[2], workspace: workspace, theme: .light)
         XCTAssertThrowsError(try missingScreen.inspect().find(button: "Reconnect"))
@@ -442,17 +521,26 @@ private final class TestClient: MobileClient {
     var attachFailures = 0
     var attachmentSessionID: String?
     var ownerUnavailable = false
+    var attachments: [String] = []
+    var delayNextAttachment = false
+    var releaseAttachment: CheckedContinuation<Void, Never>?
 
     func workingTasks() async throws -> [WorkViewPlan.Content] { try await FixtureClient().workingTasks() }
     func observeTasks() async throws -> any MobileTaskObservation { try await FixtureClient().observeTasks() }
     func attach(sessionID: String) async throws -> any MobileAttachment {
+        attachments.append(sessionID)
         if ownerUnavailable { throw SessionUnavailable("No running owner") }
         if attachFailures > 0 {
             attachFailures -= 1
             throw URLError(.cannotConnectToHost)
         }
         let link = FixtureAttachment(sessionID: attachmentSessionID ?? sessionID, terminal: terminal)
-        transport = TestAttachment(link: link)
+        let transport = TestAttachment(link: link)
+        self.transport = transport
+        if delayNextAttachment {
+            delayNextAttachment = false
+            await withCheckedContinuation { releaseAttachment = $0 }
+        }
         return transport
     }
 }

@@ -55,8 +55,12 @@ the Machine’s local Work and does not synchronously refresh an external tracke
 
 The connected Machine’s hostname replaces the fixture label in both screens.
 **Forget Machine** removes the phone’s saved credential; use Desktop’s **Remove
-access** or the Machine’s device revocation command to withdraw its server grant. Backgrounding closes the
-attachment; **Reconnect** restores the same Session as an observer.
+access** or the Machine’s device revocation command to withdraw its server grant.
+Backgrounding closes the attachment. Returning to the app automatically restores
+the same Session as an observer, including its current draft and terminal size.
+If that attempt fails, **Reconnect** tries again; no retry loop runs while away.
+Leaving the Session screen cancels restoration. Ended or unavailable Sessions
+keep their explanation.
 Input and geometry require a fresh grant. Failed input is never queued or retried.
 If opening or reconnecting fails, **Reconnect** stays on the Session screen.
 Inspect the restored prompt before resubmitting input whose delivery was uncertain.
@@ -117,10 +121,16 @@ viewport resizing, preserved observer geometry, control loss, repeated in-screen
 accepted-then-failed input without replay or duplicate submission. They also consume the
 backend's shared Machine fixtures, without inventing a second codec.
 
-Device demo still owns actual software-keyboard layout, CJK keyboard/dictation
-quality, physical key combinations, VoiceOver navigation and sustained-output
-energy use. The tests exercise UIKit input methods; they do not manufacture real
-hardware presses or prove every IME. The owner decoder consumes a Rust-generated binary fixture across fragmented
+`LoopflowiOSUITests` operates the app with the offline peer: open a Task, take
+keyboard control, type through the system keyboard, go Home, return as an observer,
+then explicitly take control and continue typing. Captures show the preserved
+draft and software-keyboard layout. The deterministic peer requests a steady
+cursor so XCTest does not wait for a repeating animation to finish.
+
+Device demo still owns CJK keyboard/dictation quality, physical key combinations,
+VoiceOver navigation and sustained-output energy use. Simulator software-keyboard
+layout and app lifecycle are exercised; that does not prove every IME or hardware
+keyboard. The owner decoder consumes a Rust-generated binary fixture across fragmented
 reads. Actual Tailscale pairing, Keychain persistence, Machine identity and empty
 Task reads have passed in Simulator against an isolated service. Native editing
 and reconnect have also passed through a real retained owner, including a newer

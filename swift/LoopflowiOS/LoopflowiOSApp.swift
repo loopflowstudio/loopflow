@@ -155,6 +155,9 @@ struct MobileTaskList: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { workspace.suspend() }
         }
+        .task(id: scenePhase == .background) {
+            if scenePhase != .background { await workspace.restoreForegroundSession() }
+        }
     }
 }
 

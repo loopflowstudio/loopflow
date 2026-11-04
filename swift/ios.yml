@@ -48,6 +48,17 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+  LoopflowiOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: LoopflowiOSUITests
+    dependencies:
+      - target: LoopflowiOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: LoopflowiOS
 schemes:
   LoopflowiOS:
     build:
@@ -57,4 +68,4 @@ schemes:
       commandLineArguments:
         "--fixture": true
     test:
-      targets: [LoopflowiOSTests]
+      targets: [LoopflowiOSTests, LoopflowiOSUITests]

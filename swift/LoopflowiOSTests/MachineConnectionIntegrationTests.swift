@@ -140,7 +140,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         try desktop.requestControl(size: TerminalGeometry(columns: 120, rows: 40))
         try await wait("Second viewer did not receive control") { desktopInput }
 
-        await workspace.reconnect()
+        await workspace.restoreForegroundSession()
         try await wait("Reconnection did not recover the unfinished draft") {
             workspace.state == .viewing && screen().contains("desktop draft + phone")
         }

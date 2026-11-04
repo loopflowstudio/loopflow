@@ -112,6 +112,7 @@ final class MobileWorkspace {
     private var replaying = false
     private var viewport: TerminalGeometry?
     private var sentViewport: TerminalGeometry?
+    private var reconnectOnForeground = false
     private(set) var tasks: [WorkViewPlan.Content] = []
     private(set) var isLoadingTasks = true
     private(set) var tasksError: String?
@@ -179,6 +180,7 @@ final class MobileWorkspace {
     }
 
     func open(_ task: WorkViewPlan.Content) async {
+        reconnectOnForeground = false
         let sameSession = selected?.primarySession == task.primarySession
         disconnect()
         if !sameSession {
@@ -195,7 +197,7 @@ final class MobileWorkspace {
         let opening = generation
         do {
             let link = try await client.attach(sessionID: session)
-            guard opening == generation else { link.close(); return }
+            guard opening == generation, !Task.isCancelled else { link.close(); return }
             guard link.sessionID == session else {
                 link.close()
                 state = .unavailable("The attachment belongs to a different Session")
@@ -256,12 +258,24 @@ final class MobileWorkspace {
         stopTaskUpdates()
         guard selected != nil else { return }
         switch state {
-        case .loading, .viewing, .requestingControl, .controlling: fail("Paused while the app is away")
-        case .disconnected, .unavailable, .ended: break
+        case .loading, .viewing, .requestingControl, .controlling:
+            reconnectOnForeground = true
+            fail("Paused while the app is away")
+        case .disconnected:
+            reconnectOnForeground = true
+        case .unavailable, .ended: break
         }
     }
 
+    /// One fresh observer attachment per return, never a background retry loop.
+    func restoreForegroundSession() async {
+        guard reconnectOnForeground, !Task.isCancelled else { return }
+        reconnectOnForeground = false
+        await reconnect()
+    }
+
     func leave() {
+        reconnectOnForeground = false
         disconnect()
         selected = nil
         render = nil

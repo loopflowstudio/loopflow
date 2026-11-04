@@ -52,8 +52,9 @@ chunks until canonical geometry arrives, detects event gaps and enforces size bo
 Input and geometry are distinct claims. Opening/reconnecting observes; Use keyboard
 explicitly takes control. The request waits for its replacement screen, and repeated
 taps cannot overlap takeover requests. The ordered bounded writer never retries
-raw input. Backgrounding disconnects; reconnect asks the same Session for a fresh
-screen and preserves provider-owned drafts. Missing/ended/mismatched Sessions have
+raw input. Backgrounding disconnects; returning opens one fresh observer attachment to the
+same Session and preserves provider-owned drafts. A failed attempt leaves explicit
+Reconnect; no background retry loop or input replay runs. Missing/ended/mismatched Sessions have
 no misleading keyboard or reconnect action.
 
 The observer viewport preserves the owner’s grid. Geometry control fits the phone;
@@ -322,3 +323,29 @@ skipped). Final all-target Clippy and seven shared Swift protocol tests passed.
 Logs: `/tmp/mobile-creation-native-final.log`, `/tmp/mobile-creation-validation-final.log`,
 `/tmp/mobile-terminal-regressions.log`, `/tmp/mobile-creation-tailscale.log`.
 Rendered captures are `demo-assets/mobile-create-ready-{light,dark,large-text}.png`.
+
+### Foreground restoration and operated keyboard — November 4, 03:00
+
+Returning from the background now automatically restores the selected Session as
+an observer. It never claims input/geometry or resends keys. A failed foreground
+attempt leaves the existing Reconnect action; ended/unavailable Sessions retain
+their explanation. Leaving the Session screen clears the pending restoration.
+Generation fencing closes an older attachment that completes after backgrounding.
+
+Twenty-one native terminal tests pass, including fresh-screen/draft restoration,
+no control/geometry takeover, one attempt per return, explicit retry after failure,
+leaving before restoration, and an attachment completing late. Actual Tailscale
+owner acceptance also passes through this restoration entry point at
+`Test-LoopflowiOS-2026.11.04_02-54-45--0800.xcresult`, preserving newer Desktop-sized
+control and exact input counts. Its temporary route was removed.
+
+The new LoopflowiOSUITests target operates the actual app in explicit fixture mode:
+Task tap, Use keyboard, system typing, Home, app activation, observer restoration,
+explicit takeover, continued typing. Captures show the unfinished draft, hidden
+keyboard on return and one 31-character submission after continuation. The peer
+requests a steady cursor using the terminal protocol; this avoids XCTest waiting
+60 seconds for repeating cursor animations. Live terminal styling is unchanged.
+This is operated Simulator/software-keyboard evidence, not a physical-phone or
+VoiceOver demonstration. The separate Tailscale proof uses the actual carrier.
+
+Checks: native terminal suite `/tmp/mobile-foreground-final-tests.log` (21 pass); operated app suite `Test-LoopflowiOS-2026.11.04_03-00-21--0800.xcresult` (1 pass); real carrier `/tmp/mobile-foreground-tailscale.log` (pass). Captures: `demo-assets/mobile-foreground-{keyboard-before,observer-return,keyboard-after}.png`.

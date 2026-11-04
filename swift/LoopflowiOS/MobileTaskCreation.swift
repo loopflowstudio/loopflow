@@ -24,12 +24,37 @@ protocol MobileTaskCreationClient {
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content
 }
 
+struct MobileSavedTaskRequest: Codable, Identifiable {
+    let submission: MobileTaskSubmission
+    var outcome: TaskCreateOutcome?
+    var id: UUID { submission.id }
+}
+
 struct MobileTaskDraft: Codable {
     var text = ""
     var directory = ""
     var machineID: String?
     var submission: MobileTaskSubmission?
     var outcome: TaskCreateOutcome?
+    var savedRequests: [MobileSavedTaskRequest] = []
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case text, directory, machineID, submission, outcome, savedRequests
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        text = try values.decode(String.self, forKey: .text)
+        directory = try values.decode(String.self, forKey: .directory)
+        machineID = try values.decodeIfPresent(String.self, forKey: .machineID)
+        submission = try values.decodeIfPresent(MobileTaskSubmission.self, forKey: .submission)
+        outcome = try values.decodeIfPresent(TaskCreateOutcome.self, forKey: .outcome)
+        // Preserve drafts saved before the local recovery list was introduced.
+        // This file is phone-owned UI state, not a Machine wire DTO.
+        savedRequests = try values.decodeIfPresent([MobileSavedTaskRequest].self, forKey: .savedRequests) ?? []
+    }
 }
 
 struct MobileTaskDraftStore {
@@ -103,9 +128,38 @@ final class MobileTaskCreation {
 
     @discardableResult
     func saveDraft() -> Bool {
+        persist(draft)
+    }
+
+    private func persist(_ next: MobileTaskDraft) -> Bool {
         guard !storageUnavailable else { return false }
-        do { try store.save(draft); return true }
-        catch { self.error = "Couldn’t save this draft. Nothing new was sent. \(error.localizedDescription)"; return false }
+        do { try store.save(next); draft = next; return true }
+        catch { self.error = "Couldn’t save your changes on this phone. \(error.localizedDescription)"; return false }
+    }
+
+    @discardableResult
+    func saveForLater() -> Bool {
+        guard !busy, let submission = draft.submission else { return false }
+        var next = draft
+        next.savedRequests.insert(MobileSavedTaskRequest(submission: submission, outcome: draft.outcome), at: 0)
+        next.submission = nil
+        next.outcome = nil
+        next.text = ""
+        if let context, next.machineID != context.machineID {
+            next.machineID = context.machineID
+            next.directory = context.repositories.first(where: { $0.error == nil })?.path ?? ""
+        }
+        guard persist(next) else { return false }
+        error = nil
+        return true
+    }
+
+    func savedRequest(_ id: UUID) -> MobileSavedTaskRequest? {
+        draft.savedRequests.first { $0.id == id }
+    }
+
+    func clearError() {
+        if !storageUnavailable { error = nil }
     }
 
     func prepare() async {
@@ -131,29 +185,39 @@ final class MobileTaskCreation {
     }
 
     /// Reusing this method after uncertain delivery always submits the saved intent.
-    func submit() async {
-        guard !busy, !storageUnavailable, !settled else { return }
-        if draft.submission == nil {
+    func submit(savedRequestID: UUID? = nil) async {
+        guard !busy, !storageUnavailable else { return }
+        let saved = savedRequestID.flatMap { savedRequest($0) }
+        if savedRequestID != nil && saved == nil { return }
+        let previous = savedRequestID == nil ? draft.outcome : saved?.outcome
+        if let previous, previous.state != .inProgress { return }
+        if savedRequestID == nil && draft.submission == nil {
             guard canCreate, let context else { return }
             draft.submission = MobileTaskSubmission(id: UUID(), machineID: context.machineID,
                 machineName: context.name, directory: draft.directory, request: draft.text)
         }
         // Even a failed local write leaves the same ID in memory for the next attempt.
-        guard saveDraft(), let submission = draft.submission else { return }
+        guard saveDraft(), let submission = saved?.submission ?? draft.submission else { return }
         busy = true
         error = nil
         defer { busy = false }
         do {
             let outcome = try await client.createTask(submission)
             try Task.checkCancellation()
-            if let previous = draft.outcome, previous.taskId != outcome.taskId {
+            if let previous, previous.taskId != outcome.taskId {
                 throw RegistryQueryError("The Machine returned a different Task for this request")
             }
             if let receipt = outcome.receipt, receipt.task.id != outcome.taskId {
                 throw RegistryQueryError("The Machine returned a receipt for a different Task")
             }
-            draft.outcome = outcome
-            _ = saveDraft()
+            var next = draft
+            if let savedRequestID {
+                guard let index = next.savedRequests.firstIndex(where: { $0.id == savedRequestID }) else { return }
+                next.savedRequests[index].outcome = outcome
+            } else {
+                next.outcome = outcome
+            }
+            _ = persist(next)
         } catch {
             if !Task.isCancelled {
                 self.error = "Couldn’t confirm the result. Check status to recover this same request. \(error.localizedDescription)"
@@ -161,8 +225,12 @@ final class MobileTaskCreation {
         }
     }
 
-    func openTask() async -> WorkViewPlan.Content? {
-        guard !busy, let submission = draft.submission, let outcome = draft.outcome else { return nil }
+    func openTask(savedRequestID: UUID? = nil) async -> WorkViewPlan.Content? {
+        guard !busy, !storageUnavailable else { return nil }
+        let saved = savedRequestID.flatMap { savedRequest($0) }
+        if savedRequestID != nil && saved == nil { return nil }
+        guard let submission = saved?.submission ?? draft.submission,
+              let outcome = savedRequestID == nil ? draft.outcome : saved?.outcome else { return nil }
         busy = true
         error = nil
         defer { busy = false }
@@ -171,12 +239,21 @@ final class MobileTaskCreation {
             try Task.checkCancellation()
             guard task.work.id == outcome.taskId else { throw RegistryQueryError("The Machine returned a different Task") }
             // Clear recovery only after a successful read; the list then opens this recorded Session.
-            var next = MobileTaskDraft()
-            next.directory = submission.directory
-            next.machineID = submission.machineID
-            try store.save(next)
-            draft = next
+            var next = draft
+            if let savedRequestID {
+                next.savedRequests.removeAll { $0.id == savedRequestID }
+            } else {
+                next.text = ""
+                next.submission = nil
+                next.outcome = nil
+                next.directory = submission.directory
+                next.machineID = submission.machineID
+            }
+            guard persist(next) else { return nil }
             return task
-        } catch { self.error = error.localizedDescription; return nil }
+        } catch {
+            if !Task.isCancelled { self.error = error.localizedDescription }
+            return nil
+        }
     }
 }

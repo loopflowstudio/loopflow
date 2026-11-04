@@ -92,9 +92,9 @@ cells without sending remote geometry changes.
    Open Task without rerunning the Graph. Existing-Task navigation stays passive.
    Desktop delegation and explicit create/start share Session owner startup exclusion.
    Verify actual dictation and software-keyboard layout on a physical phone. The
-   phone currently pairs one Machine and holds one pending creation; broader
-   multi-Machine selection and recovery history remain UX work. A permanently
-   unreachable Machine can leave that pending request needing explicit disposition.
+   phone still pairs one Machine. Save for later now moves a request into a
+   protected recovery list and frees the composer; inspecting/recovering it keeps
+   a newer draft intact. Broader multi-Machine selection remains UX work.
 6. Preserve useful telemetry: shared command/Process attribution, identity and
    connection diagnostics without duplicate provider usage or persisted terminal
    contents. Full Desktop Work cutover and installed update survival retain their
@@ -379,3 +379,30 @@ the line-selection fixture now pins its starting size and the final suite passes
 Simulator text size was restored. Captures:
 `demo-assets/mobile-large-{tasks,session,keyboard}.png`. Physical-phone gestures,
 dictation, VoiceOver and sustained-output energy remain acceptance work above.
+
+### Saved requests without blocking new work — November 4, 03:32
+
+Save for later atomically moves an active request and its optional result into
+the same protected local file, clearing only the composer. It does not cancel
+remote execution. Saved requests show original instructions/Machine/destination,
+check the same admission identity, and open the recorded Task. A newer draft is
+preserved throughout recovery. Failed local saves leave the request in place;
+canceled late replies cannot restore a record another sheet already opened.
+Existing on-phone drafts retain their data when the recovery-list field is absent.
+No credentials or second server admission path were added.
+
+Twelve creation tests pass, including lost replies/restart, re-pairing, local
+write failures, cancellation and the Save for later → Check status button path.
+Mounted UIKit/SwiftUI captures were inspected in both themes and accessibility
+text size (`demo-assets/mobile-saved-request*.png`). These are native view/model
+tests, not physical-phone gestures. `/tmp/mobile-saved-final.log` records the pass.
+
+Actual host-Tailscale acceptance also passes at
+`Test-LoopflowiOS-2026.11.04_03-31-33--0800.xcresult`: create a Task, save its
+confirmed request, reload it, recover the identical receipt and open its Session
+without submitting the newer draft. The real owner receives native input once;
+the isolated fixture records two provider starts for the two intended Sessions.
+This proves saved confirmed-result opening over the carrier; lost-result recovery
+is exercised by the separate native admission tests. The temporary Serve route
+was removed and the original empty configuration verified. Broader multi-Machine
+selection and the physical-phone acceptance above remain.

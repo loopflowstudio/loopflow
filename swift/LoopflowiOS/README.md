@@ -50,6 +50,13 @@ The request retains its original Machine and repository even after re-pairing;
 reconnect that Machine to recover it. A failed local draft save prevents sending.
 Drafts are protected local files excluded from backup; credentials stay in Keychain.
 
+Choose **Save for later** to keep an unresolved request and start a different
+draft. This does not cancel work on the Machine. **Saved requests** retains the
+original instructions, destination and any confirmed result across app restarts.
+Check status or open its Task there; your newer draft remains untouched. Recovery
+uses the original request identity and Machine. A failed save keeps the active
+request in place, and opening a saved Task removes only its recovery entry.
+
 The Task list uses one all-repository view subscription after checking Machine
 identity. Whole readings replace the list; pull-to-refresh confirms the current
 reading on that same connection. Leaving the list or backgrounding closes it.
@@ -175,7 +182,8 @@ opens the Task’s Session in UIKit, edits the existing draft, disconnects, lets
 second viewer take control, reconnects passively at the owner’s geometry, then
 explicitly takes control and submits. It then creates a Task through the native
 creation model, recovers the same receipt, opens its recorded terminal, and types
-into it. Rust asserts exactly two provider launches (one existing, one explicitly
+into it. It also saves that request for later, reloads it and opens it while
+preserving a separate unsent draft. Rust asserts exactly two provider launches (one existing, one explicitly
 created) and both exact submissions. The native log is `swift/.build/mobile-acceptance.log`. Remove
 only the temporary Serve route afterward; never reset unrelated host routes.
 

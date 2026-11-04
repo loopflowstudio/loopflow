@@ -20,6 +20,15 @@ struct MobileNewTaskView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    if !model.draft.savedRequests.isEmpty {
+                        NavigationLink {
+                            MobileSavedRequestsView(model: model, theme: theme) { task in onOpen(task); dismiss() }
+                        } label: {
+                            Label("Saved requests (\(model.draft.savedRequests.count))", systemImage: "tray")
+                                .font(Typography.strong(15))
+                                .frame(minHeight: 44)
+                        }
+                    }
                     VStack(alignment: .leading, spacing: 10) {
                         Text("What would you like to work on?")
                             .font(Typography.strong(24))
@@ -44,16 +53,9 @@ struct MobileNewTaskView: View {
                     }
                     destination
                     if let outcome = model.draft.outcome {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label(statusTitle(outcome), systemImage: outcome.state == .started ? "checkmark.circle" : "info.circle")
-                                .font(Typography.strong(17))
-                            if let receipt = outcome.receipt {
-                                Text("\(receipt.task.identifier) · \(receipt.task.title)").font(Typography.body(15))
-                            }
-                            if let message = outcome.message { Text(message).font(Typography.body(14)) }
-                        }
+                        MobileCreationResult(outcome: outcome)
                     } else if model.draft.submission != nil {
-                        Text("Your request is saved. Check its status before starting anything else.")
+                        Text("Your request may already be running. Check its status now or save it for later. Saving does not cancel work on your Machine.")
                             .font(Typography.body(14))
                     }
                     if let error = model.error {
@@ -142,18 +144,13 @@ struct MobileNewTaskView: View {
                     Button("Retry connection") { action = Task { await model.prepare() } }
                 }
             }
+            if !model.busy && model.draft.submission != nil {
+                Button("Save for later") { editing = false; model.saveForLater() }
+                    .font(Typography.strong(15)).frame(minHeight: 44)
+            }
         }
         .frame(maxWidth: .infinity).padding(16)
         .background(theme.palette.background)
-    }
-
-    private func statusTitle(_ outcome: TaskCreateOutcome) -> String {
-        switch outcome.state {
-        case .inProgress: "Your Task is starting"
-        case .started: "Your Task is ready"
-        case .failed: "Task created; start needs attention"
-        case .unknown: "Task created; start could not be confirmed"
-        }
     }
 
     private func submit() async {
@@ -162,5 +159,135 @@ struct MobileNewTaskView: View {
             onOpen(task)
             dismiss()
         }
+    }
+}
+
+private struct MobileCreationResult: View {
+    let outcome: TaskCreateOutcome
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(Self.title(outcome), systemImage: outcome.state == .started ? "checkmark.circle" : "info.circle")
+                .font(Typography.strong(17))
+            if let receipt = outcome.receipt {
+                Text("\(receipt.task.identifier) · \(receipt.task.title)").font(Typography.body(15))
+            }
+            if let message = outcome.message { Text(message).font(Typography.body(14)) }
+        }
+    }
+
+    static func title(_ outcome: TaskCreateOutcome) -> String {
+        switch outcome.state {
+        case .inProgress: "Your Task is starting"
+        case .started: "Your Task is ready"
+        case .failed: "Task created; start needs attention"
+        case .unknown: "Task created; start could not be confirmed"
+        }
+    }
+}
+
+struct MobileSavedRequestsView: View {
+    let model: MobileTaskCreation
+    let theme: ThemeDefinition
+    let onOpen: (WorkViewPlan.Content) -> Void
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(model.draft.savedRequests) { request in
+                    NavigationLink {
+                        MobileSavedTaskRequestView(id: request.id, model: model, theme: theme, onOpen: onOpen)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(request.outcome?.receipt?.task.title ?? request.submission.request)
+                                .font(Typography.strong(17)).lineLimit(3)
+                            Label(request.submission.machineName, systemImage: "desktopcomputer")
+                                .font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
+                            Text(request.outcome.map(MobileCreationResult.title) ?? "Result not confirmed")
+                                .font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .listRowBackground(theme.palette.surface)
+                }
+            } footer: {
+                Text("Saving a request does not cancel it. Reconnect its original Machine to check the result or open the Task. Your new draft stays separate.")
+                    .font(Typography.body(14))
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.background)
+        .foregroundStyle(theme.palette.text)
+        .navigationTitle("Saved requests")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct MobileSavedTaskRequestView: View {
+    let id: UUID
+    let model: MobileTaskCreation
+    let theme: ThemeDefinition
+    let onOpen: (WorkViewPlan.Content) -> Void
+    @State private var action: Task<Void, Never>?
+
+    var body: some View {
+        ScrollView {
+            if let request = model.savedRequest(id) {
+                VStack(alignment: .leading, spacing: 20) {
+                    Label(request.submission.machineName, systemImage: "desktopcomputer")
+                        .font(Typography.strong(17))
+                    Text(request.submission.directory)
+                        .font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
+                        .textSelection(.enabled)
+                    Text(request.submission.request).font(Typography.body(17)).textSelection(.enabled)
+                    if let outcome = request.outcome {
+                        MobileCreationResult(outcome: outcome)
+                    } else {
+                        Text("The result hasn’t been confirmed. Checking status recovers this exact request on its original Machine.")
+                            .font(Typography.body(14))
+                    }
+                    if let context = model.context, context.machineID != request.submission.machineID {
+                        Text("Reconnect \(request.submission.machineName) to continue. Nothing will be sent to \(context.name).")
+                            .font(Typography.body(14)).foregroundStyle(theme.palette.textSecondary)
+                    }
+                    if let error = model.error {
+                        Text(error).font(Typography.body(14)).foregroundStyle(theme.palette.warning)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+            }
+        }
+        .background(theme.palette.background)
+        .foregroundStyle(theme.palette.text)
+        .navigationTitle("Saved request")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            VStack {
+                if model.busy {
+                    ProgressView("Checking your Task…").frame(minHeight: 44)
+                } else if let request = model.savedRequest(id) {
+                    if let outcome = request.outcome, outcome.state != .inProgress {
+                        Button("Open Task") { action = Task { await open() } }
+                            .buttonStyle(.borderedProminent).controlSize(.large)
+                    } else {
+                        Button("Check status") {
+                            action = Task {
+                                await model.submit(savedRequestID: id)
+                                if model.savedRequest(id)?.outcome?.state == .started { await open() }
+                            }
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.large)
+                    }
+                }
+            }
+            .tint(theme.palette.accent).foregroundStyle(theme.palette.accentText)
+            .frame(maxWidth: .infinity).padding(16).background(theme.palette.background)
+        }
+        .onAppear { model.clearError() }
+        .onDisappear { action?.cancel(); model.clearError() }
+    }
+
+    private func open() async {
+        if let task = await model.openTask(savedRequestID: id) { onOpen(task) }
     }
 }

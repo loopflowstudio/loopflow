@@ -2,11 +2,170 @@ import Foundation
 import Loopflow
 import SwiftUI
 import UIKit
+import ViewInspector
 import XCTest
 @testable import LoopflowiOS
 
 @MainActor
 final class MobileTaskCreationTests: XCTestCase {
+    func testSavedRequestRecoversAfterRestartWithoutLosingNewDraft() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Original work after a lost reply")
+        client.loseReply = true
+        await model.submit()
+        let original = try XCTUnwrap(model.draft.submission)
+        XCTAssertTrue(model.saveForLater())
+        XCTAssertFalse(model.saveForLater(), "Saving twice cannot duplicate recovery records")
+        XCTAssertNil(model.draft.submission)
+        XCTAssertEqual(model.savedRequest(original.id)?.submission, original)
+        model.editText("A different idea, still being edited")
+        model.selectRepository("/work/second")
+        XCTAssertTrue(model.canCreate)
+        XCTAssertTrue(model.saveDraft())
+
+        let restored = MobileTaskCreation(client: client, store: store)
+        await restored.prepare()
+        await restored.submit(savedRequestID: original.id)
+        XCTAssertEqual(client.requests, [original, original])
+        XCTAssertEqual(restored.savedRequest(original.id)?.outcome?.state, .started)
+        let opened = await restored.openTask(savedRequestID: original.id)
+        XCTAssertEqual(opened?.work, client.task.work)
+        let remaining = try store.load()
+        XCTAssertTrue(remaining.savedRequests.isEmpty)
+        XCTAssertEqual(remaining.text, "A different idea, still being edited")
+        XCTAssertEqual(remaining.directory, "/work/second")
+        XCTAssertNil(remaining.submission)
+        await restored.submit(savedRequestID: original.id)
+        XCTAssertEqual(client.requests.count, 2, "A removed request cannot fall back to submitting the new draft")
+    }
+
+    func testSavingOriginalMachineRequestAllowsNewWorkWithoutRetargetingRecovery() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Work on the first Machine")
+        client.loseReply = true
+        await model.submit()
+        let original = try XCTUnwrap(model.draft.submission)
+        client.machineID = "machine-b"
+        await model.prepare()
+        XCTAssertNotNil(model.error)
+        XCTAssertTrue(model.saveForLater())
+        XCTAssertNil(model.error)
+        model.editText("Different work on the second Machine")
+        await model.submit()
+        let second = try XCTUnwrap(model.draft.submission)
+        XCTAssertEqual(second.machineID, "machine-b")
+        XCTAssertNotEqual(original.id, second.id)
+        XCTAssertEqual(model.savedRequest(original.id)?.submission, original)
+        await model.submit(savedRequestID: original.id)
+        XCTAssertEqual(client.requests, [original, second], "Recovery cannot go to the newly paired Machine")
+        XCTAssertNil(model.savedRequest(original.id)?.outcome)
+        let opened = await model.openTask()
+        XCTAssertNotNil(opened)
+        XCTAssertEqual(try store.load().savedRequests.first?.submission, original)
+    }
+
+    func testSavingForLaterAndRecoveryKeepRequestOnLocalWriteFailure() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Keep this recoverable")
+        await model.submit()
+        let original = try XCTUnwrap(model.draft.submission)
+        let bytes = try Data(contentsOf: store.url)
+        try FileManager.default.removeItem(at: store.url)
+        try FileManager.default.createDirectory(at: store.url, withIntermediateDirectories: true)
+        XCTAssertFalse(model.saveForLater())
+        XCTAssertEqual(model.draft.submission, original)
+        XCTAssertTrue(model.draft.savedRequests.isEmpty)
+        try FileManager.default.removeItem(at: store.url)
+        try bytes.write(to: store.url)
+        XCTAssertTrue(model.saveForLater())
+        client.readUnavailable = true
+        let missing = await model.openTask(savedRequestID: original.id)
+        XCTAssertNil(missing)
+        XCTAssertEqual(try store.load().savedRequests.first?.submission, original)
+    }
+
+    func testCanceledSavedRecoveryCannotRestoreAnAlreadyOpenedRequest() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Recover once")
+        client.loseReply = true
+        await model.submit()
+        let original = try XCTUnwrap(model.draft.submission)
+        XCTAssertTrue(model.saveForLater())
+        client.delayReply = true
+        let checking = Task { await model.submit(savedRequestID: original.id) }
+        while client.reply == nil { await Task.yield() }
+        checking.cancel()
+        let restored = MobileTaskCreation(client: client, store: store)
+        await restored.submit(savedRequestID: original.id)
+        let opened = await restored.openTask(savedRequestID: original.id)
+        XCTAssertNotNil(opened)
+        client.reply?.resume()
+        await checking.value
+        XCTAssertTrue(try store.load().savedRequests.isEmpty)
+    }
+
+    func testExistingLocalDraftGainsEmptyRecoveryList() throws {
+        let draft = try JSONDecoder().decode(MobileTaskDraft.self,
+            from: Data(#"{"text":"An unfinished idea","directory":"/work/first","machineID":"machine-a"}"#.utf8))
+        XCTAssertEqual(draft.text, "An unfinished idea")
+        XCTAssertTrue(draft.savedRequests.isEmpty)
+    }
+
+    func testSaveForLaterButtonAndSavedRecoveryScreens() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Make the Task sidebar easier to scan, preserving the work already running.")
+        client.loseReply = true
+        await model.submit()
+        let id = try XCTUnwrap(model.draft.submission?.id)
+        let composer = MobileNewTaskView(model: model, theme: .light, onOpen: { _ in })
+        try composer.inspect().find(button: "Save for later").tap()
+        XCTAssertNil(model.draft.submission)
+        model.editText("An unrelated draft must remain here")
+        for (name, style, size) in [("light", ColorScheme.light, DynamicTypeSize.large),
+                                    ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
+            let theme = style == .dark ? ThemeDefinition.dark : .light
+            let list = NavigationStack {
+                MobileSavedRequestsView(model: model, theme: theme, onOpen: { _ in })
+            }.environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+            try await capture(list, name: "saved-requests-\(name)")
+            let detail = NavigationStack {
+                MobileSavedTaskRequestView(id: id, model: model, theme: theme, onOpen: { _ in })
+            }.environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+            try await capture(detail, name: "saved-request-\(name)")
+        }
+        XCTAssertEqual(model.draft.text, "An unrelated draft must remain here")
+        XCTAssertEqual(client.requests.count, 1, "Opening saved screens must never resend a request")
+        var opened: WorkViewPlan.Content?
+        let detail = MobileSavedTaskRequestView(id: id, model: model, theme: .light) { opened = $0 }
+        try detail.inspect().find(button: "Check status").tap()
+        let deadline = Date().addingTimeInterval(2)
+        while opened == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(opened?.work, client.task.work)
+        XCTAssertEqual(model.draft.text, "An unrelated draft must remain here")
+        XCTAssertNil(model.savedRequest(id))
+        XCTAssertEqual(client.requests.first, client.requests.last)
+    }
+
     func testCreationSheetRendersInBothThemesAndLargeText() async throws {
         let client = try await CreationClient()
         let store = temporaryStore()
@@ -18,26 +177,7 @@ final class MobileTaskCreationTests: XCTestCase {
                                     ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
             let view = MobileNewTaskView(model: model, theme: style == .dark ? .dark : .light, onOpen: { _ in })
                 .environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
-            let controller = UIHostingController(rootView: view)
-            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-            let previous = scene.keyWindow
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-            window.rootViewController = controller
-            window.makeKeyAndVisible()
-            controller.view.frame = window.bounds
-            controller.view.layoutIfNeeded()
-            // Let SwiftUI install its navigation and safe-area layout.
-            try await Task.sleep(for: .milliseconds(250))
-            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-                XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
-            }
-            let attachment = XCTAttachment(image: image)
-            attachment.name = "new-task-\(name)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-            window.isHidden = true
-            previous?.makeKey()
+            try await capture(view, name: "new-task-\(name)")
         }
     }
 
@@ -163,6 +303,29 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertTrue(client.requests.isEmpty)
     }
 
+    private func capture<Content: View>(_ view: Content, name: String) async throws {
+        let controller = UIHostingController(rootView: view)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        // Let SwiftUI install its navigation and safe-area layout.
+        try await Task.sleep(for: .milliseconds(250))
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        window.isHidden = true
+        previous?.makeKey()
+    }
+
     private func temporaryStore() -> MobileTaskDraftStore {
         MobileTaskDraftStore(url: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString).appending(path: "draft.json"))
     }
@@ -202,6 +365,7 @@ private final class CreationClient: MobileTaskCreationClient {
     }
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
+        guard submission.machineID == machineID else { throw RegistryQueryError("Different Machine") }
         if readUnavailable { throw RegistryQueryError("Workspace not ready") }
         return task
     }

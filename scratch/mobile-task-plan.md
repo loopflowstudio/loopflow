@@ -53,7 +53,9 @@ interrupted launch reports unknown without replay. F now has the native sheet,
 durable draft/destination and explicit terminal startup through the shared owner.
 Host-Tailscale native acceptance creates, recovers the same receipt, opens the
 recorded Session and submits native text once. Existing navigation remains passive.
-Physical dictation/keyboard use and broader multi-Machine/pending-request UX remain.
+Saved requests now free the composer without losing original admission identity,
+destination or results; their recovery preserves a newer unsent draft. Physical
+dictation/keyboard use and broader multi-Machine selection remain.
 Ordinary `resume --json` stays attached until its relay returns; the explicit
 creation acknowledgement does not make the command pipe a terminal transport.
 

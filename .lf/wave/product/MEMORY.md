@@ -270,33 +270,22 @@ Jack Heart's LOO-386 approval and superseded Workflow/Flow vocabulary remain at
 `fb382a7d45:.lf/wave/product/MEMORY.md`, **Workflow and Flow alignment**.
 That approval established no native/provider acceptance or chapter KR.
 
-## Task conversation and Workflows (LOO-353, reconciled 2026-10-17)
+## Task conversation and Graphs (reconciled 2026-11-03)
 
-Jack Heart approved the October 6 fixture Task view and landing; no configured
-provider or populated live store was shown. History and evidence limits: `28dc141671:.lf/wave/product/MEMORY.md`, this heading;
-design/demo: `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
-`questions.md`, `task-workflow.md`, `demo-task-workflow.md`).
+Jack Heart approved LOO-353's October 6 fixture Task view and landing; no configured
+provider or populated live store was shown. Superseded mechanics and evidence:
+`324a0f6dc45f43b608408b2b4a0f9403c236da20:.lf/wave/product/MEMORY.md`,
+“Task conversation and Workflows”.
 
-- One ongoing Task conversation holds review; additional Sessions are deliberate.
-  Interactive Session and headless Run share LfSession continuity. Association
-  includes checkout and explicit binds, excluding repository/Wave conversations.
-- Jack removed Task workers, mutable Flow switching, automatic recovery and the
-  Session ready/complete handshake. Hiding/selecting never terminates or approves.
-  Stopped Flows are history; caller-owned recovery starts authorized remaining work.
-- Workflow is a captured graph with live position. Restart preserves graph/history;
-  October 17's Task → Wave → repository selection replaces Project defaults.
-  Completion remains independent under LOO-418. Each Flow process is equal work;
-  `--steers-after` filters nodes without restarting them.
-- Task pages consume the Work stream; the header owns Workflow presentation beside
-  retained conversations/shells/files/logs. Monitor, Session-sidebar toggle and Flow chip remain retired.
-- Whole failed Flows currently retry three times; held exit 3 stays held. LOO-435
-  owns failed-step retry. Driver death and step-registration gaps retain uncertain
-  liveness; disabled Desktop Start does not exclude another CLI run. Nonreporter
-  Waiting and lone headless-skill visibility remain unresolved as archived.
+Jack removed Task workers, automatic recovery and the Session ready/complete
+handshake. One ongoing Task conversation holds review; additional Sessions are
+deliberate. Hiding/selecting never terminates or approves.
 
-Lessons: capture the model before records; delete jobs with their replacements.
-Upsert when revisions depend on update triggers (`INSERT OR REPLACE` skips them).
-SQL can compile against removed columns; focused passes do not replace suites.
+Monitor, Session-sidebar toggle and Flow chip stay retired. Archived driver gaps,
+nonreporter Waiting and lone-run visibility remain unresolved.
+
+Lessons: capture models before records; delete replaced jobs. Upsert for update
+triggers (`INSERT OR REPLACE` skips them). SQL can compile against removed columns.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -946,12 +935,29 @@ lfd and resident-cron contracts remain in
 
 ## Swift data path — RegistryQuery is the single reader
 
-Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
-Unknown wire status stays explicit. LOO-500 (2026-11-02) removed Desktop's
-filesystem placeholder scan: surviving files resurfaced retired Waves. Explicit
-writes register directories; reads list store rows only.
-AGENTS.md owns shared runtime vocabulary; earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
-`92d95edfe:wave/product/MEMORY.md`, this heading.
+RegistryQuery retains domain DTOs while transport changes. LOO-593 (Jack Heart,
+November 3, 2026) selects an installed local Machine service through interactive
+demo, without Auto-Ship. Roadmap read/watch and Session rename now cross its
+private socket without FFI fallback; other Work glue remains for the full cutover.
+The service reuses Rust Read/Subscription, delegates complete CLI commands and
+bridges existing Session owners. Desktop UI automation remains app-owned.
+
+Historical lfd already shared engine functions; complete-operation and lifecycle
+ownership still drifted. Sharing a crate alone prevents neither defect. Preserve
+one installation authority and execution owners, with no new scheduler/retention
+policy. Request IDs correlate; uncertain commands and terminal input never replay
+automatically. Same-user Unix trust cannot authenticate a remote proxy.
+
+Separate registrar and launchd-restart fixtures establish neither installed-binary
+replacement with active Work nor native continuity or usage-accounting acceptance.
+LOO-718's native iOS client consumes the contract. Roadmap membership cannot pick a
+primary Session: existing ViewPlan contents select it; owner lookup starts nothing.
+Remote carrier, unattended hosting and takeover UX remain open.
+
+LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
+files resurfaced retired Waves. Writes register directories; reads list store
+rows only. Unknown wire status stays explicit. Earlier transport/vocabulary:
+`324a0f6dc45f43b608408b2b4a0f9403c236da20:.lf/wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
 

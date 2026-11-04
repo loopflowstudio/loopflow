@@ -194,12 +194,7 @@ impl Fixture {
     }
     #[track_caller]
     fn attach(&self, id: &str, request: Value) -> Viewer {
-        let mut viewer = self.connect(id);
-        viewer.request(request);
-        let attached = viewer.until_reply();
-        assert_eq!(attached["kind"], "attached", "{attached}");
-        viewer.accept(&attached);
-        viewer
+        self.connect(id).attach(request)
     }
     fn connect(&self, id: &str) -> Viewer {
         let socket = UnixStream::connect(self.endpoint(id)).unwrap_or_else(|e| {
@@ -209,19 +204,7 @@ impl Fixture {
                 self.home.path().display()
             )
         });
-        socket
-            .set_read_timeout(Some(Duration::from_secs(15)))
-            .unwrap();
-        Viewer {
-            socket,
-            token: None,
-            id: String::new(),
-            reconnect: String::new(),
-            nonce: String::new(),
-            received: 0,
-            wire: 0,
-            ids: 0,
-        }
+        Viewer::new(socket)
     }
     fn sql(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
@@ -458,6 +441,31 @@ struct Viewer {
     ids: u64,
 }
 impl Viewer {
+    fn new(socket: UnixStream) -> Self {
+        socket
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        Self {
+            socket,
+            token: None,
+            id: String::new(),
+            reconnect: String::new(),
+            nonce: String::new(),
+            received: 0,
+            wire: 0,
+            ids: 0,
+        }
+    }
+
+    #[track_caller]
+    fn attach(mut self, request: Value) -> Self {
+        self.request(request);
+        let attached = self.until_reply();
+        assert_eq!(attached["kind"], "attached", "{attached}");
+        self.accept(&attached);
+        self
+    }
+
     fn request(&mut self, mut value: Value) -> u64 {
         self.ids += 1;
         value["id"] = json!(self.ids);
@@ -3883,23 +3891,9 @@ impl<'a> MachineServiceProof<'a> {
     fn viewer(&self, owner: &str) -> Viewer {
         let (socket, response) = self.request("attach", json!({"kind":"attach","owner":owner}));
         assert_eq!(response["result"]["kind"], "bridged");
-        let mut viewer = Viewer {
-            socket,
-            token: None,
-            id: String::new(),
-            reconnect: String::new(),
-            nonce: String::new(),
-            received: 0,
-            wire: 0,
-            ids: 0,
-        };
-        viewer.request(
+        Viewer::new(socket).attach(
             json!({"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80}),
-        );
-        let attached = viewer.until_reply();
-        assert_eq!(attached["kind"], "attached");
-        viewer.accept(&attached);
-        viewer
+        )
     }
 }
 

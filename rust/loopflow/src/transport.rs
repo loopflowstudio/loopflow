@@ -1773,6 +1773,59 @@ pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     attach_with_terminal(id, moved, terminal)
 }
 
+/// A reconnect token, byte position and partial event scanner describe one
+/// retained output stream. A fresh screen replaces all three together.
+#[derive(Default)]
+struct RelayOutput {
+    reconnect: Option<String>,
+    received: u64,
+    scanner: Option<Scanner>,
+    replayed_claims_through: Option<u64>,
+}
+
+impl RelayOutput {
+    fn recover(&mut self, terminal: bool) -> Request {
+        // The local prompt changed a terminal's screen. Replace it with the
+        // owner's current screen; byte streams can continue without repaint.
+        if !terminal {
+            if let Some(reconnect) = &self.reconnect {
+                let (rows, cols) = size();
+                return Request::Resume(Resume {
+                    reconnect: reconnect.clone(),
+                    received: self.received,
+                    control: true,
+                    own: Some(Own::Request),
+                    rows,
+                    cols,
+                });
+            }
+        }
+        self.fresh_attachment(true)
+    }
+
+    fn fresh_attachment(&mut self, control: bool) -> Request {
+        *self = Self::default();
+        let (rows, cols) = size();
+        Request::Attach {
+            control,
+            replace: false,
+            own: control.then_some(Own::Request),
+            rows,
+            cols,
+            name: tty_name(libc::STDIN_FILENO),
+            moved: None,
+        }
+    }
+
+    fn attached(&mut self, reconnect: String, nonce: &str, sequence: u64) {
+        self.replayed_claims_through = self.reconnect.as_ref().map(|_| sequence);
+        if self.reconnect.is_none() {
+            self.scanner = Some(Scanner::new(nonce));
+        }
+        self.reconnect = Some(reconnect);
+    }
+}
+
 fn attach_with_terminal(
     id: &LfProcessId,
     moved: Option<String>,
@@ -1803,19 +1856,15 @@ fn attach_with_terminal(
         },
     )?;
     let mut decoder = Decoder::default();
-    let mut scanner: Option<Scanner> = None;
+    let mut output = RelayOutput::default();
     let mut controlled = false;
     let mut owned = false;
     let mut returning = None;
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = crate::terminal_title::ViewerTitle::new(id);
-    let mut reconnect: Option<String> = None;
-    let mut received = 0;
     let mut interrupted: Option<String> = None;
     let mut recovering = false;
-    let mut resuming = false;
-    let mut claim_sequence = 0;
     'relay: loop {
         if let Some(reason) = interrupted.take() {
             // Close the old bridge before asking the owner for its free claims.
@@ -1829,25 +1878,7 @@ fn attach_with_terminal(
             controlled = false;
             owned = false;
             recovering = true;
-            // The local prompt changed a terminal's screen. Replace it with the
-            // owner's current screen; byte streams can continue without repaint.
-            resuming = terminal.is_none() && reconnect.is_some();
-            let (rows, cols) = size();
-            let request = if resuming {
-                Request::Resume(Resume {
-                    reconnect: reconnect.clone().expect("resume has a token"),
-                    received,
-                    control: true,
-                    own: Some(Own::Request),
-                    rows,
-                    cols,
-                })
-            } else {
-                reconnect = None;
-                received = 0;
-                recovery_attachment(true)
-            };
-            if let Err(error) = send(&mut socket, request) {
+            if let Err(error) = send(&mut socket, output.recover(terminal.is_some())) {
                 interrupted = Some(error.to_string());
                 continue;
             }
@@ -1903,7 +1934,7 @@ fn attach_with_terminal(
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 if tag != Tag::Reply {
-                    received += payload.len() as u64;
+                    output.received += payload.len() as u64;
                 }
                 let pieces = match tag {
                     Tag::Reply => {
@@ -1921,11 +1952,7 @@ fn attach_with_terminal(
                                 acknowledgement_deadline = None;
                                 controlled = claim.is_some();
                                 owned = owner.as_ref() == Some(&viewer);
-                                reconnect = Some(token);
-                                if !resuming {
-                                    scanner = Some(Scanner::new(&nonce));
-                                }
-                                claim_sequence = reply.seq;
+                                output.attached(token, &nonce, reply.seq);
                                 if recovering {
                                     discard_reconnect_input()?;
                                     fds[1].revents = 0;
@@ -1953,18 +1980,15 @@ fn attach_with_terminal(
                             Reply::Busy if recovering => {
                                 // A fresh screen cannot atomically ask for optional
                                 // input. On Busy, attach passively to the same owner.
-                                if let Err(error) = send(&mut socket, recovery_attachment(false)) {
+                                if let Err(error) = send(&mut socket, output.fresh_attachment(false)) {
                                     interrupted = Some(error.to_string());
                                     continue 'relay;
                                 }
                             }
                             Reply::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                             Reply::ReconnectRequired if recovering => {
-                                resuming = false;
-                                reconnect = None;
-                                received = 0;
                                 write_output(&mut terminal, 2, b"\r\nRetained output expired; reading the same owner's current screen.\r\n")?;
-                                if let Err(error) = send(&mut socket, recovery_attachment(true)) {
+                                if let Err(error) = send(&mut socket, output.fresh_attachment(true)) {
                                     interrupted = Some(error.to_string());
                                     continue 'relay;
                                 }
@@ -1976,7 +2000,8 @@ fn attach_with_terminal(
                         }
                         continue;
                     }
-                    Tag::Snapshot | Tag::Out => scanner
+                    Tag::Snapshot | Tag::Out => output
+                        .scanner
                         .as_mut()
                         .context("Execution owner streamed before acknowledging attachment")?
                         .scan(&payload),
@@ -1993,7 +2018,9 @@ fn attach_with_terminal(
                         // The acknowledgement describes current claims. Replayed
                         // old notices cannot revoke them or resume a provider.
                         wire::Piece::Event(seq, Event::Control { .. } | Event::Owner { .. })
-                            if resuming && seq <= claim_sequence =>
+                            if output
+                                .replayed_claims_through
+                                .is_some_and(|last| seq <= last) =>
                         {
                             continue
                         }
@@ -2100,19 +2127,6 @@ fn attach_with_terminal(
                 interrupted = Some(error.to_string());
             }
         }
-    }
-}
-
-fn recovery_attachment(control: bool) -> Request {
-    let (rows, cols) = size();
-    Request::Attach {
-        control,
-        replace: false,
-        own: control.then_some(Own::Request),
-        rows,
-        cols,
-        name: tty_name(libc::STDIN_FILENO),
-        moved: None,
     }
 }
 

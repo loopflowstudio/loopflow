@@ -1,6 +1,6 @@
 // The local macOS registry query: `RegistryQuery` over this Machine. The Work
-// watches, served reads and served writes run in the app through Loopflow's
-// library; other commands, writes `lf` sends to another Machine, and the remote
+// roadmap read/watch and Session rename use the Machine service. Other served
+// operations still use Loopflow's library; commands sent to another Machine and the remote
 // Task file watch run the bundled `lf` off the main actor so a slow one never
 // stalls the UI.
 

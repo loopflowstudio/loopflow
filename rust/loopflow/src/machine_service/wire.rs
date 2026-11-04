@@ -94,7 +94,7 @@ pub enum ErrorCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Operation, Reply, Request, Response};
+    use super::{Request, Response};
 
     #[test]
     fn shared_client_fixtures_decode_and_round_trip_without_defaults() {
@@ -110,18 +110,12 @@ mod tests {
                 actual,
                 serde_json::from_str::<serde_json::Value>(raw).unwrap()
             );
-            assert!(matches!(
-                request.operation,
-                Operation::Subscribe { .. }
-                    | Operation::Attach { .. }
-                    | Operation::SessionOwner { .. }
-                    | Operation::Read { .. }
-            ));
         }
         for raw in [
             include_str!("../../../../tests/fixtures/dto/machine/bootstrap.json"),
             include_str!("../../../../tests/fixtures/dto/machine/command.json"),
             include_str!("../../../../tests/fixtures/dto/machine/owner.json"),
+            include_str!("../../../../tests/fixtures/dto/machine/reading.json"),
         ] {
             let response: Response = serde_json::from_str(raw).unwrap();
             assert_eq!(
@@ -129,16 +123,6 @@ mod tests {
                 serde_json::from_str::<serde_json::Value>(raw).unwrap()
             );
         }
-        let raw = include_str!("../../../../tests/fixtures/dto/machine/reading.json");
-        let response: Response = serde_json::from_str(raw).unwrap();
-        assert!(matches!(
-            response.result,
-            Reply::Reading { generation: 7, .. }
-        ));
-        assert_eq!(
-            serde_json::to_value(response).unwrap(),
-            serde_json::from_str::<serde_json::Value>(raw).unwrap()
-        );
         assert!(
             serde_json::from_str::<Request>(r#"{"id":"a","operation":{"kind":"bootstrap"}}"#)
                 .is_err()

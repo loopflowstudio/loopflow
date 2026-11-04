@@ -179,7 +179,7 @@ Preserve these obligations:
   bounded; do not persist every snapshot or terminal byte. Exact additional
   latency/queue/reconnect metrics and retention remain implementation choices.
 
-Checks: `cargo test -p loopflow --test transport_tests machine_service_reconnect_` — 3 passed; `cargo test -p loopflow --test transport_tests machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart` — 1 passed with the real relay attached; shared-contract checks from the preceding pass remain applicable (`machine_service::` 3 passed; Swift `MachineProtocolTests` 4 passed). `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; the expired-output proof passed again after clearing an obsolete reconnect token on fresh attachment. Gate/demo own the acceptance above, including the complete transport suite and Linux Clippy. Earlier supervisor/Swift evidence: `5b44a394cff91d0aa20c614c3b20c3f7e121affb:scratch/mobile-backend.md`.
+Checks: `cargo test -p loopflow --test transport_tests machine_service_` — 5 passed, 1 supervisor test deferred to gate; `cargo test -p loopflow --lib machine_service::` — 3 passed (macOS debug linker warned about unwind-table size); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed. Retained output state now resets together; direct/bridged viewer setup and wire round-trip checks share their existing fixtures. Earlier supervisor/Swift evidence: `d168ef82e570b8950721761f3b0170524298f7ac:scratch/mobile-backend.md`. Gate/demo retain the acceptance above, including the full transport suite and Linux Clippy.
 
 ## Later work and parallel boundaries
 

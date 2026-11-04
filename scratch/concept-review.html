@@ -3,71 +3,63 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-593 · Retry only reconnects</title>
+<title>LOO-593 · Server concepts reviewed</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf9f5;--ink:#202824;--muted:#5b665f;--line:#ccd2c9;--accent:#1b6151;--panel:#eef2eb}
 @media(prefers-color-scheme:dark){:root{--bg:#17201c;--ink:#eef2e9;--muted:#b4c0b7;--line:#42534a;--accent:#93d9bd;--panel:#24342b}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.6 system-ui,sans-serif}main{max-width:850px;margin:auto;padding:56px 28px 80px}header{margin-bottom:48px}.meta{font-size:13px;color:var(--muted)}h1{font:clamp(36px,7vw,58px)/1.08 Georgia,serif;letter-spacing:-.035em;margin:20px 0}h2{font:30px/1.2 Georgia,serif;margin:44px 0 16px}h3{font-size:19px;margin:24px 0 6px}p{margin:12px 0}a{color:var(--accent);text-underline-offset:3px}code{font:0.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{padding:20px;background:var(--panel);white-space:pre-wrap;font-size:15px;line-height:1.65}table{border-collapse:collapse;width:100%;font-size:16px}td,th{padding:14px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500}.decision{border-left:3px solid var(--accent);padding-left:20px}.note{color:var(--muted);font-size:15px}li{margin:10px 0}ol{padding-left:25px}@media(max-width:560px){main{padding:30px 18px 50px}table{font-size:14px}td,th{padding:10px 5px}pre{padding:14px;font-size:13px}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.6 system-ui,sans-serif}main{max-width:850px;margin:auto;padding:48px 24px 72px}header{margin-bottom:36px}.meta,.note{color:var(--muted);font-size:14px}h1{font:clamp(34px,7vw,54px)/1.12 Georgia,serif;letter-spacing:-.025em}h2{font:28px/1.25 Georgia,serif;margin-top:36px}p{margin:14px 0}a{color:var(--accent);text-underline-offset:3px}code{font:0.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{padding:18px;background:var(--panel);white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px}table{border-collapse:collapse;width:100%;font-size:15px}td,th{padding:12px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500}.decision{border-left:3px solid var(--accent);padding-left:18px}li{margin:12px 0}ol{padding-left:24px}@media(max-width:560px){main{padding:28px 16px 48px}table{font-size:13px}td,th{padding:10px 4px}pre{padding:12px;font-size:13px}}
 </style>
 </head>
 <body><main>
 <header>
-<p class="meta">LOO-593 · Concept review · November 4, 2026 · inspected 996f16fabb<br>
-Sources: <a href="mobile-backend.md">working design</a>, <a href="../docs/architecture/server.md">server boundary</a>, <a href="../rust/loopflow/src/transport/connection.rs">native relay recovery</a>, <a href="../swift/LoopflowMac/Services/ServerClient.swift">Work client</a>, <a href="../swift/LoopflowMac/Services/ServerConnection.swift">native status</a></p>
-<h1>Retry only reconnects.<br>Even after setup fails.</h1>
-<p class="decision"><strong>Next implement direction:</strong> separate the first readiness attempt from recovery. The current failure path can run installation again on Retry or a Work refresh. Jack Heart's accepted ownership split already settles the correction; no new product decision is needed.</p>
-<p><strong>Accepted and implemented locally:</strong> Machine selects execution destinations, server exposes client access, installation registers and updates it, and Desktop owns presentation. The first-setup failure path still crosses that boundary.</p>
+<p class="meta">LOO-593 · Concept review · November 4, 2026 · inspected 4c5ea88a47<br>
+Built from <a href="mobile-backend.md">mobile-backend.md</a>, <a href="questions.md">questions.md</a>, <a href="../docs/architecture/server.md">server architecture</a>, <a href="../rust/loopflow/src/installation/server.rs">installation/server.rs</a>, <a href="../rust/loopflow/src/server/service.rs">server/service.rs</a>, <a href="../rust/loopflow/src/transport/connection.rs">transport/connection.rs</a>, <a href="../swift/LoopflowMac/Services/ServerClient.swift">ServerClient.swift</a> and <a href="../swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift">GhosttyTerminalView.swift</a>.</p>
+<h1>The accepted split holds.</h1>
+<p class="decision"><strong>No further design change or in-scope product choice.</strong> Jack Heart's accepted separation is reflected in the local implementation. The previous review's failed-setup correction is implemented. Remaining work is proof and delivery through the existing interactive demo boundary.</p>
+<p>This headless review supplies evidence to loop-or-next. It starts no execution and grants no merge or Auto-Ship approval.</p>
 </header>
+
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>What you do</th><th>What owns it</th><th>Command or API</th></tr></thead>
+<thead><tr><th>Action</th><th>Concept</th><th>Current authority</th></tr></thead>
 <tbody>
-<tr><td>Run an agent on mini</td><td>Machine destination</td><td>Existing <code>lf --machine mini …</code></td></tr>
-<tr><td>Read Work and continue editing from a client</td><td>Server admission and connections</td><td><code>lf server</code>; shared reads, commands, owner bridge</td></tr>
-<tr><td>Install or update Loopflow</td><td>Installation</td><td>Existing <code>lf install</code>; owns registration/update</td></tr>
-<tr><td>Arrange Desktop's panes</td><td>Desktop presentation</td><td>Existing <code>lf desktop</code>; app-owned socket</td></tr>
-</tbody></table>
-<h2>The consequential mismatch</h2>
-<h3>Existing failure path</h3>
-<pre><code>Open → installation readiness fails → Unavailable
-Retry → installation readiness again → connect
+<tr><td>Run on another computer</td><td>Machine destination</td><td><code>lf machine</code>, <code>lf --machine …</code></td></tr>
+<tr><td>Read Work or continue a Session</td><td>Client access</td><td><code>lf server</code>; shared reads, complete commands, exact-owner bridge</td></tr>
+<tr><td>Install or update</td><td>Installation</td><td><code>lf install</code>; selected executable and registration</td></tr>
+<tr><td>Arrange windows and panes</td><td>Desktop presentation</td><td><code>lf desktop</code>; app-owned automation</td></tr>
+</tbody>
+</table>
+<p>Machine identity and Work records survive replacement. The server adds no scheduler, provider owner or durable viewer registry. LOO-718 owns authenticated remote access and the phone client; combined integration remains unverified.</p>
 
-Work read fails before readiness succeeds
-Refresh / reopen watch → installation readiness again</code></pre>
-<p><code>Status::connect</code> keeps its <code>initial</code> flag after preparation fails. <code>ServerLocation.path()</code> caches only a successful result. Both let connection recovery repeat registration.</p>
-<h3>Proposed correction — not implemented</h3>
-<pre><code>Open → one installation-readiness attempt
-     → connect, or show the failure
+<h2>The mismatch is corrected</h2>
+<p><strong>Before — superseded:</strong> failed first setup let Retry or a Work refresh attempt registration again. Recovery could cross the installation boundary.</p>
+<pre><code>Before: open → setup fails → Retry / refresh → setup again
+Current: open → one readiness attempt → connect or report failure
+         installation / OS enablement repairs availability
+         Retry / refresh → observe endpoint → same owner / fresh Work</code></pre>
+<p><strong>Implemented locally:</strong> native setup is consumed even on failure. The shared Work client retains the initial diagnosis and uses observational <code>server status</code> for later discovery. Failed initial attachment enters passive recovery. No second path resolver or persistent retry record is needed.</p>
+<p><strong>Usage remains:</strong> install Loopflow and open Desktop; local setup is automatic. Repair a reported installation or Background Items failure, then Retry. Retry reconnects. Move here deliberately requests control.</p>
 
-Installation / OS enablement repairs availability
-Retry / refresh → existing endpoint → same owner / fresh Work</code></pre>
-<p>Consume the setup attempt even when it fails. Obtain the endpoint independently of readiness success through the existing authority. Remove installation from the recovery loop; add no persistent retry record or second path resolver.</p>
-<p class="decision">Counterexample: setup fails before the first connection, then registration becomes possible. Pressing Retry must leave registration unchanged. After installation independently starts the server, that same pane must recover without reopening, replaying input or replacing a newer viewer's claim.</p>
-<p><strong>Proposed usage clarification:</strong> “Local setup is automatic on first connection. If it fails, use the reported installation or Background Items repair, then Retry. Retry connects; it never installs or re-registers.” Existing usage and skill guidance keep their accepted boundaries.</p>
-<h2>Keep editing through replacement</h2>
+<h2>One interaction, through failure</h2>
 <ol>
-<li><strong>Open Desktop.</strong> Installation prepares the local server. Desktop connects without a separate setup ritual.</li>
-<li><strong>Hold a draft while a Graph runs.</strong> Update the installed helper. The server connection drops; the existing execution owners continue.</li>
-<li><strong>See “Reconnecting…” in native chrome.</strong> The screen stays visible. Copy, Find and scrolling remain available; typing waits for the exact owner's acknowledgement.</li>
-<li><strong>Continue on that owner.</strong> Automatic recovery preserves a newer viewer's claim. A read-only pane offers <strong>Move here</strong> for explicit control. <strong>Retry</strong> repairs connectivity only.</li>
+<li><strong>Open and edit.</strong> Installation prepares access. The server bridges the existing Session owner while a Graph runs independently.</li>
+<li><strong>Replace the installed helper.</strong> The connection drops. The draft, provider and Graph must survive. Native status says “Reconnecting…”; input pauses while the last screen remains readable.</li>
+<li><strong>Reconnect to that owner.</strong> Fresh terminal state restores the screen. Uncertain typing is discarded. Newer input and geometry claims remain intact.</li>
+<li><strong>Move here explicitly.</strong> A connected read-only pane offers control transfer. Its generation-bound action is consumed before sending; typing waits for acknowledgement.</li>
 </ol>
-<p class="decision">If takeover succeeds but its reply is lost, and another viewer claims control, recovery must leave that newer claim intact. Never replay takeover, typing or an uncertain command.</p>
-<p class="note">Earlier signed same-build replacement evidence covers owner, provider, draft and Graph continuity. It predates the namespace cutover. The renamed composition, failed-start recovery, rendered Desktop interaction and Linux replacement still need proof. This review ran no builds or runtime checks.</p>
-<h2>One server, existing owners</h2>
-<pre><code>Desktop ─ Unix socket ─┐
-                      ├─ server ─ shared reads / subscriptions
-phone ─ HTTPS / WSS ───┘         ├ complete CLI commands
-        (LOO-718)               └ Session owner ─ provider / PTY</code></pre>
-<p>The server owns admission and delivery. Session owners retain terminal control and lifetime; Graphs retain execution. Drafts, active turns, pending requests and running Graphs already protect their owners.</p>
-<p>A paired phone is a client credential. It does not become a worker, move a Task or own its provider. Remote access has separate authentication; turning it off must leave local access and execution intact.</p>
-<h2>Migration boundary</h2>
-<p>Local command routes, supervisor entries, Swift names and fixtures now share the server namespace. The old bundled plist remains only to inspect and retire existing registration. The socket address stays stable for live relays. <code>MachineId</code>, <code>machine_id</code>, SSH routing, credentials and owner protocols stay in place.</p>
-<p>LOO-593 owns the local foundation and recovery. LOO-718 owns remote access and the native phone path. This pursuit implements the local cutover in LOO-593 and records the migration LOO-718 needs. It preserves the stop at interactive demo and leaves the other checkout alone.</p>
-<p class="note">Review outcome: design refined for implementation. No open product choice blocks this correction. GUI-less distribution, before-login hosting, active-work removal and phone takeover remain separately scoped. No merge or Auto-Ship approval.</p>
-<h2>Questions for the next proof</h2>
+<p class="decision"><strong>Decisive counterexample:</strong> takeover succeeds, its reply is lost, then another viewer claims control. Recovery must preserve that newer claim. Repeating takeover or uncertain typing would invalidate the design.</p>
+<p>A connection failure means unavailable, not ended. Only execution evidence establishes exit. Copy, Find, selection and scrolling remain local reading actions; their handlers are reachable, while rendered behavior still needs demonstration.</p>
+
+<h2>Proof remains distinct from the design</h2>
+<p>Saved focused checks cover failed setup and recovery. This review ran no runtime tests. The renamed signed installed replacement, broader gate checks and rendered Desktop continuity remain owed. Linux supervisor replacement needs Linux-host evidence. The working design retains the complete acceptance list.</p>
+<p>The stable revision-1 socket keeps live older relays reachable while OS job labels migrate. The old bundled plist only supports inspecting and retiring registration. Work, credentials and execution identity do not move.</p>
+<p><strong>No new proposal is introduced.</strong> GUI-less distribution, before-login hosting, removal during active work and the phone takeover gesture remain separate product questions outside this local cutover.</p>
+
+<h2>Questions for acceptance evidence</h2>
 <ol>
-<li>After initial readiness fails, do native Retry and Work refresh leave registration unchanged, then recover when installation independently repairs availability?</li>
-<li>Does recovery preserve the exact owner, newer input/geometry claims and all no-replay guarantees, including a lost takeover acknowledgement?</li>
-<li>Does installed replacement preserve the draft and Graph, with reading/copy/Find/scroll and Move here usable in the rendered Desktop?</li>
+<li>Does the renamed installed replacement preserve the exact owner, editable draft and running Graph under the real supervisor?</li>
+<li>Does rendered Desktop preserve reading, copy, Find and scrolling during recovery, with Retry and Move here visibly performing their distinct actions?</li>
+<li>Does the combined phone integration preserve credentials, local access and existing execution when remote access fails or is revoked?</li>
 </ol>
+<p class="note">These are verification questions for gate, demo and integration, not requests for new product approval.</p>
 </main></body></html>

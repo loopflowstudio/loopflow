@@ -46,8 +46,9 @@ No Work or credential state moves. A focused migration check found and fixed the
 old launchctl parser's assumption that overrides print `true`; current macOS
 prints `disabled`.
 
-The failed-setup correction is committed at `5f140091b6`, on the cutover at
-`996f16fabb`; main remains `ac8e088f5f`. Copy/Find and pointer/scroll handlers
+The failed-setup correction is committed at `5f140091b6`, with shared endpoint
+state simplified at `4c5ea88a47`, on the cutover at `996f16fabb`; the checkout's
+base remains `ac8e088f5f`. Copy/Find and pointer/scroll handlers
 remain reachable while provider input is paused; rendered behavior still needs
 demo evidence.
 
@@ -72,13 +73,16 @@ All five PRs remain open at reconciliation; none supplies landed behavior here.
 | [LOO-718 / #1812](https://github.com/loopflowstudio/loopflow/pull/1812) | `983b271695` | Native iOS, remote admission, pairing and create/start; migration map below |
 | [LOO-723 / #1815](https://github.com/loopflowstudio/loopflow/pull/1815) | `c7fff6b143` | Artifact selection/update; retains retired app bundles used by live processes |
 | [LOO-717 / #1811](https://github.com/loopflowstudio/loopflow/pull/1811) | `b81df60579` | Machine shell lifetime and remote routing |
-| [LOO-714 / #1805](https://github.com/loopflowstudio/loopflow/pull/1805) | `3c2a3739d1` | Published installation preferences and provider defaults |
+| [LOO-714 / #1805](https://github.com/loopflowstudio/loopflow/pull/1805) | `030ab4ef1b7` | Published installation preferences and provider defaults |
 | [LOO-312 / #1656](https://github.com/loopflowstudio/loopflow/pull/1656) | `eff20d8f32` | Installation/onboarding product choices and first-run accounts |
 
 LOO-723’s retained-bundle behavior complements server replacement: deleting an
 old app is distinct from unregistering its server. The combined installation must
 preserve that process-aware artifact cleanup and this branch’s post-promotion
 registration hook. Its source is evidence, not a composed-release proof.
+Fresh PR reads confirm the other four heads are unchanged. LOO-714's two newer
+commits change configuration display and explanations; they preserve the
+installation/server boundary and structured configuration output.
 
 ## Delete — do not maintain
 
@@ -267,7 +271,27 @@ must restore fresh Work and the exact owner on the same client, preserving newer
 input/geometry claims and replaying nothing. This complements successful-start
 restart and lost-takeover-acknowledgement checks; it does not replace signed
 replacement or rendered acceptance. The detailed review and original diagnosis
-remain at `5f140091b6:scratch/mobile-backend.md` and in `concept-review.html`.
+remain at `5f140091b6:scratch/mobile-backend.md` and
+`5f140091b6:scratch/concept-review.html`.
+
+### Concept review after the failed-setup correction
+
+Review of `4c5ea88a47` against Jack Heart's accepted direction found no further
+model or interaction change and no open product choice within this local cutover.
+Opening a client requests installation readiness once; reading Work or attaching
+uses the server; replacing that server leaves execution with existing Session
+and Graph owners. Failed setup consumes readiness too. Retry observes repaired
+availability and reconnects to the exact owner; Move here alone deliberately
+replaces control. These remain separate actions without a new durable viewer or
+recovery record. Existing usage and skill guidance need no further redesign.
+
+The failed-start and lost-takeover-acknowledgement counterexamples above remain
+acceptance constraints. Source review confirms the corrected boundary; it adds
+no runtime or rendered proof. The next proof remains the renamed installed
+replacement composition and the existing gate/demo acceptance below. GUI-less
+distribution, before-login hosting, active-work removal and the phone takeover
+gesture remain outside this accepted local scope, with no implied approval.
+The review page now shows the corrected behavior rather than proposing it again.
 
 ## Evidence and remaining proof
 
@@ -348,4 +372,4 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Check: `scripts/test_desktop.sh --filter ServerClientTests --jobs 4 -Xswiftc -gnone` built Desktop; the focused headless tests passed both failure cases after compression. `git diff --check` passed. Unchanged Rust recovery, formatting and Clippy results at `5f140091b6` remain applicable. Gate owns composed installed replacement and broader checks; demo owns rendered acceptance.
+Check: `git diff --check` passed; saved `cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims` at `5f140091b6` and `scripts/test_desktop.sh --filter ServerClientTests --jobs 4 -Xswiftc -gnone` after compression at `4c5ea88a47` passed and remain applicable; gate owns composed installed replacement/broader checks, demo owns rendered acceptance.

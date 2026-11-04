@@ -924,34 +924,34 @@ Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafab
 Jack Heart selected LOO-593’s Machine/server/installation split November 4, 2026,
 through publication and interactive demo, without Auto-Ship. Machine owns execution
 destinations; `lf server` owns client access; installation owns registration/update.
-Desktop automation stays app-owned. Roadmap read/watch and rename use the local
-socket without FFI fallback; wider cutover belongs to LOO-718. RegistryQuery keeps
-DTOs; shared Rust reads, complete CLI commands and execution owners keep authority.
-Shared functions alone did not prevent lfd drift. No new scheduler/retention owner.
+Desktop automation stays app-owned. Roadmap read/watch and rename use the socket
+without FFI fallback. Rust reads, complete CLI commands and execution owners keep
+authority. Shared functions alone did not prevent lfd drift; no new retention owner.
 
-Registration migrates OS labels while retaining the revision-1 socket/lock so live
-old relays reconnect. The old bundle plist only inspects/removes registration;
-disabled choices survive. Status observes; recovery never registers or selects code.
+Registration migrates OS labels, retaining the revision-1 socket/lock for old
+relays. The old plist only inspects/removes registration; disabled choices survive.
+Jack's November 4 reconnect-only rule includes failed first setup: consume readiness
+once per client, retain its diagnosis, then discover endpoints through observational
+status. Retry/Work refresh never register or select code. Failed-start attachment
+also recovers passively, preserving newer claims. Rust/Swift checks at `5f140091b6`
+and `4c5ea88a47` prove independent repair restores access, not installed replacement.
 
-Jack selected automatic exact-owner recovery and native status November 4.
-Surface mailboxes carry status/actions outside terminal bytes; closure cancels.
-Unavailable is not ended. Copy/Find/scroll handlers remain reachable; plain CLI
-reconnect stays deliberate. Move here consumes a generation-bound action before
-replacing claims and waits for acknowledgement. Lost replies recover passively,
-preserving newer claims. No provider restart or replay of takeover, input or commands.
-Rust/Swift checks prove components, not native interaction.
+Jack selected exact-owner recovery and native status outside terminal bytes;
+closure cancels. Unavailable is not ended. Copy/Find/scroll remain reachable;
+CLI reconnect stays deliberate. Move here consumes its generation-bound action
+before replacing claims; lost acknowledgements recover passively. No provider
+restart or replay of takeover, input or commands. Native interaction remains unproved.
 
 Pre-cutover signed same-build replacement proved owner/draft/Graph continuity
 through submission and a new acknowledgement. App-owned LaunchServices updates
 model App Management; external writes cannot. The renamed composition, released
 migration, rendered continuity, Linux replacement and usage totals remain unproved.
 
-LOO-718 owns remote/mobile admission and wider cutover; its parallel implementation
-is not combined-release proof. Keep wire identity/credential storage while moving
-verbs under server. ViewPlan selects primary Sessions; roadmap cannot. Owner lookup
-starts nothing; Unix peer trust cannot authenticate proxies. Unattended hosting
-and phone takeover remain open. LOO-723’s unmerged process-aware retired-bundle
-cleanup complements server replacement, without proving their composition.
+LOO-718 owns remote/mobile admission and wider cutover; preserve wire identity and
+credential storage when moving verbs. ViewPlan selects primary Sessions; lookup
+starts nothing. Unix peer trust cannot authenticate proxies. Unattended hosting
+and phone takeover remain open. LOO-723 retains bundles used by live processes;
+neither parallel implementation proves combined-release behavior.
 
 LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
 files resurfaced retired Waves. Writes register directories; reads list store

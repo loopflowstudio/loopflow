@@ -62,8 +62,10 @@ When an existing Task already has a worktree, `lf session bind <id> --task <task
 keeps that worktree and schedules the same conversation's next connection there.
 The current client stays in its directory until it exits. Status and Desktop show
 the pending directory; reconnect to continue. Files remain in their original
-checkout. If the Task has no checkout, binding adopts the Session’s unowned linked
-checkout. Closed Sessions and headless Runs cannot become primary.
+checkout. If an open Task has no checkout, binding adopts the Session’s unowned
+linked checkout. Done Tasks can still select an unfinished conversation without
+reopening work. With no Task checkout, the conversation stays in place and no
+checkout is adopted. Closed Sessions and headless Runs cannot become primary.
 
 ## Steer it while it runs
 

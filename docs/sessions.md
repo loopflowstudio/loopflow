@@ -139,9 +139,11 @@ as the Task's primary conversation. Repeating it selects that same Session again
 other conversations stay associated. A Task with a worktree keeps it: the current
 client stays attached, and its next connection continues there. Status shows the
 pending directory until the provider confirms it. Files stay in their old checkout.
-A Task without a worktree adopts the Session's unowned linked checkout; main and
-Wave checkouts stay shared. Binding starts no Graph, and leaves done or landed
-Tasks closed. Closed Sessions and headless Runs cannot become primary.
+An open Task without a worktree adopts the Session's unowned linked checkout;
+main and Wave checkouts stay shared. Done Tasks can still select an unfinished
+conversation. If the Task has no checkout, the conversation stays in place and
+no checkout is adopted. Binding starts no Graph, and leaves done or landed Tasks
+closed. Closed Sessions and headless Runs cannot become primary.
 `--dry-run` shows the exact target first.
 
 ## Which login it runs on

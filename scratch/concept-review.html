@@ -1,24 +1,70 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-582 · Bind the conversation</title><style>:root{color-scheme:light dark}body{max-width:760px;margin:auto;padding:36px 22px;font:17px/1.6 system-ui}h1{line-height:1.2}h2{margin-top:2em;font-size:1.25em}header,small{opacity:.7}pre{padding:18px;background:#8882;white-space:pre-wrap;overflow-wrap:anywhere}table{border-collapse:collapse;width:100%}td,th{padding:12px 10px;border-bottom:1px solid #8885;text-align:left;vertical-align:top}a{color:inherit}textarea{width:100%;min-height:5em;background:transparent;color:inherit;border:1px solid #8886}blockquote{border-left:3px solid #888;padding-left:18px;margin-left:0}</style><header>LOO-582 · concept review · November 3, 2026<br>Sources: <a href="loo-582.md">design</a> · <a href="loo-582-demo.md">demo evidence</a></header>
-<h1>Bind means “make this the Task conversation.”</h1>
-<p><strong>Accepted by Jack Heart; implemented, focused checks passed.</strong> No separate assignment-only interaction and no <code>--primary</code> flag. Remove <code>task promote</code>.</p>
-<pre># Create around the work already here
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-582 · Binding without reopening work</title>
+<style>
+:root{color-scheme:light dark}body{max-width:760px;margin:auto;padding:36px 22px;font:17px/1.6 system-ui}h1{line-height:1.2}h2{margin-top:2em;font-size:1.25em}header{font-size:.85em;opacity:.75}pre{padding:18px;background:#8882;white-space:pre-wrap;overflow-wrap:anywhere}code{overflow-wrap:anywhere}a{color:inherit}blockquote{border-left:3px solid #888;padding-left:18px;margin-left:0}dt{font-weight:650;margin-top:1em}dd{margin:0}li{margin-bottom:.75em}
+</style>
+<header>LOO-582 · concept review · November 3, 2026<br>
+Sources: <a href="loo-582.md">working design</a>, <a href="loo-582-demo.md">demo evidence</a>, <code>docs/sessions.md</code>, <code>docs/work.md</code>, <code>rust/loopflow/src/ops/task/adoption.rs</code>, <code>rust/loopflow/src/store/sqlite/children.rs</code>, <code>rust/loopflow/src/ops/human_session/primary.rs</code>, <code>rust/loopflow/tests/session_lifecycle_tests.rs</code>.</header>
+<h1>A done Task can still select its conversation.</h1>
+<p><strong>Review outcome: a bounded design clarification for implementation.</strong> No new product decision is needed. Binding to a done Task without a checkout must keep the selected conversation in place, without allocating a checkout or reopening work.</p>
+<p>Jack Heart accepted explicit adoption and always-primary binding. The documented done/landed binding contract remains. The reviewed implementation made that contract depend on where the conversation lived. The bounded repair below is now implemented; focused CLI and store verification passed, along with formatting and Clippy.</p>
+
+<h2>The interaction</h2>
+<pre># File separate work, regardless of the current chat or checkout
+lf task create --title "Finish the prototype"
+
+# Keep this exact chat and its existing work
 lf task create --session SESSION --title "Finish the prototype"
 
-# Make this chat the conversation for an existing Task
-lf session bind SESSION --task TASK</pre>
-<table><tr><th>Action</th><th>What changes</th><th>What happens next</th></tr>
-<tr><td>Create with --session</td><td>New Task adopts chat and linked checkout.</td><td>Continue in place.</td></tr>
-<tr><td>Bind to Task</td><td>Associate chat, make it primary, request the Task's checkout.</td><td>Same history; supported next connection uses that checkout.</td></tr>
-<tr><td>Create without a source</td><td>Independent new Task.</td><td>--run starts it. No implicit adoption.</td></tr></table>
-<h2>One operation across CLI and Desktop</h2>
-<p>The shared binding operation commits association, primary selection and the requested directory together. Desktop uses it too. Other conversations remain associated. Historical attribution and permanent conflicting bindings remain intact.</p>
-<pre>Before: Task T owns checkout A; chat S is in B
-Bind:   T opens S; S requests A
-Now:    live client and unsent input remain in B
-Next supported connection: same S and history, actual provider cwd A</pre>
-<p>Files in B stay there. A failed connection retains the pending destination. Retrying the same binding must not duplicate work or discard the request.</p>
-<h2>Review record</h2>
-<p><strong>1. Is adoption the default?</strong> No. Select --session or --worktree.</p>
-<p><strong>2. Does bind need --primary?</strong> No. Jack chose always-primary binding.</p>
-<p><strong>3. Is this shipped?</strong> No. The command correction is implemented; publication and its real-path binding demo remain in the Graph. Existing creation, draft retention and Rex/cmux checks are recorded in the demo.</p>
+# Select the conversation for an existing Task
+lf session bind SESSION --task TASK
+lf open --task TASK</pre>
+<p><strong>Existing implementation:</strong> explicit creation retains the source. Binding keeps an existing Task checkout and requests continuation there. The live client and input stay attached until the supported next connection.</p>
+<dl>
+<dt>Create with an explicit source → Task + optional Session → <code>task_create</code></dt>
+<dd><code>TaskAdoptionOptions</code> resolves the exact Session and/or checkout. The common adoption writer preserves Task identity on retry. Plain creation resolves no source.</dd>
+<dt>Bind an exact Session → assignment + primary choice → <code>human_session::bind</code></dt>
+<dd>CLI and Desktop share the same atomic adoption writer. Other Task conversations remain associated; conflicting permanent binds fail without partial changes.</dd>
+<dt>Reconnect → pending Session directory → <code>admit_workspace</code></dt>
+<dd><code>requested_cwd</code> survives failure and a later primary selection. Matching provider connection confirmation clears it. Files remain in their original checkout.</dd>
+</dl>
+
+<h2>The consequential mismatch</h2>
+<pre>Task T: done, no checkout
+Session S: unfinished, live in unowned linked checkout B
+
+Reviewed source path:
+  bind S to T → prepare placement B
+              → “terminal Task cannot allocate a checkout”
+              → no binding
+
+Implemented correction:
+  bind S to T → T selects S; S permanently belongs to T
+              → T remains done, with no checkout
+              → S continues in B</pre>
+<p><strong>Evidence:</strong> <code>adoption::save</code> prepares placement whenever a source checkout exists and the Task has none. <code>place_task_in</code> rejects terminal Tasks before binding commits. A Session in a shared main checkout avoids placement. This was a source-level finding in the review. Implementation now checks terminal state before preparation and again inside the binding transaction.</p>
+<p>Make optional checkout adoption respect terminal Task state in the atomic operation. Keep ordinary checkout allocation rules. No new command, flag, assignment-only mode or lifecycle is needed.</p>
+
+<h2>Normal path, failure, recovery</h2>
+<p>An open, unplaced Task still adopts the selected unowned linked checkout. A Task with checkout A still keeps A, even when done: binding Session S in B records A as its next destination. The live client continues in B until it exits.</p>
+<p>If A is missing or the provider rejects the move, retain the request. Restore A or repair the provider failure and reconnect the same Session. Selecting another primary does not cancel S’s pending move. Existing lifecycle fixtures cover those recovery paths; configured binding proof is still pending.</p>
+<blockquote>Counterexample to an overbroad repair: skipping every directory effect for done Tasks would lose the accepted continuation into a done Task’s existing checkout. Only the absent-checkout case stays in place.</blockquote>
+
+<h2>Updated guidance</h2>
+<p><strong>Usage docs:</strong> Done Tasks can still select an unfinished conversation. If the Task has no checkout, the conversation stays in place and no checkout is adopted.</p>
+<p><strong>Work skill:</strong> Bind to a done Task without reopening it. With no Task checkout, retain the Session’s directory; do not allocate a checkout merely to bind the conversation.</p>
+
+<h2>Focused proof and remaining demonstration</h2>
+<p>The new CLI fixture exercises bind → repeat → open for a done, unplaced Task and a live Session in a linked checkout. It checks exact identity, primary selection, retained input/history/files, unchanged completion and no checkout, provider launch or Graph. It also covers the shared-checkout case and the done Task’s existing-destination case. A store fixture covers completion arriving after placement preparation. Results are recorded in the working design.</p>
+<p>Prior creation, native draft and Rex/cmux observations remain in the demo record. The review itself added no runtime pass; the subsequent implementation fixtures now pass all four CLI source/destination combinations and the transaction-time completion case. The revised configured binding demo, Desktop create-from-chat composer retention, detached idle expiry and combined gate remain unproven. Publication and demo follow the authored Graph; Auto-Ship and landing remain unapproved.</p>
+
+<h2>Review questions — resolved by the accepted contract</h2>
+<ol>
+<li><strong>Should a done Task’s missing checkout prevent binding?</strong> No. Bind and select the unfinished Session in place without allocating a checkout.</li>
+<li><strong>Should the correction remove continuation into an existing Task checkout?</strong> No. Preserve its pending directory and provider confirmation.</li>
+<li><strong>Is another product choice open?</strong> No. The repair follows the working design; remaining demonstrations are proof obligations.</li>
+</ol>
 </html>

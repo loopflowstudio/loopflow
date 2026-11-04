@@ -47,13 +47,13 @@ observations, not Jack's acceptance or authorization to ship.
   An attached draft surviving several minutes is not proof of detached expiry.
 - Full combined gate and disposable installation upgrade remain pending.
 
-## Accepted feedback and next action
+## Accepted feedback and current state
 
 During this demo, Jack Heart rejected `task promote TASK`, then resolved the
 replacement: `session bind SESSION --task TASK` always makes it primary and
 requests continuation in the Task checkout. No optional-primary mode. Creation
-around existing work stays explicit. Implement the correction in the existing
-Task and PR, retain this evidence, and demonstrate the revised binding workflow.
+around existing work stays explicit. The correction is implemented in this Task;
+publication to PR #1807 and the revised binding demonstration remain pending.
 See the current design in `loo-582.md`; presentation is `demo.html` and
 `concept-review.html`. No Graph was restarted merely by performing the demo.
 

@@ -183,7 +183,14 @@ pub(super) async fn save(
         &source.checkout,
         existing.as_ref().and_then(|task| task.worktree.as_ref()),
     ) {
-        (Some(root), None) => {
+        (Some(root), None)
+            if existing.is_none()
+                || !store
+                    .task_state(&id)
+                    .await
+                    .map_err(task_error)?
+                    .is_terminal() =>
+        {
             let prepared = prepare(main, root)?;
             Some((root.clone(), prepared.pr(&id)))
         }

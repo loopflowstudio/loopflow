@@ -266,15 +266,19 @@ impl SqliteStore {
                         .into(),
                 ));
             }
-            place_task_in(&tx, task_id, path, &pr.slug, pr)?;
-            insert_task_event_in(
-                &tx,
-                task_id,
-                &TaskEventKind::CheckoutReady {
-                    branch: pr.branch.clone(),
-                    base_commit: pr.base_commit.clone(),
-                },
-            )?;
+            // Completion may have arrived after source preparation. Binding still
+            // selects the conversation, without allocating or reopening work.
+            if !super::durable::task_state_in(&tx, task_id)?.is_terminal() {
+                place_task_in(&tx, task_id, path, &pr.slug, pr)?;
+                insert_task_event_in(
+                    &tx,
+                    task_id,
+                    &TaskEventKind::CheckoutReady {
+                        branch: pr.branch.clone(),
+                        base_commit: pr.base_commit.clone(),
+                    },
+                )?;
+            }
         }
         if let Some(session) = session {
             super::task_ownership::claim_in(&tx, task_id)?;

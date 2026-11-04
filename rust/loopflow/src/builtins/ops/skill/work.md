@@ -37,8 +37,10 @@ conversation. Use an unfinished interactive Session; closed Sessions and headles
 Runs cannot become primary.
 If the Task already owns another worktree, the same conversation continues there
 after its current client exits. Status and Desktop show the pending directory;
-reconnect to continue. Files stay where they are. If the Task has no checkout,
-binding adopts the Session’s unowned linked checkout.
+reconnect to continue. Files stay where they are. If an open Task has no checkout,
+binding adopts the Session’s unowned linked checkout. Bind to a done Task without
+reopening it. With no Task checkout, retain the Session’s directory; do not
+allocate a checkout merely to bind the conversation.
 Promotion keeps files, branch, provider history and live input attachment;
 it starts no Graph and approves no Auto-Ship. Creation keeps main/Wave checkouts
 shared and binds the selected Session in place. A selected repository/Wave primary

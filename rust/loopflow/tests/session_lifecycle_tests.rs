@@ -194,6 +194,14 @@ impl Fixture {
             .unwrap()
     }
 
+    fn input_attachment(&self, session: &str) -> String {
+        self.db().query_row(
+            "SELECT json_array(s.current_capture,s.input_published,p.agent_session_id,p.attached_lf_process_id,p.attachment_token)
+             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+            [session], |row| row.get(0),
+        ).unwrap()
+    }
+
     /// (session id, title, title_source, completed) of the captured input’s Session.
     fn session_row(&self, run_id: &str) -> (String, String, String, bool) {
         self.db()
@@ -2707,36 +2715,53 @@ fn promotion_preserves_live_conversation_and_existing_work() {
                 .find(|session| session["id"] == id)
                 .unwrap();
             assert_eq!(before["cwd"], path);
-            let input_attachment = || -> String {
-                fixture.db().query_row(
-                "SELECT json_array(s.current_capture,s.input_published,p.agent_session_id,p.attached_lf_process_id,p.attachment_token)
-                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
-                [&id], |row| row.get(0),
-            ).unwrap()
-            };
-            let attachment = input_attachment();
+            let attachment = fixture.input_attachment(&id);
             let captures = fixture.captures();
             let history = fixture.run_parents(&capture);
             let created = if existing {
                 let filed =
                     fixture.json(&["task", "create", "--title", "Research prototype", "--json"]);
                 let wrong_identity = fixture.run(&[
-                    "session", "bind", &capture, "--task", filed["id"].as_str().unwrap(),
+                    "session",
+                    "bind",
+                    &capture,
+                    "--task",
+                    filed["id"].as_str().unwrap(),
                 ]);
                 assert!(!wrong_identity.status.success());
                 assert!(String::from_utf8_lossy(&wrong_identity.stderr).contains("was not found"));
                 let preview = fixture.json(&[
-                    "session", "bind", &id, "--task", filed["id"].as_str().unwrap(), "--dry-run", "--json",
+                    "session",
+                    "bind",
+                    &id,
+                    "--task",
+                    filed["id"].as_str().unwrap(),
+                    "--dry-run",
+                    "--json",
                 ]);
                 assert_eq!(preview["session_id"], id);
                 assert_eq!(preview["task_id"], filed["id"]);
-                assert_eq!(input_attachment(), attachment);
+                assert_eq!(fixture.input_attachment(&id), attachment);
                 let bound = fixture.json(&[
-                    "session", "bind", &id, "--task", filed["id"].as_str().unwrap(), "--json",
+                    "session",
+                    "bind",
+                    &id,
+                    "--task",
+                    filed["id"].as_str().unwrap(),
+                    "--json",
                 ]);
                 assert_eq!(bound["id"], id);
-                let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db")).unwrap();
-                serde_json::to_value(store.task(&filed["id"].as_str().unwrap().parse().unwrap()).unwrap().unwrap()).unwrap()
+                let store = loopflow::store::sqlite::SqliteStore::new(
+                    &fixture.home.path().join("loopflow.db"),
+                )
+                .unwrap();
+                serde_json::to_value(
+                    store
+                        .task(&filed["id"].as_str().unwrap().parse().unwrap())
+                        .unwrap()
+                        .unwrap(),
+                )
+                .unwrap()
             } else {
                 fixture.json(&[
                     "--repo",
@@ -2762,7 +2787,7 @@ fn promotion_preserves_live_conversation_and_existing_work() {
                 assert_eq!(before[field], after[field], "{field}");
             }
             assert_eq!(after["task_primary"], true);
-            assert_eq!(input_attachment(), attachment);
+            assert_eq!(fixture.input_attachment(&id), attachment);
             assert_eq!(fixture.captures(), captures);
             assert_eq!(fixture.run_parents(&capture), history);
             assert_eq!(fixture.launches().len(), 1);
@@ -2821,6 +2846,126 @@ fn promotion_preserves_live_conversation_and_existing_work() {
             })
             .unwrap();
         assert_eq!(cwd, path);
+    }
+}
+
+#[test]
+fn promotion_binding_done_tasks_preserves_live_work_on_retry_and_open() {
+    for (shared, placed) in [(false, false), (true, false), (false, true), (true, true)] {
+        let fixture = Fixture::new(true);
+        let origin = if shared {
+            fixture.repo.path().canonicalize().unwrap()
+        } else {
+            fixture
+                .repo
+                .create_named_worktree("research")
+                .canonicalize()
+                .unwrap()
+        };
+        let destination = placed.then(|| {
+            fixture
+                .repo
+                .create_named_worktree("delivery")
+                .canonicalize()
+                .unwrap()
+        });
+        let mut args = vec!["task", "create", "--title", "Finished work", "--json"];
+        if let Some(path) = &destination {
+            args.extend(["--worktree", path.to_str().unwrap()]);
+        }
+        let created = fixture.json(&args);
+        let task = created["id"].as_str().unwrap();
+        let task_id = task.parse().unwrap();
+        let completion = fixture.run(&["task", "complete", task]);
+        assert!(completion.status.success(), "{completion:?}");
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+                .unwrap();
+        let completed = store.task(&task_id).unwrap().unwrap();
+        assert!(completed.completed_at.is_some());
+        std::fs::write(origin.join("README.md"), "unfinished research\n").unwrap();
+        std::fs::write(origin.join("draft.txt"), "untracked draft\n").unwrap();
+        let branch = loopflow::git::current_branch(&origin).unwrap();
+        let (child, capture) = fixture.attach(&[
+            "--repo",
+            origin.to_str().unwrap(),
+            "-i",
+            "--agent",
+            "opencode",
+            ":",
+            "Keep researching",
+        ]);
+        fixture.with_attached_clients([child], || {
+            let id = fixture.session_row(&capture).0;
+            let before = fixture
+                .sessions()
+                .into_iter()
+                .find(|s| s["id"] == id)
+                .unwrap();
+            let attachment = fixture.input_attachment(&id);
+            let history = fixture.run_parents(&capture);
+            let captures = fixture.captures();
+            let native_history =
+                std::fs::read(fixture.home.path().join("native-sessions.json")).unwrap();
+            for _ in 0..2 {
+                let bound = fixture.json(&["session", "bind", &id, "--task", task, "--json"]);
+                assert_eq!(bound["id"], id);
+                let opened = fixture.json(&["open", "--task", task, "--link", "--json"]);
+                assert_eq!(opened[0]["target"]["task_id"], task);
+                let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
+                assert_eq!(primary["id"], id);
+                assert_eq!(primary["task_primary"], true);
+                assert_eq!(primary["task_ids"], serde_json::json!([task]));
+                assert_eq!(
+                    store
+                        .session(&id)
+                        .unwrap()
+                        .unwrap()
+                        .task_id
+                        .unwrap()
+                        .as_str(),
+                    task
+                );
+                assert_eq!(
+                    primary["requested_cwd"],
+                    serde_json::to_value(&destination).unwrap()
+                );
+                for field in ["id", "cwd", "agent_process_id", "provider"] {
+                    assert_eq!(primary[field], before[field], "{field}");
+                }
+                let status = fixture.json(&["task", "status", task, "--json"]);
+                assert_eq!(status["task"]["state"], "done");
+                let current = store.task(&task_id).unwrap().unwrap();
+                assert_eq!(current.completed_at, completed.completed_at);
+                assert_eq!(current.state, completed.state);
+                assert_eq!(current.worktree, completed.worktree);
+                assert_eq!(current.branch, completed.branch);
+                assert_eq!(current.base_commit, completed.base_commit);
+                assert_eq!(fixture.input_attachment(&id), attachment);
+                assert_eq!(fixture.run_parents(&capture), history);
+                assert_eq!(fixture.captures(), captures);
+                assert_eq!(
+                    std::fs::read(fixture.home.path().join("native-sessions.json")).unwrap(),
+                    native_history
+                );
+                assert_eq!(fixture.launches().len(), 1);
+                assert_eq!(fixture.count("agent_sessions"), 1);
+                assert_eq!(fixture.count("tasks"), 1);
+                assert_eq!(fixture.count("task_graphs"), 0);
+            }
+            assert_eq!(
+                std::fs::read_to_string(origin.join("README.md")).unwrap(),
+                "unfinished research\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(origin.join("draft.txt")).unwrap(),
+                "untracked draft\n"
+            );
+            assert_eq!(loopflow::git::current_branch(&origin).unwrap(), branch);
+            if let Some(path) = &destination {
+                assert!(!path.join("draft.txt").exists());
+            }
+        });
     }
 }
 

@@ -19,5 +19,12 @@ remain pending. No Auto-Ship or landing approval.
 Implementation assumption (2026-11-03): closed Sessions cannot be selected as
 primary under the existing lifecycle. Public bind rejects them atomically;
 historical low-level assignments remain readable. No automatic reopening or
-new lifecycle is introduced. Binding a Task with no checkout keeps adoption of
+new lifecycle is introduced. Binding an open Task with no checkout keeps adoption of
 its Session's unowned linked checkout, as the existing placement path did.
+
+Concept-review implication (2026-11-03): the accepted ability to bind to done
+Tasks without reopening them takes precedence over optional checkout adoption.
+For a done Task with no checkout, select and bind the unfinished interactive
+Session in place without allocating one. The implementation now skips optional
+placement for terminal Tasks, including a transaction-time completion race.
+No new product decision; remaining proof is in `loo-582.md`.

@@ -735,3 +735,70 @@ a local return-to-latest control when reading scrollback. The current callback i
 empty; SwiftTerm already exposes its scroll position and local scroll API. Preserve
 passive viewing, canonical geometry and selection; neither action should acquire
 input or send terminal bytes.
+
+### Terminal reading ergonomics — implementation and acceptance
+
+Add a local Latest button only when the terminal scrollback or oversized observer
+viewport is above its bottom. Tapping it moves the two local scroll views, leaves
+selection intact and never requests input or geometry. Keep the compact typing
+bar unchanged. Use existing SwiftTerm scrolling APIs instead of another history.
+
+Open explicit terminal web links in a dismissible native browser. Other link
+schemes have no mobile implementation and should give a readable response.
+Observer reading must support native selection/link gestures without showing the
+software keyboard: local first-responder status is distinct from remote input
+authority. Keep all text input gated, disable remote mouse reporting while
+observing and retain explicit Use keyboard for control.
+
+Implemented with the native terminal's two scroll views and SafariServices.
+Latest retains selection and horizontal position; new output does not interrupt
+scrollback reading. Its pill uses Desktop colors/type and scales with system text.
+Observers have local reading focus and no software keyboard or remote mouse
+reporting. Underlined OSC 8 web links open in the native browser. Plain text URLs
+are not yet touch links; the pinned renderer only activates those through hover.
+No extra link parser or terminal history store was added.
+
+Actual UIKit/XCTest exposed a gap that handler tests missed: the first tap only
+established reading focus. The terminal now begins local reading on appearance.
+Close initially appeared broken, but instrumentation showed that XCTest's
+remote-service element tap never reached the button. Tapping its reported frame
+in app coordinates reached it and passed; no custom dismissal is needed. The
+temporary delegate and logs were removed. Apple's automatic dismissal contract:
+https://developer.apple.com/documentation/safariservices/sfsafariviewcontrollerdelegate/safariviewcontrollerdidfinish(_:)
+The tap-through test opens the link from observation and closes back to that
+Session without a keyboard grant. Initial logs: `/tmp/mobile-terminal-reading-ui.log` and
+`/tmp/mobile-terminal-reading-focus.log`. Native captures initially used a
+scene-less test window and were black; the capture test now mounts its window in
+the actual UIWindowScene before rendering.
+
+The 32 native terminal tests passed at 06:13; the existing lifecycle and
+accessibility UI tests passed in that run. The corrected link tap-through test
+then passed on the final browser implementation at
+`Test-LoopflowiOS-2026.11.04_06-18-05--0800.xcresult`, with default Safari dismissal
+and no delegate workaround. Screenshot review then caught the shared font helper
+discarding a configuration-only button title; it now preserves the existing
+configuration title/image, and Latest has an explicit visible-label/width check.
+
+The actual carrier proof passed at
+`Test-LoopflowiOS-2026.11.04_06-18-55--0800.xcresult` (49.755 seconds native).
+All 33,554,432 payload bytes and 512 native edited acknowledgements arrived once.
+Native-input response was p95 15.4 ms/max 21.3 ms; feed CPU was 16.503 seconds
+across 32,770 calls. Service restart, current activity, passive recovery and stale
+viewer disconnection passed. This is not a physical-phone energy or touch-latency
+guarantee. Logs: `/tmp/mobile-terminal-reading-live.log` and
+`/tmp/mobile-terminal-reading-live-native.log`; the temporary Serve route was
+removed and empty configuration verified. The later title-preservation change is
+local button styling only; its focused render/interaction verification remains
+separate from that carrier run.
+
+Large-text review also found a font-transformer sizing issue: the Latest label
+grew while its pill retained a narrow intrinsic width. The pill now uses an
+attributed title with its scaled font so layout measures the rendered text.
+Final local navigation and rendered sizing checks passed at
+`Test-LoopflowiOS-2026.11.04_06-21-48--0800.xcresult`; the visible Latest label,
+44-point minimum target width, preserved selection and no control/resize/input
+effects are asserted. Light, dark and large-text captures were inspected under
+`scratch/demo-assets/terminal-reading-*.png`; the browser round trip is also
+captured there. Physical gestures and VoiceOver on a phone remain unverified.
+The final capture-only run at 06:23 also applies the matching UIKit light/dark
+appearance so native disabled controls reflect the selected theme.

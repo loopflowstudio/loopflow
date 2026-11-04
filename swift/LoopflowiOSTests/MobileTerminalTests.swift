@@ -1,4 +1,5 @@
 import Loopflow
+import SafariServices
 import SwiftTerm
 import SwiftUI
 import UIKit
@@ -9,6 +10,107 @@ import XCTest
 @MainActor
 final class MobileTerminalTests: XCTestCase {
     private var window: UIWindow?
+
+    func testReadingHistoryLayouts() async throws {
+        for (name, theme, size) in [("light", ThemeDefinition.light, UIContentSizeCategory.large),
+                                    ("dark", .dark, .large), ("large-text", .light, .accessibilityExtraLarge)] {
+            let (workspace, client, controller) = try await connected()
+            defer { workspace.leave(); controller.terminal.updateUiClosed() }
+            client.link.loseControl()
+            await settle()
+            controller.update(theme: theme)
+            controller.overrideUserInterfaceStyle = theme.isDark ? .dark : .light
+            controller.traitOverrides.preferredContentSizeCategory = size
+            controller.view.layoutIfNeeded()
+            workspace.render?(Data((0..<100).map { "Reading line \($0)\r\n" }.joined().utf8), false)
+            controller.terminal.scroll(toPosition: 0.3)
+            controller.view.layoutIfNeeded()
+            let window = try XCTUnwrap(window)
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previous = scene.keyWindow
+            window.windowScene = scene
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; previous?.makeKey() }
+            try await Task.sleep(for: .milliseconds(150))
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "terminal-reading-\(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testLatestReturnsFromScrollbackAndOversizedViewportWithoutTakingControl() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        client.link.loseControl()
+        await settle()
+        controller.update(theme: .light)
+        let view = controller.terminal
+        let sent = client.transport.sent.count
+        XCTAssertEqual(view.getTerminal().link(at: .buffer(Position(col: 2, row: 0)), mode: .explicitOnly), "https://loopflow.studio")
+        let sizes = client.link.sizes
+        let controls = client.transport.controlRequests
+        workspace.render?(Data((0..<100).map { "Reading line \($0)\r\n" }.joined().utf8), false)
+        view.scroll(toPosition: 0.3)
+        view.setSelectionRange(start: Position(col: 0, row: 20), end: Position(col: 7, row: 20))
+        let selection = try XCTUnwrap(view.getSelection())
+        XCTAssertFalse(selection.isEmpty)
+        let latest = try XCTUnwrap(controller.view.subviews.first { $0.accessibilityIdentifier == "terminal-latest" } as? UIButton)
+        XCTAssertFalse(latest.isHidden)
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(latest.configuration?.title, "Latest")
+        XCTAssertGreaterThanOrEqual(latest.bounds.width, 44)
+        let offset = view.contentOffset.y
+        workspace.render?(Data("More output while reading\r\n".utf8), false)
+        XCTAssertEqual(view.contentOffset.y, offset, accuracy: 1, "New output must not interrupt reading")
+        latest.sendActions(for: .touchUpInside)
+        XCTAssertEqual(view.scrollPosition, 1)
+        XCTAssertEqual(view.getSelection(), selection)
+        XCTAssertTrue(latest.isHidden)
+
+        workspace.setGeometry?(TerminalGeometry(columns: 120, rows: 80))
+        controller.view.layoutIfNeeded()
+        let viewport = try XCTUnwrap(controller.view.subviews.first { $0.accessibilityIdentifier == "terminal-viewport" } as? UIScrollView)
+        viewport.setContentOffset(CGPoint(x: 100, y: 0), animated: false)
+        XCTAssertFalse(latest.isHidden)
+        latest.sendActions(for: .touchUpInside)
+        XCTAssertEqual(viewport.contentOffset.x, 100)
+        XCTAssertEqual(viewport.contentOffset.y, viewport.contentSize.height - viewport.bounds.height, accuracy: 1)
+        XCTAssertTrue(latest.isHidden)
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.transport.sent.count, sent)
+        XCTAssertTrue(client.link.sizes.elementsEqual(sizes, by: { $0.0 == $1.0 && $0.1 == $1.1 }))
+        XCTAssertEqual(client.transport.controlRequests, controls)
+    }
+
+    func testObserverCanSelectAndOpenWebLinksWithoutAKeyboardOrRemoteInput() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        client.link.loseControl()
+        await settle()
+        controller.update(theme: .light)
+        let view = controller.terminal
+        let sent = client.transport.sent.count
+        XCTAssertTrue(view.becomeFirstResponder(), "Reading gestures need a local responder")
+        XCTAssertNotNil(view.inputView, "Observation must not show the software keyboard")
+        XCTAssertFalse(view.allowMouseReporting)
+        view.setSelectionRange(start: Position(col: 0, row: 0), end: Position(col: 8, row: 0))
+        XCTAssertEqual(view.getSelection(), "Loopflow")
+        view.insertText("must not send")
+        view.deleteBackward()
+        view.pasteText("must not paste")
+        controller.requestOpenLink(source: view, link: "file:///tmp/local-on-another-machine", params: [:])
+        XCTAssertNil(controller.presentedViewController)
+        XCTAssertTrue(controller.view.subviews.contains { ($0 as? UILabel)?.text == "This link cannot be opened on this device." })
+        controller.requestOpenLink(source: view, link: "https://example.invalid/review", params: [:])
+        XCTAssertTrue(controller.presentedViewController is SFSafariViewController)
+        controller.dismiss(animated: false)
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.transport.sent.count, sent)
+    }
 
     func testMobileTextColorsRemainReadableInBothThemes() {
         for theme in [ThemeDefinition.light, .dark] {

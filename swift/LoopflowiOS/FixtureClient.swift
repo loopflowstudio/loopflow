@@ -123,7 +123,7 @@ final class FixtureTerminal {
         let row = 5 + lines.count - 1
         let column = (lines.count == 1 ? prompt.count : 0) + (lines.last?.count ?? 0) + 1
         // This deterministic peer requests a steady cursor for native UI captures.
-        return "\u{1b}[2 q\u{1b}[?2004h\u{1b}[2J\u{1b}[H\u{1b}[1mLoopflow · fixture Session\u{1b}[0m\r\n"
+        return "\u{1b}[2 q\u{1b}[?2004h\u{1b}[2J\u{1b}[H\u{1b}[1m\u{1b}]8;;https://loopflow.studio\u{1b}\\Loopflow\u{1b}]8;;\u{1b}\\ · fixture Session\u{1b}[0m\r\n"
             + "Offline input harness · no commands execute\r\n\(result)\r\n\r\n"
             + prompt + draft.replacingOccurrences(of: "\n", with: "\r\n")
             + "\u{1b}[\(row);\(column)H"

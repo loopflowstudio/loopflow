@@ -1,4 +1,5 @@
 import Loopflow
+import SafariServices
 import SwiftTerm
 import SwiftUI
 import UIKit
@@ -23,7 +24,9 @@ final class SessionTerminalView: TerminalView {
     var canWrite = false
     var pasteUnavailable: ((String) -> Void)?
 
-    override var canBecomeFirstResponder: Bool { canWrite }
+    // Selection and link gestures need a local responder even while observing.
+    // The controller hides its software keyboard; input still requires canWrite.
+    override var canBecomeFirstResponder: Bool { true }
 
     override func insertText(_ text: String) {
         guard canWrite else { return }
@@ -87,7 +90,7 @@ struct SessionTerminal: UIViewControllerRepresentable {
     }
 }
 
-final class SessionTerminalController: UIViewController, @preconcurrency TerminalViewDelegate {
+final class SessionTerminalController: UIViewController, @preconcurrency TerminalViewDelegate, UIScrollViewDelegate {
     let workspace: MobileWorkspace
     let terminal = SessionTerminalView(frame: .zero)
     private let viewport = TerminalViewport()
@@ -100,6 +103,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private let pasteButton = UIButton(type: .system)
     private let newlineButton = UIButton(type: .system)
     private let keyboardButton = UIButton(type: .system)
+    private let latestButton = UIButton(type: .system)
     private var keyboardHidden = false
 
     init(workspace: MobileWorkspace) {
@@ -124,13 +128,18 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             controller.updateTerminalFont()
         }
         terminal.inputAccessoryView = nil
+        terminal.inputView = UIView(frame: .zero)
+        terminal.allowMouseReporting = false
+        // Touch has no hover state: expose program-supplied OSC 8 links directly.
+        terminal.linkHighlightMode = .always
         terminal.accessibilityLabel = "Session terminal"
         terminal.accessibilityIdentifier = "session-terminal"
         terminal.pasteUnavailable = { [weak self] text in self?.message.text = text }
-        workspace.render = { [weak terminal] bytes, reset in
-            guard let terminal else { return }
+        workspace.render = { [weak self] bytes, reset in
+            guard let self else { return }
             if reset { terminal.feed(text: "\u{1b}c") }
             terminal.feed(byteArray: Array(bytes)[...])
+            updateLatestButton()
         }
         workspace.setGeometry = { [weak self] geometry in
             guard let self else { return }
@@ -146,6 +155,16 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         keyboardButton.setImage(UIImage(systemName: "keyboard.chevron.compact.down"), for: .normal)
         keyboardButton.accessibilityLabel = "Hide keyboard"
         keyboardButton.addAction(UIAction { [weak self] _ in self?.toggleKeyboard() }, for: .touchUpInside)
+        var latestStyle = UIButton.Configuration.filled()
+        latestStyle.title = "Latest"
+        latestStyle.image = UIImage(systemName: "arrow.down")
+        latestStyle.imagePadding = 6
+        latestStyle.cornerStyle = .capsule
+        latestButton.configuration = latestStyle
+        latestButton.accessibilityLabel = "Scroll to latest output"
+        latestButton.accessibilityIdentifier = "terminal-latest"
+        latestButton.isHidden = true
+        latestButton.addAction(UIAction { [weak self] _ in self?.showLatest() }, for: .touchUpInside)
         bar.axis = .horizontal
         bar.distribution = .fillEqually
         for button in [pasteButton, newlineButton, keyboardButton] { bar.addArrangedSubview(button) }
@@ -155,13 +174,14 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         message.numberOfLines = 0
         viewport.contentInsetAdjustmentBehavior = .never
         viewport.isDirectionalLockEnabled = true
+        viewport.delegate = self
         terminal.panGestureRecognizer.require(toFail: viewport.panGestureRecognizer)
         viewport.accessibilityIdentifier = "terminal-viewport"
         terminal.translatesAutoresizingMaskIntoConstraints = false
         viewport.addSubview(terminal)
         terminalWidth = terminal.widthAnchor.constraint(equalToConstant: 1)
         terminalHeight = terminal.heightAnchor.constraint(equalToConstant: 1)
-        for subview in [viewport, message, bar] {
+        for subview in [viewport, message, bar, latestButton] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
@@ -182,12 +202,24 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             bar.trailingAnchor.constraint(equalTo: viewport.trailingAnchor),
             bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             bar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            latestButton.centerXAnchor.constraint(equalTo: viewport.centerXAnchor),
+            latestButton.bottomAnchor.constraint(equalTo: viewport.bottomAnchor, constant: -8),
+            latestButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            latestButton.widthAnchor.constraint(lessThanOrEqualTo: viewport.widthAnchor),
         ])
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutTerminal()
+        updateLatestButton()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Begin local reading immediately, so the first tap can open a link.
+        // Observer inputView is empty and remote input is still gated.
+        _ = terminal.becomeFirstResponder()
     }
 
     private var preferredTerminalFont: UIFont {
@@ -200,8 +232,8 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traitCollection)
         for button in [pasteButton, newlineButton, keyboardButton] {
             var configuration = button.configuration ?? .plain()
-            configuration.title = button.currentTitle
-            configuration.image = button.currentImage
+            configuration.title = button.currentTitle ?? configuration.title
+            configuration.image = button.currentImage ?? configuration.image
             configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4)
             configuration.titleLineBreakMode = .byWordWrapping
             configuration.titleAlignment = .center
@@ -213,6 +245,16 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(font: font)
             button.configuration = configuration
         }
+        // An attributed title makes the pill's intrinsic width follow its font,
+        // unlike a transformer applied only when drawing the title label.
+        var latest = latestButton.configuration
+        var attributes = AttributeContainer()
+        attributes.font = font
+        latest?.attributedTitle = AttributedString("Latest", attributes: attributes)
+        latest?.titleLineBreakMode = .byClipping
+        latest?.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+        latest?.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(font: font)
+        latestButton.configuration = latest
     }
 
     private func updateTerminalFont() {
@@ -251,6 +293,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         let canWrite = workspace.state == .controlling
         let changed = terminal.canWrite != canWrite
         terminal.canWrite = canWrite
+        terminal.allowMouseReporting = canWrite
         for button in [pasteButton, newlineButton, keyboardButton] { button.isEnabled = canWrite }
         if changed {
             if canWrite {
@@ -260,12 +303,14 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
                 terminal.inputView = nil
                 updateKeyboardButton()
                 terminal.reloadInputViews()
-                terminal.becomeFirstResponder()
+                _ = terminal.becomeFirstResponder()
             }
             else {
                 // Commit/discard any platform composition only after the transport input gate closed.
                 terminal.unmarkText()
-                terminal.resignFirstResponder()
+                terminal.inputView = UIView(frame: .zero)
+                terminal.reloadInputViews()
+                _ = terminal.resignFirstResponder()
             }
         }
         guard appliedTheme != theme.id else { return }
@@ -283,14 +328,31 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         view.backgroundColor = UIColor(theme.palette.background)
         bar.tintColor = UIColor(theme.palette.accentInk)
         message.textColor = UIColor(theme.palette.textSecondary)
+        latestButton.configuration?.baseBackgroundColor = UIColor(theme.palette.surface)
+        latestButton.configuration?.baseForegroundColor = UIColor(theme.palette.accentInk)
     }
+
+    private func updateLatestButton() {
+        let readingHistory = terminal.canScroll && terminal.scrollPosition < 1
+        let aboveBottom = viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
+        latestButton.isHidden = !(readingHistory || aboveBottom)
+    }
+
+    private func showLatest() {
+        terminal.scroll(toPosition: 1)
+        viewport.setContentOffset(CGPoint(x: viewport.contentOffset.x,
+            y: max(0, viewport.contentSize.height - viewport.bounds.height)), animated: false)
+        updateLatestButton()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) { updateLatestButton() }
 
     private func toggleKeyboard() {
         keyboardHidden.toggle()
         // Keep first responder so a hardware keyboard still reaches the terminal.
         terminal.inputView = keyboardHidden ? UIView(frame: .zero) : nil
         terminal.reloadInputViews()
-        terminal.becomeFirstResponder()
+        _ = terminal.becomeFirstResponder()
         updateKeyboardButton()
     }
 
@@ -305,7 +367,19 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     }
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-    func scrolled(source: TerminalView, position: Double) {}
+    func scrolled(source: TerminalView, position: Double) { updateLatestButton() }
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
-    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        guard let url = URL(string: link), let scheme = url.scheme?.lowercased(),
+              ["https", "http"].contains(scheme),
+              let host = url.host, !host.isEmpty else {
+            message.text = "This link cannot be opened on this device."
+            return
+        }
+        guard presentedViewController == nil else { return }
+        message.text = nil
+        let browser = SFSafariViewController(url: url)
+        browser.dismissButtonStyle = .close
+        present(browser, animated: true)
+    }
 }

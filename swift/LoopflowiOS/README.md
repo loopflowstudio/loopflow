@@ -11,6 +11,9 @@ Session. Paste and **New line** preserve multiline input; Return submits. Try
 `permission`, then `y` or `n` and Return. Nothing executes outside the app.
 The keyboard button hides the software keyboard while retaining hardware input.
 Text selection and VoiceOver reading belong to the native terminal.
+Reading and selecting text do not require keyboard control. Tap an underlined
+program-supplied web link to open the native browser, then Close to return to the
+Session. Ordinary text URLs are not automatically made into touch links.
 Search the compact Task list by title or checkout path. A Task without a recorded
 Session opens an explanation instead of an empty terminal.
 
@@ -23,6 +26,9 @@ System text size also enlarges the terminal and its accessory controls. At
 accessibility sizes the Session header stacks vertically. Observing still keeps
 every remote cell; pan to read the wider screen. Only explicit geometry control
 fits the larger text to the phone.
+When reading earlier output or the top of a taller remote screen, **Latest**
+returns to the bottom locally. New output leaves the reading position alone;
+Latest preserves selection and never takes keyboard or geometry control.
 
 Disable `--fixture` to connect to a Machine. Sign into host Tailscale on both
 devices. In Desktop, open Settings → Mobile → **Pair a phone**. On iPhone, choose

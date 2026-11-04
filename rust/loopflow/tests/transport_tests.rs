@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use loopflow::program_status;
 use loopflow_test_support::TestRepo;
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
@@ -1179,7 +1180,9 @@ done
         fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "native status"));
     let mut viewer = fixture.viewer(&owner, true);
     let mut received = out(&until_out(&mut viewer, "native ready"));
-    let states = ["working", "idle", "blocked", "working", "done", "idle"];
+    let states = [
+        "working", "idle", "blocked", "working", "done", "idle", "clear",
+    ];
     for state in states {
         viewer.input(&format!("{state}\n"));
         received.extend(out(&until_out(&mut viewer, &format!("reported {state}"))));
@@ -1193,15 +1196,31 @@ done
             );
             received.extend(out(&quiet));
         }
+        drop(viewer);
+        viewer = fixture.viewer(&owner, true);
+        let snapshot = match viewer.next().unwrap() {
+            Item::Snapshot(bytes) => bytes,
+            other => panic!("expected retained snapshot, got {other:?}"),
+        };
+        let mut terminal = ghostty_vt::Terminal::new(80, 24).unwrap();
+        terminal.write(b"\x1b]7501;id=previous:state=working\x1b\\");
+        terminal.write(&snapshot);
+        let status = terminal.program_status();
+        assert!(status.seen);
+        if state == "clear" {
+            assert!(status.records.is_empty());
+        } else {
+            assert_eq!(status.records.len(), 1);
+            assert_eq!(
+                serde_json::to_value(status.records[0].state).unwrap(),
+                state
+            );
+            assert_eq!(status.records[0].id, None);
+            assert_eq!(status.records[0].app.as_deref(), Some("claude-code"));
+        }
     }
-    drop(viewer);
-    let mut replacement = fixture.viewer(&owner, true);
-    let snapshot = match replacement.next().unwrap() {
-        Item::Snapshot(bytes) => bytes,
-        other => panic!("expected retained snapshot, got {other:?}"),
-    };
-    replacement.input("exit\n");
-    replacement.finish();
+    viewer.input("exit\n");
+    viewer.finish();
 
     let received = String::from_utf8(received).unwrap();
     let reports: Vec<_> = received
@@ -1214,9 +1233,51 @@ done
         states.map(|state| format!("state={state}:app=claude-code")),
         "native reports must pass unchanged without a competing lf record"
     );
-    assert!(
-        !String::from_utf8_lossy(&snapshot).contains(":state=working"),
-        "reattachment restored a stale launcher record"
+}
+
+#[test]
+fn native_program_status_detects_support_before_a_viewer_attaches() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "python3",
+        "-c",
+        r#"
+import os, select, tty
+from pathlib import Path
+tty.setraw(0)
+os.write(1, b"\x1b]7501;?\x07")
+reply = b""
+while select.select([0], [], [], 3)[0]:
+    reply += os.read(0, 1024)
+    if reply.endswith(b"\x07"):
+        break
+path = Path(os.environ["HOME"]) / "detection"
+path.with_suffix(".tmp").write_text(reply.hex() or "missing")
+path.with_suffix(".tmp").rename(path)
+os.write(1, b"\x1b]7501;state=blocked:kind=question\x1b\\ready")
+os.read(0, 1)
+"#,
+    ]);
+    let reply = fixture.wait_file("detection");
+    let mut viewer = fixture.viewer(&owner, true);
+    let items = until_out(&mut viewer, "ready");
+    let mut terminal = ghostty_vt::Terminal::new(80, 24).unwrap();
+    for item in items {
+        match item {
+            Item::Snapshot(bytes) | Item::Out(bytes) => terminal.write(&bytes),
+            _ => {}
+        }
+    }
+    viewer.input("x");
+    viewer.finish();
+    assert_eq!(reply, hex::encode(b"\x1b]7501;?\x07"));
+    assert_eq!(
+        terminal.program_status().records[0].state,
+        program_status::State::Blocked
+    );
+    assert_eq!(
+        terminal.program_status().records[0].kind,
+        Some(program_status::Kind::Question)
     );
 }
 

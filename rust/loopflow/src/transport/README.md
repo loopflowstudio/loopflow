@@ -195,3 +195,8 @@ Native providers own their Program Status (OSC 7501) reports, which pass through
 unchanged. Loopflow reports activity for structured Runs and Graph progress, and
 the command's result when it exits. It does not label an open native conversation
 Working for the lifetime of its process. Quiet output alone changes no status.
+The owner answers status-support queries while detached and retains the latest
+64 records from providers and lf together. Reattaching replaces the viewer's
+records with that current status, including completed work and pending questions.
+Clear removes the named record and its children; a shell prompt retires live
+claims, and a terminal reset removes all records.

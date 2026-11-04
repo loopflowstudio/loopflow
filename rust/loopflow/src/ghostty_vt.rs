@@ -10,6 +10,8 @@
 use std::ffi::c_void;
 use std::fmt;
 
+use crate::program_status::{Kind, Records, Report, State};
+
 /// The Ghostty revision the linked library was built from.
 pub const REVISION: &str = env!("LOOPFLOW_GHOSTTY_REVISION");
 
@@ -52,9 +54,23 @@ fn check(call: &'static str, code: i32) -> Result<(), Error> {
     }
 }
 
-/// Bytes the terminal wrote back toward the program: DSR, DA and mode reports.
-#[derive(Debug, Default)]
-struct Replies(Vec<u8>);
+#[derive(Debug)]
+struct Effects {
+    replies: Vec<u8>,
+    status: Records,
+}
+
+impl Default for Effects {
+    fn default() -> Self {
+        Self {
+            replies: Vec::new(),
+            status: Records {
+                seen: false,
+                records: Vec::new(),
+            },
+        }
+    }
+}
 
 unsafe extern "C" fn write_pty(
     _terminal: ffi::Terminal,
@@ -62,13 +78,72 @@ unsafe extern "C" fn write_pty(
     data: *const u8,
     len: usize,
 ) {
-    // SAFETY: userdata is the Box<Replies> this terminal registered and owns
+    // SAFETY: userdata is the Box<Effects> this terminal registered and owns
     // for its whole life; data points to len readable bytes for this call.
     unsafe {
-        let replies = &mut *userdata.cast::<Replies>();
-        replies
-            .0
+        let effects = &mut *userdata.cast::<Effects>();
+        effects
+            .replies
             .extend_from_slice(std::slice::from_raw_parts(data, len));
+    }
+}
+
+unsafe extern "C" fn program_status(
+    _terminal: ffi::Terminal,
+    userdata: *mut c_void,
+    report: *const ffi::ProgramStatus,
+) {
+    // SAFETY: Ghostty calls synchronously with a validated report and borrowed
+    // strings; userdata is this terminal's stable Box<Effects>.
+    unsafe {
+        let report = &*report;
+        let state = match report.state {
+            0 => State::Idle,
+            1 => State::Working,
+            2 => State::Done,
+            3 => State::Blocked,
+            4 => State::Error,
+            5 => State::Clear,
+            _ => return,
+        };
+        let kind = match report.kind {
+            1 => Some(Kind::Permission),
+            2 => Some(Kind::Question),
+            3 => Some(Kind::Auth),
+            _ => None,
+        };
+        (*userdata.cast::<Effects>()).status.apply(Report {
+            state,
+            id: copy_string(&report.id),
+            kind,
+            progress: u8::try_from(report.progress).ok(),
+            app: copy_string(&report.app),
+            title: copy_string(&report.title),
+            msg: copy_string(&report.message),
+        });
+    }
+}
+
+unsafe fn copy_string(value: &ffi::String) -> Option<String> {
+    if value.len == 0 {
+        return None;
+    }
+    // SAFETY: the callback owns a readable, validated UTF-8 slice for this call.
+    let bytes = unsafe { std::slice::from_raw_parts(value.ptr, value.len) };
+    std::str::from_utf8(bytes).ok().map(str::to_owned)
+}
+
+unsafe extern "C" fn semantic_prompt(
+    _terminal: ffi::Terminal,
+    userdata: *mut c_void,
+    event: *const ffi::SemanticPrompt,
+) {
+    // SAFETY: the event is borrowed for this callback, and userdata is the
+    // terminal's stable Box<Effects>.
+    unsafe {
+        if (*event).kind == 1 {
+            (*userdata.cast::<Effects>()).status.clear_live();
+        }
     }
 }
 
@@ -97,7 +172,7 @@ unsafe extern "C" fn device_attributes(
 /// callbacks run inside `write`.
 pub struct Terminal {
     raw: ffi::Terminal,
-    replies: Box<Replies>,
+    effects: Box<Effects>,
     received_output: bool,
 }
 
@@ -124,7 +199,7 @@ impl Terminal {
         })?;
         let mut terminal = Self {
             raw,
-            replies: Box::default(),
+            effects: Box::default(),
             received_output: false,
         };
         terminal.configure()?;
@@ -134,15 +209,27 @@ impl Terminal {
     /// Callbacks and limits every owner terminal uses, including one restored
     /// from a snapshot.
     fn configure(&mut self) -> Result<(), Error> {
-        let userdata: *mut Replies = &mut *self.replies;
+        let userdata: *mut Effects = &mut *self.effects;
         // Callback options take the function pointer itself as the value.
         let write: ffi::WritePtyFn = write_pty;
         let attributes: ffi::DeviceAttributesFn = device_attributes;
+        let status: ffi::ProgramStatusFn = program_status;
+        let prompt: ffi::SemanticPromptFn = semantic_prompt;
         // SAFETY: each value pointer has the type its option documents and
         // outlives the call; the userdata Box lives as long as the terminal.
         unsafe {
             self.set("userdata", ffi::OPT_USERDATA, userdata.cast())?;
             self.set("write_pty", ffi::OPT_WRITE_PTY, write as *const c_void)?;
+            self.set(
+                "program_status",
+                ffi::OPT_PROGRAM_STATUS,
+                status as *const c_void,
+            )?;
+            self.set(
+                "semantic_prompt",
+                ffi::OPT_SEMANTIC_PROMPT,
+                prompt as *const c_void,
+            )?;
             self.set(
                 "device_attributes",
                 ffi::OPT_DEVICE_ATTRIBUTES,
@@ -191,7 +278,11 @@ impl Terminal {
 
     /// Replies the program is owed since the last call.
     pub fn take_replies(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.replies.0)
+        std::mem::take(&mut self.effects.replies)
+    }
+
+    pub fn program_status(&self) -> &Records {
+        &self.effects.status
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Error> {
@@ -487,7 +578,7 @@ impl Terminal {
         }
         let mut terminal = Self {
             raw,
-            replies: Box::default(),
+            effects: Box::default(),
             received_output: true,
         };
         terminal.configure()?;
@@ -556,6 +647,8 @@ mod ffi {
     pub const OPT_DEVICE_ATTRIBUTES: i32 = 8;
     pub const OPT_SCROLLBACK_MAX_BYTES: i32 = 27;
     pub const OPT_CONTINUATION_MAX_BYTES: i32 = 31;
+    pub const OPT_SEMANTIC_PROMPT: i32 = 42;
+    pub const OPT_PROGRAM_STATUS: i32 = 46;
 
     pub const DATA_COLS: i32 = 1;
     pub const DATA_ROWS: i32 = 2;
@@ -582,6 +675,40 @@ mod ffi {
     pub type WritePtyFn = unsafe extern "C" fn(Terminal, *mut c_void, *const u8, usize);
     pub type DeviceAttributesFn =
         unsafe extern "C" fn(Terminal, *mut c_void, *mut DeviceAttributes) -> bool;
+    pub type ProgramStatusFn = unsafe extern "C" fn(Terminal, *mut c_void, *const ProgramStatus);
+    pub type SemanticPromptFn = unsafe extern "C" fn(Terminal, *mut c_void, *const SemanticPrompt);
+
+    #[derive(Debug)]
+    #[repr(C)]
+    pub struct String {
+        pub ptr: *const u8,
+        pub len: usize,
+    }
+
+    #[derive(Debug)]
+    #[repr(C)]
+    pub struct ProgramStatus {
+        pub size: usize,
+        pub state: i32,
+        pub kind: i32,
+        pub progress: i8,
+        pub id: String,
+        pub app: String,
+        pub title: String,
+        pub message: String,
+    }
+
+    #[derive(Debug)]
+    #[repr(C)]
+    pub struct SemanticPrompt {
+        pub size: usize,
+        pub kind: i32,
+        pub prompt_kind: i32,
+        pub has_exit_code: bool,
+        pub exit_code: i32,
+        pub command: String,
+        pub error: String,
+    }
 
     #[repr(C)]
     pub struct DeviceAttributesPrimary {

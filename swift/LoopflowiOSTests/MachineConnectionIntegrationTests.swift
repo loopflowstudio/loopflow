@@ -44,6 +44,15 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let reopened = RemoteMobileClient(credential: confirmed)
         let refreshed = try await reopened.workingTasks()
         XCTAssertEqual(refreshed.map(\.work), tasks.map(\.work))
+        let observation = try await reopened.observeTasks()
+        defer { observation.close() }
+        var readings = observation.readings.makeAsyncIterator()
+        let initial = try await readings.next()
+        XCTAssertEqual(try XCTUnwrap(initial).get().map(\.work), tasks.map(\.work))
+        try await observation.refresh()
+        let replacement = try await readings.next()
+        XCTAssertEqual(try XCTUnwrap(replacement).get().map(\.work), tasks.map(\.work))
+        observation.close()
         if let proof { try await exerciseSession(proof, client: reopened, tasks: refreshed) }
     }
 

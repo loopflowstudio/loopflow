@@ -94,8 +94,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             activity_known: false,
         });
     }
-    let mut tasks = super::children::tasks_in(conn, None)?;
-    tasks.retain(|task| &task.repository_id == repository);
+    let mut tasks = super::children::repository_tasks_in(conn, repository)?;
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
     let sessions = super::sessions::session_summaries_in(
         conn,
@@ -367,6 +366,26 @@ fn plan_in(
     })
 }
 
+fn plan_selection_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    selection: Selection,
+) -> StoreResult<crate::work::selection::ViewPlan> {
+    let catalog = catalog_in(conn, repository)?;
+    let work = work_in(conn, repository)?;
+    let saved = selection
+        .referenced_query()
+        .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
+    plan_in(
+        conn,
+        repository,
+        saved.map_or(selection, |saved| saved.selection.clone()),
+        saved,
+        &definitions(&catalog),
+        &work,
+    )
+}
+
 impl SqliteStore {
     /// Resolve text/defaults and saved intent without creating Work or acquiring a client.
     pub fn view_plan(
@@ -388,19 +407,31 @@ impl SqliteStore {
     ) -> StoreResult<crate::work::selection::ViewPlan> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let catalog = catalog_in(&snapshot, repository)?;
-        let work = work_in(&snapshot, repository)?;
-        let saved = selection
-            .referenced_query()
-            .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
-        plan_in(
-            &snapshot,
-            repository,
-            saved.map_or(selection, |saved| saved.selection.clone()),
-            saved,
-            &definitions(&catalog),
-            &work,
-        )
+        plan_selection_in(&snapshot, repository, selection)
+    }
+
+    /// One consistent reading of the same selection across this Machine's repositories.
+    pub fn all_view_plans(
+        &self,
+        source: Option<&str>,
+    ) -> StoreResult<Vec<crate::work::selection::ViewPlan>> {
+        let selection = match source {
+            Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
+            None => repository_default(),
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let mut statement = snapshot.prepare("SELECT id FROM repository_plans ORDER BY id")?;
+        let repositories = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        repositories
+            .iter()
+            .map(|repository| {
+                let repository = RepositoryId::parse(repository).map_err(invalid)?;
+                plan_selection_in(&snapshot, &repository, selection.clone())
+            })
+            .collect()
     }
 
     /// The observer and one-shot plans expose the same repository/default and saved views.

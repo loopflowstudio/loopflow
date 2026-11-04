@@ -40,6 +40,10 @@ local Desktop connections. Its saved configuration survives service restart.
 Desktop Mobile settings and iOS QR scanning use the same ticket format; generated
 QR decoding and native builds pass. Physical camera/share-sheet use, installed
 Desktop interaction and composed installed update survival remain unproven.
+The phone now reads and watches existing ViewPlans across repositories in one
+shared operation, with local SQL scope applied before Task decoding. Native stale/
+recovery/cancellation tests, shared CLI/watch parity and live Tailscale checkpoint
+refresh pass. Real network loss and physical-phone energy/latency remain open.
 Terminal activity #1809 is included through main sync at ac8e088f5f; other
 coordination references below do not assert delivery status.
 

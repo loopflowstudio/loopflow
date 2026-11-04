@@ -69,16 +69,23 @@ final class MachineConnection {
         }
     }
 
-    func request(_ operation: MachineOperation) async throws -> MachineResponse {
+    func request(_ operation: MachineOperation, id: String = UUID().uuidString) async throws -> MachineResponse {
         let timeout = deadline()
         defer { timeout.cancel() }
-        let id = UUID().uuidString
         let body = try JSONEncoder().encode(MachineRequest(version: 1, id: id, operation: operation))
+        try await sendFrame(body)
+        return try await receiveResponse(id: id)
+    }
+
+    func sendFrame(_ body: Data) async throws {
         guard body.count <= 65536 else { throw RegistryQueryError("Machine request exceeds its limit") }
         var length = UInt32(body.count).bigEndian
         var bytes = withUnsafeBytes(of: &length) { Data($0) }
         bytes.append(body)
         try await send(bytes)
+    }
+
+    func receiveResponse(id: String) async throws -> MachineResponse {
         let header = try await read(4)
         let size = header.reduce(0) { ($0 << 8) | Int($1) }
         guard size <= 32 * 1024 * 1024 else { throw RegistryQueryError("Machine reading exceeds its limit") }

@@ -134,6 +134,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     let (reads, watches) = match task_diff(None, None) {
         Read::MonitorPs
         | Read::DesktopPlans { .. }
+        | Read::AllViewPlans { .. }
         | Read::DesktopSessions { .. }
         | Read::DesktopTask { .. }
         | Read::TaskChanges { .. }
@@ -167,6 +168,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
             [
                 Read::MonitorPs,
                 plans(),
+                Read::AllViewPlans { expression: None },
                 sessions(true),
                 task_pane(),
                 Read::TaskChanges {
@@ -234,6 +236,9 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 Read::Machines,
                 history(),
                 all_plans(),
+                Read::AllViewPlans {
+                    expression: Some("kind:task state:open".into()),
+                },
                 Read::Roadmap {
                     directory: repo.path().to_owned(),
                     wave: None,
@@ -282,6 +287,9 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 history(),
                 Read::MonitorPs,
                 all_plans(),
+                Read::AllViewPlans {
+                    expression: Some("kind:task state:open".into()),
+                },
                 plans(),
                 sessions(false),
                 sessions(true),

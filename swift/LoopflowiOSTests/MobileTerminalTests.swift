@@ -444,6 +444,7 @@ private final class TestClient: MobileClient {
     var ownerUnavailable = false
 
     func workingTasks() async throws -> [WorkViewPlan.Content] { try await FixtureClient().workingTasks() }
+    func observeTasks() async throws -> any MobileTaskObservation { try await FixtureClient().observeTasks() }
     func attach(sessionID: String) async throws -> any MobileAttachment {
         if ownerUnavailable { throw SessionUnavailable("No running owner") }
         if attachFailures > 0 {

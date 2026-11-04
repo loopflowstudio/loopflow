@@ -21,6 +21,7 @@ struct LoopflowiOSApp: App {
 struct MobileTaskList: View {
     @State private var workspace: MobileWorkspace
     @State private var search = ""
+    @State private var listVisible = false
     private let connectionLabel: String
     private let onForget: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
@@ -45,6 +46,9 @@ struct MobileTaskList: View {
                             Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark")
                                 .font(Typography.strong(15))
                             Text(error).font(Typography.caption(13))
+                            if !workspace.tasks.isEmpty {
+                                Text("Showing the last received Tasks.").font(Typography.caption(13))
+                            }
                             Button("Try again") { Task { await workspace.refresh() } }
                                 .disabled(workspace.isLoadingTasks)
                         }
@@ -98,6 +102,8 @@ struct MobileTaskList: View {
                 }
             }
             .refreshable { await workspace.refresh() }
+            .onAppear { listVisible = true }
+            .onDisappear { listVisible = false; workspace.stopTaskUpdates() }
             .searchable(text: $search, prompt: "Find a Task")
             .navigationTitle("Tasks")
             .navigationBarTitleDisplayMode(.large)
@@ -107,6 +113,7 @@ struct MobileTaskList: View {
                         Menu {
                             Text(connectionLabel)
                             Button("Forget Machine", role: .destructive) {
+                                workspace.stopTaskUpdates()
                                 workspace.leave()
                                 onForget()
                             }
@@ -118,7 +125,10 @@ struct MobileTaskList: View {
         }
         .tint(theme.palette.accentInk)
         .environment(\.palette, theme.palette)
-        .task { await workspace.refresh() }
+        .task(id: listVisible && scenePhase == .active) {
+            if listVisible && scenePhase == .active { await workspace.startTaskUpdates() }
+            else { workspace.stopTaskUpdates() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { workspace.suspend() }
         }

@@ -37,6 +37,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public enum ServedRead: Equatable, Sendable, Encodable {
     case monitorPs
     case desktopPlans(directory: String)
+    case allViewPlans(expression: String?)
     case desktopSessions(directory: String, headless: Bool)
     case desktopTask(directory: String, issue: String)
     case taskChanges(issue: String, base: String)
@@ -78,6 +79,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["monitor", "ps", "--json"]
         case .desktopPlans:
             return ["desktop", "plans", "--json"]
+        case .allViewPlans(let expression):
+            return ["desktop", "plans", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopSessions(_, let headless):
             return ["desktop", "sessions"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
         case .desktopTask(_, let issue):
@@ -164,6 +167,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         switch self {
         case .monitorPs: TaggedFields("monitor_ps")
         case .desktopPlans(let directory): TaggedFields("desktop_plans", ["directory": directory])
+        case .allViewPlans(let expression): TaggedFields("all_view_plans", ["expression": expression])
         case .desktopSessions(let directory, let headless):
             TaggedFields("desktop_sessions", ["directory": directory, "headless": headless])
         case .desktopTask(let directory, let issue):

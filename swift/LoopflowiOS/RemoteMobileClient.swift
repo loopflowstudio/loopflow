@@ -9,21 +9,15 @@ final class RemoteMobileClient: MobileClient {
 
     func workingTasks() async throws -> [WorkViewPlan.Content] {
         try await verifyMachine()
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try await read(.allPlans).utf8))
-        guard case .available(let tasks, let truncated) = roadmap.tasks else {
-            throw RegistryQueryError(roadmap.tasks.unavailableReason ?? "Task reading unavailable")
-        }
-        guard !truncated else { throw RegistryQueryError("The Machine returned an incomplete Task list") }
-        let repositories = Set(tasks.map { $0.task.repositoryId }).sorted()
-        var result: [WorkViewPlan.Content] = []
-        for repository in repositories {
-            try Task.checkCancellation()
-            let path = try await read(.repositoryPath(id: repository)).trimmingCharacters(in: .whitespacesAndNewlines)
-            let reading = try await response(.read(.viewPlan(directory: path, expression: "kind:task state:open")))
-            // Consume the same WorkViewPlan contract as the offline/native proof.
-            result.append(contentsOf: try mobileTasks(reading))
-        }
-        return result
+        let output = try await read(Self.taskQuery)
+        return try JSONDecoder().decode([WorkViewPlan].self, from: Data(output.utf8)).flatMap { try mobileTasks($0) }
+    }
+
+    private static let taskQuery = ServedRead.allViewPlans(expression: "kind:task state:open")
+
+    func observeTasks() async throws -> any MobileTaskObservation {
+        try await verifyMachine()
+        return try await RemoteTaskObservation.open(credential: credential, query: Self.taskQuery)
     }
 
     func attach(sessionID: String) async throws -> any MobileAttachment {
@@ -55,7 +49,7 @@ final class RemoteMobileClient: MobileClient {
             try MachineKeychain.save(confirmed)
             credential = confirmed
         }
-        guard ["view_plan", "repository_path", "session_owner", "owner_bridge"].allSatisfy(capabilities.contains) else {
+        guard ["all_view_plans", "session_owner", "owner_bridge"].allSatisfy(capabilities.contains) else {
             throw RegistryQueryError("Update the Machine service to use Tasks and Sessions from this phone")
         }
     }

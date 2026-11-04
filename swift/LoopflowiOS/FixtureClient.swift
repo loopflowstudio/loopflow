@@ -18,6 +18,27 @@ final class FixtureClient: MobileClient {
         sessions[sessionID] = terminal
         return FixtureAttachment(sessionID: sessionID, terminal: terminal)
     }
+
+    func observeTasks() async throws -> any MobileTaskObservation {
+        FixtureTaskObservation(tasks: try await workingTasks())
+    }
+}
+
+@MainActor
+final class FixtureTaskObservation: MobileTaskObservation {
+    let readings: AsyncThrowingStream<MobileTaskReading, any Error>
+    let continuation: AsyncThrowingStream<MobileTaskReading, any Error>.Continuation
+    private let tasks: [WorkViewPlan.Content]
+    private(set) var closed = false
+
+    init(tasks: [WorkViewPlan.Content]) {
+        self.tasks = tasks
+        (readings, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        continuation.yield(.success(tasks))
+    }
+
+    func refresh() async throws { continuation.yield(.success(tasks)) }
+    func close() { closed = true; continuation.finish() }
 }
 
 @MainActor

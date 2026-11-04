@@ -3,6 +3,13 @@ import Testing
 @testable import Loopflow
 
 struct MachineProtocolTests {
+    @Test func allRepositorySelectionUsesTheSharedWatch() throws {
+        let query = ServedRead.allViewPlans(expression: "kind:task state:open")
+        let request = MachineRequest(version: 1, id: "tasks-1", operation: .subscribe(query, generation: 1))
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("all_view_plans")))
+        #expect(query.argv == ["desktop", "plans", "--all", "--json", "--expression", "kind:task state:open"])
+        #expect(query.cwd == nil)
+    }
     @Test func localMobileSetupUsesRustFixtures() throws {
         let request = MachineRequest(version: 1, id: "mobile-1", operation: .configureRemote(port: 0))
         #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("configure_remote")))

@@ -73,9 +73,10 @@ grant restores the software keyboard even if the earlier attachment hid it.
    ticket as a QR code; iOS validates scans before explicit Connect. Verify actual
    camera scanning, first-certificate provisioning latency and real permission/
    sign-in failures. A running CLI alone does not establish readiness.
-3. Replace per-repository sequential Task reads with a measured efficient path and
-   connect shared replacement subscriptions. Keep stale/error state honest and
-   cancel offscreen work. Do not create a second Work projection or event log.
+3. Continue Task-list performance and recovery acceptance under sustained Work
+   changes and real network loss. The phone now uses one all-repository selection
+   watch, closes it offscreen/in background and preserves stale readings on failure.
+   Local query cost is measured below; physical-phone latency/energy remains open.
 4. Verify real phone ergonomics: horizontal observer panning, software keyboard
    layout, CJK conversion, dictation, physical keys, VoiceOver and sustained-output
    battery use. Programmatic scroll offsets and UIKit text calls do not prove these.
@@ -227,3 +228,36 @@ and dark initial layout and the corrected button contrast. Computer-use returned
 operated. Physical camera scanning, file sharing and installed app interaction
 remain acceptance work. Apple’s API requirements:
 https://developer.apple.com/documentation/visionkit/scanning-data-with-the-camera
+
+### One Task reading and live replacement — November 4, 01:49
+
+The phone previously performed bootstrap + roadmap + two requests per repository.
+The roadmap could also observe the external tracker before returning. It now uses
+a shared all-repository selection read (`desktop plans --all`) with the existing
+ViewPlan projection and one pinned store snapshot. Its watch uses
+the existing Subscription owner and Session observation probe; no mobile store,
+Task resolver, polling scheduler or delta log.
+
+While the Task list is visible and the app is active, one bounded replacement
+stream runs. Leaving/backgrounding cancels it; return starts fresh. Pull-to-refresh
+confirms a new reading on the same connection. Failure preserves the last list
+with an explicit stale/error explanation. Incomplete projection bodies fail, and
+an older canceled opening cannot replace a newer watch. Whole readings coalesce
+to one queued replacement; checkpoint acknowledgements settle before coalescing.
+
+The new read exposed a shared projection cost: every repository loaded all Tasks
+before filtering them. The existing task reader now applies repository scope in
+SQL. On the current Machine, 46 repositories/36 visible Tasks/124,608 JSON bytes
+took 4.653 seconds before that fix, then 0.876/0.707/1.013 seconds (median 0.876).
+These are local debug-CLI wall times, not phone/network latency or a controlled
+benchmark suite. The cold original measurement and warm repeats are not a claim
+of a portable speedup. Network requests now stay at bootstrap + one subscription
+instead of growing with repository count; refresh uses its existing connection.
+
+Native suite: 29 passed, one opt-in skipped, including four Task-update tests.
+CLI/read/watch parity and cross-repository service replacement tests passed;
+the latter observes a rename and a new repository without client polling.
+All-target Clippy passed. The separate native host-Tailscale proof also passed
+initial/confirmed readings and retained-owner editing/reconnect at
+`Test-LoopflowiOS-2026.11.04_01-48-15--0800.xcresult`; temporary Serve configuration
+was restored. All 21 selection-engine tests and six Desktop protocol tests passed.

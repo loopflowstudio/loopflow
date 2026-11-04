@@ -217,6 +217,7 @@ async fn operation(
                     "session_owner".into(),
                     "desktop_sessions".into(),
                     "view_plan".into(),
+                    "all_view_plans".into(),
                 ],
                 max_frame: MAX_FRAME,
                 max_connections: MAX_CONNECTIONS,
@@ -225,7 +226,9 @@ async fn operation(
         Operation::Read { query } if supported_read(&query) => Reply::Read {
             output: tokio::task::spawn_blocking(move || query.read()).await??,
         },
-        Operation::Subscribe { query, generation } if matches!(query, Read::Roadmap { .. }) => {
+        Operation::Subscribe { query, generation }
+            if matches!(query, Read::Roadmap { .. } | Read::AllViewPlans { .. }) =>
+        {
             return subscribe(socket, id, instance, query, generation).await;
         }
         Operation::Command { change } if matches!(change, Write::SessionRename { .. }) => {
@@ -266,6 +269,7 @@ fn supported_read(query: &Read) -> bool {
     matches!(
         query,
         Read::Roadmap { .. }
+            | Read::AllViewPlans { .. }
             | Read::DesktopSessions { .. }
             | Read::MachineId
             | Read::Portfolio

@@ -710,6 +710,12 @@ pub enum DesktopCommand {
     },
     /// Print the repository's default and saved Dashboard plans as JSON
     Plans {
+        /// Apply one selection across every repository on this Machine
+        #[arg(long)]
+        all: bool,
+        /// Selection to apply with --all; omitted uses each repository's default
+        #[arg(long, requires = "all")]
+        expression: Option<String>,
         #[arg(long, required = true)]
         json: bool,
         /// Print a JSON line now and each time the plans change, until stdin closes

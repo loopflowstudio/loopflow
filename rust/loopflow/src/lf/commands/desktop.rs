@@ -715,6 +715,38 @@ pub(crate) fn watch_plans(
     )
 }
 
+pub(crate) fn read_all_view_plans(
+    expression: Option<&str>,
+) -> Result<Vec<crate::work::selection::ViewPlan>> {
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    Ok(store.sqlite.all_view_plans(expression)?)
+}
+
+pub(crate) fn watch_all_view_plans(
+    expression: Option<String>,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    #[derive(Debug, Clone, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Arguments {
+        expression: Option<String>,
+    }
+    let watched = super::watch::Watched::every(super::watch::ACTIVITY_CLOCK).probing(|store| {
+        Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
+    });
+    super::watch::start(
+        Arguments { expression },
+        watched,
+        |store, args| async move {
+            let store = super::watch::require_store(store)?;
+            Ok(store.sqlite.all_view_plans(args.expression.as_deref())?)
+        },
+        transport,
+    )
+}
+
 /// `lf desktop view [expression] --plan`: what a view shows, in `selected`
 /// or the repository containing `directory`.
 pub fn plan_view(
@@ -1033,7 +1065,25 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             plan,
             json,
         } => return view_plan(cli, expression.as_deref(), *plan, *json || cli.json),
-        DesktopCommand::Plans { watch, .. } => return plans(cli, *watch),
+        DesktopCommand::Plans {
+            all,
+            expression,
+            watch,
+            ..
+        } => {
+            if !all {
+                return plans(cli, *watch);
+            }
+            return if *watch {
+                watch_all_view_plans(expression.clone(), Transport::Stdio).map(drop)
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string(&read_all_view_plans(expression.as_deref())?)?
+                );
+                Ok(())
+            };
+        }
         DesktopCommand::Plan {
             wave,
             task,

@@ -54,6 +54,8 @@ pub enum Read {
     MonitorPs,
     /// `lf --cwd <directory> desktop plans`: the plans a repository window shows.
     DesktopPlans { directory: PathBuf },
+    /// `lf desktop plans --all`: one selection across the Machine's repositories.
+    AllViewPlans { expression: Option<String> },
     /// `lf --cwd <directory> desktop sessions`, with `--interactive all`
     /// when `headless` Sessions are shown too.
     DesktopSessions { directory: PathBuf, headless: bool },
@@ -174,6 +176,11 @@ impl Read {
         match self {
             Self::MonitorPs => words(&["monitor", "ps", "--json"]),
             Self::DesktopPlans { directory } => at(directory, &["desktop", "plans", "--json"]),
+            Self::AllViewPlans { expression } => {
+                let mut argv = words(&["desktop", "plans", "--all", "--json"]);
+                argv.extend(optional("--expression", expression.as_ref()));
+                argv
+            }
             Self::DesktopSessions {
                 directory,
                 headless,
@@ -352,6 +359,9 @@ impl Read {
             Self::DesktopPlans { directory } => {
                 pretty(&super::desktop::read_plans(None, directory)?)
             }
+            Self::AllViewPlans { expression } => {
+                pretty(&super::desktop::read_all_view_plans(expression.as_deref())?)
+            }
             Self::DesktopSessions { directory, .. } | Self::SessionPage { directory, .. } => {
                 pretty(&super::session::read_once(
                     &self.session_filter(directory)?,
@@ -493,6 +503,9 @@ impl Read {
     ) -> anyhow::Result<Subscription> {
         let transport = Transport::Pull(Box::new(wake));
         let subscription = match self {
+            Self::AllViewPlans { expression } => {
+                super::desktop::watch_all_view_plans(expression, transport)
+            }
             Self::MonitorPs => super::top::watch_ps(transport),
             Self::DesktopPlans { directory } => {
                 super::desktop::watch_plans(None, directory, transport)

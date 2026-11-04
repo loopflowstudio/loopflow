@@ -31,6 +31,13 @@ the device grant in Keychain, pins the Machine identity
 on first bootstrap, reads actual open Tasks and attaches their recorded Session
 owners. It installs no CLI on the phone and never starts a provider.
 
+The Task list uses one all-repository view subscription after checking Machine
+identity. Whole readings replace the list; pull-to-refresh confirms the current
+reading on that same connection. Leaving the list or backgrounding closes it.
+Returning opens a fresh subscription. A connection or reading failure keeps the
+last Tasks visible with an explanation; **Try again** reconnects. This path reads
+the Machine’s local Work and does not synchronously refresh an external tracker.
+
 The connected Machine’s hostname replaces the fixture label in both screens.
 **Forget Machine** removes the phone’s saved credential; use Desktop’s **Remove
 access** or the Machine’s device revocation command to withdraw its server grant. Backgrounding closes the

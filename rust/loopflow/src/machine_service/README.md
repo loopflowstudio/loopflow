@@ -99,12 +99,17 @@ setup delegates to the promoted installation; source builds use an explicit
 `LF_HOME` to keep experiments separate.
 
 - `read {query}` uses the existing `Read` shape. Supported reads: `roadmap`,
-  `desktop_sessions`, `machine_id`, `portfolio`, `repository_path`, `view_plan`. Repository IDs resolve on the
+  `desktop_sessions`, `machine_id`, `portfolio`, `repository_path`, `view_plan`,
+  `all_view_plans`. Repository IDs resolve on the
   destination with `repository_path`; paths in local reads are destination paths.
   `view_plan` returns the existing WorkViewPlan, including the recorded primary
   Session; roadmap membership alone cannot select one. A missing primary stays
   absent. Resolve its owner with `session_owner` before attachment.
-- `subscribe {query,generation}` supports `roadmap`. `reading {generation,frame}`
+- `all_view_plans {expression}` applies the existing selection across repositories
+  in one store snapshot, returning existing ViewPlans. `lf desktop plans --all
+  --expression 'kind:task state:open' --json` is the same read. It observes local
+  Work without synchronously refreshing an external tracker.
+- `subscribe {query,generation}` supports `roadmap` and `all_view_plans`. `reading {generation,frame}`
   wraps the existing complete `answers/unavailable/body` watch frame. Subsequent
   client frames are existing watch checkpoints (`{"id":3}`) or argument changes.
   The shared watch validates them, including its 16 KiB limit; an invalid

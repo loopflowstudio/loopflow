@@ -3902,6 +3902,66 @@ impl<'a> MachineServiceProof<'a> {
     }
 }
 
+#[test]
+fn machine_service_task_watch_replaces_readings_across_repositories() {
+    let fixture = Fixture::new();
+    let task = support::register_task_without_pr(
+        fixture.home.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
+        "mobile-watch",
+        &fixture.repo.head_sha(),
+    );
+    let service = MachineServiceProof::start(&fixture, false);
+    let query = json!({"read":"all_view_plans","expression":"kind:task state:open"});
+    let (mut watch, first) = service.request(
+        "tasks",
+        json!({"kind":"subscribe","query":query,"generation":1}),
+    );
+    let contents = |response: &Value| -> Vec<Value> {
+        response["result"]["frame"]["body"]
+            .as_array()
+            .unwrap_or_else(|| panic!("Expected a complete Task reading: {response}"))
+            .iter()
+            .flat_map(|plan| plan["contents"].as_array().unwrap().clone())
+            .collect()
+    };
+    assert_eq!(contents(&first).len(), 1);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE tasks SET issue_title='Renamed on Desktop' WHERE id=?1",
+            [task.task.id.as_str()],
+        )
+        .unwrap();
+    let updated = machine_receive(&mut watch);
+    assert_eq!(contents(&updated)[0]["title"], "Renamed on Desktop");
+
+    let second = TestRepo::new();
+    support::register_task_without_pr(
+        fixture.home.path(),
+        &second.path().canonicalize().unwrap(),
+        "other-repository",
+        &second.head_sha(),
+    );
+    loop {
+        if contents(&machine_receive(&mut watch)).len() == 2 {
+            break;
+        }
+    }
+    machine_send(&mut watch, json!({"id":12}));
+    loop {
+        let reading = machine_receive(&mut watch);
+        if reading["result"]["frame"]["answers"] == 12 {
+            assert_eq!(contents(&reading).len(), 2);
+            break;
+        }
+    }
+    drop(watch);
+    let (_, reading) = service.request("read", json!({"kind":"read","query":query}));
+    let plans: Value = serde_json::from_str(reading["result"]["output"].as_str().unwrap()).unwrap();
+    assert_eq!(plans.as_array().unwrap().len(), 2);
+}
+
 /// Cross-language acceptance, explicitly opted into an already configured private
 /// Tailscale route and installed Simulator. Ordinary CI never needs either.
 #[cfg(target_os = "macos")]

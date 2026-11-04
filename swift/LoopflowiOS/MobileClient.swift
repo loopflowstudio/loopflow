@@ -14,13 +14,19 @@ func mobileTasks(_ response: MachineResponse) throws -> [WorkViewPlan.Content] {
         if case .error(_, let message) = response.result { throw RegistryQueryError(message) }
         throw RegistryQueryError("The Machine did not return a Task reading")
     }
-    let plan = try JSONDecoder().decode(WorkViewPlan.self, from: Data(output.utf8))
+    return try mobileTasks(JSONDecoder().decode(WorkViewPlan.self, from: Data(output.utf8)))
+}
+
+func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
     guard plan.resolution.unavailable.isEmpty else {
         throw RegistryQueryError(plan.resolution.unavailable.joined(separator: "; "))
     }
-    return plan.projection.visible.compactMap { member in
-        guard member.work.kind == .task else { return nil }
-        return plan.contents.first { $0.work == member.work }
+    let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
+    return try plan.projection.visible.filter { $0.work.kind == .task }.map { member in
+        guard let task = contents[member.work] else {
+            throw RegistryQueryError("The Machine returned an incomplete Task reading")
+        }
+        return task
     }
 }
 
@@ -28,8 +34,18 @@ func mobileTasks(_ response: MachineResponse) throws -> [WorkViewPlan.Content] {
 @MainActor
 protocol MobileClient {
     func workingTasks() async throws -> [WorkViewPlan.Content]
+    func observeTasks() async throws -> any MobileTaskObservation
     func attach(sessionID: String) async throws -> any MobileAttachment
 }
+
+@MainActor
+protocol MobileTaskObservation: AnyObject {
+    var readings: AsyncThrowingStream<MobileTaskReading, any Error> { get }
+    func refresh() async throws
+    func close()
+}
+
+typealias MobileTaskReading = Result<[WorkViewPlan.Content], RegistryQueryError>
 
 /// One attachment to an existing Session. No provider creation or input retry lives here.
 @MainActor
@@ -89,13 +105,15 @@ final class MobileWorkspace {
     private var eventTask: Task<Void, Never>?
     private var generation = 0
     private var taskGeneration = 0
+    private var taskObservation: (any MobileTaskObservation)?
+    private var taskReader: Task<Void, Never>?
     private var ownsGeometry = false
     private var terminalGeometry: TerminalGeometry?
     private var replaying = false
     private var viewport: TerminalGeometry?
     private var sentViewport: TerminalGeometry?
     private(set) var tasks: [WorkViewPlan.Content] = []
-    private(set) var isLoadingTasks = false
+    private(set) var isLoadingTasks = true
     private(set) var tasksError: String?
     private(set) var selected: WorkViewPlan.Content?
     private(set) var state: MobileConnectionState = .loading
@@ -106,20 +124,58 @@ final class MobileWorkspace {
 
     init(client: any MobileClient) { self.client = client }
 
+    func startTaskUpdates() async {
+        stopTaskUpdates()
+        let opening = taskGeneration
+        isLoadingTasks = true
+        do {
+            let observation = try await client.observeTasks()
+            guard opening == taskGeneration, !Task.isCancelled else { observation.close(); return }
+            taskObservation = observation
+            taskReader = Task { [weak self] in
+                do {
+                    for try await reading in observation.readings {
+                        guard let self, opening == self.taskGeneration else { return }
+                        self.isLoadingTasks = false
+                        switch reading {
+                        case .success(let tasks): self.tasks = tasks; self.tasksError = nil
+                        case .failure(let error): self.tasksError = error.message
+                        }
+                    }
+                    throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
+                } catch {
+                    guard let self, opening == self.taskGeneration else { return }
+                    self.stopTaskUpdates()
+                    self.tasksError = error.localizedDescription
+                }
+            }
+        } catch {
+            guard opening == taskGeneration, !Task.isCancelled else { return }
+            isLoadingTasks = false
+            tasksError = error.localizedDescription
+        }
+    }
+
     func refresh() async {
-        taskGeneration += 1
+        guard let observation = taskObservation else { await startTaskUpdates(); return }
         let refreshing = taskGeneration
         isLoadingTasks = true
         defer { if refreshing == taskGeneration { isLoadingTasks = false } }
-        do {
-            let replacement = try await client.workingTasks()
-            guard refreshing == taskGeneration else { return }
-            tasks = replacement
-            tasksError = nil
-        } catch {
-            guard refreshing == taskGeneration else { return }
+        do { try await observation.refresh() }
+        catch {
+            guard refreshing == taskGeneration, !Task.isCancelled else { return }
+            stopTaskUpdates()
             tasksError = error.localizedDescription
         }
+    }
+
+    func stopTaskUpdates() {
+        taskGeneration += 1
+        taskReader?.cancel()
+        taskReader = nil
+        taskObservation?.close()
+        taskObservation = nil
+        isLoadingTasks = false
     }
 
     func open(_ task: WorkViewPlan.Content) async {
@@ -197,6 +253,7 @@ final class MobileWorkspace {
     }
 
     func suspend() {
+        stopTaskUpdates()
         guard selected != nil else { return }
         switch state {
         case .loading, .viewing, .requestingControl, .controlling: fail("Paused while the app is away")

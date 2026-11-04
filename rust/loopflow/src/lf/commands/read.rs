@@ -1,12 +1,12 @@
-//! The reads an app serves inside its own process. Each [`Read`] is an `lf`
+//! Shared reads served by the client API server. Each [`Read`] is an `lf`
 //! command: [`Read::argv`] names it, [`Read::read`] returns what it prints,
 //! and for a command that takes `--watch`, [`Read::subscribe`] goes through the
-//! same function as `lf <argv> --watch`, so the app pulls exactly the frames
+//! same function as `lf <argv> --watch`, so clients receive exactly the frames
 //! that command prints.
 //!
 //! A read the command scopes by its working directory names that directory
-//! instead: `--cwd <directory>` in its argv, and the same path in-process,
-//! where every subscription shares one working directory.
+//! instead: `--cwd <directory>` in its argv, and an explicit path in the server,
+//! where concurrent subscriptions cannot change the working directory.
 //!
 //! Reads only read: they record no Process and change no Work. The app's
 //! writes are [`super::write::Write`]s.

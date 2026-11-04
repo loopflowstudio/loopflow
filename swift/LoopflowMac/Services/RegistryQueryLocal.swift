@@ -1,8 +1,5 @@
-// The local macOS registry query: `RegistryQuery` over this Machine. The Work
-// roadmap read/watch and Session rename use the server. Other served
-// operations still use Loopflow's library; commands sent to another Machine and the remote
-// Task file watch run the bundled `lf` off the main actor so a slow one never
-// stalls the UI.
+// Native Work reads, writes and subscriptions use the local server.
+// Execution launches and remote file streams retain their CLI transports.
 
 #if os(macOS)
 import Foundation
@@ -12,13 +9,9 @@ enum RegistryQueryLocal {
     static let shared = RegistryQuery(runWithInput: { args, cwd, input in
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
     }, serve: { query in
-        if case .roadmap = query { return try await ServerClient.read(query) }
-        return try await LoopflowLibrary.read(query)
+        try await ServerClient.read(query)
     }, write: { change in
-        if case .sessionRename = change { return try await ServerClient.write(change) }
-        if let made = try await LoopflowLibrary.write(change) { return made }
-        // `lf` sends this write to another Machine; its command does.
-        return try await LocalWaveAgentLauncher.queryLf(change.argv, cwd: change.cwd, input: change.input)
+        try await ServerClient.write(change)
     }, watchFiles: { args, cwd in
         // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {
@@ -45,10 +38,7 @@ enum RegistryQueryLocal {
             return LineWatch(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
     }, watchWork: {
-        try WorkWatches.observe { query in
-            if case .roadmap = query { return try ServerClient.watch(query) }
-            return try LoopflowLibrary.watch(query)
-        }
+        try WorkWatches.observe { ServerClient.watch($0) }
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

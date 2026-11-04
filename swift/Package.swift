@@ -2,11 +2,7 @@
 
 import PackageDescription
 
-// SwiftPM builds the cross-platform `Loopflow` library and the macOS app. The
-// app links Loopflow's Rust library, which `scripts/loopflow-dev.py ffi` builds
-// into the Cargo target directory first.
-let cargoTarget = Context.packageDirectory + "/../target"
-
+// Work access uses the server; GhosttyKit supplies the native renderer.
 let package = Package(
     name: "LoopflowSwift",
     platforms: [
@@ -32,7 +28,6 @@ let package = Package(
                 .copy("Themes")
             ]
         ),
-        .systemLibrary(name: "LoopflowFFI", path: "LoopflowFFI"),
         .binaryTarget(
             name: "GhosttyKit",
             url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip",
@@ -42,7 +37,6 @@ let package = Package(
             name: "LoopflowMac",
             dependencies: [
                 "Loopflow",
-                .target(name: "LoopflowFFI", condition: .when(platforms: [.macOS])),
                 .target(name: "GhosttyKit", condition: .when(platforms: [.macOS])),
                 .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS])),
             ],
@@ -67,15 +61,6 @@ let package = Package(
                 .linkedFramework("Metal", .when(platforms: [.macOS])),
                 .linkedFramework("IOKit", .when(platforms: [.macOS])),
                 .linkedLibrary("c++", .when(platforms: [.macOS])),
-                // What `cargo rustc -p loopflow-ffi -- --print native-static-libs` names.
-                .linkedFramework("ServiceManagement", .when(platforms: [.macOS])),
-                .linkedFramework("CoreServices", .when(platforms: [.macOS])),
-                .linkedFramework("Security", .when(platforms: [.macOS])),
-                .linkedFramework("SystemConfiguration", .when(platforms: [.macOS])),
-                .linkedLibrary("iconv", .when(platforms: [.macOS])),
-                .linkedLibrary("proc", .when(platforms: [.macOS])),
-                .unsafeFlags(["-L", cargoTarget + "/debug"], .when(platforms: [.macOS], configuration: .debug)),
-                .unsafeFlags(["-L", cargoTarget + "/release"], .when(platforms: [.macOS], configuration: .release)),
             ]
         ),
         .testTarget(

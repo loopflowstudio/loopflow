@@ -56,9 +56,11 @@ attribution and recoverable outcomes. Session owners own providers, PTYs,
 terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
-Keep one implementation of each complete operation. Remove migrated Work FFI
-paths instead of keeping a silent fallback; preserve renderer FFI and app-owned
-automation. A shared Rust function alone does not prevent duplicated orchestration.
+Every shared native Work read, write and subscription uses this server. Desktop
+links no Loopflow Rust library or C bridge. The server runs each complete write
+through `lf`, forwarding stdin and returning stdout, stderr and exit status;
+it has no duplicate mutation executor. Ghostty rendering and app-owned automation
+keep their existing boundaries. A shared Rust function alone does not prevent duplicated orchestration.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
 
 Local peer credentials apply only to the private Unix socket. Remote access needs

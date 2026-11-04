@@ -1,4 +1,4 @@
-use super::wire::{Operation, Reply, Request, Response, MAX_FRAME, MAX_REQUEST, VERSION};
+use super::wire::{Operation, Reply, Request, Response, MAX_FRAME, VERSION};
 use anyhow::{Context, Result};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -64,7 +64,7 @@ pub fn connect(operation: Operation) -> Result<(UnixStream, Response)> {
         operation,
     };
     let bytes = serde_json::to_vec(&request)?;
-    anyhow::ensure!(bytes.len() <= MAX_REQUEST, "Server request is too large");
+    anyhow::ensure!(bytes.len() <= MAX_FRAME, "Server request is too large");
     socket.write_all(&(bytes.len() as u32).to_be_bytes())?;
     socket.write_all(&bytes)?;
     let response = receive(&mut socket)?;

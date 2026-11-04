@@ -1,0 +1,14 @@
+{
+  "target/debug/lf": {
+    "bytes": 203707264,
+    "modified_ns": 1793826552342972208
+  },
+  "target/debug/libloopflow_ffi.a": {
+    "bytes": 617813920,
+    "modified_ns": 1793824098120280568
+  },
+  "swift/.build/debug/LoopflowMac": {
+    "bytes": 286793536,
+    "modified_ns": 1793827690161355375
+  }
+}

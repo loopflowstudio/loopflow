@@ -4,7 +4,7 @@
 // current by the same reads `--watch` streams, one served watch per part.
 //
 // On macOS the Work watches, `ServedRead` reads and `ServedWrite` writes run
-// inside the app through Loopflow's Rust library; other commands run the `lf`
+// through the local server; other commands run the `lf`
 // shipped inside the app.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
@@ -635,7 +635,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.
-    /// Registration writes the store, so `lf` runs it, not the app's library.
+    /// Registration runs the complete CLI command.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
         try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
     }

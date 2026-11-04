@@ -420,20 +420,6 @@ async fn rename_session(
     crate::ops::human_session::rename(&store, id, &requested, source).await
 }
 
-/// The Session `lf session rename --json -- <id> <name>` prints.
-pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
-    let name = [name.to_owned()];
-    tokio::runtime::Runtime::new()?.block_on(rename_session(id, &name, SessionTitleSource::Human))
-}
-
-/// The Session `lf session bind --json --task <task> -- <id>` prints.
-pub(crate) fn bound(id: &str, task: &str) -> anyhow::Result<SessionRecord> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = open_shared_store().await?;
-        crate::ops::human_session::bind(&store, id, task).await
-    })
-}
-
 /// What `lf session bind <id> --task <task> --dry-run --json` prints.
 pub(crate) fn binding_preview(
     id: &str,

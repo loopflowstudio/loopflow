@@ -22,6 +22,7 @@ instance as JSON. It observes without installing or repairing anything.
 Machine commands manage execution destinations, their connections and capacity.
 The server lets clients reach Work and existing Sessions on a host. Installation
 owns its registration and updates. Desktop's window automation stays with the app.
+Desktop uses this connection for all shared Work reads, changes and live updates.
 Ordinary CLI commands can run without the client server.
 
 ## Keep editing through a connection loss

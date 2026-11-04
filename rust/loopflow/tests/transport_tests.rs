@@ -363,14 +363,17 @@ read -r answer < /dev/tty
     }
     /// Signal an owner the test leaves running.
     fn stop(&self, owner: &str) {
-        let pid: i64 = self
+        let pid: Option<i64> = self
             .sql()
             .query_row("SELECT pid FROM processes WHERE id=?1", [owner], |r| {
                 r.get(0)
             })
+            .optional()
             .unwrap();
-        // SAFETY: test-owned owner PID recorded by this fixture's store.
-        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        if let Some(pid) = pid {
+            // SAFETY: test-owned owner PID recorded by this fixture's store.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        }
     }
     fn wait_file(&self, name: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -4451,7 +4454,9 @@ fn server_move_here_pending_action_is_cancelled_by_pane_closure() {
         pid
     );
     request_server_move(&status);
-    std::fs::remove_dir_all(&directory).unwrap();
+    let closed = directory.with_extension("closed");
+    std::fs::rename(&directory, &closed).unwrap();
+    std::fs::remove_dir_all(closed).unwrap();
     drop(paused);
     assert!(relay.wait_exit().success());
     let mut observer = fixture.connect(&owner);
@@ -4700,7 +4705,9 @@ fn server_reconnect_cancels_when_native_pane_closes() {
     wait_server_status(&status, "connected", true, 1);
     service.stop();
     wait_server_status(&status, "reconnecting", false, 2);
-    std::fs::remove_dir_all(&directory).unwrap();
+    let closed = directory.with_extension("closed");
+    std::fs::rename(&directory, &closed).unwrap();
+    std::fs::remove_dir_all(closed).unwrap();
     assert!(relay.wait_exit().success());
     // The pane owns cancellation, never the provider's lifetime.
     assert!(pid_of_process(&fixture, &owner) > 0);

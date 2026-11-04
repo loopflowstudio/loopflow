@@ -9,7 +9,11 @@ struct PortfolioServiceTests {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("portfolio-cli-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: home) }
-        let query = try BuiltLf(home: home).query
+        let lf = try BuiltLf(home: home)
+        // Installation prepares the Machine before Desktop connects. Reading
+        // Portfolio initializes the fixture without choosing a portfolio mode.
+        _ = try await lf.run(["portfolio", "--json"])
+        let query = lf.query
         let service = PortfolioService(query: query)
         await service.refresh()
         #expect(service.selection?.configured == false)

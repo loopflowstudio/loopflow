@@ -75,6 +75,14 @@ final class ServerConnection {
         observation = nil
         pendingMove = nil
         changed = nil
-        try? FileManager.default.removeItem(at: directory)
+        // Remove the mailbox address atomically before deleting its contents;
+        // the relay may still be publishing a status file as the pane closes.
+        let closed = directory.appendingPathExtension("closed")
+        do {
+            try FileManager.default.moveItem(at: directory, to: closed)
+            try FileManager.default.removeItem(at: closed)
+        } catch {
+            // Repeated stop has no mailbox left to remove.
+        }
     }
 }

@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import Loopflow
 
-/// Migrated operations have exactly one path; service errors remain visible.
+/// Shared Work operations use the server; service errors remain visible.
 enum ServerClient {
     static func read(_ query: ServedRead, location: ServerLocation = .shared) async throws -> String {
         let response = try await request(.read(query), location: location)
@@ -11,33 +11,74 @@ enum ServerClient {
         return output
     }
 
-    static func write(_ change: ServedWrite) async throws -> String {
-        let response = try await request(.command(change))
+    static func write(_ change: ServedWrite, location: ServerLocation = .shared) async throws -> String {
+        let response = try await request(.command(change), location: location)
         guard case .command(_, let output, let stderr, let code) = response else {
-            throw RegistryQueryError("Server command outcome unknown; inspect Session before retrying")
+            throw RegistryQueryError("Server command outcome unknown; inspect the affected work before retrying")
         }
-        guard code == 0 else { throw RegistryQueryError(stderr) }
+        guard code == 0 else { throw RegistryQueryError(stderr, stdout: output) }
         return output
     }
 
     private static func request(_ operation: ServerOperation, location: ServerLocation = .shared) async throws -> ServerReply {
+        try Task.checkCancellation()
         let path = try await location.path()
-        return try await withCheckedThrowingContinuation { continuation in
-            Thread.detachNewThread {
-                do {
-                    let connection = try ServerSocket(path: path)
-                    defer { connection.close() }
-                    let id = UUID().uuidString
-                    try connection.send(JSONEncoder().encode(ServerRequest(version: 1, id: id, operation: operation)))
-                    continuation.resume(returning: try connection.receive(id: id).result)
-                } catch { continuation.resume(throwing: error) }
+        try Task.checkCancellation()
+        let request = ServerRequestConnection()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                Thread.detachNewThread {
+                    do {
+                        let connection = try ServerSocket(path: path)
+                        defer { connection.close() }
+                        try request.connect(connection)
+                        let id = UUID().uuidString
+                        try connection.send(JSONEncoder().encode(ServerRequest(version: 1, id: id, operation: operation)))
+                        let reply = try connection.receive(id: id).result
+                        try request.checkCancellation()
+                        continuation.resume(returning: reply)
+                    } catch {
+                        do { try request.checkCancellation() }
+                        catch { continuation.resume(throwing: error); return }
+                        continuation.resume(throwing: error)
+                    }
+                }
             }
+        } onCancel: {
+            request.cancel()
         }
     }
 
-    static func watch(_ query: ServedRead, location: ServerLocation = .shared) throws -> LineWatch {
+    static func watch(_ query: ServedRead, location: ServerLocation = .shared) -> LineWatch {
         let watch = ServerWatch(query, location: location)
         return LineWatch(lines: watch.lines, send: watch.send, cancel: watch.cancel)
+    }
+}
+
+/// Cancellation releases this viewer's wait, never the command's execution.
+private final class ServerRequestConnection: @unchecked Sendable {
+    private let lock = NSLock()
+    private var socket: ServerSocket?
+    private var cancelled = false
+
+    func connect(_ socket: ServerSocket) throws {
+        try lock.withLock {
+            guard !cancelled else { throw CancellationError() }
+            self.socket = socket
+        }
+    }
+
+    func checkCancellation() throws {
+        try lock.withLock {
+            if cancelled { throw CancellationError() }
+        }
+    }
+
+    func cancel() {
+        lock.withLock {
+            cancelled = true
+            socket?.shutdown()
+        }
     }
 }
 
@@ -130,7 +171,7 @@ private final class ServerSocket: @unchecked Sendable {
     func send(_ body: Data) throws {
         try writes.withLock {
             guard !state.withLock({ closed }) else { throw RegistryQueryError("Server connection is closed") }
-            guard body.count <= 65536 else { throw RegistryQueryError("Server request exceeds 64 KiB") }
+            guard body.count <= Self.maxFrame else { throw RegistryQueryError("Server request exceeds 32 MiB") }
             var length = UInt32(body.count).bigEndian
             var bytes = withUnsafeBytes(of: &length) { Data($0) }
             bytes.append(body)

@@ -1,7 +1,4 @@
-//! Every app read and write, served in-process as the app's library serves
-//! it, prints what its `lf` command prints; every write has its command's
-//! effect and records the same Process. Its own binary: the library's in-app
-//! store mode is process-wide.
+//! Native client operations through the real server match the CLI.
 
 mod isolated_lf;
 mod support;
@@ -9,7 +6,6 @@ mod support;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::sync::mpsc;
 use std::time::Duration;
 
 use isolated_lf::{isolated_lf, isolated_read as read};
@@ -18,7 +14,7 @@ use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
 #[test]
-fn what_an_app_serves_in_process_matches_its_lf_command() {
+fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;
     use loopflow::lf::commands::write::Write;
@@ -292,10 +288,14 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
             ],
         ),
     };
-    // From here this process opens stores as the app does.
-    loopflow::store::serve_in_app();
+    let server = Server(isolated_lf(repo.path(), home.path(), &["server", "run"]));
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while loopflow::server::client::connect(loopflow::server::wire::Operation::Bootstrap).is_err() {
+        assert!(std::time::Instant::now() < deadline, "server did not start");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let database = home.path().join("loopflow.db");
-    // A read served in the app changes no Work and records no Process.
+    // A server read changes no Work and records no Process.
     let unchanged = |argv: &[&str], serve: &mut dyn FnMut()| {
         let before = changes(&database);
         serve();
@@ -306,7 +306,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
         let printed = read(repo.path(), home.path(), &argv, served.input());
         let mut text = String::new();
-        unchanged(&argv, &mut || text = served.read().unwrap());
+        unchanged(&argv, &mut || text = server_read(served.clone()));
         let served = text;
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
             // `config repository --path` prints a path, not JSON.
@@ -322,17 +322,17 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         let mut frame = Vec::new();
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
-            let (sender, wakes) = mpsc::channel();
-            let sender = std::sync::Mutex::new(sender);
-            let subscription = served
-                .clone()
-                .subscribe(move || {
-                    let _ = sender.lock().unwrap().send(());
+            let (_, response) =
+                loopflow::server::client::connect(loopflow::server::wire::Operation::Subscribe {
+                    query: served.clone(),
+                    generation: 1,
                 })
                 .unwrap();
-            // The app pulls on its own thread after a data-free wakeup.
-            wakes.recv_timeout(Duration::from_secs(30)).unwrap();
-            frame = subscription.pull().expect("a first frame");
+            let loopflow::server::wire::Reply::Reading { frame: reading, .. } = response.result
+            else {
+                panic!("unexpected subscription: {:?}", response.result);
+            };
+            frame = serde_json::to_vec(&reading).unwrap();
         });
         let served: Value = serde_json::from_slice(&frame).unwrap();
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
@@ -358,7 +358,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         issue: "INF-123".into(),
         path: "edit.txt".into(),
         revision,
-        content: "saved\n".into(),
+        content: "saved\n".repeat(12_000),
     };
     let session = session["id"].as_str().unwrap().to_owned();
     // What a write changed, as the app reads it.
@@ -535,7 +535,11 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                         member: format!("task:{task_id}"),
                         hidden,
                     };
-                    let _ = tile(false).write();
+                    let _ = loopflow::server::client::connect(
+                        loopflow::server::wire::Operation::Command {
+                            change: tile(false),
+                        },
+                    );
                     tile(true)
                 }),
                 Box::new(|| Write::DashboardSlots {
@@ -554,16 +558,16 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
             ],
         ),
     };
-    // The same write in the app, then through `lf`: each prints the same,
+    // The same write through the server, then through `lf`: each prints the same,
     // leaves the same Work and records a Process the same way. A finished
     // Process nothing references is forgotten as it exits; its revision stays.
     let compare = |served: Write, again: &dyn Fn() -> Write, effect: &dyn Fn() -> Value| {
         let argv = served.argv();
         let before = processes(&database);
-        let written = served.write().unwrap().expect("made in the app");
+        let written = server_write(served);
         let recorded = processes(&database) - before;
         // Nothing it started outlives it: no provider, no child of the app.
-        assert_eq!(children(), "", "{argv:?}");
+        assert_eq!(children().trim(), server.0.id().to_string(), "{argv:?}");
         let effected = effect();
         let again = again();
         let args = again.argv();
@@ -610,7 +614,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         };
         let owner = |text: &str| serde_json::from_str::<Value>(text).unwrap()["owner"].clone();
         let before = processes(&database);
-        let written = ownership.write().unwrap().expect("made in the app");
+        let written = server_write(ownership.clone());
         let recorded = processes(&database) - before;
         let args = ownership.argv();
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -683,7 +687,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 "successor_id": "proj_4f6c2b8e-3d5a-4c1e-9b7a-2e8d6f0a1c3b",
                 "create": true,
                 "project_name": "October",
-                "krs": [{"text": "Desktop writes in-process", "holds": false}],
+                "krs": [{"text": "Desktop writes through the server", "holds": false}],
                 "metric_targets": []
             }]
         })
@@ -701,7 +705,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         expression: format!("task:{task_id}"),
         revision: None,
     };
-    let created = create.write().unwrap().unwrap();
+    let created = server_write(create);
     assert_eq!(layout("query:served")["id"], "served", "{created}");
     for write in arrangement {
         let recorded = compare(write(), &*write, &dashboard);
@@ -798,4 +802,40 @@ fn without_clock(mut value: Value) -> Value {
         _ => {}
     }
     value
+}
+
+struct Server(std::process::Child);
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn server_read(query: loopflow::lf::commands::read::Read) -> String {
+    let (_, response) =
+        loopflow::server::client::connect(loopflow::server::wire::Operation::Read { query })
+            .unwrap();
+    match response.result {
+        loopflow::server::wire::Reply::Read { output } => output,
+        result => panic!("unexpected read: {result:?}"),
+    }
+}
+
+fn server_write(change: loopflow::lf::commands::write::Write) -> String {
+    let (_, response) =
+        loopflow::server::client::connect(loopflow::server::wire::Operation::Command { change })
+            .unwrap();
+    match response.result {
+        loopflow::server::wire::Reply::Command {
+            output,
+            stderr,
+            code,
+            ..
+        } => {
+            assert_eq!(code, 0, "{stderr}");
+            output
+        }
+        result => panic!("unexpected command: {result:?}"),
+    }
 }

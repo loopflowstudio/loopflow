@@ -755,25 +755,20 @@ lf desktop sessions --json --watch         # the repository's Sessions as Deskto
 lf planning status --json --watch          # stored sync receipts
 ```
 
-A window observes these reads through `RegistryQuery.watchWork()`, one
-subscription per part. The roadmap read/watch crosses the local client API socket; the
-service uses the shared Rust subscription. Other parts still run through the
-in-app Rust library (`rust/loopflow-ffi/include/loopflow.h`). Each part names its
-`ServedRead`, the `lf` command above that prints the same frames. Task files,
-diffs, Waves, Machine identity, Portfolio, saved panes, Task owners and Graphs
-still use that library. First connection obtains the selected `lf` helper.
-The [server boundary](../docs/dev/server.md) puts registration
-and updates under installation, connection readiness in the server client, and
-Machine destination routing separately. `ServerClient` caches the socket path
-after installation readiness; reconnect never installs or re-registers a helper.
-Session rename crosses the server and runs the complete CLI command.
-Completing, reopening, deferring, moving and editing a Task, saving a Task
-file, binding a Session, ensuring a Wave's Project, the planning
-refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
-library calls the function their `lf` command calls and records the same
-Process; arrangement records none, as its command does. Other writes, the
-commands that start work (`task create --run`, `task run`, `ship`, `resume`,
-`session connect`) and other Machines' reads still run the bundled `lf`. The parts: the plan, the repository's Dashboard plans
+A window observes these reads through `RegistryQuery.watchWork()`, one server
+subscription per part. All `ServedRead` and `ServedWrite` operations cross the
+same local protocol, including Task files, diffs, Waves, Machine identity,
+Portfolio, saved panes, Task ownership and Graphs. Desktop links no Loopflow Rust
+library; GhosttyKit remains its native renderer.
+
+The [server boundary](../docs/dev/server.md) puts registration and updates under
+installation. First connection obtains the selected helper; later connections
+only reconnect. Commands run through the complete CLI with their stdin, routing,
+defaults and Process attribution. A lost command response is an unknown outcome;
+Desktop never automatically resubmits it. Execution launches and remote Machine
+streams retain their CLI transports. Desktop's UI automation remains app-owned.
+
+The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
@@ -971,7 +966,7 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 ## Testing
 
-Task readings and Session rename use the installed client API server; Session
+All shared Work reads, writes and watches use the installed client API server; Session
 terminals bridge their existing owner through it. A lost server bridge leaves the
 relay and native surface alive. A native status row shows automatic exact-owner
 recovery, with input paused and local copy, Find and scrolling available. Exhausted
@@ -980,9 +975,11 @@ ended. Recovery never prepares or resumes a provider, and a newer viewer retains
 control until **Move here** in the read-only pane's connection row. That action
 keeps input paused until acknowledgement and retains the draft and running
 provider. A lost reply recovers passively; it never repeats the takeover.
-Closing the pane cancels its pending action. These operations surface service
-errors without a direct FFI fallback. Other Work operations retain FFI until their
-cutover. See the [local protocol](../rust/loopflow/src/server/README.md).
+Closing the pane cancels its pending action. Desktop links no Loopflow library:
+the server uses shared Rust reads/subscriptions and delegates complete commands
+to `lf`, preserving defaults, stdin, output and attribution. Ghostty renders the
+terminal; UI automation remains app-owned. See the
+[local protocol](../rust/loopflow/src/server/README.md).
 `scripts/test_desktop.sh --filter ServerProtocolTests` builds the consumer and
 checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
 source experiments select a separate `LF_HOME`.
@@ -1007,7 +1004,6 @@ for optional hosted execution and cleanup.
 
 ```bash
 cargo build -p loopflow --bin lf # Real CLI transport proofs
-uv run python scripts/loopflow-dev.py ffi # The Rust library the app links; test_desktop.sh builds it too
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered

@@ -9,9 +9,8 @@ requests readiness through the selected installation; subsequent connections and
 terminal recovery never re-register a server. `lf server status` only observes.
 
 The foreground `lf server run` belongs to the OS supervisor. Desktop
-uses the service for Task readings, Session rename and existing terminal
-attachment. Other Work operations still use their existing transport pending
-LOO-718's full cutover. Desktop's UI automation socket remains app-owned.
+uses the service for all shared Work reads, writes and subscriptions, plus
+existing terminal attachment. It links no embedded Loopflow library. Desktop's UI automation socket remains app-owned.
 
 `installation/server.rs` owns registration and replacement. Its hidden
 `install server` bridge is for local clients, not a separate setup workflow.
@@ -34,8 +33,7 @@ protocol path. Work and credentials stay in place.
 ## Local protocol, revision 1
 
 One operation per same-user Unix connection. Every control message is a four-byte
-big-endian length followed by UTF-8 JSON. Requests are capped at 64 KiB, responses
-at 32 MiB and connections at 64. Writes have a five-second deadline. The socket
+big-endian length followed by UTF-8 JSON. Requests and responses are capped at 32 MiB and connections at 64. Writes have a five-second deadline. The socket
 and its directory are private; remote proxies must never forward this endpoint.
 Remote admission is outside this revision.
 
@@ -49,23 +47,23 @@ revision, limits and capabilities. Each restart changes `instance`. Default-Mach
 setup delegates to the promoted installation; source builds use an explicit
 `LF_HOME` to keep experiments separate.
 
-- `read {query}` uses the existing `Read` shape. Supported reads: `roadmap`,
-  `desktop_sessions`, `machine_id`, `portfolio`, `repository_path`, `view_plan`. Repository IDs resolve on the
+- `read {query}` uses the existing `Read` shape. Every shared read is supported. Repository IDs resolve on the
   destination with `repository_path`; paths in local reads are destination paths.
   `view_plan` returns the existing WorkViewPlan, including the recorded primary
   Session; roadmap membership alone cannot select one. A missing primary stays
   absent. Resolve its owner with `session_owner` before attachment.
-- `subscribe {query,generation}` supports `roadmap`. `reading {generation,frame}`
+- `subscribe {query,generation}` supports every shared read with a watch. `reading {generation,frame}`
   wraps the existing complete `answers/unavailable/body` watch frame. Subsequent
   client frames are existing watch checkpoints (`{"id":3}`) or argument changes.
   The shared watch validates them, including its 16 KiB limit; an invalid
   checkpoint ends the watch with an `unavailable` reading.
   Closing cancels. Reconnect opens a fresh subscription; no replay cursor exists.
-- `command {change}` supports `session_rename` using the existing `Write` shape
-  and argv mapping. `command {trace_id,output,stderr,code}` reports the real CLI result.
+- `command {change}` accepts the shared `Write` shape and forwards its argv and stdin. `command {trace_id,output,stderr,code}` reports the real CLI result.
   The CLI owns mutation, defaults and Process attribution. A lost response means
   outcome unknown; inspect state before retrying. IDs correlate diagnostics and
   are **not** durable deduplication receipts. No automatic resubmission.
+  Canceling a native request closes its connection and releases the client's wait;
+  a command already dispatched may still complete. Cancellation never replays it.
 - `session_owner {session}` resolves a Session ID to `session_owner {owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.

@@ -40,17 +40,17 @@ impl Status {
 
     fn publish(&self, state: &str, input: bool, message: Option<&str>) -> Result<()> {
         let pending = self.path.with_extension("pending");
-        std::fs::write(
-            &pending,
-            serde_json::to_vec(&Reading {
-                generation: self.generation,
-                state,
-                input,
-                message,
-            })?,
-        )?;
-        std::fs::rename(pending, &self.path)?;
-        Ok(())
+        let bytes = serde_json::to_vec(&Reading {
+            generation: self.generation,
+            state,
+            input,
+            message,
+        })?;
+        match std::fs::write(&pending, bytes).and_then(|()| std::fs::rename(pending, &self.path)) {
+            // The pane atomically removes its mailbox while a publish can be in flight.
+            Err(_) if self.closed() => Ok(()),
+            result => result.map_err(Into::into),
+        }
     }
 
     pub(super) fn connected(&mut self, input: bool) -> Result<()> {

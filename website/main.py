@@ -429,7 +429,7 @@ def _split_doc_source(content: str) -> tuple[str, str]:
     return match.group(1).strip(), source[match.end() :].lstrip()
 
 
-def _resolve_doc_target(target: str, current_slug: str, architecture: bool = False) -> str:
+def _resolve_doc_target(target: str, current_slug: str) -> str:
     if target.startswith(("#", "/", "http://", "https://", "mailto:")):
         return target
 
@@ -437,22 +437,18 @@ def _resolve_doc_target(target: str, current_slug: str, architecture: bool = Fal
     source_dir = posixpath.dirname(current_slug)
     resolved = posixpath.normpath(posixpath.join(source_dir, parsed.path))
 
-    if parsed.path.endswith(".md"):
-        if resolved.startswith("../"):
-            repo_path = resolved.removeprefix("../")
-            path = f"https://github.com/loopflowstudio/loopflow/blob/main/{repo_path}"
-        else:
-            slug = resolved.removesuffix(".md")
-            path = (
-                _architecture_href(slug)
-                if slug in ARCHITECTURE_SLUGS
-                else ("/docs" if slug == "index" else f"/docs/{slug}")
-            )
-        return urlunsplit(("", "", path, parsed.query, parsed.fragment))
-
     if resolved.startswith("../"):
         repo_path = resolved.removeprefix("../")
         path = f"https://github.com/loopflowstudio/loopflow/blob/main/{repo_path}"
+        return urlunsplit(("", "", path, parsed.query, parsed.fragment))
+
+    if parsed.path.endswith(".md"):
+        slug = resolved.removesuffix(".md")
+        path = (
+            _architecture_href(slug)
+            if slug in ARCHITECTURE_SLUGS
+            else ("/docs" if slug == "index" else f"/docs/{slug}")
+        )
         return urlunsplit(("", "", path, parsed.query, parsed.fragment))
 
     if Path(parsed.path).suffix.lower() in {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}:
@@ -462,18 +458,18 @@ def _resolve_doc_target(target: str, current_slug: str, architecture: bool = Fal
     return target
 
 
-def _resolve_markdown_targets(content: str, current_slug: str, architecture: bool = False) -> str:
+def _resolve_markdown_targets(content: str, current_slug: str) -> str:
     pattern = re.compile(r"(!?\[[^\]]*\]\()([^)\s]+)([^)]*\))")
 
     def replace(match: re.Match[str]) -> str:
-        href = _resolve_doc_target(match.group(2), current_slug, architecture)
+        href = _resolve_doc_target(match.group(2), current_slug)
         return f"{match.group(1)}{href}{match.group(3)}"
 
     return pattern.sub(replace, content)
 
 
-def render_markdown(content: str, current_slug: str = "index", architecture: bool = False) -> list:
-    source = _resolve_markdown_targets(_strip_frontmatter(content), current_slug, architecture)
+def render_markdown(content: str, current_slug: str = "index") -> list:
+    source = _resolve_markdown_targets(_strip_frontmatter(content), current_slug)
     html = markdown_to_html(
         source,
         extensions=("fenced_code", "sane_lists", "tables", "toc"),
@@ -561,8 +557,6 @@ def DocsNav(current: str = "index"):
 def _architecture_href(slug: str, markdown: bool = False) -> str:
     if slug == "dev/index":
         suffix = ""
-    elif slug == "dev/reference":
-        suffix = "/reference"
     else:
         suffix = f"/{slug.removeprefix('dev/')}"
     return f"/architecture{suffix}{'.md' if markdown else ''}"
@@ -1036,7 +1030,7 @@ def _docs_page(slug: str, title: str, architecture: bool = False):
                             cls="docs-page-header",
                         ),
                         DocsDirectory() if slug == "index" and not architecture else None,
-                        *render_markdown(body, slug, architecture=architecture),
+                        *render_markdown(body, slug),
                         DocsPager(
                             slug,
                             pages=ARCHITECTURE_PAGES if architecture else DOC_PAGES,
@@ -1087,8 +1081,6 @@ def _architecture_source_slug(route_slug: str) -> str | None:
     route_slug = route_slug.removesuffix(".md").strip("/")
     if not route_slug:
         return "dev/index"
-    if route_slug == "reference":
-        return "dev/reference"
     candidate = f"dev/{route_slug}"
     return candidate if candidate in ARCHITECTURE_SLUGS else None
 

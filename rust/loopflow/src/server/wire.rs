@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 pub const VERSION: u32 = 1;
 pub const MAX_FRAME: usize = 32 * 1024 * 1024;
-pub const MAX_REQUEST: usize = 64 * 1024;
 pub const MAX_CONNECTIONS: usize = 64;
 
 #[derive(Debug, Serialize, Deserialize)]

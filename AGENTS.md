@@ -494,6 +494,10 @@ Aim for a mix:
 
 ## Verification Cadence
 
+Swift async process fixtures install `terminationHandler` before `run()` and
+await its completion. Do not call blocking `waitUntilExit()` on a cooperative
+executor; it can remain in Foundation's run loop after the child has exited.
+
 - **Implement/compress:** build changed code and run its focused test. Skip
   builds for prose-only edits; no change or still-applicable pass means no rerun.
 - **Realign:** reconcile the plan; test only a repair or a concrete uncertainty.

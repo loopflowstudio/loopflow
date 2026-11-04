@@ -9,6 +9,26 @@ import ViewInspector
 @Suite("Application workspace retention")
 @MainActor
 struct WorkspaceRetentionTests {
+    @Test("Selection retains, departure releases, and Close preserves history with a closed observation")
+    func hostRetentionFollowsTheNativeWorkspace() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let first = WorkWorkspaceKey(repository: "repo", kind: .task, id: "first")
+        let second = WorkWorkspaceKey(repository: "repo", kind: .task, id: "second")
+        let a = registry.open(first, title: "First", location: nil)
+        a.multiplexer.load(sessionId: "history")
+        #expect(a.hostUse == "retained")
+        let b = registry.open(second, title: "Second", location: nil)
+        #expect(a.hostUse == "away")
+        #expect(b.hostUse == "retained")
+        registry.closePresentation()
+        #expect(a.hostUse == "closed")
+        #expect(b.hostUse == "closed")
+        #expect(a.multiplexer.sessionPane?.sessionId == "history")
+        #expect(registry.retained(first) === a)
+        _ = registry.open(first, title: "First", location: nil)
+        #expect(a.hostUse == "retained")
+    }
+
     @Test("Known repository entry presents its scene before admitting a new link",
           arguments: ["success", "failure", "cancellation"], [false, true])
     func repositoryEntryDuringResolution(outcome: String, restored: Bool) async throws {

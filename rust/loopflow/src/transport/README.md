@@ -190,3 +190,56 @@ over the terminal and reports newly recorded diagnostics after returning. Native
 provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
+
+## Task shells and completed workspaces
+
+```sh
+lf task shell TASK --checkout /recorded/checkout --id SHELL --create
+lf task shell TASK --checkout /recorded/checkout --list
+lf task shell TASK --checkout /recorded/checkout --id SHELL
+lf task shell TASK --checkout /recorded/checkout --id SHELL --close
+```
+
+Choose a fresh shell identity once. Creation accepts literal initial argv after
+`--`, followed by the destination login shell; repeating that identity never runs
+its initial command again. Attachment, Hide and Desktop exit leave the shell
+running. Close ends its ordinary foreground, background and stopped jobs, even
+when job control assigned them separate process groups. Deliberately daemonized
+processes that created a different OS session are outside the shell's ownership.
+Ended shells retain their identity and saved screen. Undo restores that history;
+New Shell deliberately starts different execution. An unavailable destination
+never opens a local successor prompt. Prefix these commands with `--machine` to
+use the same operations on the Task's recorded Machine.
+
+Native hosts retain Task Sessions through one destination-owned contract:
+
+```sh
+lf task presence TASK --occurrence desktop:window:task --state retained --revision 1
+lf task presence TASK --occurrence desktop:window:task --state away --revision 2
+lf task presence TASK
+```
+
+Each host chooses its own occurrence identity and release policy. Use distinct
+identities for independent occurrences; persist increasing revisions so reordered
+reports cannot undo a return or Close. Retry an identical report safely. Renew
+`retained` within 30 seconds. `away` releases retention; `closed` acknowledges that
+this occurrence's native resources have ended. Failed reads and expired retained
+leases are unknown and prevent checkout deletion. Rex owns its native shell/window
+cleanup; it reports this same contract without relaying its shells through lf.
+
+Desktop reports retained for the selected Task, away on departure, and closed
+when its repository window closes. Away Sessions follow the usual two-minute
+eligible idle policy. A completed, released Task keeps its checkout and shells
+for fifteen minutes total. Return cancels that deadline; later departure starts
+a new one. Closing every occurrence skips that grace. Requested active work,
+drafts, pending requests and running Graphs still prevent ending execution.
+Finishing that work does not restart an already-due workspace deadline.
+
+The JSON reading names the pinned completion, checkout, branch, deadline, phase
+and pending reason. At `closing`, a released native host closes its Task resources
+and reports `closed`. Owners confirm job settlement before deletion. Completion
+and PR landing use this same operation; reopen or changed placement revokes it.
+Eligible cleanup discards uncommitted files but preserves primary/persistent
+checkouts and changed committed refs. Failures retain a pending reason and retry
+on the next host report. Task and conversation history survive; reopening a
+retired Task never silently recreates a checkout.

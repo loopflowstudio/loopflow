@@ -111,19 +111,21 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let inspect: (String, UUID) -> DesktopWindowInspection
     let perform: (DesktopActionRequest) throws -> DesktopActionOutcome
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
+    var closed: () -> Void = {}
     let receive: (LinkedWork) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, perform: perform, readText: readText, receive: receive)
+        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, perform: perform, readText: readText, closed: closed, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
         view.receive = receive
         view.inspect = inspect
         view.perform = perform
         view.readText = readText
+        view.closed = closed
     }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) {
-        view.router.remove(view.id, repository: view.repository)
+        view.disconnect()
     }
 
     final class Receiver: NSView {
@@ -135,15 +137,26 @@ struct WorkLinkReceiver: NSViewRepresentable {
         var perform: (DesktopActionRequest) throws -> DesktopActionOutcome
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (LinkedWork) async -> Void
+        var closed: () -> Void
+        private var closeObserver: NSObjectProtocol?
+
+        func disconnect() {
+            router.remove(id, repository: repository)
+            if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+            closeObserver = nil
+        }
+
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
              perform: @escaping (DesktopActionRequest) throws -> DesktopActionOutcome,
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
+             closed: @escaping () -> Void,
              receive: @escaping (LinkedWork) async -> Void) {
             self.router = router
             self.repository = repository
             self.openingRequests = openingRequests
             self.receive = receive
+            self.closed = closed
             self.inspect = inspect
             self.perform = perform
             self.readText = readText
@@ -151,8 +164,13 @@ struct WorkLinkReceiver: NSViewRepresentable {
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
         override func viewDidMoveToWindow() {
-            router.remove(id, repository: repository)
+            disconnect()
             if let window {
+                closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification,
+                    object: window, queue: .main) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.closed() }
+                    }
+
                 router.register(id, repository: repository, openingRequests: openingRequests, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
                 }, inspect: inspect, perform: { [weak self] request in

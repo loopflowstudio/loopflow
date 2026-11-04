@@ -1049,10 +1049,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Shell { .. }
+        TaskCommand::Presence { .. }
+        | TaskCommand::Retire { .. }
+        | TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => {
-            unreachable!("location reads precede repository commands")
+            unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync {
@@ -1831,12 +1833,60 @@ fn run() -> anyhow::Result<()> {
     }
     match &cli.command {
         Some(Commands::Task {
-            cmd: TaskCommand::Shell { issue, checkout },
+            cmd: TaskCommand::Retire { issue },
         }) => {
+            journal::admit_process(&std::env::current_dir()?, &args);
+            return loopflow::ops::task::retirement::run(issue).map_err(Into::into);
+        }
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Presence {
+                    issue,
+                    occurrence,
+                    state,
+                    revision,
+                },
+        }) => {
+            if state.is_some() {
+                journal::admit_process(&std::env::current_dir()?, &args);
+            }
+            println!(
+                "{}",
+                serde_json::to_string(&loopflow::ops::task::retirement::observe(
+                    issue,
+                    occurrence.as_deref(),
+                    *state,
+                    *revision
+                )?)?
+            );
+            return Ok(());
+        }
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Shell {
+                    issue,
+                    checkout,
+                    id,
+                    list,
+                    create,
+                    close,
+                    command,
+                },
+        }) => {
+            if *list {
+                return loopflow::ops::task::workspace::list_shells(issue, checkout);
+            }
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::task_shell(issue, checkout);
+            return loopflow::ops::task::task_shell(
+                issue,
+                checkout,
+                id.as_deref().expect("Clap requires shell identity"),
+                *create,
+                *close,
+                command,
+            );
         }
         Some(Commands::Task {
             cmd:

@@ -13,7 +13,8 @@ struct RepositoryWorkspace: Codable, Hashable, Sendable {
 }
 
 /// Application lifetime, keyed by the stable repository scene resolved by WorkLinkRouter.
-/// Closing a window releases its mounts, not its Work, drafts or terminal surfaces.
+/// Closing a window releases host retention. Work and history stay discoverable;
+/// execution and completed-Task retirement settle through lf.
 @MainActor
 final class RepositoryWorkspaces {
     private var repositories: [String: SessionsWorkspaceRegistry] = [:]

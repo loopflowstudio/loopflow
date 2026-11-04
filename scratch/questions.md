@@ -60,3 +60,15 @@ Task checkout and one migration if needed. No competing implementation process.
 Demo disconnected/live versus ended/fresh shells, process cleanup, active-work
 protection and two-stage completed-Task cleanup with uncommitted files. Real remote
 proof and process/PTY/socket inventories complement the automated policy checks.
+
+## Build assumptions — November 3
+
+A lost retained-host lease is unknown and keeps cleanup pending until a fresh
+observation. Desktop releases on departure, including unfinished Tasks; ordinary
+shell execution stays alive and an eligible idle agent uses its existing grace.
+Host observations carry increasing persisted revisions so an old release cannot
+overwrite a newer return. Native Rex integration remains owned by LOO-498.
+
+The compress step's explicit context-budget curation shortened historical Product
+memory without changing accepted direction. Earlier implementation correctly left
+it unchanged; curation is limited to the required size reduction.

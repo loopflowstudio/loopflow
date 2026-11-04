@@ -190,7 +190,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             )
             .unwrap();
         runtime
-            .block_on(super::cleanup_completed_task(&fixture.store, &fixture.task))
+            .block_on(super::retirement::schedule(&fixture.store, &fixture.task))
             .unwrap();
     }
     assert!(repo.path().exists());

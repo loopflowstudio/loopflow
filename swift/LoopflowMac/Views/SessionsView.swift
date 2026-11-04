@@ -156,7 +156,7 @@ final class SessionsWorkspace {
     var title: String
     var location: WorkspaceIdentity?
     var presentation = WorkNavigation.WorkspacePresentation()
-    let localMachineId: String?
+    var localMachineId: String?
 
     /// A Task's first conversation brings its Files into view once.
     func prepareTaskPanes(query: RegistryQuery = RegistryQueryLocal.shared) {
@@ -177,9 +177,14 @@ final class SessionsWorkspace {
             throw RegistryQueryError("Shells belong to Tasks; no shell was opened.")
         }
         let (location, execution) = try shellLocation()
-        let argv = try command.map { try shellCommand($0, at: location, execution: execution) }
-            ?? shellCommand(at: location, execution: execution)
-        return multiplexer.newShell(command: argv, location: location, execution: execution, focus: focus)
+        if location.machineId != localMachineId {
+            guard let execution, execution.machineID == location.machineId,
+                  case .recorded(_, let checkout) = execution.location, checkout == location.worktree else {
+                throw RegistryQueryError("Reopen the remote Task before adding a shell; its location is unavailable.")
+            }
+        }
+        let id = UUID().uuidString
+        return multiplexer.newShell(id: id, command: command ?? [], location: location, execution: execution, focus: focus)
     }
 
     func toggleShell() throws {
@@ -212,13 +217,25 @@ final class SessionsWorkspace {
     }
 
     /// ⌘W closes the named tab, else the selected one; a session pane, or one
-    /// without tabs, hides. The closed tab keeps its shell or page for Undo until
-    /// another close replaces it.
+    /// without tabs, hides. Shell Close ends execution; Undo restores its identity
+    /// and history, never a new process.
     func closePane(_ paneId: String, tab: String? = nil) {
         guard let pane = multiplexer.layout.pane(for: paneId) else { return }
         let id = tab ?? pane.content.selectedTabID
         let replaced: ClosedOccurrence?
-        if case .shell(let tabs, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
+        if case .shell(let tabs, _) = pane.content, let id, let shell = tabs.first(where: { $0.id == id }) {
+            if let location = shell.location {
+                do {
+                    let argv = try shellCommand(id: id, at: location, execution: shell.execution)
+                    Task { [weak self] in
+                        do {
+                            _ = try await LocalWaveAgentLauncher.queryLf(Array(argv.dropFirst()) + ["--close"], cwd: nil)
+                        } catch { self?.conversationError = error.localizedDescription }
+                    }
+                } catch { conversationError = error.localizedDescription }
+            }
+            disconnectedShells.insert(id)
+            if let terminal = shell.terminal { surfaces.release(terminal) }
             replaced = multiplexer.closeShell(id)
         } else if case .browser(_, let tabs, _, _, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
             replaced = multiplexer.closeBrowserTab(id)
@@ -249,25 +266,104 @@ final class SessionsWorkspace {
         return (location, execution)
     }
 
-    /// A script's command runs in the shell's login shell at the recorded location.
-    private func shellCommand(_ command: [String], at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
-        guard identity.machineId == localMachineId else {
-            throw RegistryQueryError("Commands run in local Task shells; this Task is on another Machine. No shell was opened.")
-        }
-        return command
+    /// Both local and remote shells are owned on their recorded Machine.
+    func shellCommand(id: String, at identity: WorkspaceIdentity, execution: TaskLocationObservation? = nil) throws -> [String] {
+        let observed = execution ?? multiplexer.layout.allPanes.first { $0.content.location == identity }?.executionLocation
+        let task: String
+        if let observed, observed.machineID == identity.machineId,
+           case .recorded(let recorded, let checkout) = observed.location, checkout == identity.worktree {
+            task = recorded
+        } else { task = key.id }
+        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
+         "--repository", key.repository, "task", "shell", task,
+         "--checkout", identity.worktree, "--id", id]
     }
 
-    private func shellCommand(at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
-        if identity.machineId == localMachineId { return [] }
-        guard let location = execution, location.machineID == identity.machineId,
-              case .recorded(let task, let checkout) = location.location,
-              checkout == identity.worktree else {
-            throw RegistryQueryError("Reopen the remote Task before adding a shell; no local shell was opened.")
+    func shellAttachment(_ tab: ShellTab) throws -> [String] {
+        guard let location = tab.location else { throw RegistryQueryError("Shell location is unavailable") }
+        var argv = try shellCommand(id: tab.id, at: location, execution: tab.execution)
+        if let initial = tab.command {
+            argv += ["--create"]
+            if !initial.isEmpty { argv += ["--"] + initial }
         }
-        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", location.machineID,
-            "--repository", location.repositoryID, "task", "shell", task,
-            "--checkout", identity.worktree]
+        return argv
     }
+
+    func reconnectShell(_ tab: ShellTab) {
+        guard let terminal = tab.terminal else { return }
+        surfaces.release(terminal)
+        disconnectedShells.remove(tab.id)
+    }
+
+    // Exiting an attachment does not establish that its remote execution ended.
+    var disconnectedShells: Set<String> = []
+    var shellScreens: [String: String] = [:]
+
+    private(set) var hostUse = "away"
+    private(set) var retirement: TaskRetirement?
+    var retentionError: String?
+    @ObservationIgnored private var presenceTask: Task<Void, Never>?
+    @ObservationIgnored private var presenceRevision: Int64 = 0
+
+    func retain(_ retained: Bool) {
+        guard key.kind == .task else { return }
+        let next = retained ? "retained" : "away"
+        if hostUse == next { return }
+        hostUse = next
+        if !retained { detachTerminals() }
+        Task { [weak self] in await self?.reportPresence() }
+    }
+
+    func closeWorkspace() {
+        hostUse = "closed"
+        detachTerminals()
+        Task { [weak self] in await self?.reportPresence() }
+    }
+
+    private func detachTerminals() {
+        for pane in multiplexer.layout.allPanes {
+            if case .shell(let tabs, _) = pane.content {
+                for tab in tabs { if let terminal = tab.terminal { surfaces.release(terminal) } }
+            } else if let terminal = pane.terminal { surfaces.release(terminal) }
+        }
+    }
+
+    private func reportPresence() async {
+        guard key.kind == .task, let query = persistenceQuery, let location else { return }
+        guard let localMachineId else {
+            retentionError = "Machine identity is unavailable; retention has not been reported."
+            return
+        }
+        let occurrence = "desktop:\(localMachineId):\(key.id)"
+        let revisionKey = "workspace-presence-\(occurrence)"
+        let previous = Int64(UserDefaults.standard.double(forKey: revisionKey))
+        let revision = max(previous + 1, Int64(Date().timeIntervalSince1970 * 1000))
+        UserDefaults.standard.set(Double(revision), forKey: revisionKey)
+        presenceRevision = revision
+        let observedUse = hostUse
+        do {
+            let remote = query.onMachine(location.machineId, repository: key.repository)
+            let task: String
+            if location.machineId == localMachineId { task = key.id }
+            else if let observed = multiplexer.layout.allPanes.first(where: { $0.content.location == location })?.executionLocation,
+                    case .recorded(let recorded, let checkout) = observed.location, checkout == location.worktree {
+                task = recorded
+            } else { throw RegistryQueryError("Task retention is unknown until its remote location is observed.") }
+            let result = try await remote.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision)
+            guard presenceRevision == revision, hostUse == observedUse else { return }
+            retirement = result
+            retentionError = nil
+            if result?.phase == "closing", hostUse == "away" {
+                closeWorkspace()
+                if case .shell(let tabs, _)? = multiplexer.shellPane?.content {
+                    disconnectedShells.formUnion(tabs.map(\.id))
+                }
+            }
+        } catch {
+            if presenceRevision == revision { retentionError = error.localizedDescription }
+        }
+    }
+
     let multiplexer: MultiplexerStore
     /// One flag per pane strip, read only by that strip's Close control, so a
     /// crossing never re-renders another pane. Lookup itself is unobserved.
@@ -375,8 +471,9 @@ final class SessionsWorkspace {
                 guard let terminal = notification.object as? TerminalIdentity,
                       case .shell(let tabId, _) = terminal else { return }
                 MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.multiplexer.removeExitedShell(tabId, machineId: terminal.machineId)
+                    guard let self, self.multiplexer.shell(tabId)?.terminal == terminal else { return }
+                    self.disconnectedShells.insert(tabId)
+                    if let output = notification.userInfo?["output"] as? String { self.shellScreens[tabId] = output }
                 }
             }
     }
@@ -404,17 +501,28 @@ final class SessionsWorkspaceRegistry {
     }
 
     func refreshMachine(query: RegistryQuery) async {
-        do { localMachineId = try await query.localMachineId(); machineError = nil }
+        do {
+            localMachineId = try await query.localMachineId()
+            for workspace in workspaces.values { workspace.localMachineId = localMachineId }
+            machineError = nil
+        }
         catch { machineError = error.localizedDescription }
     }
 
     func clearPresentation() {
+        for workspace in workspaces.values { workspace.retain(false) }
         surfaces.clearFocus()
         openWork = []
         selectedWork = nil
     }
 
+    func closePresentation() {
+        for workspace in workspaces.values { workspace.closeWorkspace() }
+        surfaces.clearFocus()
+    }
+
     func present(open: [WorkWorkspaceKey]) {
+        for workspace in workspaces.values where !open.contains(workspace.key) { workspace.retain(false) }
         openWork = open
         if selectedWork.map({ openWork.contains($0) }) != true {
             selectedWork = openWork.first
@@ -443,6 +551,7 @@ final class SessionsWorkspaceRegistry {
         guard openWork.contains(key) else { return }
         if selectedWork != key { surfaces.clearFocus() }
         selectedWork = key
+        for workspace in workspaces.values { workspace.retain(workspace.key == key) }
     }
 
     func inspect() -> [DesktopWorkspaceInspection] {
@@ -1201,6 +1310,19 @@ struct SessionsContentView: View {
         let active = currentKey == key
         let terminals = key.kind != .task || task?.task.runtime?.owner != nil || entry.presentation.content == .terminals
         return VStack(spacing: 0) {
+            if let error = entry.retentionError {
+                Text("Workspace cleanup pending: " + error).font(.caption).textSelection(.enabled).padding(6)
+            } else if let retirement = entry.retirement {
+                if retirement.phase == "retired" {
+                    Text("Task workspace retired. Conversation history remains available.").font(.caption).padding(6)
+                } else if let reason = retirement.reason, reason != "Retained by a host" {
+                    Text("Workspace cleanup pending: " + reason).font(.caption).textSelection(.enabled).padding(6)
+                } else if retirement.phase == "closing" {
+                    Text("Closing the completed Task workspace after its work settles.").font(.caption).padding(6)
+                } else if let due = retirement.dueAt {
+                    Text("Completed workspace retained until " + Date(timeIntervalSince1970: TimeInterval(due)).formatted(date: .omitted, time: .shortened)).font(.caption).padding(6)
+                }
+            }
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
                 HStack {
@@ -1452,6 +1574,15 @@ extension SessionsWorkspace {
         persistenceQuery = query
         persistenceRepo = repoPath
         persistenceTask = Task { [weak self] in await self?.loadPaneIntent() }
+        if key.kind == .task {
+            presenceTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    guard self != nil else { return }
+                    await self?.reportPresence()
+                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                }
+            }
+        }
     }
 
     func portableLayout() -> WorkPaneLayout {

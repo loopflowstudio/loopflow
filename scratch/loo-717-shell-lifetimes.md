@@ -314,6 +314,53 @@ No second provider conversation, copied Task state, duplicate native layout,
 idle timer for unfinished shells, command replay, silent home/local fallback,
 deletion of changed committed refs, or cleanup of another Task's windows/processes.
 
+## Delete — do not maintain
+
+- `workspace.rs::task_shell`'s unrecorded delegated launcher: shell receipts now
+  distinguish one creation from attach/Close. Preserve pinned Task placement.
+- `SessionsWorkspace.shellCommand`'s local/remote split and scripted-command
+  refusal: use one Machine-addressed shell command and literal argv.
+- `buildWorkspaceShellCommand` and Swift-owned `LoopflowZshBootstrap`, including
+  `conversationReturnsToShell` and the companion case in `embeddedLaunchContract`:
+  deleted. Destination-packaged startup owns personal rc files, inner PTY identity
+  and Ghostty integration; ordinary attachment uses `buildGhosttyShellCommand`.
+- `MultiplexerStore.removeExitedShell` and its disappearance assertions: keep
+  ended/disconnected identities and screen history, with explicit reconnect/new.
+- Undo replacement as execution termination: Close requests owner termination;
+  surface release only detaches presentation.
+- Immediate `cleanup_completed_task` and its forwarding wrapper: deleted.
+  Completion, landing and Graph callers directly schedule the same pinned intent.
+
+These deletion targets are removed. Shell creation now falls through to one receipt
+read after insert contention; no recursive retry or duplicate checkout check.
+Shell inventory reads complete receipts in one query. Session ending checks active
+work once, and retirement validates owners without returning an unused owner set.
+`disconnectedShells` names attachment state without claiming process death.
+
+## Build notes — November 3
+
+Host observation uses `task presence TASK --occurrence ID --state STATE
+--revision N`. Increasing revisions fence reordered requests. A retained lease
+lasts 30 seconds; an expired lease is unknown, so cleanup stays pending. Away
+and closed observations persist until the host reports again. Host adapters poll
+for `phase=closing`, close only their Task occurrences and acknowledge closed.
+Desktop and Rex use the same contract; native Rex mapping remains LOO-498's work.
+The existing owner loop confirms Session ending against active-work/input facts.
+
+Implemented destination-owned Desktop shells, idempotent creation/attachment,
+Close and job settlement, retained ended identities, native-host observations,
+and completion-pinned retirement. The policy tests cover return/reopen, unavailable
+hosts, pending requests, drafts, headless Runs and silent final work past the deadline.
+The checkout path discards files only after protecting primary/persistent checkouts
+and moved committed heads. Shell history remains readable after checkout deletion.
+
+Gate still owns the added twenty-cycle resource census, the updated completion/
+landing retirement test, migration-frontier/DTO checks, formatting, Clippy and
+expanded affected suites. The isolated-sshd lifecycle proof has not run; fake SSH
+routing is not that proof. Installed Desktop/Rex/remote-Machine experience remains
+the interactive demo. LOO-498 received the concrete adapter contract and retains
+its native Rex implementation/proof.
+
 ## Demo and acceptance
 
 Show local and actual remote Desktop shells executing on their recorded Machine
@@ -379,4 +426,4 @@ backend, process migration, arbitrary history replay or C-style workload recipes
 Jack's explicit build approval authorizes the next implementation run. Stop at
 the interactive demo; no Auto-Ship, merge, install or separate LOO-498 launch.
 
-Check: November 3 — source and merged-main lifecycle review; prior exploration interactions passed. This planning revision runs no runtime cleanup, build or acceptance tests.
+Check: November 3 — `cargo test -p loopflow --lib workspace_retirement`, `cargo test -p loopflow --lib transport::lifetime::`, `cargo test -p loopflow --test transport_tests desktop_shell_reconnects_without_replay_and_close_settles_its_jobs` and `scripts/test_desktop.sh --filter 'GhosttyShellBlockTests|DesktopPaneControlTests|WorkspaceRetentionTests|WorkDestinationTests' -Xswiftc -gnone` pass (Desktop build, 101 Swift tests); `cargo fmt --check` and `git diff --check` pass. Gate owns expanded suites/Clippy and remaining automated acceptance; demo owns installed native/remote proof.

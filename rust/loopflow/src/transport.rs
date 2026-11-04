@@ -643,14 +643,27 @@ impl Ownership {
     }
 }
 
+struct OwnerSocket(PathBuf);
+impl Drop for OwnerSocket {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Own a command's transport until it exits; only `start` launches this.
 pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let id =
         crate::journal::current_lf_process_id().context("Transport needs an admitted Process")?;
+    let shell = std::env::var("LF_DESKTOP_SHELL").ok();
+    std::env::remove_var("LF_DESKTOP_SHELL");
+    if let Some(shell) = &shell {
+        crate::journal::process_ledger()?.bind_task_shell(shell, &id)?;
+    }
     let path = endpoint(&id).context("Prepare transport socket")?;
     let listener = UnixListener::bind(&path)
         .with_context(|| format!("Bind transport socket {}", path.display()))?;
     listener.set_nonblocking(true)?;
+    let _socket_file = OwnerSocket(path.clone());
     let socket = path.clone();
     crate::agent::register_interrupt_cleanup(move || {
         let _ = std::fs::remove_file(&socket);
@@ -692,11 +705,35 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             .stderr(Stdio::piped());
         command.process_group(0);
     }
-    let mut child = command.spawn()?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            if shell.is_some() {
+                crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
+            }
+            return Err(error.into());
+        }
+    };
     // Command retains its configured slave descriptors after spawn. Close them
     // so Linux reports PTY EOF when the execution closes its own descriptors.
     drop(command);
     let group = crate::os_process::ProcessGroupGuard::new(child.id());
+    let shell_jobs = shell
+        .as_ref()
+        .map(|_| crate::os_process::TerminalJobs::new(child.id()));
+    if let Some(jobs) = &shell_jobs {
+        let jobs = jobs.clone();
+        let owner = id.clone();
+        crate::agent::register_interrupt_cleanup(move || {
+            let settled = jobs
+                .terminate()
+                .map_err(anyhow::Error::from)
+                .and_then(|()| Ok(crate::journal::process_ledger()?.settle_shell_jobs(&owner)?));
+            if let Err(error) = settled {
+                tracing::error!(%owner,%error,"Shell job cleanup remains pending");
+            }
+        });
+    }
     let mut readers: Vec<(u8, File)> = Vec::new();
     let input: File;
     if let Some((master, slave)) = pair {
@@ -1101,7 +1138,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             let recorded = if terminal && recorded_input < pending_input.len() {
                 let bytes = &pending_input.make_contiguous()[recorded_input..];
                 crate::journal::process_ledger()
-                    .and_then(|store| store.record_owner_input(&id, bytes))
+                    .and_then(|store| {
+                        if store.shell_owner(&id)?.is_some() && !store.shell_holds_work(&id)? {
+                            store.clear_owner_input(&id)
+                        } else { store.record_owner_input(&id, bytes) }
+                    })
                     .map(|()| recorded_input = pending_input.len())
                     .inspect_err(|error| tracing::warn!(%error, "cannot retain terminal input; retrying before delivery"))
                     .is_ok()
@@ -1212,6 +1253,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         if let Some(status) = status {
+            if let Some(jobs) = &shell_jobs {
+                jobs.terminate()?;
+                crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
+            }
             let code = if let Some(record) = exit_record.take() {
                 let settled = match crate::harness::native_exit::settle(&record, status) {
                     Ok(settled) => settled,
@@ -1313,6 +1358,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 .ok()
                 .flatten();
             if let Some(event) = event {
+                if let Some(jobs) = &shell_jobs {
+                    jobs.terminate()?;
+                    crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
+                }
                 end_viewers(&mut viewers, event);
                 snapshot::leave(&id, &output);
                 crate::platform::kill_process(std::process::id());
@@ -1727,6 +1776,14 @@ pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>, Optio
         }
     }
     Some((owner, moved, json_session))
+}
+
+/// Paint an ended Desktop shell's retained screen without starting execution.
+pub(crate) fn shell_history(owner: &LfProcessId) -> Result<()> {
+    if let Some(screen) = snapshot::last_screen(owner.as_str()) {
+        io::stdout().write_all(&screen)?;
+    }
+    Ok(())
 }
 
 /// Relay this terminal to the execution owner: socket in, terminal out.

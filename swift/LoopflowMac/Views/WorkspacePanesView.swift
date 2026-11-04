@@ -698,10 +698,19 @@ struct SessionPaneView: View {
             VStack(spacing: 0) {
                 if !showsStrip { shellTabs.padding(4) }
                 if let tab = pane.content.selectedShell,
-                          let location = tab.location, let terminal = tab.terminal {
-                    if let command = tab.command {
+                          tab.location != nil, let terminal = tab.terminal {
+                    if workspace.disconnectedShells.contains(tab.id) {
+                        VStack {
+                            if let screen = workspace.shellScreens[tab.id] {
+                                ScrollView { Text(screen).font(.system(.body, design: .monospaced)).textSelection(.enabled) }
+                            }
+                            Text("Shell attachment ended. Reconnect checks the same execution; New Shell starts fresh.")
+                            Button("Reconnect") { workspace.reconnectShell(tab) }
+                            Button("New Shell") { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                        }
+                    } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(
-                            workingDirectory: location.machineId == workspace.localMachineId ? location.worktree : NSHomeDirectory(),
+                            workingDirectory: NSHomeDirectory(),
                             argv: command,
                             terminal: terminal,
                             surfacePool: sessions.surfaces,

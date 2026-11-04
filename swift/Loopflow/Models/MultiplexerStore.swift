@@ -189,10 +189,10 @@ public final class MultiplexerStore {
 
     /// Add a shell tab and select it. Focus moves only when asked; scripts keep theirs.
     @discardableResult
-    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil,
+    public func newShell(id: String = UUID().uuidString, command: [String] = [], location: WorkspaceIdentity? = nil,
                          execution: TaskLocationObservation? = nil, focus: Bool = true) -> PaneState? {
         guard let pane = shellPane, case .shell(let tabs, _) = pane.content else { return nil }
-        let tab = ShellTab(location: location, execution: execution, command: command)
+        let tab = ShellTab(id: id, location: location, execution: execution, command: command)
         layout = layout.updatingShellTabs(of: pane.id, tabs: tabs + [tab], selected: tab.id)
         if focus { setFocusedPane(pane.id) } else { setCollapsed(paneId: pane.id, collapsed: false) }
         return layout.pane(for: pane.id)
@@ -218,15 +218,6 @@ public final class MultiplexerStore {
               let index = tabs.firstIndex(where: { $0.id == id }) else { return nil }
         _removeShell(id)
         return _record(.shellTab(tabs[index], index: index))
-    }
-
-    /// Drop a shell tab whose process on `machineId` exited, open or kept for Undo.
-    public func removeExitedShell(_ id: String, machineId: String) {
-        if case .shellTab(let tab, _) = lastClosed, tab.id == id, tab.location?.machineId == machineId {
-            lastClosed = nil
-        }
-        guard shell(id)?.location?.machineId == machineId else { return }
-        _removeShell(id)
     }
 
     private func _removeShell(_ id: String) {

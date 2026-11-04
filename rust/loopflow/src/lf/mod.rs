@@ -1098,6 +1098,9 @@ impl TaskCommand {
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
+            Self::Presence { state, .. } => state.is_some(),
+            Self::Shell { list, .. } => !list,
+            Self::Retire { .. } => true,
             Self::Comment { message, .. } => message.is_some(),
             Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
@@ -1108,7 +1111,6 @@ impl TaskCommand {
             | Self::Create { .. }
             | Self::Claim { .. }
             | Self::Unassign { .. }
-            | Self::Shell { .. }
             | Self::Save { .. }
             | Self::Abandon { .. }
             | Self::Delete { .. }
@@ -2067,7 +2069,36 @@ until `lf ship`."
         issue: String,
         #[arg(long)]
         checkout: std::path::PathBuf,
+        /// Stable Desktop shell identity; attachment never creates execution
+        #[arg(long, required_unless_present = "list")]
+        id: Option<String>,
+        /// List retained shell identities, including ended shells
+        #[arg(long, conflicts_with_all = ["id", "create", "close", "command"])]
+        list: bool,
+        /// Create once, then attach; retrying the same identity never replays it
+        #[arg(long, conflicts_with = "close")]
+        create: bool,
+        /// End this shell and its ordinary jobs
+        #[arg(long)]
+        close: bool,
+        /// Initial command, followed by the destination login shell
+        #[arg(last = true)]
+        command: Vec<String>,
     },
+    /// Report native-host retention or read pending workspace cleanup
+    Presence {
+        issue: String,
+        #[arg(long, requires_all = ["state", "revision"])]
+        occurrence: Option<String>,
+        /// Increasing observation revision, persisted by the host per occurrence
+        #[arg(long, requires = "occurrence")]
+        revision: Option<i64>,
+        #[arg(long, requires = "occurrence")]
+        state: Option<crate::store::sqlite::HostUse>,
+    },
+    /// Run the Task's recorded workspace retirement
+    #[command(hide = true)]
+    Retire { issue: String },
     /// Stream invalidations from an existing Task checkout (JSON lines)
     WatchFiles {
         issue: String,
@@ -2228,7 +2259,9 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Shell { issue, .. }
+            Self::Presence { issue, .. }
+            | Self::Retire { issue }
+            | Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2256,7 +2289,9 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Shell { issue, .. }
+            Self::Presence { issue, .. }
+            | Self::Retire { issue }
+            | Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }

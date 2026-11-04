@@ -1107,4 +1107,12 @@ Task pane layouts, selected shell/file tabs and file drafts save through lfdb.
 A delayed restore keeps newer tabs and edits. Conflicts leave local content intact
 and show an error; **Reload saved intent** reconciles retained content before another
 save. File drafts compare their saved base with disk before editing. Restored shell
-intent has no launch command: a saved tab alone does not reattach a Process.
+intent retains its identity without initial commands: opening it attaches to the
+same owner and never replays startup or creates replacement execution.
+
+Task shell views attach to a retained owner on the Task's recorded Machine.
+Hide, switching Work and app exit detach presentation. Close ends that shell and
+its ordinary jobs; Undo restores its identity and history. Use Reconnect for
+transport loss and New Shell for fresh execution. No remote failure opens a
+local prompt. Completed workspace cleanup and native-host retention use the
+[shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).

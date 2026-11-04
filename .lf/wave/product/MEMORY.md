@@ -38,12 +38,9 @@
   `4cde15a0d3` removes Task inventory hashes/reads, not capture receipts.
   Installed input exceeds budget; rendering proves no adoption.
 
-Jack folded LOO-430/431/432 into LOO-427: identity, window
-control and terminal I/O in one diff.
-
-October 8: LOO-427 leaves unknown checkout location unavailable; `92cafe61d`
-routes known Tasks without rewriting Machine defaults. Seeded IDs prove routing,
-not exchange/admission.
+Jack folded LOO-430/431/432 into LOO-427 (identity, windows, terminal I/O).
+October 8's `92cafe61d` routes known Tasks without changing Machine defaults;
+unknown checkouts stay unavailable. Seeded routing proves neither exchange nor admission.
 
 `desktop text/key` reuse existing owners: Jack selected cursor insertion into
 drafts with Enter separate; control-text/IME limits are reversible. Verified lf3
@@ -218,7 +215,7 @@ Jack authorized shipping #1499 October 9; native acceptance was not established.
 Observed provider conflicts win; matching readback does not guarantee atomic writes
 against an unseen reopening. LOO-385 overlap does not establish closure.
 
-## Historical pointers
+## History
 
 - Terminal-host adoption (2026-10-07): Jack Heart authorized landing after cmux/herdr
   trials without full adoption proof; LOO-421 limits at `27613222eb`, same file.
@@ -262,7 +259,7 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   new Task appear there; Jack kept the rule then (2026-10-05). LOO-505 now
   exposes unstarted standalone captures in repository inventory/navigation.
 
-## Graph alignment (reconciled 2026-11-02)
+## Graph alignment (2026-11-02)
 
 AGENTS.md owns the current Graph/Task contract. Latest GraphProcessDetail grants
 no control authority; Task position, execution and TaskRunControl stay separate.
@@ -638,17 +635,13 @@ selects one destination. Anonymous arrangement remains a draft save-first choice
 clause IDs; distinct Dashboards need distinct occurrence roots. Intent proves no
 liveness; Waiting's 2:1 weight is provisional.
 
-Jack's October 17 tab decision: each Task has at most one Shell and one Files pane;
-shell tabs own independent processes, file tabs share Task/path documents. No
-tear-out, extra tool panes or repo/Wave/Dashboard shells. Creation selects a tab;
-arrangement groups existing panes. Shell identity is independent of pane/selection;
-empty Files keeps location. Delayed reads merge missing content without replacing
-newer tabs, selection, geometry or drafts (October 18 tests).
-Revision conflicts preserve live and durable edits. Cold shells have no launch command. Native
-launch still records no Shell Process ID, so cold attachment and mounted restart/
-cross-machine continuity remain unproved with 416.
-Pane ownership follows Task.repository_id, not optional Project/Wave membership;
-leaving a Project must preserve the same saved panes and drafts.
+Jack Heart (October 17): one Shell pane per Task, independent processes per tab;
+one Files pane shares Task/path documents. No tear-out, extra tools or non-Task
+shells. Creation selects; arrangement groups existing panes. Shell identity ignores pane/selection; empty Files retains location.
+Delayed restoration merges missing content, preserving newer tabs, selection,
+geometry and drafts; conflicts preserve live and saved edits. Pane ownership is
+Task.repository_id, independent of Project/Wave membership. Cold-shell and native
+continuity limits with LOO-416: `17cf6a71f9:.lf/wave/product/MEMORY.md`, this heading.
 
 October 15, LOO-492: Jack Heart required even nested-corner clearance; text
 padding alone is insufficient. Lower workspace radii derive from pane radius

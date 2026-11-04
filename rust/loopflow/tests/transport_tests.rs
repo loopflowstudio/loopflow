@@ -86,7 +86,11 @@ impl Fixture {
             .read_line(&mut line)
             .unwrap();
         std::thread::spawn(move || child.wait());
-        assert!(!line.trim().is_empty(), "owner exited before acknowledging");
+        assert!(
+            !line.trim().is_empty(),
+            "owner exited before acknowledging: {}",
+            std::fs::read_to_string(logs.join("transport.log")).unwrap_or_default()
+        );
         line.trim().to_owned()
     }
     fn serve(&self, terminal: bool, argv: &[&str]) -> Command {
@@ -3500,4 +3504,272 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
         "{} bytes on the wire",
         viewer.wire
     );
+}
+
+struct ShellOwnerGuard<'a>(&'a Fixture, String);
+
+impl Drop for ShellOwnerGuard<'_> {
+    fn drop(&mut self) {
+        if self.0.running(&self.1) {
+            self.0.stop(&self.1);
+        }
+    }
+}
+
+#[test]
+fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
+    let fixture = Fixture::new();
+    let _initialized = fixture.start(&["/bin/sh", "-c", "true"]);
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let repo = store
+        .ensure_repository(fixture.repo.path().to_str().unwrap())
+        .unwrap();
+    let machine = store.local_machine().unwrap().id;
+    let task = "task_5e55105e000040008000000000000005";
+    fixture.sql().execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,checkout_machine_id,branch) VALUES(?1,?2,'SHELL-1',1,?3,?4,'task')", rusqlite::params![task,repo.as_str(),fixture.repo.path().to_str().unwrap(),machine.as_str()]).unwrap();
+    drop(store);
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 1s\n",
+    )
+    .unwrap();
+    let base = [
+        "task",
+        "shell",
+        task,
+        "--checkout",
+        fixture.repo.path().to_str().unwrap(),
+        "--id",
+        "desktop-shell",
+    ];
+    let mut launch = fixture
+        .command(&base)
+        .arg("--create")
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '%s\\n' \"$1\" >> \"$HOME/launches\"",
+            "initial",
+            "$(literal); spaced argument",
+        ])
+        .env("SHELL", "/bin/bash")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert_eq!(
+        fixture.wait_file("launches").trim(),
+        "$(literal); spaced argument"
+    );
+    let owner: String = fixture
+        .sql()
+        .query_row(
+            "SELECT owner FROM task_shells WHERE id='desktop-shell'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut viewer = fixture.viewer(&owner, true);
+    launch.wait().unwrap();
+    viewer.input("export RETAINED=still-here; sleep 30 & printf 'job:%s\\n' $! > \"$HOME/job\"; printf 'state-ready\\n'\r");
+    until_out(&mut viewer, "state-ready");
+    let job = fixture
+        .wait_file("job")
+        .trim()
+        .strip_prefix("job:")
+        .unwrap()
+        .parse::<u32>()
+        .unwrap();
+    drop(viewer);
+    // Simulate a completed nested conversation; shell purpose stays immutable.
+    let session = fixture.session(&owner);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET interactive=1,completed_at=unixepoch() WHERE id=?1",
+            [&session],
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(fixture.running(&owner));
+    let mut retry = fixture
+        .command(&base)
+        .arg("--create")
+        .env("SHELL", "/bin/bash")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    fixture.wait_controlled(&owner);
+    let mut returning = fixture.viewer(&owner, true);
+    retry.wait().unwrap();
+    returning.input("printf 'value:%s\\n' \"$RETAINED\"\r");
+    until_out(&mut returning, "value:still-here");
+    assert_eq!(fixture.wait_file("launches").lines().count(), 1);
+    let close = fixture.command(&base).arg("--close").output().unwrap();
+    assert!(
+        close.status.success(),
+        "{}",
+        String::from_utf8_lossy(&close.stderr)
+    );
+    fixture.ends(&owner);
+    let settled: bool = fixture
+        .sql()
+        .query_row(
+            "SELECT jobs_settled FROM task_shells WHERE owner=?1",
+            [&owner],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        settled,
+        "shell job settlement was not recorded: {:?}",
+        std::fs::read_to_string(fixture.home.path().join("logs/transport.log"))
+    );
+    // Zombies cannot execute or retain terminal descriptors.
+    let output = Command::new("ps")
+        .args(["-p", &job.to_string(), "-o", "stat="])
+        .output()
+        .unwrap();
+    assert!(
+        output.stdout.is_empty()
+            || String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .starts_with('Z')
+    );
+    let listed = fixture
+        .command(&[
+            "task",
+            "shell",
+            task,
+            "--checkout",
+            fixture.repo.path().to_str().unwrap(),
+            "--list",
+        ])
+        .output()
+        .unwrap();
+    assert!(listed.status.success(), "{listed:?}");
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("desktop-shell\tended"));
+    // History remains readable after retirement removed the recorded directory.
+    let checkout = fixture.repo.path().to_path_buf();
+    let retired = checkout.with_extension("retired");
+    std::fs::rename(&checkout, &retired).unwrap();
+    let ended = fixture
+        .command(&base)
+        .current_dir(fixture.home.path())
+        .arg("--create")
+        .output()
+        .unwrap();
+    std::fs::rename(&retired, &checkout).unwrap();
+    assert!(!ended.status.success());
+    assert!(String::from_utf8_lossy(&ended.stderr).contains("Shell ended"));
+    assert_eq!(fixture.wait_file("launches").lines().count(), 1);
+    assert!(!fixture.endpoint(&owner).exists());
+}
+
+#[test]
+fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
+    let fixture = Fixture::new();
+    let _initialized = fixture.start(&["/bin/sh", "-c", "true"]);
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let repo = store
+        .ensure_repository(fixture.repo.path().to_str().unwrap())
+        .unwrap();
+    let task = "task_5e55105e000040008000000000000006";
+    fixture.sql().execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,checkout_machine_id,branch) VALUES(?1,?2,'CYCLES-1',1,?3,?4,'task')", rusqlite::params![task,repo.as_str(),fixture.repo.path().to_str().unwrap(),store.local_machine().unwrap().id.as_str()]).unwrap();
+    for cycle in 0..20 {
+        let id = format!("cycle-{cycle}");
+        let base = [
+            "task",
+            "shell",
+            task,
+            "--checkout",
+            fixture.repo.path().to_str().unwrap(),
+            "--id",
+            &id,
+        ];
+        let ready = fixture.home.path().join("cycle-ready");
+        let _ = std::fs::remove_file(&ready);
+        let _ = std::fs::remove_file(fixture.home.path().join("shell-pid"));
+        let mut launch = fixture
+            .command(&base)
+            .args([
+                "--create",
+                "--",
+                "/bin/sh",
+                "-c",
+                "printf ready > \"$HOME/cycle-ready\"",
+            ])
+            .env("SHELL", "/bin/bash")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        fixture.wait_file("cycle-ready");
+        let owner: String = fixture
+            .sql()
+            .query_row("SELECT owner FROM task_shells WHERE id=?1", [&id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let _stop = ShellOwnerGuard(&fixture, owner.clone());
+        let mut viewer = fixture.viewer(&owner, true);
+        launch.wait().unwrap();
+        viewer
+            .input("sleep 30 & printf '%s\\n' $$ > \"$HOME/shell-pid\"; printf 'cycle-ready\\n'\r");
+        until_out(&mut viewer, "cycle-ready");
+        let pid = fixture
+            .wait_file("shell-pid")
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        drop(viewer);
+        assert!(fixture
+            .command(&base)
+            .arg("--close")
+            .output()
+            .unwrap()
+            .status
+            .success());
+        fixture.ends(&owner);
+        assert!(!fixture.endpoint(&owner).exists(), "cycle {cycle}");
+        let inventory = Command::new("ps")
+            .args(["-axo", "pid=,stat="])
+            .output()
+            .unwrap();
+        assert!(inventory.status.success());
+        for row in String::from_utf8_lossy(&inventory.stdout).lines() {
+            let mut fields = row.split_whitespace();
+            let process = fields.next().unwrap().parse::<i32>().unwrap();
+            let state = fields.next().unwrap();
+            // SAFETY: getsid only inspects the enumerated PID; a raced exit is absent.
+            let session = unsafe { libc::getsid(process) };
+            assert!(
+                session != pid as i32 || state.starts_with('Z'),
+                "cycle {cycle} retained PTY process {process}"
+            );
+        }
+        let settled: bool = fixture
+            .sql()
+            .query_row(
+                "SELECT jobs_settled FROM task_shells WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(settled, "cycle {cycle}");
+    }
+    let (total, settled): (u32, u32) = fixture
+        .sql()
+        .query_row(
+            "SELECT count(*),sum(jobs_settled) FROM task_shells WHERE task_id=?1",
+            [task],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((total, settled), (20, 20));
 }

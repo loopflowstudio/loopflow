@@ -75,12 +75,42 @@ impl Ending {
         activity: Activity,
         input_queued: bool,
     ) -> Result<Option<Event>> {
-        if !self.may_end(activity, input_queued) {
+        let store = crate::journal::process_ledger()?;
+        if let Some(close) = store.shell_owner(owner)? {
+            let settled = !store.shell_holds_work(owner)? || store.owner_waits_for_person(owner)?;
+            let may_close = settled
+                && !input_queued
+                && (close == 1
+                    || (close == 2 && !activity.viewed && store.owner_retiring(owner)?));
+            return Ok(may_close.then_some(Event::Control {
+                held: false,
+                notice: Some("Shell closed".into()),
+                successor: None,
+            }));
+        }
+        if store.owner_host_hold(owner)? {
             return Ok(None);
         }
-        let store = crate::journal::process_ledger()?;
-        if !store.owner_waits_for_person(owner)? {
+        let closed = store.owner_host_closed(owner)?;
+        if input_queued
+            || (!closed && !self.may_end(activity, false))
+            || !store.owner_waits_for_person(owner)?
+        {
             return Ok(None);
+        }
+        let notice = if closed {
+            Some("Workspace closed")
+        } else if store.owner_retiring(owner)? {
+            Some("Completed Task workspace retired")
+        } else {
+            None
+        };
+        if let Some(notice) = notice {
+            return Ok(Some(Event::Control {
+                held: false,
+                notice: Some(notice.into()),
+                successor: None,
+            }));
         }
         let (notice, successor) = match &self.change {
             Some((change, path)) => {
@@ -224,6 +254,28 @@ fn watch(
                 }
             }
         }
+        let Some(store) = store.open(owner) else {
+            continue;
+        };
+        // Shell purpose is fixed at creation. Running lf inside an ordinary
+        // shell must never enroll it in the idle-agent or binary-rollover policy.
+        match store.shell_owner(owner) {
+            Ok(Some(1 | 2)) => {
+                if end
+                    .send(Ending {
+                        change: None,
+                        activity: grace.activity,
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+                let _ = waker.write_all(&[1]);
+                continue;
+            }
+            Ok(Some(_)) | Err(_) => continue,
+            Ok(None) => {}
+        }
         let now = SystemTime::now();
         let change = executable.and_then(|executable| {
             executable
@@ -232,16 +284,21 @@ fn watch(
         });
         // Native turns may leave only terminal output. Viewers never prolong a
         // vanished build, so their activity cannot reset this quiet interval.
-        let quiet = match change {
-            Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
-            None => grace.expired(now),
-        };
+        if store.owner_host_hold(owner).unwrap_or(true) {
+            grace.quiet_since = now;
+            continue;
+        }
+        let host_closed = store.owner_host_closed(owner).unwrap_or(false);
+        let retiring = store.owner_retiring(owner).unwrap_or(false);
+        let quiet = host_closed
+            || retiring
+            || match change {
+                Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
+                None => grace.expired(now),
+            };
         if !quiet {
             continue;
         }
-        let Some(store) = store.open(owner) else {
-            continue;
-        };
         match store.owner_waits_for_person(owner) {
             Ok(true) => {}
             // A turn or a running Graph holds it: activity, and the grace
@@ -409,6 +466,99 @@ mod tests {
             assert!(fresh.may_end(activity, false));
             assert!(!fresh.may_end(activity, true));
         }
+    }
+
+    #[test]
+    fn workspace_retirement_waits_for_final_work_drafts_and_pending_requests() {
+        use crate::store::sqlite::HostUse;
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let owner = store.test_lf_process();
+        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        let repo = store.ensure_repository("/repo").unwrap();
+        let task = crate::durable::TaskId::new();
+        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at) VALUES(?1,?2,'CLOSE-1',1,'/repo.task','task',1,'completed')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2,agent_process_id=?2 WHERE id='session'", rusqlite::params![task.as_str(),owner]).unwrap();
+        conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('session',?1,1,1,0,0)", [&owner]).unwrap();
+        store
+            .observe_task_host(&task, "desktop", HostUse::Away, 0, 1)
+            .unwrap();
+        let intent = store.reconcile_task_retirement(&task, 0).unwrap().unwrap();
+        assert_eq!(intent.due_at, Some(900));
+        // Silent work remains protected long after both deadlines, including
+        // a queued ending whose activity never saw another output byte.
+        let candidate = ending(true, Activity::default());
+        store.reconcile_task_retirement(&task, 3600).unwrap();
+        store.retirement_progress(&intent, "closing", None).unwrap();
+        for (tools, pending, yielded) in [(1, 0, 0), (0, 1, 1), (0, 0, 0)] {
+            conn.execute(
+                "UPDATE session_activity SET open_tools=?1,pending_input=?2,yielded=?3",
+                rusqlite::params![tools, pending, yielded],
+            )
+            .unwrap();
+            assert!(candidate
+                .confirm(&owner, Activity::default(), false)
+                .unwrap()
+                .is_none());
+        }
+        conn.execute(
+            "UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1",
+            [],
+        )
+        .unwrap();
+        store
+            .record_owner_input(&owner, b"unsubmitted draft")
+            .unwrap();
+        assert!(candidate
+            .confirm(&owner, Activity::default(), false)
+            .unwrap()
+            .is_none());
+        store.clear_owner_input(&owner).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET interactive=0 WHERE id='session'",
+            [],
+        )
+        .unwrap();
+        assert!(candidate
+            .confirm(&owner, Activity::default(), false)
+            .unwrap()
+            .is_none());
+        conn.execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id='session'",
+            [],
+        )
+        .unwrap();
+        assert!(candidate
+            .confirm(&owner, Activity::default(), true)
+            .unwrap()
+            .is_none());
+        assert!(candidate
+            .confirm(&owner, Activity::default(), false)
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            store.task_retirement(&task).unwrap().unwrap().due_at,
+            Some(900)
+        );
+        // Explicit Close of a shell also respects a nested requested turn.
+        store
+            .create_task_shell("shell", &task, "/repo.task")
+            .unwrap();
+        store.bind_task_shell("shell", &owner).unwrap();
+        store.close_task_shell("shell").unwrap();
+        conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
+            .unwrap();
+        assert!(candidate
+            .confirm(&owner, Activity::default(), false)
+            .unwrap()
+            .is_none());
+        conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
+            .unwrap();
+        assert!(candidate
+            .confirm(&owner, Activity::default(), false)
+            .unwrap()
+            .is_some());
     }
 
     #[test]

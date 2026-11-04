@@ -201,13 +201,14 @@ class Cleaner:
         cwd: Path | None = None,
         timeout: float = 120,
         allowed: tuple[int, ...] = (0,),
+        input_text: str | None = None,
     ) -> str:
         self._check_time()
         with subprocess.Popen(
             args,
             cwd=cwd,
             env=self.env,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -215,7 +216,7 @@ class Cleaner:
         ) as process:
             try:
                 stdout, stderr = process.communicate(
-                    timeout=min(timeout, self.deadline - time.time())
+                    input=input_text, timeout=min(timeout, self.deadline - time.time())
                 )
             except subprocess.TimeoutExpired:
                 _stop_group(process)
@@ -228,8 +229,13 @@ class Cleaner:
             raise RuntimeError(f"{args[0]} exited {process.returncode}: {stderr.strip()}")
         return stdout
 
-    def _processes(self) -> dict[int, Process]:
-        output = self._command(["ps", "-axo", "pid=,ppid=,uid=,lstart=,stat=,comm="], timeout=10)
+    def _processes(self, pids: set[int] | None = None) -> dict[int, Process]:
+        selection = ["-p", ",".join(map(str, sorted(pids)))] if pids else ["-ax"]
+        output = self._command(
+            ["ps", *selection, "-o", "pid=,ppid=,uid=,lstart=,stat=,comm="],
+            timeout=10,
+            allowed=(0, 1) if pids else (0,),
+        )
         processes = {}
         for line in output.splitlines():
             fields = line.split(maxsplit=9)
@@ -239,7 +245,7 @@ class Cleaner:
             if fields[8].startswith("Z"):
                 continue
             processes[pid] = Process(pid, parent, uid, " ".join(fields[3:8]), fields[9])
-        if not processes:
+        if not processes and not pids:
             raise RuntimeError("empty process inventory")
         return processes
 
@@ -401,8 +407,10 @@ class Cleaner:
             ):
                 raise RuntimeError(f"owner uses project-owned/deferred state: pid {pid}")
         identities = {pid: processes[pid] for pid in selected}
+        # Poll only this verified tree; unrelated machine activity must not make
+        # every grace-period check rescan the entire process table.
         for sig in (signal.SIGTERM, signal.SIGKILL):
-            current = self._processes()
+            current = self._processes(selected)
             for pid, original in identities.items():
                 process = current.get(pid)
                 if process is None:
@@ -425,14 +433,14 @@ class Cleaner:
             until = time.time() + (OWNER_GRACE_SECONDS if sig == signal.SIGTERM else 1)
             while time.time() < until:
                 self._check_time()
-                current = self._processes()
+                current = self._processes(selected)
                 if not any(
                     pid in current and current[pid].identity == original.identity
                     for pid, original in identities.items()
                 ):
                     break
                 time.sleep(0.1)
-        current = self._processes()
+        current = self._processes(selected)
         if any(
             pid in current and current[pid].identity == original.identity
             for pid, original in identities.items()
@@ -440,6 +448,26 @@ class Cleaner:
             raise RuntimeError("owner tree survived teardown")
         if self._activity().owners(candidate):
             raise RuntimeError("output still has owners after teardown")
+
+    def _ignored_directories(self, checkout: Path) -> set[Path]:
+        output = self._command(
+            ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+            cwd=checkout,
+            timeout=10,
+        )
+        directories = [entry for entry in output.split("\0") if entry.endswith("/")]
+        if not directories:
+            return set()
+        # ls-files also reports empty untracked parents. Only actual ignore
+        # matches may prune traversal into nested output.
+        matches = self._command(
+            ["git", "check-ignore", "--stdin", "-z"],
+            cwd=checkout,
+            timeout=10,
+            allowed=(0, 1),
+            input_text="\0".join(directories) + "\0",
+        )
+        return {checkout / path for path in matches.split("\0") if path}
 
     def _builds(self) -> list[Candidate]:
         candidates = []
@@ -478,23 +506,7 @@ class Cleaner:
                                     registered.add(worktree)
                                     if _within(worktree, self.src):
                                         pending.append((worktree, True))
-                        output = self._command(
-                            [
-                                "git",
-                                "--no-optional-locks",
-                                "status",
-                                "--ignored=matching",
-                                "--porcelain=v1",
-                                "-z",
-                            ],
-                            cwd=checkout,
-                            timeout=10,
-                        )
-                        ignored_by_checkout[checkout] = {
-                            checkout / entry[3:]
-                            for entry in output.split("\0")
-                            if entry.startswith("!! ") and entry.endswith("/")
-                        }
+                        ignored_by_checkout[checkout] = self._ignored_directories(checkout)
                         gate = checkout / ".lf/tmp/gate"
                         candidates.extend(
                             Candidate(path, "test-evidence", checkout)
@@ -532,7 +544,6 @@ class Cleaner:
                                 if output.is_dir()
                             )
                         elif path.name in BUILD_NAMES and not (path / ".git").exists():
-                            checkout = _owning_checkout(path)
                             if checkout:
                                 if path.name == ".build" and (path / "checkouts").is_dir():
                                     # SwiftPM keeps dependency source beside target
@@ -866,9 +877,7 @@ class Cleaner:
         entry.update(bytes=allocated, status=status, reason=reason)
         self.entries.append(entry)
 
-    def _step(self, name: str, args: list[str]) -> dict | None:
-        if self.dry_run:
-            return
+    def _step(self, name: str, args: list[str]) -> dict:
         self._note(f"== {name}")
         entry = {"step": name, "status": "completed", "reason": None}
         try:
@@ -919,8 +928,6 @@ class Cleaner:
                     entry = self._step(
                         "uv cache", ["uv", "cache", *operation, "--cache-dir", str(path)]
                     )
-                    if entry is None:
-                        break
                     entry.update(path=str(path), limit_bytes=cap)
                     if entry["status"] != "completed":
                         break
@@ -1056,8 +1063,7 @@ class Cleaner:
                     continue
                 # Non-forced image removal also refuses a new container reference.
                 entry = self._step("docker image", [*docker, "image", "rm", image_id])
-                if entry is not None:
-                    entry.update(image=image_id, created=created, registry_backed=True)
+                entry.update(image=image_id, created=created, registry_backed=True)
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
             if "Cannot connect to the Docker daemon" in str(
                 exc

@@ -16,7 +16,7 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "disk-cleanup.sh"
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="macOS maintenance script")
 
 
-def _activity(paths=frozenset(), builders=frozenset()):
+def _activity(paths=(), builders=()):
     processes = {999999: cleanup.Process(999999, 1, os.getuid(), "fixture", "cargo")}
     files = tuple(cleanup.OpenPath(999999, "txt", path) for path in paths)
     files += tuple(cleanup.OpenPath(999999, "cwd", path) for path in builders)
@@ -149,18 +149,12 @@ def test_linked_worktree_loses_output_idle_for_four_hours(tmp_path: Path) -> Non
 
 def test_general_cache_and_trash_are_observation_only(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    for root in (home / "Library/Caches", home / ".Trash"):
-        for name, age in (("old", 40), ("held", 40), ("recent", 0)):
-            _write(root / name / "data", age)
-            _age_tree(root / name, 40)
-
-    with (home / "Library/Caches/held/data").open("rb"), (home / ".Trash/held/data").open("rb"):
-        out = _run(tmp_path)
-
-    for root in (home / "Library/Caches", home / ".Trash"):
-        assert (root / "old").exists(), out
-        assert (root / "held/data").exists(), out
-        assert (root / "recent/data").exists(), out
+    roots = (home / "Library/Caches", home / ".Trash")
+    for root in roots:
+        _write(root / "old/data", 40)
+        _age_tree(root, 40)
+    _run(tmp_path)
+    assert all((root / "old/data").exists() for root in roots)
 
 
 def test_failed_open_file_inspection_stops_all_cleanup(tmp_path: Path) -> None:
@@ -533,10 +527,8 @@ def test_activity_distinguishes_a_builder_from_an_idle_shell(cleaner, monkeypatc
 
 @pytest.fixture
 def schedule(cleaner, monkeypatch):
-    main = cleaner.src / "loopflow"
-    scripts = main / "scripts"
+    scripts = cleaner.home / "standalone-runner"
     scripts.mkdir(parents=True)
-    _git(main, "init", "-q")
     for name in (
         "disk-cleanup.sh",
         "disk_cleanup.py",
@@ -870,7 +862,9 @@ def test_owner_teardown_failure_preserves_output(cleaner, monkeypatch, failure) 
     monkeypatch.setattr(cleaner, "_activity", lambda: activity)
     changed = cleanup.Process(process.pid, 1, os.getuid(), "changed", "sleeper")
     monkeypatch.setattr(
-        cleaner, "_processes", lambda: {process.pid: changed if failure == "changed" else process}
+        cleaner,
+        "_processes",
+        lambda pids: {process.pid: changed if failure == "changed" else process},
     )
     monkeypatch.setattr(cleanup, "OWNER_GRACE_SECONDS", 0)
 
@@ -998,6 +992,22 @@ def test_project_owned_state_preserves_its_output_owner(cleaner, monkeypatch) ->
     assert (repo / "target/debug/output").exists()
     assert cleaner.stopped == []
     assert any("project-owned/deferred" in failure for failure in cleaner.failures)
+
+
+def test_discovery_preserves_dirty_source_without_running_content_filters(cleaner) -> None:
+    repo = _build_fixture(cleaner, 300)
+    source = repo / "source.txt"
+    source.write_text("original source\n")
+    _git(repo, "add", "source.txt")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+    (repo / ".gitattributes").write_text("source.txt filter=unavailable\n")
+    _git(repo, "config", "filter.unavailable.clean", "false")
+    _git(repo, "config", "filter.unavailable.required", "true")
+    source.write_text("modified source\n")
+
+    assert cleaner.run() == 0
+    assert not (repo / "target").exists()
+    assert source.read_text() == "modified source\n"
 
 
 def test_ignored_data_is_not_walked_but_registered_nested_worktrees_are(

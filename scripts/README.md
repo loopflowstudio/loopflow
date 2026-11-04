@@ -48,6 +48,8 @@ Ignored, untracked `target`, `.build`, `DerivedData`, `node_modules` and `.venv`
 roots anywhere under `~/src` (`LOOPFLOW_SRC` overrides it) are candidates. Nested
 worktrees use their own Git rules. Git lists registered worktrees inside ignored
 containers; other ignored data trees and `.lf` state are not recursively scanned.
+Discovery reads ignore rules without inspecting tracked file contents or running
+Git content filters.
 Global Xcode Build/Index and shared generated
 caches are included; SourcePackages and embedded Git checkouts survive. Cargo
 profiles can be reclaimed separately. Discovery excludes symlinks and stops at
@@ -219,8 +221,9 @@ Cargo can replace a held profile lock during clean; native locks do not provide
 universal exclusion. Detected activity always retains output.
 
 Recovery also prunes old disposable gate output and entries accepted by
-`uv cache prune`. Verification recovery runs before builds; the machine cleaner
-has its own launchd schedule.
+`uv cache prune`. Gate recovery retains seven days of artifact content and
+preserves saved outcome records and nested `.cleanup-keep` markers. Verification
+recovery runs before builds; the machine cleaner has its own launchd schedule.
 A busy uv cache is reported immediately
 without waiting for its reader locks, including the parent `uv run`. Other cleanup
 and above-reserve verification continue. To reclaim uv entries, run

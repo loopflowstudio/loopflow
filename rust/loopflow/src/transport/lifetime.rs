@@ -482,7 +482,7 @@ mod tests {
         conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2,agent_process_id=?2 WHERE id='session'", rusqlite::params![task.as_str(),owner]).unwrap();
         conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('session',?1,1,1,0,0)", [&owner]).unwrap();
         store
-            .observe_task_host(&task, "desktop", HostUse::Away, 0, 1)
+            .observe_task_host(&task, "desktop", HostUse::Away, 0, 1, true)
             .unwrap();
         let intent = store.reconcile_task_retirement(&task, 0).unwrap().unwrap();
         assert_eq!(intent.due_at, Some(900));

@@ -279,24 +279,25 @@ checks do not replace affected suites.
 
 ## Native shell lifetimes (LOO-717, accepted 2026-11-03)
 
-Jack Heart approved implementation and review publication through interactive demo,
-not landing or installation. Desktop and Rex own their native shells/layouts;
-lf shares Session retention and completed-Task retirement. No ordinary-shell relay
-into Rex or automatic deleted-checkout restoration. LOO-498 owns its native adapter.
+Jack Heart approved implementation and review publication through interactive demo, not landing
+or installation. Desktop/Rex own native shells/layouts; lf shares Session retention
+and Task retirement. No ordinary-shell relay or automatic deleted-checkout restoration.
+LOO-498 owns Rex's adapter.
 
 Close ends a Desktop shell and ordinary jobs; Hide/switch/quit retain execution.
-Undo restores identity/history, not processes. Host retention holds Sessions; each
-host owns release policy. Eligible idle agents end at two minutes; completed-and-away
-shells/checkouts retire at fifteen total. Return cancels the deadline. Active requested
-work, drafts and pending requests protect execution; an elapsed workspace deadline
-need not restart after work settles. Eligible cleanup discards uncommitted files,
-preserving committed-ref safeguards and Task/conversation history.
+Undo restores identity/history, not processes. Hosts own Session retention/release.
+Eligible idle agents end at two minutes; completed-and-away shells/checkouts retire
+at fifteen total. Return cancels the deadline. Active work, drafts and pending
+requests protect execution; elapsed deadlines need not restart after settlement.
+Cleanup discards uncommitted files, preserving committed-ref safeguards and history.
 
-Shell purpose must survive nested lf use. Retained host leases expiring mean unknown
-workspace observation, not confirmed closure; this can leave cleanup pending.
-Stable pane IDs and saved screens prove no process survival. Local shell/policy
-checks do not prove real SSH lifetimes or native Desktop/Rex recovery; those remain
-acceptance gaps in this branch.
+Nested lf preserves shell purpose. Expired host leases mean unknown;
+checkout cleanup stays pending.
+`2abcfc28cc` adds loopback SSH identity/cleanup and composed retirement checks:
+return cancels between passes; partial Git deletion remains retryable. Recorded
+macOS passes do not prove Linux isolation, physical remote Machines or installed
+Desktop/Rex recovery. macOS ignores SSH tests by default: sshd cannot nest in
+the test sandbox; direct runs pass.
 
 ## Session and operate pairs (2026-10-05)
 

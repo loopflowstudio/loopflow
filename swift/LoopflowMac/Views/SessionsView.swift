@@ -299,24 +299,45 @@ final class SessionsWorkspace {
     var shellScreens: [String: String] = [:]
 
     private(set) var hostUse = "away"
+    private(set) var nativeSettled = false
+    @ObservationIgnored private var quitting = false
     private(set) var retirement: TaskRetirement?
     var retentionError: String?
     @ObservationIgnored private var presenceTask: Task<Void, Never>?
     @ObservationIgnored private var presenceRevision: Int64 = 0
 
     func retain(_ retained: Bool) {
-        guard key.kind == .task else { return }
+        guard key.kind == .task, !quitting else { return }
         let next = retained ? "retained" : "away"
         if hostUse == next { return }
-        hostUse = next
-        if !retained { detachTerminals() }
+        setHostUse(next)
         Task { [weak self] in await self?.reportPresence() }
     }
 
     func closeWorkspace() {
-        hostUse = "closed"
-        detachTerminals()
+        guard !quitting else { return }
+        setHostUse("closed")
         Task { [weak self] in await self?.reportPresence() }
+    }
+
+    func prepareForQuit() {
+        quitting = true
+        presenceTask?.cancel()
+        presenceTask = nil
+        // Preserve a prior explicit Close; quitting itself only releases retention.
+        setHostUse(hostUse == "closed" ? "closed" : "away")
+    }
+
+    func releaseForQuit() async {
+        await reportPresence(quitting: true)
+    }
+
+    private func setHostUse(_ state: String) {
+        hostUse = state
+        // Desktop owns presentation; the destination owns shell execution.
+        // Every release settles that presentation before reporting the fact.
+        if state != "retained" { detachTerminals() }
+        nativeSettled = state != "retained"
     }
 
     private func detachTerminals() {
@@ -327,11 +348,16 @@ final class SessionsWorkspace {
         }
     }
 
-    private func reportPresence() async {
+    private func reportPresence(quitting: Bool = false) async {
+        guard self.quitting == quitting, !Task.isCancelled else { return }
         guard key.kind == .task, let query = persistenceQuery, let location else { return }
         guard let localMachineId else {
             retentionError = "Machine identity is unavailable; retention has not been reported."
             return
+        }
+        // Restored, unselected Work may never have passed through departure.
+        if hostUse == "away", !nativeSettled {
+            setHostUse("away")
         }
         let occurrence = "desktop:\(localMachineId):\(key.id)"
         let revisionKey = "workspace-presence-\(occurrence)"
@@ -340,6 +366,7 @@ final class SessionsWorkspace {
         UserDefaults.standard.set(Double(revision), forKey: revisionKey)
         presenceRevision = revision
         let observedUse = hostUse
+        let observedSettlement = nativeSettled
         do {
             let remote = query.onMachine(location.machineId, repository: key.repository)
             let task: String
@@ -348,12 +375,12 @@ final class SessionsWorkspace {
                     case .recorded(let recorded, let checkout) = observed.location, checkout == location.worktree {
                 task = recorded
             } else { throw RegistryQueryError("Task retention is unknown until its remote location is observed.") }
-            let result = try await remote.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision)
-            guard presenceRevision == revision, hostUse == observedUse else { return }
+            let result = try await remote.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision, nativeSettled: observedSettlement)
+            guard !Task.isCancelled, presenceRevision == revision, hostUse == observedUse,
+                  nativeSettled == observedSettlement else { return }
             retirement = result
             retentionError = nil
             if result?.phase == "closing", hostUse == "away" {
-                closeWorkspace()
                 if case .shell(let tabs, _)? = multiplexer.shellPane?.content {
                     disconnectedShells.formUnion(tabs.map(\.id))
                 }
@@ -513,6 +540,19 @@ final class SessionsWorkspaceRegistry {
         surfaces.clearFocus()
         openWork = []
         selectedWork = nil
+    }
+
+    func prepareForQuit() {
+        for workspace in workspaces.values { workspace.prepareForQuit() }
+        surfaces.clearFocus()
+    }
+
+    func releaseForQuit() async {
+        await withTaskGroup(of: Void.self) { group in
+            for workspace in workspaces.values {
+                group.addTask { await workspace.releaseForQuit() }
+            }
+        }
     }
 
     func closePresentation() {

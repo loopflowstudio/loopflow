@@ -3,7 +3,7 @@
 Status: **Accepted; implementation present, acceptance incomplete.**
 Jack Heart approved implementation and review publication on November 3, 2026,
 after design review. The delivery boundary is interactive demo; shipping, merging
-and installation are not approved. Reconciled November 3 against `9ab296eeff`,
+and installation are not approved. Reconciled November 3 against `2abcfc28cc`,
 which includes main through `aef0c0a5cd` and LOO-709's `ed983ac176`.
 
 `scratch/explore.html` is the historical simulation, not the implemented terminal
@@ -191,8 +191,16 @@ The accepted cut already removed the local prompt tail in
 remote scripted-command refusal and delayed termination through the Undo slot.
 Keep one destination-owned Desktop shell path and preserve literal initial argv,
 login configuration, host retention and ended-history behavior. Do not restore
-those predecessors while adding failure coverage. No further production owner or
-store is replaced by this acceptance-test pass.
+those predecessors while adding failure coverage. The release/settlement cut removes `retirement_hosts_closed` and Desktop’s
+`phase=closing` conversion to `closeWorkspace()`. Settlement remains in the same
+revisioned host observation; explicit-Close policy and destination job settlement
+stay separate. The concept review below refines
+the existing host observation rather than introducing another owner or registry.
+
+Desktop uses one host-use transition to detach native presentation before marking
+it settled, shared by departure, explicit Close, quit and restored-away reporting.
+The Close-policy query selects associated hosts once. The landing regression now
+supplies native settlement explicitly, completing the required-argument cutover.
 
 Keep landed deletion and Task retirement on one merged-head check. Shell input
 uses the purpose already fixed at launch; it does not reread the receipt for each
@@ -259,7 +267,9 @@ These recommendations do not authorize implementation or add product decisions.
 ## Host adapter contract
 
 `task presence TASK --occurrence ID --state STATE --revision N` accepts retained,
-away, closed or unknown observations. Persisted increasing revisions fence delayed
+away, closed or unknown observations plus required `--native-settled true|false`.
+Closed selects explicit-Close policy; settlement proves no host-owned resources
+remain to close. Persisted increasing revisions fence delayed
 reports. Retained leases last thirty seconds; expiry becomes unknown for workspace
 cleanup. Away/closed observations persist. A live retained lease holds Session
 execution; an expired lease is not an indefinite agent hold. Unknown observation
@@ -268,11 +278,17 @@ means an unavailable host can leave cleanup pending until it reports again.
 
 Desktop polls every five seconds, releases on departure and reports closed on
 repository-window Close. At `phase=closing`, a released host closes only its Task
-occurrences and acknowledges closed. Both hosts use this same contract; LOO-498
+occurrences and acknowledges native settlement without changing release policy.
+Desktop detaches surfaces on departure and reports away plus settlement; its
+bounded quit path awaits those reports without requiring a later launch. Both hosts use this same contract; LOO-498
 owns Rex mapping, reporting and native cleanup. The shared API was sent in comment
 `67cd130c-9104-48ef-b019-615e3e41e01e`; `rex-coordination.md` retains the boundary.
 
-## Remaining work and evidence limits — November 3
+## Completed fixture coverage and evidence limits — November 3
+
+The previous iteration's missing SSH and composed retirement fixtures are present
+in `2abcfc28cc`. Its focused results below remain applicable; reconciliation
+inspected the assertions without rerunning unchanged runtime checks.
 
 - **Real SSH automation is implemented** in `transport/ssh_shells.rs`: disposable
   sshd, generated keys, separate Machine stores and the public remote shell route.
@@ -292,11 +308,128 @@ owns Rex mapping, reporting and native cleanup. The shared API was sent in comme
   pass; unconfirmed shell-job settlement after recorded owner death retains the
   checkout; a locked worktree after remote deletion leaves retryable closing, and
   retry skips the already-deleted remote ref. Owner-death evidence is supplied in
-  the fixture; an installed owner crash remains demo evidence.
-- Gate owns the existing local twenty-cycle census, completion/landing regression,
+  the fixture; an installed owner crash remains demo evidence. Cancellation is
+  established between cleanup passes, not as atomic rollback of effects already
+  in progress.
+
+## Concept review — November 3: release and settlement
+
+**Outcome: release/settlement distinction implemented; installed proof remains for demo.**
+This headless review derives the change from Jack Heart's accepted quit/Close,
+two-stage cleanup and host-native ownership requirements. It records no new
+approval and leaves the existing demo boundary intact. The source mismatch below
+is the pre-change evidence; implementation now follows the revised contract.
+
+The pre-change mismatch was that `HostUse::Closed` served two jobs:
+explicit Close skips absence grace (`reconcile_task_retirement`), and the same
+value proves native cleanup finished (`retirement_hosts_closed`). Releasing a
+view and settling the resources that only its host can close are independent.
+
+Source evidence: Desktop's `closeWorkspace()` detaches surfaces and asynchronously
+reports closed. Its only window hook is `NSWindow.willCloseNotification` in
+`WorkDestination.swift`. The app termination observer in `LaunchJournal.swift`
+records exit only; there is no explicit, acknowledged quit-release path. An away
+occurrence requires a later closed report before retirement can delete anything.
+`retirement_return_and_reopen_cancel_closing_before_git_deletion` deliberately
+demonstrates that wait. Thus simply reporting away on quit would still leave
+cleanup dependent on another Desktop launch. Reporting closed instead would skip
+the accepted grace. This is source evidence, not a claim about installed AppKit
+notification ordering.
+
+### Usage copy implemented in the Swift and transport guides
+
+> Quit Desktop to leave shells running. A completed Task keeps its shells and
+> checkout for the remaining fifteen-minute absence grace; eligible idle agents
+> end under the two-minute policy. Cleanup can finish while Desktop stays quit.
+> Close the Task's last workspace explicitly to skip that grace, after requested
+> work settles. A crash before release reaches the destination leaves cleanup pending.
+> Reopen before cleanup to retain the workspace again. Reconnect reuses surviving
+> shell execution; New Shell starts fresh. Conversation history remains after
+> cleanup; a deleted checkout is not recreated automatically.
+
+The Swift/transport usage sections carry this behavior. Lifecycle policy stays
+in its host adapter and shared owner, not in agent prompts.
+
+### Model and API consequences
+
+- Keep Task, shell receipt, Session, host occurrence and retirement intent. Keep
+  one destination executor and the current revision fencing. No new daemon,
+  mirrored layout, shutdown ledger or timer authority.
+- Keep the host-use values: retained, away, closed, unknown. Define closed as an
+  explicit Close request/release policy, not proof of resource settlement. Only
+  that policy skips grace. Away preserves the deadline even when its native
+  presentation is already gone.
+- Add an explicit native-resource settlement fact to the same revisioned host
+  observation and `task presence` write. It means this occurrence has no remaining
+  host-owned resources requiring action before shared checkout deletion. It does
+  not assert that destination-owned Sessions or Desktop shell jobs ended. Those
+  existing owners still prove their own settlement. Update the single Task
+  migration and any affected Rust/Swift wire shapes together.
+- Desktop can report away plus native settlement once its surfaces are detached;
+  its shells are already destination-owned. Clean quit must complete a bounded
+  release attempt before exiting and must not turn quit into explicit Close.
+  Failed or interrupted reporting leaves unknown evidence; never fabricate an
+  acknowledgement. Do not wait for the full grace or for active work to finish.
+- A Rex occurrence with native shells cannot claim settlement merely because it
+  is away. It acknowledges after its own cleanup. LOO-498 still owns that adapter;
+  the refined contract must be shared during implementation, without launching
+  its work. Saved layouts alone establish neither retention nor settlement.
+- Retirement waits on native settlement instead of requiring every observation
+  to become closed. Agent explicit-Close judgment continues to use host-use
+  policy. A newer retained/unknown report revokes queued retirement as today;
+  old settlement cannot authorize deletion after a return.
+
+### Counterexamples and next proof
+
+1. Normal: leave a completed Desktop Task, then quit before minute fifteen. With
+   an acknowledged release, native surfaces are gone but the same shell PID/jobs
+   survive until the existing deadline. Cleanup finishes without a new app launch.
+2. Failure: kill Desktop before release is acknowledged, or lose SSH during the
+   report. Expired retained evidence remains unknown; no checkout deletion. On
+   return, fresh observation recovers the same occurrence and surviving execution.
+3. Recovery/race: return after native settlement but before deletion. Its newer
+   retained revision cancels the pending intent; delayed old settlement cannot
+   undo it. Explicit Close still skips grace, while silent requested work, drafts,
+   pending input and another retaining occurrence still protect execution.
+4. Cross-host counterexample: Rex is away with a live native shell. Its absence
+   cannot count as settlement. Keep the shared checkout until the adapter closes
+   that Task's resources; leave other Tasks in the Rex session intact.
+
+Focused checks exercise these cases below; installed quit/relaunch remains
+demo evidence. Existing SSH/process tests retain their scope and recorded passes.
+
+The implementation adds `native_settled` to the existing occurrence row in the
+single Task migration, requires it on Rust/CLI and Swift writes, and keeps the
+TaskRetirement response/DTO fixtures unchanged. New retained/unknown revisions
+clear settlement; an older revision cannot restore it. Desktop detaches before
+acknowledging settlement and uses AppKit termination deferral with one five-second
+budget across destinations. Quit fences Close notifications and heartbeats, and
+preserves an earlier explicit Close. Restored unselected Work also settles its
+presentation before reporting away.
+
+Failed-request evidence stays unknown to the caller. If release never reached the
+destination, the retained lease expires to unknown and prevents deletion. A lost
+reply after the destination committed a release does not revoke that observation;
+the identical-revision retry test covers this case. Documentation distinguishes
+these cases rather than promising that every failed request prevents cleanup.
+
+Focused checks prove deadline preservation, identical-report retry and stale
+settlement rejection, explicit Close without native settlement, multiple hosts,
+failed/expired observation, active work/drafts/pending requests, deletion without
+another host report, and retry after owner or Git settlement failures. Headless
+Swift tests cover quit acknowledgement, timeout/failure, Close notification races,
+and retained history. These checks do not prove installed AppKit lifecycle order
+or native shell PID survival; the prior transport fixtures and demo retain those
+separate boundaries. Refined adapter contract shared with LOO-498 in comment
+`30bf4970-3bb1-481f-8200-83a6734cb26e`; its independently running Graph was left alone.
+
+## Remaining work — November 3
+
+- Gate owns broader completion/landing regression,
   migration-frontier/DTO checks, Clippy and affected suites. Linux CI owns the new
   SSH fixtures under Linux process and network isolation. The new focused tests
-  do not replace the existing Swift or agent-policy coverage.
+  and local twenty-cycle census retain their recorded passes; they do not replace
+  the existing Swift or agent-policy coverage.
 - Installed Desktop quit/relaunch, native input/TUI preservation, failed Close
   presentation and remote recovery remain demo evidence. One host's state records
   do not prove the other's real adapter. Rex acceptance depends on LOO-498's
@@ -368,4 +501,4 @@ backend, process migration, arbitrary history replay or C-style workload recipes
 The accepted boundary remains interactive demo, without Auto-Ship, merge,
 installation or a separate LOO-498 launch.
 
-Check: November 3 — `cargo test -p loopflow --lib ops::task::retirement::tests::` passed (3); `cargo test -p loopflow --lib ops::wt::tests::` passed (5); `cargo test -p loopflow --test transport_tests desktop_shell_` passed (2, twenty local cycles); `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored` passed on macOS (2, twenty SSH cycles). `swift build --build-tests --package-path swift` and headless `DesktopPaneControlTests|WorkDestinationTests|WorkspaceRetentionTests` passed (95; revised companion-Close test rebuilt and passed separately). `cargo fmt --check`, `git diff --check` and `lf context` passed; earlier CI YAML parsing remains applicable. Gate/CI owns broad checks, Clippy and Linux isolation; demo owns installed Desktop/Rex and physical remote-Machine judgment.
+Check: November 3 — `cargo test -p loopflow --lib workspace_retirement` passed (6); isolated `cargo test -p loopflow --test integration land_tests::waited_land_retains_intent_on_interrupt_and_finishes_only_after_merge -- --exact` passed (1); `swift build --build-tests --package-path swift` and headless `WorkspaceRetentionTests` passed (11). Formatting, diff checks and context budgets passed. Reused recorded composed-retirement (5), migration validation and CLI help results; earlier local/SSH twenty-cycle and broader Swift evidence remains at `2abcfc28cc:scratch/loo-717-shell-lifetimes.md`. Gate/CI owns affected suites, migration-frontier/DTO checks, Clippy and Linux isolation; demo owns installed Desktop/Rex and physical remote-Machine judgment.

@@ -48,8 +48,7 @@ once an already-due cleanup becomes safe. This is an implementation interpretati
 of Jack's wait-for-final-work direction, not an additional timing choice from Jack.
 Keep the existing agent idle clock/protections distinct. Record/test exact races.
 
-LOO-498 owns the Rex-specific adapter and workspace features and is independently
-in design discussion. The shared contract and Desktop path are implemented here; concrete API needs
+LOO-498 owns the Rex-specific adapter and workspace features and remains independently owned. The shared contract and Desktop path are implemented here; concrete API needs
 were shared in the coordination note. Rex end-to-end proof remains outstanding.
 
 Main through `aef0c0a5cd`, including LOO-709 and LOO-711, is integrated. LOO-714
@@ -63,3 +62,19 @@ observation. Desktop releases on departure, including unfinished Tasks; ordinary
 shell execution stays alive and an eligible idle agent uses its existing grace.
 Host observations carry increasing persisted revisions so an old release cannot
 overwrite a newer return. Native Rex integration remains owned by LOO-498.
+
+## Concept-review interpretation — November 3
+
+Clean Desktop quit is departure, not explicit Close: it preserves ordinary
+shells and the completed Task's fifteen-minute grace. This follows Jack Heart's
+accepted quit/Close distinction; it is an engineering interpretation, not new
+approval. The next implementation separates release policy from native-resource
+settlement in the existing host observation, so acknowledged quit can finish
+cleanup without reopening Desktop. Failed reporting remains unknown. Exact
+direction and counterexamples are in `loo-717-shell-lifetimes.md`, **Concept
+review — November 3**. No unresolved product choice was found.
+
+Build choice: quit has one five-second reporting budget across all destinations.
+Desktop fences window Close and heartbeats before detaching surfaces; failed or
+canceled writes provide no acknowledgement. A prior explicit Close keeps its
+policy. This bounds departure only, not requested work or the cleanup deadline.

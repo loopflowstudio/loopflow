@@ -214,21 +214,33 @@ use the same operations on the Task's recorded Machine.
 Native hosts retain Task Sessions through one destination-owned contract:
 
 ```sh
-lf task presence TASK --occurrence desktop:window:task --state retained --revision 1
-lf task presence TASK --occurrence desktop:window:task --state away --revision 2
+lf task presence TASK --occurrence desktop:window:task --state retained --revision 1 --native-settled false
+lf task presence TASK --occurrence desktop:window:task --state away --revision 2 --native-settled true
 lf task presence TASK
 ```
 
 Each host chooses its own occurrence identity and release policy. Use distinct
 identities for independent occurrences; persist increasing revisions so reordered
 reports cannot undo a return or Close. Retry an identical report safely. Renew
-`retained` within 30 seconds. `away` releases retention; `closed` acknowledges that
-this occurrence's native resources have ended. Failed reads and expired retained
-leases are unknown and prevent checkout deletion. Rex owns its native shell/window
-cleanup; it reports this same contract without relaying its shells through lf.
+`retained` within 30 seconds. `away` releases retention; `closed` is an explicit
+Close request that skips absence grace. Every write also supplies
+`--native-settled true|false`: true means this occurrence has no host-owned
+resources requiring action before checkout deletion. It says nothing about
+Session or destination-owned shell settlement. Retained/unknown observations
+clear that fact; a delayed settlement cannot overwrite a newer return.
+A failed request leaves its result unknown to the caller. If no release reached
+the destination, an expired retained lease prevents checkout deletion. A lost
+reply does not undo a release already recorded there; retry its identical revision.
+Rex owns its native shell/window cleanup and reports this contract without
+relaying its shells through lf.
 
 Desktop reports retained for the selected Task, away on departure, and closed
-when its repository window closes. Away Sessions follow the usual two-minute
+when its repository window explicitly closes. Detached Desktop surfaces can
+acknowledge native settlement while destination-owned shells still run. Quit
+releases as away and waits up to five seconds for acknowledgements; it preserves
+an existing absence deadline and does not become explicit Close. Acknowledged
+cleanup can finish without relaunching Desktop. A crash before release reaches
+the destination leaves cleanup pending. Away Sessions follow the usual two-minute
 eligible idle policy. A completed, released Task keeps its checkout and shells
 for fifteen minutes total. Return cancels that deadline; later departure starts
 a new one. Closing every occurrence skips that grace. Requested active work,
@@ -237,7 +249,10 @@ Finishing that work does not restart an already-due workspace deadline.
 
 The JSON reading names the pinned completion, checkout, branch, deadline, phase
 and pending reason. At `closing`, a released native host closes its Task resources
-and reports `closed`. Owners confirm job settlement before deletion. Completion
+and reports native settlement with a newer revision, preserving its release policy.
+An away Rex occurrence with native shells remains unsettled until its adapter
+closes those resources. Saved layouts alone establish neither retention nor
+settlement. Destination owners separately confirm job settlement before deletion. Completion
 and PR landing use this same operation; reopen or changed placement revokes it.
 Eligible cleanup discards uncommitted files but preserves primary/persistent
 checkouts and changed committed refs. Failures retain a pending reason and retry

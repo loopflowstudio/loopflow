@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-717 · Shell lifetimes</title>
+<style>
+  :root { color-scheme: light dark; --ink:#24282b; --paper:#faf9f6; --muted:#62676c; --line:#c7cbd0; --accent:#185c74; }
+  @media(prefers-color-scheme:dark) { :root { --ink:#e8e7e3; --paper:#181c20; --muted:#a8b0b6; --line:#48515b; --accent:#8ccfe4; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 system-ui,sans-serif; }
+  main { max-width:780px; margin:auto; padding:44px 24px 72px; }
+  header,small { color:var(--muted); font-size:14px; }
+  h1 { font-size:clamp(27px,5vw,40px); line-height:1.15; margin:22px 0; }
+  h2 { font-size:23px; margin:38px 0 14px; }
+  p { margin:14px 0; }
+  a { color:var(--accent); }
+  code { font:0.87em/1.5 ui-monospace,monospace; overflow-wrap:anywhere; }
+  blockquote { margin:24px 0; padding:0 0 0 20px; border-left:3px solid var(--accent); }
+  ol { padding-left:24px; } li { margin:14px 0; }
+  dl { margin:22px 0; } dt { font-weight:650; margin-top:20px; } dd { margin:5px 0 0; }
+  .source { overflow-wrap:anywhere; } .rule { border-top:1px solid var(--line); padding-top:22px; }
+</style>
+<main>
+<header>LOO-717 · concept-review · November 3, 2026
+<p class="source">Built from <a href="questions.md">questions.md</a>,
+<a href="loo-717-shell-lifetimes.md">loo-717-shell-lifetimes.md</a>,
+SessionsView.swift, WorkDestination.swift, LaunchJournal.swift,
+store/sqlite/task_retirement.rs and ops/task/retirement_tests.rs at 2abcfc28cc.</p></header>
+<h1>Quit releases the view.<br>Cleanup must not need it back.</h1>
+<p><strong>Design changed; next implement direction.</strong> Separate the reason a
+host releases retention from evidence that its native resources have settled.
+Jack Heart's accepted quit, Close and grace rules already imply this distinction.
+No new product approval is needed; runtime implementation remains pending.</p>
+
+<h2>The consequential mismatch</h2>
+<p><strong>Existing:</strong> <code>closed</code> both skips the fifteen-minute grace
+and acknowledges native cleanup. <code>away</code> keeps the grace, but retirement
+then waits for that host to report <code>closed</code>.</p>
+<blockquote>Leave a completed Task → quit Desktop → grace expires.<br>
+An away report still requires another Desktop acknowledgement. A closed report
+would skip the grace. Neither expresses the accepted interaction.</blockquote>
+<p>Source inspection finds a window-Close hook but no explicit acknowledged
+quit-release path. Installed AppKit ordering has not been demonstrated. Crashes
+and unacknowledged releases must continue to leave cleanup pending.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<dl>
+<dt>Leave or quit Desktop</dt>
+<dd><strong>Proposed implementation:</strong> release retention and settle native
+presentation; preserve destination execution. <code>task presence</code> records
+<code>away</code> plus native settlement in the same revision. The existing deadline
+runs; Desktop need not stay open to acknowledge it later.</dd>
+<dt>Explicitly close the last Task workspace</dt>
+<dd>Use <code>closed</code> as Close intent; record settlement independently.
+Skip grace after requested work settles. Session and shell owners retain their
+own execution checks.</dd>
+<dt>Return before retirement</dt>
+<dd>A newer <code>retained</code> observation revokes pending retirement. Reconnect
+checks the same shell receipt. Delayed settlement cannot override the return.</dd>
+<dt>Leave a Rex Task with native shells</dt>
+<dd><code>away</code> releases retention but does not prove settlement. LOO-498's
+adapter closes that Task's resources and acknowledges them; other Tasks survive.</dd>
+</dl>
+<p>Keep the existing Task, Session, shell receipt, host occurrence and retirement
+intent. Add one settlement fact to the occurrence and presence write. Reuse the
+destination executor and current revision fencing; no new lifecycle service.</p>
+
+<h2>Proposed usage copy</h2>
+<blockquote>Quit Desktop to leave shells running. Completed Tasks retain their
+shells and checkout through the fifteen-minute absence grace; eligible idle
+agents follow the two-minute policy. Cleanup can finish while Desktop stays quit.
+Explicit Close skips grace after work settles. Failed release leaves cleanup
+pending. Reconnect reuses surviving execution; New Shell starts fresh.</blockquote>
+
+<h2>Proof before acceptance</h2>
+<p>Use the same PID and jobs through acknowledged quit, then retire the completed
+checkout without relaunching Desktop. Kill the app or lose SSH before acknowledgement:
+retain the checkout. Return after settlement: cancel cleanup. Repeat with active
+work, another retaining occurrence and Rex-owned resources. Existing loopback SSH
+tests do not establish these installed host behaviors.</p>
+
+<h2 class="rule">Review questions and dispositions</h2>
+<ol>
+<li><strong>Does quit mean explicit Close?</strong> No. Jack Heart accepted retaining
+ordinary shells on quit. Implement departure with grace.</li>
+<li><strong>Does release prove native cleanup?</strong> No. Record settlement
+separately; Desktop and Rex have different native resources.</li>
+<li><strong>Does missing acknowledgement mean closure?</strong> No. Preserve unknown
+evidence and recover with a fresh observation.</li>
+</ol>
+<small>No unresolved product question. This headless review changes the working
+design only. Interactive demo remains the delivery boundary; no merge or
+installation approval was added.</small>
+</main>
+</html>

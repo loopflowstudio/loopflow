@@ -2597,6 +2597,8 @@ esac
             "closed",
             "--revision",
             "1",
+            "--native-settled",
+            "true",
         ])
         .output()
         .unwrap();

@@ -2088,13 +2088,16 @@ until `lf ship`."
     /// Report native-host retention or read pending workspace cleanup
     Presence {
         issue: String,
-        #[arg(long, requires_all = ["state", "revision"])]
+        #[arg(long, requires_all = ["state", "revision", "native_settled"])]
         occurrence: Option<String>,
         /// Increasing observation revision, persisted by the host per occurrence
         #[arg(long, requires = "occurrence")]
         revision: Option<i64>,
         #[arg(long, requires = "occurrence")]
         state: Option<crate::store::sqlite::HostUse>,
+        /// No native resources remain to settle before checkout deletion (true/false)
+        #[arg(long, requires = "occurrence")]
+        native_settled: Option<bool>,
     },
     /// Run the Task's recorded workspace retirement
     #[command(hide = true)]

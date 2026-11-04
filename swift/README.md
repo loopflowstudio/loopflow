@@ -1114,5 +1114,15 @@ Task shell views attach to a retained owner on the Task's recorded Machine.
 Hide, switching Work and app exit detach presentation. Close ends that shell and
 its ordinary jobs; Undo restores its identity and history. Use Reconnect for
 transport loss and New Shell for fresh execution. No remote failure opens a
-local prompt. Completed workspace cleanup and native-host retention use the
+local prompt.
+
+Quit Desktop to leave shells running. For a completed Task, acknowledged quit
+preserves its fifteen-minute absence deadline; eligible idle agents end under
+the two-minute policy. Cleanup can finish while Desktop stays quit. Desktop waits
+up to five seconds for release reports. A failed request leaves its result unknown;
+cleanup stays pending if the destination never received the release.
+Explicitly closing the last Task workspace skips absence grace, after
+requested work settles. Return before cleanup to retain the workspace again.
+Conversation history remains after cleanup; a deleted checkout is not recreated.
+Completed workspace cleanup and native-host retention use the
 [shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).

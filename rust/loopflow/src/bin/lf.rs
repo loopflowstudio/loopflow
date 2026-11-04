@@ -1845,6 +1845,7 @@ fn run() -> anyhow::Result<()> {
                     occurrence,
                     state,
                     revision,
+                    native_settled,
                 },
         }) => {
             if state.is_some() {
@@ -1856,7 +1857,8 @@ fn run() -> anyhow::Result<()> {
                     issue,
                     occurrence.as_deref(),
                     *state,
-                    *revision
+                    *revision,
+                    *native_settled
                 )?)?
             );
             return Ok(());

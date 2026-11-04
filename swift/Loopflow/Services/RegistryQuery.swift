@@ -769,9 +769,10 @@ public struct RegistryQuery: Sendable {
         try await run(["history", "show", id], nil)
     }
 
-    public func taskPresence(task: String, occurrence: String, state: String, revision: Int64) async throws -> TaskRetirement? {
+    public func taskPresence(task: String, occurrence: String, state: String, revision: Int64, nativeSettled: Bool) async throws -> TaskRetirement? {
         let output = try await run(["task", "presence", task, "--occurrence", occurrence,
-                                    "--state", state, "--revision", String(revision)], nil)
+                                    "--state", state, "--revision", String(revision),
+                                    "--native-settled", String(nativeSettled)], nil)
         return try Self.decode(TaskRetirement?.self, from: output)
     }
 

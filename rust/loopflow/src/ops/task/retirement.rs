@@ -127,6 +127,7 @@ pub fn observe(
     occurrence: Option<&str>,
     state: Option<HostUse>,
     revision: Option<i64>,
+    native_settled: Option<bool>,
 ) -> OpsResult<Option<TaskRetirement>> {
     block_on_task(async {
         let store = task_store().await?;
@@ -148,6 +149,7 @@ pub fn observe(
                     state,
                     now(),
                     revision.ok_or_else(|| task_error("Host revision is required"))?,
+                    native_settled.ok_or_else(|| task_error("Native settlement is required"))?,
                 )
                 .map_err(task_error)?;
         }
@@ -279,11 +281,11 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
     // work and queued input in the serving loop before ending the provider.
     if !store
         .sqlite
-        .retirement_hosts_closed(&task.id)
+        .retirement_hosts_settled(&task.id)
         .map_err(task_error)?
     {
         return Err(task_error(
-            "Waiting for native hosts to close this Task's occurrences",
+            "Waiting for native hosts to settle this Task's occurrences",
         ));
     }
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;

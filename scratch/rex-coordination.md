@@ -2,7 +2,8 @@
 
 Jack Heart approved LOO-717 implementation and review publication on November 3,
 2026, stopping at interactive demo. No shipping, merge or installation approval.
-LOO-498 remains independently in design; no competing run was launched.
+LOO-498’s existing feature Graph was observed running compress on November 3;
+no competing run was launched or existing workflow changed.
 
 The accepted contract lives in `questions.md` and `loo-717-shell-lifetimes.md`.
 Rex owns its native shells/layouts and adapter; Desktop owns its own. Shared lf
@@ -11,16 +12,25 @@ layout; LF agent-conversation identity and attachment remain shared.
 
 ## Adapter contract shared with LOO-498
 
-Comment `67cd130c-9104-48ef-b019-615e3e41e01e` specifies:
+Comment `30bf4970-3bb1-481f-8200-83a6734cb26e` refines
+`67cd130c-9104-48ef-b019-615e3e41e01e`:
 
 - `task presence TASK --occurrence ID --state STATE --revision N` reports a
-  native occurrence as retained, away, closed or unknown. Persist increasing
+  native occurrence as retained, away, closed or unknown, with required
+  `--native-settled true|false`. Closed selects explicit-Close policy; it does
+  not prove native cleanup. Persist increasing
   revisions; delayed release must not overwrite a return.
 - Renew retained leases within 30 seconds. Expiry is unknown, never confirmed
   closure. Another retaining occurrence keeps shared resources alive.
 - The destination returns a completion-pinned retirement intent. At `closing`,
   the released adapter settles only that Task's native resources and reports
-  closed. A Rex Wave session can contain other Tasks; do not destroy it wholesale.
+  native-settled=true with a newer revision, preserving away/closed policy. Away
+  native shells are not settled. A Rex Wave session can contain other Tasks;
+  do not destroy it wholesale. New retained/unknown observations clear settlement.
+- Desktop detaches surfaces on departure, so away+settled can preserve the
+  existing fifteen-minute deadline and finish cleanup without relaunch. Quit
+  awaits reports within five seconds. Destination Sessions/shell jobs still
+  settle through their owners. TaskRetirement response fields are unchanged.
 - Host policy owns release. Eligible idle agents end after two minutes;
   completed-Task shells/checkout retire at fifteen total. Explicit last Close
   skips grace, while active requested work, drafts and pending requests still

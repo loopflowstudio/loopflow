@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Loopflow
 import Observation
@@ -22,11 +23,54 @@ final class RepositoryWorkspaces {
 
     init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
 
+    func prepareForQuit() {
+        for registry in repositories.values { registry.prepareForQuit() }
+    }
+
+    /// Every destination gets an independent release attempt within one quit budget.
+    func releaseForQuit(timeout: Duration = .seconds(5)) async {
+        await withTaskGroup(of: Bool.self) { group in
+            for registry in repositories.values {
+                group.addTask {
+                    await registry.releaseForQuit()
+                    return true
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return false
+            }
+            var pending = repositories.count
+            while pending > 0, await group.next() == true { pending -= 1 }
+            group.cancelAll()
+        }
+    }
+
     func registry(for repository: String) -> SessionsWorkspaceRegistry {
         if let retained = repositories[repository] { return retained }
         let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId)
         repositories[repository] = registry
         return registry
+    }
+}
+
+/// AppKit waits for acknowledged departure, bounded independently of cleanup grace.
+@MainActor
+final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
+    let workspaces = RepositoryWorkspaces(
+        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId)
+    private var release: Task<Void, Never>?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if release == nil {
+            // Fence window-close notifications and retention heartbeats before yielding.
+            workspaces.prepareForQuit()
+            release = Task {
+                await workspaces.releaseForQuit()
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        return .terminateLater
     }
 }
 

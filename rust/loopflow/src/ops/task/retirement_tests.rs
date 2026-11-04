@@ -87,7 +87,14 @@ impl Workspace {
     fn host(&self, state: HostUse, revision: i64) {
         self.store
             .sqlite
-            .observe_task_host(&self.task.id, "native:task-window", state, now(), revision)
+            .observe_task_host(
+                &self.task.id,
+                "native:task-window",
+                state,
+                now(),
+                revision,
+                state == HostUse::Closed,
+            )
             .unwrap();
     }
 
@@ -168,7 +175,8 @@ fn retirement_return_and_reopen_cancel_closing_before_git_deletion() {
                         "native:task-window",
                         HostUse::Closed,
                         now(),
-                        1
+                        1,
+                        true
                     )
                     .is_err());
                 fixture.host(HostUse::Closed, 3);
@@ -182,6 +190,113 @@ fn retirement_return_and_reopen_cancel_closing_before_git_deletion() {
                     .is_some());
             }
         }
+    });
+}
+
+#[test]
+fn retirement_acknowledged_quit_finishes_without_another_host_report() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let fixture = Workspace::new().await;
+        fixture.host(HostUse::Away, 1);
+        let departure = now() - 300;
+        let intent = fixture
+            .store
+            .sqlite
+            .reconcile_task_retirement(&fixture.task.id, departure)
+            .unwrap()
+            .unwrap();
+        assert_eq!(intent.due_at, Some(departure + 900));
+        fixture
+            .store
+            .sqlite
+            .observe_task_host(
+                &fixture.task.id,
+                "native:task-window",
+                HostUse::Away,
+                now(),
+                2,
+                true,
+            )
+            .unwrap();
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        fixture.assert_retained();
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_retirement(&fixture.task.id)
+                .unwrap()
+                .unwrap()
+                .due_at,
+            intent.due_at
+        );
+
+        // Advance the persisted deadline; the quit host never reports again.
+        fixture
+            .sql()
+            .execute("UPDATE task_retirements SET due_at=?1", [now() - 1])
+            .unwrap();
+        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        assert!(!fixture.checkout.exists());
+        assert!(git(
+            fixture.repo.path(),
+            &["ls-remote", "--heads", "origin", "completed"]
+        )
+        .is_empty());
+        assert!(fixture
+            .store
+            .get_task(&fixture.task.id)
+            .await
+            .unwrap()
+            .is_some());
+    });
+}
+
+#[test]
+fn retirement_unacknowledged_quit_keeps_checkout_and_recovers_on_return() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let fixture = Workspace::new().await;
+        fixture
+            .store
+            .sqlite
+            .observe_task_host(
+                &fixture.task.id,
+                "native:task-window",
+                HostUse::Retained,
+                now() - 1000,
+                1,
+                false,
+            )
+            .unwrap();
+        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        fixture.assert_retained();
+        let intent = fixture
+            .store
+            .sqlite
+            .task_retirement(&fixture.task.id)
+            .unwrap()
+            .unwrap();
+        assert!(intent.due_at.is_none());
+        assert!(intent.reason.unwrap().contains("unavailable"));
+        fixture.host(HostUse::Retained, 3);
+        assert!(fixture
+            .store
+            .sqlite
+            .observe_task_host(
+                &fixture.task.id,
+                "native:task-window",
+                HostUse::Away,
+                now(),
+                2,
+                true
+            )
+            .is_err());
+        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        fixture.assert_retained();
     });
 }
 

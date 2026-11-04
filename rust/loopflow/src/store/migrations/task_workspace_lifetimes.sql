@@ -26,6 +26,8 @@ CREATE TABLE task_host_occurrences (
     task_id TEXT NOT NULL REFERENCES tasks(id),
     occurrence TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('retained','away','closed','unknown')),
+    -- Host presentation/native jobs are separate from destination-owned execution.
+    native_settled INTEGER NOT NULL CHECK(native_settled IN (0,1)),
     lease_until INTEGER NOT NULL,
     revision INTEGER NOT NULL,
     PRIMARY KEY(task_id,occurrence)

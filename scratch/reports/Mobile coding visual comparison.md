@@ -1,0 +1,47 @@
+# Make the phone terminal feel usable
+
+Research baseline: this report and its captured Loopflow images predate the input/Desktop-style pass. Jack Heart subsequently requested those refinements; see the [current prototype](../prototype-tasks.html). The source comparisons and native proof requirements remain relevant.
+
+The screenshot comparison supports Jack Heart’s selected **open Tasks → existing editable Session** flow. Rex supplies the closest terminal reference; Claude and Paseo show how named work and attention cues help people choose where to return. The largest gap in Loopflow’s current prototype is input fidelity: it presents an editable HTML field, but does not show what happens when the software keyboard consumes much of the phone. The next study should improve that interaction without adding destinations. This research inspected public team media and publisher assets on November 3, 2026; it did not operate installed apps. The [visual comparison board](../mobile-visual-comparison.html) includes the inspected images, source links and exact Loopflow captures.
+
+## Rex supports the simple navigation choice
+
+Mitchell Hashimoto’s attributed October 22 clip shows native grouped rows beneath Machine headings, program icons, chevrons and blue markers. The markers visibly distinguish some rows; their precise semantics are not established by the image. Alasdair Monk’s October 23 demo shows an agent terminal in portrait and a sidebar beside the terminal in a wider view. The portrait keeps the agent’s own prompt in the terminal, with compact identity and special keys around it. These are source frames from team demonstrations, not reconstructed screens. ([Mitchell’s post](https://x.com/mitchellh/status/2113346052090925406), [Alasdair’s demo](https://x.com/almonk/status/2113677839853572233))
+
+Loopflow can borrow the native-list-to-running-program relationship while using Tasks as its organizing unit. It does not need Rex’s full Machine/group/tab/pane hierarchy. The useful visual change is a more compact terminal header, with the Task still recognizable and one obvious route back. Our prototype’s generous white header and fixed text-field area spend space that matters once typing begins. This is a design inference from the comparison, not a measured usability result.
+
+The team terminal frames show modifier/navigation controls and a keyboard toggle. Rex’s documentation separately describes a customizable key bar, clipboard and cursor-navigation options. **Neither inspected team clip shows the expanded software keyboard**, so they cannot establish keyboard-open geometry, IME or typing comfort. Original X pages were blocked; attribution and dates came through indexed mirrors linking original Twitter CDN videos. The board preserves the original frames and links to the posts. ([Rex iOS settings](https://www.superlogical.com/rex/docs/reference/ios-settings), [attribution mirror](https://nitter.gq/almonk))
+
+## Claude and Paseo clarify what belongs in the list
+
+Claude’s Code marketing image shows named work with status filters, a computer/connection cue on one row, cloud/repository context on others, and a prominent approval card. Ordinary Claude chat and Artifacts imagery is a different surface. The Code image is useful evidence for discoverability and attention, but **does not show a remote terminal detail view**. ([Claude publisher screenshots](https://apps.apple.com/us/app/claude-by-anthropic/id6473753684))
+
+Claude documents both cloud Code sessions and Remote Control in its mobile app. Remote Control continues computer-hosted work through synchronized conversation and tool activity; the computer and process remain execution dependencies. That documentation establishes behavior beyond what the screenshot shows. It does not imply that Loopflow should replace its terminal with native chat or adopt Claude’s backend. ([Claude mobile](https://code.claude.com/docs/en/mobile), [Remote Control](https://code.claude.com/docs/en/remote-control))
+
+Paseo’s workspace screenshot distinguishes work needing input, work ready for review, active work and completed work. Its agent-chat screenshot uses proportional text and a message composer. A separate terminal screenshot shows monospace output and two rows of special keys, including arrows, modifiers, paste and keyboard visibility. The latter is the direct input comparison for Loopflow; the chat image should not be mistaken for terminal editing. ([Paseo publisher screenshots](https://apps.apple.com/app/paseo-pocket-engineer/id6758887924))
+
+The implication for our Task list is modest: replace identical fixture readiness labels with credible states, and distinguish connection availability from the Session needing input. A Task can need a response while its Machine is unreachable. That distinction can fit in the existing row; it does not require a new inbox, filters or another view. For terminal input, test a small accessory set against real agent interactions before choosing its layout. Paseo’s mobile-testing guide explicitly exercises docked keyboards, focus and keyboard visibility—useful validation targets for our native spike. ([Paseo testing guide](https://github.com/getpaseo/paseo/blob/main/docs/mobile-testing.md))
+
+## Blink and Happy expose the keyboard cost
+
+Blink’s official Smart Keys animation shows a terminal prompt above an actual iOS keyboard and a narrow special-key strip. Its documentation explains modifier combinations, cursor navigation and a scrollable accessory area. The image is undated and uses older device styling, so it is evidence of an interaction pattern rather than current visual fashion. The keyboard occupies real space; the terminal must remain useful in what is left. ([Blink quick start](https://docs.blink.sh/))
+
+Happy’s publisher images show active/previous Session lists with contextual metadata, plus native conversation UI with the system keyboard visible. That is a useful benchmark for how quickly someone can recognize work and edit a message on a phone. It is not a PTY grid. Happy documents permissions and remote access, but no inspected permission-dialog image proves the exact approval layout. ([Happy screenshots](https://apps.apple.com/us/app/happy-codex-claude-code-app/id6748571505), [mobile access](https://happy.engineering/mobile-app/))
+
+Loopflow’s terminal should be judged against that practical editing comfort while preserving terminal semantics. The current browser field cannot prove arrow-key movement in the agent, menu selection, Control combinations, Shift-Tab, marked-text composition or paste handling. Its simulated Enter response also cannot demonstrate uncertain delivery after a network loss. A native test must separate editing input from selecting old output, and show how scrolling returns to the live prompt.
+
+## Replit addresses the next development loop
+
+Replit’s inspected mobile images pair project conversation/checkpoint context with a nearly full-screen generated-site preview. This demonstrates a build → inspect output → request changes loop. Its current mobile product page distinguishes the iOS app’s website/web-app work from its native-app creation workflow using web tooling and Expo Go previews. Coding from a phone and producing a native mobile app are different comparisons. ([Replit screenshots](https://apps.apple.com/us/app/replit-vibe-code-with-ai-fast/id1614022293), [mobile product scope](https://replit.com/products/mobile))
+
+A preview surface could become valuable for Loopflow later, particularly when a remote agent changes a UI. It does not belong in Jack’s current minimum scope. The present proof is continuing existing work through the Session; host preview URLs, authentication and feedback deserve their own later design. Likewise, attractive native chat, diff and plugin screens in the other products do not justify expanding this MVP.
+
+## The next proof should be an interaction
+
+The next prototype pass should depict the **keyboard-open terminal**, with compact Task identity, a reachable prompt and the minimum useful navigation/modifier keys. Include one terminal menu or permission question, not only free text. Show distinct Task/connection states and the return from another Task. These are recommendations for review, not newly accepted requirements.
+
+The native acceptance trial should then enter a multiline request, correct an earlier word, navigate a choice, submit once, hide/show the keyboard, switch Tasks, background the app and recover from a disconnected host. Test touch selection, paste, dictation/IME and an external keyboard on a real device. Preserve the same Session and never resend uncertain input automatically. Source images can guide layout; they cannot establish input ownership, process survival, reconnect correctness, accessibility or latency. Those remain the architectural and device proofs in LOO-718.
+
+The HTML board and its local assets load without external runtime dependencies. Original asset provenance is retained in the research notes/manifests. Publisher compositions are labeled, Rex access limitations are explicit, and the two Loopflow images are fresh browser captures of the unchanged current prototype.
+
+Verification: Chrome/Playwright passed all 26 local links/assets, image loading, desktop and 390px dark layout overflow checks, and image enlargement/Escape dismissal. Desktop, Rex section and narrow screenshots were visually inspected. No source prototype was modified.

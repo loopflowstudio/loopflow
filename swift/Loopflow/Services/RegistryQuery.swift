@@ -239,6 +239,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     case sessionRename(directory: String, id: String, name: String)
     case sessionBind(directory: String, id: String, task: String)
+    case sessionStart(id: String)
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
     case sessionNew(directory: String, id: String, agent: String?)
@@ -275,6 +276,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
+        case .sessionStart(let id): ["session", "resume", "--start-only", "--json", "--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent):
             Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
                 + Self.option("--task", task) + Self.option("--wave", wave),
@@ -353,6 +355,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("session_rename", ["directory": directory, "id": id, "name": name])
         case .sessionBind(let directory, let id, let task):
             TaggedFields("session_bind", ["directory": directory, "id": id, "task": task])
+        case .sessionStart(let id):
+            TaggedFields("session_start", ["id": id])
         case .sessionResume(let directory, let id, let task, let wave, let agent):
             TaggedFields("session_resume", ["directory": directory, "id": id, "task": task, "wave": wave,
                                             "agent": agent])

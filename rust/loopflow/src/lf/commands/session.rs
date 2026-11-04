@@ -160,7 +160,47 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             id,
             connection,
             fork,
+            start_only,
         } => {
+            if *start_only {
+                anyhow::ensure!(!cli.batch, "--start-only opens an interactive Session");
+                anyhow::ensure!(
+                    cli.output_schema.is_none(),
+                    "response schemas require a headless Run (-b)"
+                );
+                let store = open_shared_store().await?;
+                let cwd = std::env::current_dir()?;
+                let id = select(&store, &cwd, connection.target(cli, id.as_deref())?).await?;
+                let session = crate::ops::human_session::session_by_id(&store, &id)
+                    .await?
+                    .context("Session is unavailable")?;
+                if let Some(reason) =
+                    crate::ops::human_session::run_refusal(&store.sqlite, &session)?
+                {
+                    bail!(reason);
+                }
+                // Pin the selected conversation: do not resolve a Task/scope
+                // again in the child after its primary may have changed.
+                let mut argv = vec![std::env::current_exe()?.to_string_lossy().into_owned()];
+                argv.extend(cli.step_args());
+                if let Some(agent) = &cli.agent {
+                    argv.extend(["--agent".into(), agent.clone()]);
+                }
+                argv.extend(["session".into(), "resume".into(), "--".into(), id.clone()]);
+                let starting = id.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::transport::start_session(&starting, &argv, true, &cwd)
+                })
+                .await??;
+                let session = crate::ops::human_session::session_by_id(&store, &id)
+                    .await?
+                    .context("Session is unavailable")?;
+                let record = crate::ops::human_session::surface(&store, &session).await?;
+                if !connection.json && !cli.json {
+                    println!("{}", record.id);
+                }
+                return print_opened(cli, connection, &record);
+            }
             resume(
                 cli,
                 connection,
@@ -693,6 +733,7 @@ pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<Sessio
                 id,
                 connection,
                 fork,
+                ..
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
                 reopen(&store, directory, target, *fork, false, false).await

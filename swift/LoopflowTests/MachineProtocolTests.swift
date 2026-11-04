@@ -3,6 +3,14 @@ import Testing
 @testable import Loopflow
 
 struct MachineProtocolTests {
+    @Test func sessionOpeningDelegatesTheExactRecordedIdentity() throws {
+        let id = "session_5e55105e000040008000000000000001"
+        let change = ServedWrite.sessionStart(id: id)
+        let request = MachineRequest(version: 1, id: "start-1", operation: .command(change))
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("session_start")))
+        #expect(change.argv == ["session", "resume", "--start-only", "--json", "--", id])
+        #expect(change.cwd == "/")
+    }
     @Test func creationRetainsItsIdentityAndOutcomeAcrossCarriers() throws {
         let id = try #require(UUID(uuidString: "00000000-0000-4000-8000-000000000001"))
         let change = ServedWrite.taskCreate(directory: "/repo", requestID: id, request: "Fix the retry test", wave: nil, graph: nil, terminal: false)

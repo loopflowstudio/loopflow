@@ -36,6 +36,12 @@ on first bootstrap, reads actual open Tasks and attaches their recorded Session
 owners. It installs no CLI on the phone. Opening an existing Task observes its
 running Session; it never implicitly starts or resumes a provider.
 
+If its terminal has stopped, choose **Open Session** to continue the recorded
+conversation on the Machine. It reuses a running owner or resumes saved history,
+then opens as an observer. **Use keyboard** remains a separate action. If opening
+is not confirmed, **Reconnect** inspects that Session; it never repeats the start.
+An ended screen retains its output and offers the same explicit opening action.
+
 Choose **New Task** (+), describe the work, and select a repository on the paired
 Machine. The sheet saves your draft and remembers that destination. Use the
 keyboard’s microphone to dictate, then edit before choosing **Create & start**.
@@ -80,7 +86,7 @@ keep their explanation.
 Input and geometry require a fresh grant. Failed input is never queued or retried.
 If opening or reconnecting fails, **Reconnect** stays on the Session screen.
 Inspect the restored prompt before resubmitting input whose delivery was uncertain.
-Missing, ended or mismatched Sessions retain their explanation without a retry.
+Missing or mismatched Sessions retain their explanation without a retry.
 
 The app uses the shared Loopflow fonts, Light/Dark themes and WorkViewPlan types.
 `MobileClient` is an injectable UI boundary, not a serialized protocol.

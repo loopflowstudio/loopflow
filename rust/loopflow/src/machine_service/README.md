@@ -115,11 +115,17 @@ setup delegates to the promoted installation; source builds use an explicit
   The shared watch validates them, including its 16 KiB limit; an invalid
   checkpoint ends the watch with an `unavailable` reading.
   Closing cancels. Reconnect opens a fresh subscription; no replay cursor exists.
-- `command {change}` supports `session_rename` and `task_create` using the existing `Write` shape
+- `command {change}` supports `session_rename`, `session_start` and `task_create` using the existing `Write` shape
   and argv mapping. `command {trace_id,output,stderr,code}` reports the real CLI result.
   The CLI owns mutation, defaults and Process attribution. Transport IDs correlate
   diagnostics; they do not deduplicate commands. Session rename has no automatic
   resubmission. Task creation has its separate durable admission below.
+- `session_start {id}` delegates `lf resume SESSION_ID --start-only --json`.
+  This explicit action reuses or starts the recorded Session's retained owner,
+  returns its existing SessionRecord and takes no viewer claims. CLI, Desktop and
+  phone share startup exclusion. Reconnecting only looks up the owner; a lost
+  opening reply requires inspection, never automatic launch replay. A later
+  explicit open can restart an ended provider; this is not an idempotent receipt.
 - `session_owner {session}` resolves a Session ID to `session_owner {owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.

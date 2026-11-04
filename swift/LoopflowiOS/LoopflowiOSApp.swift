@@ -209,12 +209,26 @@ struct MobileSessionView: View {
     let theme: ThemeDefinition
     var connectionLabel: String = "Offline fixture"
     @Environment(\.dynamicTypeSize) private var textSize
+    @State private var opening: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
             if case .unavailable(let reason) = workspace.state {
                 ContentUnavailableView("Session unavailable", systemImage: "terminal",
                     description: Text(reason))
+            } else if workspace.state == .notRunning {
+                ContentUnavailableView {
+                    Label("Continue this Session", systemImage: "terminal")
+                } description: {
+                    Text("Its conversation is saved on your Machine. Open it to continue where you left off.")
+                } actions: {
+                    if workspace.canStartSession {
+                        openSessionButton
+                            .buttonStyle(.borderedProminent)
+                            .tint(theme.palette.accent)
+                            .foregroundStyle(theme.palette.accentText)
+                    }
+                }
             } else {
                 header
                 .padding(.horizontal, 16)
@@ -228,7 +242,7 @@ struct MobileSessionView: View {
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await workspace.open(task) }
-        .onDisappear { workspace.leave() }
+        .onDisappear { opening?.cancel(); workspace.leave() }
     }
 
     private var header: some View {
@@ -256,8 +270,13 @@ struct MobileSessionView: View {
             if case .disconnected = workspace.state {
                 Button { Task { await workspace.reconnect() } } label: { actionLabel("Reconnect") }
             }
+            if workspace.canStartSession { openSessionButton }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var openSessionButton: some View {
+        Button { opening = Task { await workspace.startSession() } } label: { actionLabel("Open Session") }
     }
 
     private func actionLabel(_ title: String) -> some View {

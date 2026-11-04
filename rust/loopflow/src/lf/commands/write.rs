@@ -86,6 +86,9 @@ pub enum Write {
         id: String,
         task: String,
     },
+    /// Start the exact recorded Session without a viewer. Like Portfolio,
+    /// this Machine-scoped command runs from `/`; the Session owns its workspace.
+    SessionStart { id: crate::id::LfSessionId },
     /// `lf [--agent <agent>] session resume [<id>] [--task <task>] [--wave <wave>]
     /// --prepare --json`, with `--repo <directory>` when it names none of them:
     /// the conversation and the command that opens it, no provider started.
@@ -215,6 +218,16 @@ impl Write {
         let (notes_flag, revision_flag, query, path);
         let words: Vec<&str> = match self {
             Self::TaskCreate { .. } => unreachable!("creation argv returned above"),
+            Self::SessionStart { id } => {
+                vec![
+                    "session",
+                    "resume",
+                    "--start-only",
+                    "--json",
+                    "--",
+                    id.as_str(),
+                ]
+            }
             Self::TaskComplete { issue, .. } => vec!["task", "complete", issue],
             Self::TaskReopen { issue, .. } => vec!["task", "reopen", issue],
             Self::TaskAbandon { issue, .. } => vec!["task", "abandon", issue],
@@ -417,7 +430,7 @@ impl Write {
             | Self::DashboardSlots { directory, .. }
             | Self::TileMove { directory, .. }
             | Self::PaneLayout { directory, .. } => directory,
-            Self::Portfolio { .. } => Path::new("/"),
+            Self::Portfolio { .. } | Self::SessionStart { .. } => Path::new("/"),
         }
     }
 
@@ -447,7 +460,7 @@ impl Write {
     pub fn write(&self) -> anyhow::Result<Option<String>> {
         // The CLI owns full creation, Graph launch and conversation admission.
         // App callers and Machine carriers use this same command, not an FFI run.
-        if matches!(self, Self::TaskCreate { .. }) {
+        if matches!(self, Self::TaskCreate { .. } | Self::SessionStart { .. }) {
             return Ok(None);
         }
         let argv: Vec<String> = std::iter::once("lf".to_owned())
@@ -470,7 +483,9 @@ impl Write {
     fn perform(&self, repo: &Path, cli: &Cli) -> anyhow::Result<String> {
         let command = cli.command.as_ref().context("a write names its command")?;
         Ok(match self {
-            Self::TaskCreate { .. } => unreachable!("creation delegates to its CLI"),
+            Self::TaskCreate { .. } | Self::SessionStart { .. } => {
+                unreachable!("execution delegates to its CLI")
+            }
             Self::TaskComplete { issue, .. } => {
                 task_complete(repo, issue, None)?;
                 format!("{issue}: completed\n")

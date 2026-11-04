@@ -4027,6 +4027,184 @@ fn task_creation_opens_one_retained_terminal_and_recovers_it_after_exit() {
 }
 
 #[test]
+fn start_only_opens_one_session_without_taking_existing_viewer_claims() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap();
+    let open = || {
+        fixture
+            .command(&["resume", session, "--start-only", "--json"])
+            .env("PATH", &path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let first = open();
+    let second = open();
+    for child in [first, second] {
+        let result = wait_for_viewer(child, Duration::from_secs(30));
+        assert!(result.status.success(), "{result:?}");
+        let returned: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(returned["id"], session);
+    }
+    let owner: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let launches = fixture.launches(1);
+    let mut desktop = fixture.attach(
+        &owner,
+        json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99
+        }),
+    );
+    until_out(&mut desktop, "ready for");
+    let service = MachineServiceProof::start(&fixture, false);
+    let operation = json!({"kind":"command", "change":{"write":"session_start", "id":session}});
+    let (_, reply) = service.request("open", operation.clone());
+    assert_eq!(reply["result"]["code"], 0, "{reply}");
+    let record: Value = serde_json::from_str(reply["result"]["output"].as_str().unwrap()).unwrap();
+    assert_eq!(record["id"], session);
+    let mut observer = fixture.connect(&owner);
+    observer
+        .request(json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}));
+    let reply = observer.until_reply();
+    assert_eq!(reply["owner"], desktop.id);
+    assert!(reply["token"].is_null());
+    desktop.request(json!({"kind":"controlled"}));
+    assert_eq!(desktop.until_reply()["held"], true);
+    desktop.input("still mine\n");
+    desktop.finish();
+    fixture.ends(&owner);
+    assert_eq!(fixture.launches(1), launches);
+}
+
+#[test]
+fn start_only_lost_reply_preserves_the_started_session_for_passive_inspection() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let record: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = record["id"].as_str().unwrap();
+    let service = MachineServiceProof {
+        fixture: &fixture,
+        supervised: false,
+        remote_port: None,
+        child: Some(
+            fixture
+                .command(&["machine", "service", "run"])
+                .env("PATH", &path)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        ),
+    };
+    service.ready();
+    let mut abandoned = UnixStream::connect(fixture.endpoint("machine")).unwrap();
+    machine_send(
+        &mut abandoned,
+        json!({"version":1,"id":"lost","operation":{
+            "kind":"command", "change":{"write":"session_start", "id":session}
+        }}),
+    );
+    // Confirm admission before losing the response, not before the request arrives.
+    let launches = fixture.launches(1);
+    drop(abandoned);
+    let (_, reply) = service.request(
+        "inspect",
+        json!({"kind":"session_owner", "session":session}),
+    );
+    let owner = reply["result"]["owner"].as_str().unwrap();
+    let _cleanup = StopOwner(&fixture, owner.into());
+    let observer = fixture.viewer(owner, false);
+    assert!(observer.token.is_none());
+    // An explicit later open shares that live owner, even after service restart.
+    drop(service);
+    let reopened = fixture
+        .command(&["resume", session, "--start-only", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(reopened.status.success(), "{reopened:?}");
+    assert_eq!(returned_session(&reopened)["id"], session);
+    let mut controller = fixture.viewer(owner, true);
+    controller.input("done\n");
+    controller.finish();
+    fixture.ends(owner);
+    assert_eq!(fixture.launches(1), launches);
+}
+
+#[test]
+fn start_only_refuses_runs_and_incompatible_options_without_launching() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let record: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = record["id"].as_str().unwrap();
+    for extra in ["--prepare", "--fork", "-b"] {
+        let output = fixture
+            .command(&["resume", session, "--start-only", extra])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{extra}: {output:?}");
+    }
+    for missing in ["--fork", "session_00000000000040008000000000000000"] {
+        let output = fixture
+            .command(&["resume", "--start-only", "--json", "--", missing])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "An unknown Session cannot start: {output:?}"
+        );
+    }
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+            [session],
+        )
+        .unwrap();
+    let result = fixture
+        .command(&["resume", session, "--start-only", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("is a Run"),
+        "{result:?}"
+    );
+    assert!(!fixture.home.path().join("launches").exists());
+}
+
+#[test]
 fn simultaneous_session_openers_share_one_retained_owner() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
@@ -4312,13 +4490,13 @@ printf 'output-final\r\n'
     );
     fixture.ends(&owner);
     assert_eq!(
-        fixture.launches(2).len(),
-        first_launch.len() + 1,
-        "Only explicit new Task creation may launch another provider"
+        fixture.launches(3).len(),
+        first_launch.len() + 2,
+        "Only explicit Session opening and new Task creation may launch another provider"
     );
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
-        "desktop draft + phone + desktop\ncreated from phone\n",
+        "desktop draft + phone + desktop\ncontinued from phone\ncreated from phone\n",
         "Input must reach the child exactly once"
     );
 }

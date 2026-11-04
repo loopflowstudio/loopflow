@@ -1621,6 +1621,31 @@ fn session_resume_explain_never_probes_or_claims_a_live_endpoint() {
     .unwrap();
     assert_eq!(report["action"]["intent"], "take_over");
     assert_eq!(report["action"]["prepare_only"], false);
+    let opening: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "--json",
+                "--agent",
+                "claude",
+                "session",
+                "resume",
+                &session.id,
+                "--start-only",
+                "--explain",
+            ],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(opening["action"]["intent"], "reuse");
+    assert_eq!(opening["action"]["start_only"], true);
+    assert_eq!(
+        opening["action"]["agent"], "codex",
+        "An existing owner keeps its harness"
+    );
     assert!(report["unavailable"]
         .as_array()
         .unwrap()

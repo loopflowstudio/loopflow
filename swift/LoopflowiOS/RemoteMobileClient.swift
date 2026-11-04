@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 
 @MainActor
-final class RemoteMobileClient: MobileClient, MobileTaskCreationClient {
+final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSessionOpeningClient {
     private(set) var credential: MachineCredential
 
     init(credential: MachineCredential) { self.credential = credential }
@@ -24,13 +24,27 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient {
         try await verifyMachine()
         let response = try await response(.sessionOwner(session: sessionID))
         guard case .sessionOwner(let owner) = response.result else { throw RegistryQueryError("The Machine did not resolve the Session owner") }
-        guard let owner else { throw SessionUnavailable("This Session has no running owner. Open it on its Machine first.") }
+        guard let owner else { throw SessionNotRunning() }
         let connection = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
         do {
             let response = try await connection.request(.attach(owner: owner))
             guard case .bridged = response.result else { throw RegistryQueryError("The Machine did not attach the Session") }
             return try await RemoteAttachment.open(sessionID: sessionID, connection: connection)
         } catch { connection.close(); throw error }
+    }
+
+    func startSession(sessionID: String) async throws {
+        try await verifyMachine(required: ["session_start"])
+        let reply = try await response(.command(.sessionStart(id: sessionID)))
+        guard case .command(_, let output, let stderr, let code) = reply.result else {
+            throw RegistryQueryError("The Machine did not confirm Session opening")
+        }
+        guard code == 0 else { throw RegistryQueryError(stderr.isEmpty ? "The Session did not open" : stderr) }
+        // The complete CLI operation returns its existing SessionRecord.
+        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(output.utf8))
+        guard record.id == sessionID else {
+            throw RegistryQueryError("The Machine returned a different Session")
+        }
     }
 
     func creationContext() async throws -> MobileCreationContext {

@@ -309,6 +309,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         defer { desktopEvents.cancel() }
         try desktop.requestControl(size: TerminalGeometry(columns: 120, rows: 40))
         try await wait("Second viewer did not receive control") { desktopInput }
+        // Opening an already running Session acknowledges the same owner;
+        // it cannot take this newer viewer's keyboard or geometry.
+        try await client.startSession(sessionID: proof.session)
 
         await workspace.restoreForegroundSession()
         try await wait("Reconnection did not recover the unfinished draft") {
@@ -329,6 +332,21 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         try await wait("The existing provider did not finish") { workspace.state == .ended }
         XCTAssertEqual(workspace.selected?.primarySession, proof.session)
         XCTAssertTrue(screen().contains("accepted:"))
+
+        // Continuing is a separate explicit action, never a reconnect effect.
+        await workspace.reconnect()
+        XCTAssertEqual(workspace.state, .notRunning)
+        await workspace.startSession()
+        try await wait("Saved Session did not reopen", seconds: 20) {
+            workspace.state == .viewing && screen().contains("mobile-owner-ready")
+        }
+        XCTAssertEqual(workspace.selected?.primarySession, proof.session)
+        workspace.send(Data("must not send before takeover".utf8))
+        workspace.requestControl()
+        try await wait("Reopened Session did not accept keyboard control") { workspace.state == .controlling }
+        controller.update(theme: .light)
+        controller.terminal.insertText("continued from phone\n")
+        try await wait("Reopened provider did not receive native input") { workspace.state == .ended }
     }
 
     private func wait(_ reason: String, seconds: TimeInterval = 10, until predicate: () -> Bool) async throws {

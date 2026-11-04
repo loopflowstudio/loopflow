@@ -2237,6 +2237,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 id,
                 connection,
                 fork,
+                start_only,
             },
     }) = &cli.command
     {
@@ -2244,6 +2245,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             connection.target(cli, id.as_deref())?,
             *fork,
             connection.prepare,
+            *start_only,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);

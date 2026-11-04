@@ -38,6 +38,12 @@ protocol MobileClient {
     func attach(sessionID: String) async throws -> any MobileAttachment
 }
 
+/// Explicitly open a recorded conversation; ordinary attachment never starts it.
+@MainActor
+protocol MobileSessionOpeningClient {
+    func startSession(sessionID: String) async throws
+}
+
 @MainActor
 protocol MobileTaskObservation: AnyObject {
     var readings: AsyncThrowingStream<MobileTaskReading, any Error> { get }
@@ -80,8 +86,12 @@ struct SessionUnavailable: LocalizedError {
     var errorDescription: String? { message }
 }
 
+struct SessionNotRunning: LocalizedError {
+    var errorDescription: String? { "The Session is saved, but its terminal is not running." }
+}
+
 enum MobileConnectionState: Equatable {
-    case loading, viewing, requestingControl, controlling, ended
+    case loading, viewing, requestingControl, controlling, ended, notRunning
     case disconnected(String), unavailable(String)
 
     var label: String {
@@ -91,6 +101,7 @@ enum MobileConnectionState: Equatable {
         case .requestingControl: "Connecting keyboard…"
         case .controlling: "Keyboard connected"
         case .ended: "Session ended"
+        case .notRunning: "Session not running"
         case .disconnected(let reason): "Disconnected · \(reason)"
         case .unavailable(let reason): reason
         }
@@ -124,6 +135,28 @@ final class MobileWorkspace {
     var setGeometry: ((TerminalGeometry?) -> Void)?
 
     init(client: any MobileClient) { self.client = client }
+
+    var canStartSession: Bool {
+        (state == .ended || state == .notRunning) && selected?.primarySession != nil
+            && client is any MobileSessionOpeningClient
+    }
+
+    func startSession() async {
+        guard canStartSession, let task = selected, let session = task.primarySession,
+              let opener = client as? any MobileSessionOpeningClient else { return }
+        disconnect()
+        let opening = generation
+        state = .loading
+        do {
+            try await opener.startSession(sessionID: session)
+            guard opening == generation else { return }
+            try Task.checkCancellation()
+            await open(task)
+        } catch {
+            guard opening == generation else { return }
+            fail("Opening was not confirmed. Reconnect to inspect this Session before another attempt. \(error.localizedDescription)")
+        }
+    }
 
     func startTaskUpdates() async {
         stopTaskUpdates()
@@ -215,6 +248,10 @@ final class MobileWorkspace {
                 guard let self, self.generation == opening else { return }
                 self.fail("Connection closed; input was not retried")
             }
+        } catch is SessionNotRunning {
+            guard opening == generation else { return }
+            disconnect()
+            state = .notRunning
         } catch let error as SessionUnavailable {
             guard opening == generation else { return }
             disconnect()
@@ -263,7 +300,7 @@ final class MobileWorkspace {
             fail("Paused while the app is away")
         case .disconnected:
             reconnectOnForeground = true
-        case .unavailable, .ended: break
+        case .unavailable, .ended, .notRunning: break
         }
     }
 

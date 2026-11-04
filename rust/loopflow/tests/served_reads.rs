@@ -430,6 +430,10 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     };
     let before = processes(&database);
     assert_eq!(create.write().unwrap(), None);
+    let start = Write::SessionStart {
+        id: session.as_str().into(),
+    };
+    assert_eq!(start.write().unwrap(), None);
     assert_eq!(processes(&database), before);
     // A new Write fails to compile here until it is compared too.
     let (writes, arrangement) = match (Write::TaskReopen {
@@ -437,6 +441,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         issue: "INF-123".into(),
     }) {
         Write::TaskCreate { .. }
+        | Write::SessionStart { .. }
         | Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }

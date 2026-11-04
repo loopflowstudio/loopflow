@@ -43,8 +43,8 @@ revocation remains a separate Machine operation.
 
 RemoteMobileClient watches shared all-repository WorkViewPlans for actual Task
 primary Sessions. It rejects unavailable/truncated
-readings. A missing Session owner remains unavailable, with no implicit launch or
-provider resume. The adapter bridges the actual owner and consumes its existing
+readings. A missing Session owner offers explicit Open Session; navigation and
+reconnect never launch or resume a provider. The adapter bridges the actual owner and consumes its existing
 binary protocol; no mobile CLI or second serialized domain model is introduced.
 
 OwnerStream handles fragmented frames and nonce-qualified events, buffers snapshot
@@ -54,8 +54,9 @@ explicitly takes control. The request waits for its replacement screen, and repe
 taps cannot overlap takeover requests. The ordered bounded writer never retries
 raw input. Backgrounding disconnects; returning opens one fresh observer attachment to the
 same Session and preserves provider-owned drafts. A failed attempt leaves explicit
-Reconnect; no background retry loop or input replay runs. Missing/ended/mismatched Sessions have
-no misleading keyboard or reconnect action.
+Reconnect; no background retry loop or input replay runs. Missing/mismatched Sessions have
+no misleading keyboard or reconnect action. Ended Sessions retain their screen
+and offer explicit Open Session, without replaying any input.
 
 The observer viewport preserves the owner’s grid. Geometry control fits the phone;
 loss restores the owner’s geometry. Layout deduplicates resize traffic and theme
@@ -64,6 +65,13 @@ grant restores the software keyboard even if the earlier attachment hid it.
 System text size scales the terminal and accessory controls. Accessibility sizes
 stack the Session header; observer font changes preserve even alternate-screen
 cells without sending remote geometry changes.
+
+Open Session delegates the complete `lf resume --start-only --json` operation
+through the shared Machine command. It pins the recorded Session ID, reuses the
+existing startup lock and returns without viewer claims. An uncertain reply
+exposes passive Reconnect; no automatic command replay runs. A later explicit
+open can resume a provider that has ended, so this is not a durable idempotent
+receipt. Runs remain unavailable through the same shared admission policy.
 
 ## Next work and acceptance
 
@@ -502,3 +510,52 @@ Logs: `/tmp/mobile-repository-picker-tests.log`, `/tmp/mobile-repository-search-
 Captures: `demo-assets/mobile-repository-picker-{light,dark,large-text,empty,search}.png`.
 These are mounted Simulator views; physical-phone keyboard and VoiceOver review
 remain outstanding. Backend behavior is unchanged, so no carrier rerun was needed.
+
+### Explicitly continue a stopped Session — November 4, 04:47
+
+A saved conversation with no running owner now offers Open Session. An ended
+terminal retains its screen and offers the same action. The Machine delegates
+`resume --start-only --json` to the CLI, pins the resolved Session and uses the
+same startup exclusion as Desktop and Task creation. It reuses a live owner or
+resumes that conversation, then the phone attaches as an observer. Input and
+geometry still require Use keyboard. No CLI is installed on iOS, no provider
+runtime moved into the service, and no second lifecycle owner was introduced.
+The reply decodes the existing shared SessionRecord. CLI explanation now describes
+owner reuse without claiming a takeover; existing owners retain their harness.
+
+Lost replies leave passive Reconnect, never automatic command replay. Background,
+cancellation and leaving the screen fence late opening replies. A canceled opening
+cannot leave the screen stuck loading. This operation is intentionally not a
+creation-style durable receipt: another explicit open after the provider ended
+can resume it again. Missing identities, Runs and incompatible flags fail before
+launching. Ordinary `resume --json` retains its existing relay lifetime.
+
+Native terminal suite: 28 tests passed at 04:41, including explicit button action,
+no implicit opening/control, lost replies, duplicate taps and lifecycle cancellation.
+The final prominent-button captures and action test passed at 04:45; light/dark
+and accessibility3 screenshots were inspected and saved as
+`demo-assets/mobile-open-session-{light,dark,large-text}.png`. Shared Swift DTO and
+protocol suites passed 59 tests. CLI proofs cover concurrent starts sharing one
+provider, preserved viewer control/geometry, response loss followed by passive
+inspection, service exit without owner loss, Run refusal and normal relay behavior.
+Read-only explanation, Rust wire/DTO fixtures and app/CLI write parity pass.
+
+Actual host-Tailscale acceptance passed twice, including the full SessionRecord
+decoder at `Test-LoopflowiOS-2026.11.04_04-46-31--0800.xcresult`. The same recorded
+Session continued after its first provider ended and received native text once.
+Opening a live owner retained the newer viewer's 120×40 screen and input claim.
+The fixture counted exactly three intended provider starts: the initial Session,
+its explicit continuation, and a new Task. Each submitted line arrived once.
+The 32 MiB mounted rendering/slow-viewer proof also passed. The temporary Serve
+route was removed and the original empty configuration verified afterward.
+These use stand-in providers and Simulator UIKit input, not actual account history,
+physical keyboard/dictation or a manual Desktop interaction. Those acceptance
+items above remain open; no distribution, push or merge occurred.
+
+Logs: `/tmp/mobile-session-open-rust-final.log`, `/tmp/mobile-session-open-layouts.log`,
+`/tmp/mobile-session-open-polish.log`, `/tmp/mobile-session-open-shared-swift.log`,
+`/tmp/mobile-session-open-validation.log`, `/tmp/mobile-session-open-validation-rest.log`,
+`/tmp/mobile-session-open-tailscale-final.log`. Final CLI argument/unknown-identity
+checks passed in `/tmp/mobile-session-open-last.log`; eight shared Swift protocol
+tests passed in `/tmp/mobile-session-open-protocol-final.log`. Cargo fmt, all-target
+Clippy with warnings denied and diff whitespace checks pass.

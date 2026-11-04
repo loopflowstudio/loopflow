@@ -1700,7 +1700,7 @@ pub enum SessionCommand {
     List(SessionListArgs),
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Whatever holds the conversation, it continues here: a terminal showing it hands it over and says where it went; a provider client lf started stops; a dead one resumes from its history. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Whatever holds the conversation, it continues here: a terminal showing it hands it over and says where it went; a provider client lf started stops; a dead one resumes from its history. With nothing to resume, it starts one.\n\nWith --start-only, reuse or start its retained terminal and return without attaching. Existing viewers keep input and geometry; harness and account options apply only when starting an owner. A lost reply requires inspection before another explicit open.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID
@@ -1711,6 +1711,9 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
+        /// Start or reuse the terminal owner, then return without taking control
+        #[arg(long, conflicts_with_all = ["fork", "prepare", "message"])]
+        start_only: bool,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness

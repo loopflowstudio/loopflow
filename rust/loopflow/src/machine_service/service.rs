@@ -222,6 +222,7 @@ async fn operation(
                     "portfolio".into(),
                     "repository_path".into(),
                     "session_rename".into(),
+                    "session_start".into(),
                     "task_create".into(),
                     "owner_bridge".into(),
                     "session_owner".into(),
@@ -244,7 +245,7 @@ async fn operation(
         Operation::Command { change }
             if matches!(
                 change,
-                Write::SessionRename { .. } | Write::TaskCreate { .. }
+                Write::SessionRename { .. } | Write::TaskCreate { .. } | Write::SessionStart { .. }
             ) =>
         {
             let recovery = if matches!(change, Write::TaskCreate { .. }) {

@@ -458,7 +458,140 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(client.terminal.draft, "deliberate input")
     }
 
-    func testMissingOwnerRemainsUnavailableAfterBackgrounding() async throws {
+    func testSavedSessionOpensOnlyOnExplicitActionAndStaysAnObserver() async throws {
+        let client = TestClient()
+        client.ownerNotRunning = true
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        let task = try await client.workingTasks()[0]
+        await workspace.open(task)
+        workspace.suspend()
+        await workspace.restoreForegroundSession()
+        XCTAssertEqual(workspace.state, .notRunning)
+        XCTAssertTrue(client.starts.isEmpty)
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        XCTAssertThrowsError(try screen.inspect().find(button: "Use keyboard"))
+        try screen.inspect().find(button: "Open Session").tap()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.starts, [try XCTUnwrap(task.primarySession)])
+        XCTAssertEqual(client.transport.controlRequests, 0)
+        XCTAssertTrue(client.link.sizes.isEmpty)
+        workspace.send(Data("not until keyboard takeover".utf8))
+        XCTAssertTrue(client.terminal.draft.isEmpty)
+        workspace.requestControl()
+        await settle()
+        workspace.send(Data("continued conversation".utf8))
+        XCTAssertEqual(client.terminal.draft, "continued conversation")
+    }
+
+    func testSavedSessionOpeningLayouts() async throws {
+        bootstrapLoopflowApp()
+        for (name, theme, textSize) in [("light", ThemeDefinition.light, DynamicTypeSize.large),
+                                      ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
+            let client = TestClient()
+            client.ownerNotRunning = true
+            let workspace = MobileWorkspace(client: client)
+            defer { workspace.leave() }
+            let task = try await client.workingTasks()[0]
+            let view = NavigationStack { MobileSessionView(task: task, workspace: workspace, theme: theme) }
+                .environment(\.dynamicTypeSize, textSize)
+                .preferredColorScheme(name == "dark" ? .dark : .light)
+            let controller = UIHostingController(rootView: view)
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previous = scene.keyWindow
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; previous?.makeKey() }
+            controller.view.frame = window.bounds
+            controller.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(250))
+            XCTAssertEqual(workspace.state, .notRunning)
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "open-session-\(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testLostOpeningReplyReconnectsWithoutStartingAgain() async throws {
+        let client = TestClient()
+        client.ownerNotRunning = true
+        client.loseStartReply = true
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        await workspace.open(try await client.workingTasks()[0])
+        await workspace.startSession()
+        guard case .disconnected(let reason) = workspace.state else { return XCTFail("Opening must remain uncertain") }
+        XCTAssertTrue(reason.contains("Reconnect to inspect"))
+        XCTAssertFalse(workspace.canStartSession)
+        await workspace.startSession()
+        workspace.suspend()
+        await workspace.restoreForegroundSession()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.starts.count, 1)
+        XCTAssertEqual(client.transport.controlRequests, 0)
+    }
+
+    func testLateSessionOpeningCannotReopenAfterLeavingOrBackgrounding() async throws {
+        for leave in [false, true] {
+            let client = TestClient()
+            client.ownerNotRunning = true
+            client.delayNextStart = true
+            let workspace = MobileWorkspace(client: client)
+            defer { workspace.leave() }
+            await workspace.open(try await client.workingTasks()[0])
+            let opening = Task { await workspace.startSession() }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+            while client.releaseStart == nil && ContinuousClock.now < deadline { await Task.yield() }
+            let release = try XCTUnwrap(client.releaseStart)
+            await workspace.startSession() // A second tap cannot overlap the first.
+            if leave { workspace.leave() } else { workspace.suspend() }
+            release.resume()
+            await opening.value
+            XCTAssertEqual(client.starts.count, 1)
+            XCTAssertEqual(client.attachments.count, 1, "A late acknowledgement cannot attach")
+            await workspace.restoreForegroundSession()
+            await settle()
+            if leave {
+                XCTAssertNil(workspace.selected)
+                XCTAssertEqual(client.attachments.count, 1)
+            } else {
+                XCTAssertEqual(workspace.state, .viewing)
+                XCTAssertEqual(client.transport.controlRequests, 0)
+            }
+        }
+    }
+
+    func testCanceledOpeningOffersInspectionInsteadOfStayingLoading() async throws {
+        let client = TestClient()
+        client.ownerNotRunning = true
+        client.delayNextStart = true
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        await workspace.open(try await client.workingTasks()[0])
+        let opening = Task { await workspace.startSession() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while client.releaseStart == nil && ContinuousClock.now < deadline { await Task.yield() }
+        let release = try XCTUnwrap(client.releaseStart)
+        opening.cancel()
+        release.resume()
+        await opening.value
+        guard case .disconnected = workspace.state else { return XCTFail("Canceled opening needs inspection") }
+        XCTAssertEqual(client.attachments.count, 1)
+        await workspace.reconnect()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.starts.count, 1)
+    }
+
+    func testUnavailableSessionRemainsUnavailableAfterBackgrounding() async throws {
         let client = TestClient()
         client.ownerUnavailable = true
         let workspace = MobileWorkspace(client: client)
@@ -522,6 +655,10 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertThrowsError(try endedScreen.inspect().find(button: "Reconnect"))
         workspace.send(Data("no".utf8))
         XCTAssertTrue(client.terminal.draft.isEmpty)
+        try endedScreen.inspect().find(button: "Open Session").tap()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.starts.count, 1)
         let rows = try await FixtureClient().workingTasks()
         await workspace.open(rows[2])
         workspace.suspend()
@@ -577,21 +714,36 @@ final class MobileTerminalTests: XCTestCase {
 }
 
 @MainActor
-private final class TestClient: MobileClient {
+private final class TestClient: MobileClient, MobileSessionOpeningClient {
     let terminal = FixtureTerminal()
     var transport: TestAttachment!
     var link: FixtureAttachment { transport.link }
     var attachFailures = 0
     var attachmentSessionID: String?
     var ownerUnavailable = false
+    var ownerNotRunning = false
+    var starts: [String] = []
+    var loseStartReply = false
+    var delayNextStart = false
+    var releaseStart: CheckedContinuation<Void, Never>?
     var attachments: [String] = []
     var delayNextAttachment = false
     var releaseAttachment: CheckedContinuation<Void, Never>?
 
     func workingTasks() async throws -> [WorkViewPlan.Content] { try await FixtureClient().workingTasks() }
     func observeTasks() async throws -> any MobileTaskObservation { try await FixtureClient().observeTasks() }
+    func startSession(sessionID: String) async throws {
+        starts.append(sessionID)
+        ownerNotRunning = false
+        if delayNextStart {
+            delayNextStart = false
+            await withCheckedContinuation { releaseStart = $0 }
+        }
+        if loseStartReply { throw URLError(.networkConnectionLost) }
+    }
     func attach(sessionID: String) async throws -> any MobileAttachment {
         attachments.append(sessionID)
+        if ownerNotRunning { throw SessionNotRunning() }
         if ownerUnavailable { throw SessionUnavailable("No running owner") }
         if attachFailures > 0 {
             attachFailures -= 1

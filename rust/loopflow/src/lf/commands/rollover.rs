@@ -764,6 +764,14 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &owner.id, false)
             .unwrap();
+        let sql = |statement: &str, params: &[&dyn rusqlite::ToSql]| {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(statement, params)
+                .unwrap();
+        };
         let stays = |reason: &str| {
             let Disposition::Stays(stayed) = owner_disposition(&store, &owner.id).unwrap() else {
                 panic!("rollover must preserve {reason}");
@@ -784,12 +792,7 @@ mod tests {
             )
             .unwrap();
         stays("a live turn");
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("DELETE FROM session_activity", [])
-            .unwrap();
+        sql("DELETE FROM session_activity", &[]);
         assert!(matches!(
             owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Moves(ref sessions) if sessions == &[session.id.as_str().to_owned()]
@@ -808,44 +811,27 @@ mod tests {
             )
             .unwrap();
         stays("a live turn");
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("DELETE FROM session_activity", [])
-            .unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
-                [&session.id],
-            )
-            .unwrap();
-        }
+        sql("DELETE FROM session_activity", &[]);
+        sql(
+            "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+            &[&session.id],
+        );
         stays("a headless Run");
+        sql(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            &[&session.id],
+        );
         let graph = LfProcessId::new();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
-                [&session.id],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
-                rusqlite::params![graph, owner.id],
-            ).unwrap();
-            conn.execute(
-                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')", [&graph],
-            ).unwrap();
-        }
+        sql(
+            "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+            &[&graph, &owner.id],
+        );
+        sql(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+            &[&graph],
+        );
         stays("a running Graph");
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE processes SET completed_at=2 WHERE id=?1", [&graph])
-            .unwrap();
+        sql("UPDATE processes SET completed_at=2 WHERE id=?1", &[&graph]);
         assert!(matches!(
             owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Moves(_)

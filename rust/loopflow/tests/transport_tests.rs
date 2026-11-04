@@ -1822,6 +1822,41 @@ fn resume_json_returns_once_when_it_starts_the_owner() {
     fixture.ends(&owner);
 }
 
+/// A retired conversation reopened by id can still end: its owner is not held forever.
+#[test]
+fn a_reopened_retired_conversation_ends_after_its_grace() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 2s\n",
+    )
+    .unwrap();
+    let path = parented_provider(&fixture);
+    let binary = Path::new(env!("CARGO_BIN_EXE_lf"));
+    let first = fixture.owner(fixture.native(binary, &path, "initial"));
+    fixture.launches(1);
+    let mut viewer = fixture.viewer(&first, true);
+    viewer.input("done\n");
+    viewer.finish();
+    fixture.ends(&first);
+    let sql = fixture.sql();
+    let (session, retired): (String, Option<i64>) = sql
+        .query_row(
+            "SELECT id,completed_at FROM agent_sessions WHERE transport_lf_process_id=?1",
+            [&first],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(retired.is_some(), "the exited conversation was not retired");
+
+    // A terminal owner, as a person's `lf resume` gets; nobody views it.
+    let mut reopened = fixture.serve(true, &[binary.to_str().unwrap(), "resume", &session]);
+    reopened.env("PATH", &path);
+    let owner = fixture.owner(reopened);
+    fixture.launches(2);
+    fixture.ends(&owner);
+}
+
 #[test]
 fn resume_json_returns_after_relay_and_viewer_takeover() {
     let fixture = Fixture::new();
@@ -2331,7 +2366,7 @@ while True:
         ("submitted", Path::new(env!("CARGO_BIN_EXE_lf"))),
     ] {
         let mut command = fixture.native(binary, &path, "initial");
-        command.env("EDITOR_CASE", name);
+        command.env("EDITOR_CASE", name).env("RUST_LOG", "warn");
         let owner = fixture.owner(command);
         let mut viewer = fixture.viewer(&owner, true);
         until_out(&mut viewer, "EDITOR_READY");
@@ -2352,6 +2387,15 @@ while True:
     assert!(
         fixture.running(&owners[0]),
         "an unsent draft ended after its grace"
+    );
+    // The grace restarts while input holds the owner; its reason stays one line.
+    std::thread::sleep(Duration::from_secs(5));
+    let log = std::fs::read_to_string(fixture.home.path().join("logs/transport.log")).unwrap();
+    assert_eq!(
+        log.matches("retaining detached Session past its limit: native input")
+            .count(),
+        1,
+        "{log}"
     );
     std::fs::remove_file(&removable).unwrap();
     std::thread::sleep(Duration::from_secs(4));

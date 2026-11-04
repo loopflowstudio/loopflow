@@ -545,7 +545,8 @@ impl SqliteStore {
         self.with_session_attachment(session, attachment, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
+                // An owner reopens a retired conversation; its next exit retires it again.
+                "UPDATE agent_sessions SET transport_lf_process_id=?2,completed_at=NULL WHERE id=?1",
                 params![session, owner.as_str()],
             )?;
             Ok(())

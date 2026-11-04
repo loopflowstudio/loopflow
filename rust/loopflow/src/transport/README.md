@@ -57,9 +57,10 @@ path to `logs/lf.log`; attached viewers receive the reason and run the resume
 command through the lf entry. The viewer restores its terminal before running
 that command and preserves its exit status or launch error. Failed store
 judgments retry at the next poll.
-Retention logs name native input, a live turn, running Graph, headless Run,
-missing Session or command output. Repeated unchanged policy errors and retention
-reasons produce one warning until the condition changes. Activity cannot accelerate
+An owner held past its detached limit or its replaced executable logs why: native
+input, a live turn, running Graph, headless Run, missing Session or, for the
+executable, command output. Repeated unchanged policy errors and retention reasons
+produce one warning until the condition changes. Activity cannot accelerate
 the two-second policy poll; it launches no helper process.
 Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.

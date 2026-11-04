@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-725 — What ends a demo?</title>
+<title>LOO-725 — Who proves it, and where?</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.6; }
   body { margin: 0 auto; max-width: 48rem; padding: 2rem 1.25rem 4rem; }
@@ -20,80 +20,86 @@
   a { color: light-dark(#195a9b, #9bc9ff); }
 </style>
 <body>
-<header>LOO-725 · concept-review · 2026-11-04<br>
-Built from <a href="loo-725.md">scratch/loo-725.md</a>, <code>builtins/task/skill/demo.md</code>,
-<code>transport/lifetime.rs</code>, <code>transport/input.rs</code>, LOO-722’s
-<code>scripts/disk_cleanup.py</code> and its comments <code>2693d72d</code>, <code>9ad44189</code>
-and <code>4f0b98a7</code>. Rust source paths are beneath <code>rust/loopflow/src/</code>.</header>
+<header>
+  <p>LOO-725 · concept-review · 2026-11-04<br>
+  Built from <code>scratch/loo-725.md</code>, <code>scratch/questions.md</code>,
+  <code>builtins/task/skill/demo.md</code>, <code>builtins/task/graph/{auto,code,pursue}.yaml</code>,
+  <code>.lf/skills/disk-cleanup.md</code>, LOO-722's <code>scripts/disk_cleanup.py</code> and
+  Jack Heart's brief. Rust source paths are beneath <code>rust/loopflow/src/</code>.</p>
+</header>
 
-<h1>What ends a demo?</h1>
-<p class="decision"><strong>Your decisions already answer this; check the reading.</strong>
-Earlier reviews held two questions open. Your brief and <code>2693d72d</code> exclude one option
-of each, so the plan now moves to one prose repair of <code>demo.md</code>. No Rust changes.
-This is a reading of what you said, not a decision you made. Overturn it in demo review if it is wrong.</p>
-<blockquote>Pending drafts or quiet-but-live demo owners must not silently retain eligible disposable
-output forever; preserve durable conversation history and source.
-<small>— <code>2693d72d</code>, recording Jack Heart’s cleanup policy</small></blockquote>
-<p>The branch’s <code>demo.md</code> currently says the opposite: never mark a history-bearing root,
-and “retained or unresolved input keeps its owner and complete fixture.”</p>
+<h1>Who proves it, and where?</h1>
+
+<div class="decision">
+  <p><strong>The plan waits for a demo review this Task will never reach.</strong> Jack Heart's
+  brief asked for the <code>auto</code> workflow, which goes from request to merge with no demo step.
+  The plan is revised so each obligation has an owner that exists. This headless run asks
+  nothing here and continues; the questions below ride to LOO-722's demo.</p>
+</div>
+
+<blockquote>
+  # Request to merged PR without a person: build and publish, then deliver.
+  <small>— <code>task/graph/auto.yaml</code>. Only <code>code.yaml</code> adds
+  <code>interactive: demo</code> and <code>interactive: verify</code>.</small>
+</blockquote>
+
+<p>The Rust and Python work holds up, and nothing in this review changes it. The gap is in the
+lifecycle around it: <code>demo.md</code>'s two-root release has never run, every fixture is
+source-level, and <code>lf land</code> clears the plan and this page at merge.</p>
 
 <h2>Actions → concepts → APIs</h2>
 <div class="flow"><strong>Type while storage is busy</strong><br>
-Queued bytes → <code>PendingInput</code> → <code>try_record_owner_input</code> → native editor.<br>
-<small>Existing on this branch. Retry after 100 ms; retain before delivery; control stays responsive.</small></div>
+  Queued bytes → <code>PendingInput</code> → <code>try_record_owner_input</code> → native editor.<br>
+  <small>Existing on this branch. Fixture-proven.</small></div>
 <div class="flow"><strong>Detach, rebuild, return</strong><br>
-Same Session and live editor owner → <code>lf resume SESSION</code> → <code>owner_retention</code>.<br>
-<small>Existing on this branch. Protected work keeps its owner even if attachment fails; usable
-installed recovery remains unproved.</small></div>
-<div class="flow"><strong>Finish the demo</strong><br>
-Record each draft and request → release the runtime root → verified owner stop → final death recheck → reclaim.<br>
-<small>Proposed. Replaces “until disposition”, which let unsettled input hold a root forever.</small></div>
-<div class="flow"><strong>Return after teardown</strong><br>
-Durable Session and provider history → <code>lf resume SESSION</code> in the durable private Machine.<br>
-<small>Required: no replay. Saved history cannot reconstruct a dead editor.</small></div>
+  Same Session and live owner → <code>lf resume SESSION</code> → <code>owner_retention</code>.<br>
+  <small>Existing on this branch. Fixture-proven; installed path unproved.</small></div>
+<div class="flow"><strong>Finish a demo with a person present</strong><br>
+  Settled or given-up answer → release → verified stop → reclaim the runtime root.<br>
+  <small>Existing as instructions in <code>demo.md</code>. Never run.</small></div>
+<div class="flow"><strong>Finish a headless demo</strong><br>
+  Before: no person, so no answer, so “both roots stay”.<br>
+  After: the run settles input it made, and tears down when it ends.<br>
+  <small>Proposed. A person's input still needs a person's answer.</small></div>
+<div class="flow"><strong>Choose where history lives</strong><br>
+  Before: “outside rebuildable output”, which permits <code>/private/tmp</code>, where the incident's
+  fixtures began and macOS purges.<br>
+  After: neither root is temporary; this Machine uses <code>~/.lf-machine/demo-history/&lt;id&gt;</code>.<br>
+  <small>Proposed. LOO-722's cleaner iterates only <code>~/.lf-machine/demos</code>.</small></div>
 
-<h2>The directory boundary</h2>
-<p><strong>Existing on this branch:</strong> one root, permanent because it holds history.</p>
-<pre>private fixture/
-  copied runtime
-  private Machine + provider history
-  repository</pre>
-<p><strong>Proposed:</strong> two roots, created before launch so no absolute path moves.</p>
-<pre>durable root/                runtime root/
-  private Machine              copied app or CLI
-  provider history             generated output
-  fixture repository           marker, written at release
-
-kept                         reclaimed after owners stop</pre>
+<h2>Who owns each proof</h2>
+<pre>Before                        After (proposed)
+demo review                   this Task, headless, before publish
+  lifecycle, CPU/FD/errors      lifecycle, CPU/FD/errors
+LOO-722 plus demo             LOO-722's code-graph demo, Jack Heart present
+  live, interrupted cleanup     live, interrupted cleanup, reparented provider
+demo review                   the same demo
+  overturn the reading          overturn the reading, abandoned-review age
+delivery verification         LOO-723's rollout under b15070d6
+  installed resume              installed resume</pre>
 
 <h2>Normal path, failure, recovery</h2>
-<p><strong>Settled input.</strong> Review ends with nothing pending. Stop verified owners, confirm exit,
-remove the runtime root, reopen the same history.</p>
-<p><strong>Unsettled input.</strong> The demo records it and releases the root but stops nothing, because
-the 24h minimum for owner termination still stands. On your Machine, writing the marker restarts the
-cleaner’s newest-write window; a demo with an unknown outcome waits seven days. After that the draft
-may be lost with its owner. History survives.</p>
-<p><strong>Interrupted teardown.</strong> The runtime root stays, and the note names survivors and the
-next action. Nothing is deleted underneath a surviving owner.</p>
-<p><strong>Abandoned review.</strong> Nothing releases the root. Its runtime stays valid and the cleaner
-reports it retained. That is visible, and it is not the incident’s path-loss condition, but it does not
-reclaim anything.</p>
-<p>Idle, replaced and superseded owners keep LOO-709’s protection. Only authorized cleanup of a
-released root ends a draft-holding owner. The marker stays out of the builtin skill: the cleaner is
-machine-local, so repository guidance under <code>.lf/</code> names it.</p>
+<p><strong>Normal.</strong> The headless walkthrough passes, the PR states its limits, the Task lands.
+<code>end</code> requests completion while LOO-722 and LOO-723 still hold combined and installed proof.
+The PR says so; merge claims neither.</p>
+<p><strong>Failure.</strong> The walkthrough fails. That is implement work, not a publish caveat.</p>
+<p><strong>Recovery.</strong> Jack Heart overturns the reading after merge. The change is prose in two
+files, and a marker is written only on a person's answer, so nothing has been deleted by then.</p>
+<p><strong>Counterexample.</strong> LOO-722 changes graph or lands without its demo. The reading then has
+no review point except the PR. <code>scratch/questions.md</code> records that assumption.</p>
 
-<h2>Questions for demo review</h2>
-<p>This headless run requests no reply and continues on the reading above.</p>
+<h2>Questions for LOO-722's demo</h2>
+<p>This headless run requests no reply and continues on the proposed readings.</p>
 <ol>
-  <li><strong>Where does completed demo history live?</strong><br>
-  <strong>1a.</strong> Stable durable root outside the disposable runtime (proposed).<br>
-  <strong>1b.</strong> Overturn: keep whole fixtures until explicit teardown.</li>
-  <li><strong>Can unsettled input hold a released root?</strong><br>
-  <strong>2a.</strong> No: record it, release, and let the 24h-minimum cleanup end its owner (proposed).<br>
-  <strong>2b.</strong> Overturn: input holds the root until someone disposes of it.</li>
-  <li><strong>Should an abandoned review eventually release itself?</strong><br>
-  <strong>3a.</strong> No: it stays retained and reported (proposed).<br>
-  <strong>3b.</strong> Yes: name the age at which it does.</li>
+  <li>Where does completed demo history live?
+    <br>1a. Stable durable root outside the disposable runtime (proposed).
+    <br>1b. Overturn: keep whole fixtures until explicit teardown.</li>
+  <li>Can unsettled input hold a released root?
+    <br>2a. No: record it, release, and let the 24h-minimum cleanup end its owner (proposed).
+    <br>2b. Overturn: input holds the root until someone disposes of it.</li>
+  <li>Should an abandoned review eventually release itself?
+    <br>3a. No: it stays retained and reported (current behavior).
+    <br>3b. Yes: name the age at which it does.</li>
 </ol>
 </body>
 </html>

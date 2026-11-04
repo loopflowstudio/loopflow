@@ -94,24 +94,23 @@ entry-point lesson separates source/publication from installed behavior.
 
 ## Demo runtime lifetime (LOO-725, 2026-11-04)
 
-Jack Heart requested recurrence prevention: stopping six demo owners recovered
+Jack Heart requested recurrence prevention: stopping six demo owners restored
 syspolicyd CPU; service restart failed. Their combined contribution is established,
-not the requesting hook/thread or fixture mover. One image was unchanged; a
-moved-WAL probe accepted writes. Neither condition explains the incident alone.
+not the requesting hook/thread or mover. One image was unchanged and a moved
+store accepted writes; neither explains it alone.
 
-Demos copy complete runtimes outside build output and select private Home/binary
-for children. Draft/request disposition precedes teardown: saved history cannot
-recreate a dead editor. Retained input needs its owner and valid files. Jack prefers
-stopping verified owners before reclaiming eligible output; LOO-722 owns cleanup.
-Its marker assumes evidence elsewhere; history-bearing roots remain unmarked.
-Separating history from disposable runtime remains a demo/review decision.
+Demos copy runtimes outside build and temporary output and select private
+Home/binary for children. A durable root keeps history; only the runtime root is
+markable. A person's settled/given-up answer or a headless run's end releases it;
+saved history cannot recreate a dead editor. Jack prefers stopping verified owners
+before reclaiming eligible output; LOO-722 owns cleanup. This reads his brief and
+`2693d72d`; he can overturn it at LOO-722's demo.
 
 LOO-724's nonblocking queue fixes store-induced PTY spin/control stalls, retaining
-before delivery with other writers' timeouts unchanged. Policy operations retry
-without activity; successes clear only their own errors. Fixtures prove recovery,
-not cause. Security pressure stops
-later suites; product failures do not. Cleanup, rebuild and installed acceptance
-remain unproved.
+before delivery. Fixtures prove recovery, not cause. Security pressure stops later
+suites; product failures do not. A stand-in walkthrough passed rebuild, store loss
+and reopen; owner binding reopens retired Sessions. Combined cleanup and installed
+acceptance stay open.
 
 ## Session viewer wire (LOO-712, 2026-11-02)
 

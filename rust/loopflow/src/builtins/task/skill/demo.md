@@ -47,8 +47,9 @@ Discuss the feedback, revised artifact paths and remaining work in the ongoing
 conversation. Save their exact paths and a short takeaway with the review evidence.
 The caller chooses further work; preserve their Session and Graph.
 
-For disposable demos, create two private roots outside rebuildable output before
-launch, using any location or release step the repository's cleanup guidance names.
+For disposable demos, create two private roots before launch, outside rebuildable
+output and temporary directories, which the system purges. Use any location or release
+step the repository's cleanup guidance names.
 The durable root holds the private Machine, provider history and fixture repository.
 The runtime root holds the complete copied runtime (whole app bundle when applicable)
 and generated output. Absolute paths are fixed from the start; nothing is relocated.
@@ -57,15 +58,19 @@ launch, fixture commands and teardown. Record both roots, Session, exact owner
 identities, teardown command and private-Machine history reopening instructions in
 the demo note. Keep both roots intact through rebuilds while owners live.
 
-When review ends, record each draft and pending request as settled or given up. The
-person present answers this on the demo page; that answer is the release. Closing a
-viewer, age or socket failure releases nothing, and without an answer both roots stay.
-If all input is settled, stop only verified demo owners through existing
-Session/process controls, confirm exit and remove the runtime root. If any input is
-given up, leave owners running and record the release and the input at risk: saved
-history cannot recreate a dead editor. Never delete durable history. If teardown is
-incomplete, keep the runtime root and record surviving owners and the next action.
-Use no competing cleaner or process-name signaling.
+When review ends, record each draft and pending request as settled or given up. A
+person's input needs that person's answer, given on the demo page; that answer is the
+release. Closing a viewer, age or socket failure releases nothing, and without an
+answer both roots stay. A headless run settles the input it made itself when it ends,
+and that ending is its release.
+If all input is settled, end only verified demo owners, confirm exit and remove the
+runtime root. An owner whose draft was edited stays running even after that draft is
+sent, and no command stops a Session: `lf resume` it, exit its provider, and signal
+only the verified owner PID if it will not exit. If any input is given up, leave
+owners running and record the release and the input at risk: saved history cannot
+recreate a dead editor. Never delete durable history. If teardown is incomplete, keep
+the runtime root and record surviving owners and the next action. Use no competing
+cleaner or process-name signaling.
 
 On a headless surface, run the same demonstration autonomously. If required
 product judgment or absent-user action prevents the proof, explain the exact

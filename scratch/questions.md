@@ -9,9 +9,20 @@ cause; the moved-WAL counterexample and causal limits remain in
 Demo cleanup is no longer held open. Jack Heart's brief and LOO-722 comment
 `2693d72d` exclude whole-root retention and draft-held roots, so the plan now
 separates durable history from runtime and treats review's end as release. This is
-a reading of his decisions, not a new decision by him; his demo review can overturn
-it. See [the plan](loo-725.md#demo-cleanup-decision--settled-by-accepted-decisions-2026-11-04).
+a reading of his decisions, not a new decision by him; he can overturn it. See
+[the plan](loo-725.md#demo-cleanup-decision--settled-by-accepted-decisions-2026-11-04).
 An abandoned review releases nothing, and its root stays reported as retained.
+
+This Task's `auto` graph has no demo step. The reading and the abandoned-review
+question reach him through the PR body and LOO-722's interactive demo, assuming that
+Task keeps its `code` graph. Installed acceptance is assumed to belong to LOO-723's
+authorized rollout. See [the owners](loo-725.md#obligations-and-owners--concept-review-2026-11-04).
+
+The walkthrough found an edited draft stays `Uncertain` after it is sent, so a settled
+conversation holds its owner until the provider exits. That is LOO-709's stated
+contract and Jack Heart selected editable drafts, so it stays; the PR raises it, and
+`demo.md` teaches the teardown. Clearing `completed_at` at owner bind is the simpler
+choice over narrowing `MissingSession`, which `attaches` depends on.
 
 Marker guidance lives in `.lf/skills/disk-cleanup.md`, the only live cleanup guidance
 under `.lf/`. A demo run does not load that skill, so `demo.md` carries one generic

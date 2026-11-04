@@ -3608,6 +3608,16 @@ fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
         assert_eq!(primary["cwd"], before["cwd"]);
         assert!(primary["primary_scope"].is_null());
         assert_eq!(primary["task_primary"], true);
+        assert_eq!(primary["workspace"], before["workspace"]);
+        assert!(!primary["workspace"].is_null());
+        let sessions = fixture.json(&["desktop", "sessions", "--all", "--json"]);
+        let visible = sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["id"] == session)
+            .unwrap();
+        assert_eq!(visible["workspace"], before["workspace"]);
         // Retrying from the selected conversation keeps the Task identity.
         assert_eq!(
             fixture.json(&[

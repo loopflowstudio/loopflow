@@ -211,3 +211,10 @@ recovery, including a surviving host during disconnect and another instance
 returning during cleanup. Existing focused results are not installed acceptance.
 
 Check: November 4 realignment — `git diff --check` and `lf context` passed; documentation only, reusing compression's `cargo test -p loopflow --lib retirement` (18 passed) and `scripts/test_desktop.sh --jobs 2 --filter WorkspaceRetentionTests` (11 passed, Desktop built). Earlier exact SSH (`--ignored`), DTO and migration checks passed; SDK/linker warnings remain. Broader checks belong to gate; installed proof belongs to demo.
+
+Review publication check, November 4: `lf sync` completed without conflicts onto
+`ac8e088f5f`. At `4edeaf8f4e`, `cargo test -p loopflow --lib retirement` passed
+all 18 tests; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+and `git diff --check origin/main...HEAD` passed. The test linker reported the
+existing large unwind-section warning. This pass changes no runtime code and
+adds no installed acceptance; the gate/demo boundaries above still apply.

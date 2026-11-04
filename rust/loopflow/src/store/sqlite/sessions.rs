@@ -22,6 +22,18 @@ pub(crate) enum OwnerRetention {
     LiveTurn,
 }
 
+impl std::fmt::Display for OwnerRetention {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            OwnerRetention::NativeInput => "native input",
+            OwnerRetention::RunningGraph => "a running Graph",
+            OwnerRetention::MissingSession => "a missing Session",
+            OwnerRetention::HeadlessRun => "a headless Run",
+            OwnerRetention::LiveTurn => "a live turn",
+        })
+    }
+}
+
 /// The Graph whose process recorded, as a step, the Process that captured session
 /// `s`'s current input. Sessions carry no Graph column of their own.
 macro_rules! session_graph {

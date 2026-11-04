@@ -397,7 +397,7 @@ fn owner_disposition(store: &SqliteStore, owner: &LfProcessId) -> Result<Disposi
     }
     if let Some(reason) = store.owner_retention(owner)? {
         return Ok(Disposition::Stays(format!(
-            "{reason:?} holds the conversation"
+            "{reason} holds the conversation"
         )));
     }
     for session in &sessions {
@@ -825,7 +825,7 @@ mod tests {
         let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
             panic!("rollover must preserve a headless Run");
         };
-        assert_eq!(reason, "HeadlessRun holds the conversation");
+        assert_eq!(reason, "a headless Run holds the conversation");
         let graph = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -845,7 +845,7 @@ mod tests {
         let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
             panic!("rollover must preserve a running Graph");
         };
-        assert_eq!(reason, "RunningGraph holds the conversation");
+        assert_eq!(reason, "a running Graph holds the conversation");
         store
             .conn
             .lock()
@@ -862,7 +862,7 @@ mod tests {
             let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
                 panic!("rollover must preserve native editor input");
             };
-            assert_eq!(reason, "NativeInput holds the conversation");
+            assert_eq!(reason, "native input holds the conversation");
         }
     }
 }

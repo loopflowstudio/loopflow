@@ -34,29 +34,33 @@
     Built from <a href="loo-724.md">scratch/loo-724.md</a>,
     <code>ops/human_session.rs</code>, <code>lf/commands/rollover.rs</code>,
     <code>store/sqlite/{sessions,native_input}.rs</code>,
-    <code>transport/{README.md,input.rs}</code> and <code>tests/transport_tests.rs</code>.
-    API names below also reflect LOO-725's existing retention work.
+    <code>transport/{README.md,input.rs,lifetime.rs}</code>, <code>tests/transport_tests.rs</code>,
+    <code>docs/sessions.md</code> and builtin <code>task/skill/{demo,verify}.md</code>.
   </header>
 
   <h1>Return to the same conversation, with its work intact.</h1>
-  <p class="decision"><strong>Review decision: continue repair under the accepted preservation contract.</strong>
-    The earlier discard-or-wait question is premature. Neither reported freeze is established as permanent.
-    Jack Heart already required drafts and pending requests to survive.</p>
-  <p><small>Design changed; implementation and configured recovery remain open. This headless review requests no response or live handoff.</small></p>
+  <p class="decision"><strong>Review decision: make the public resume promise match the preservation contract.</strong>
+    Jack Heart already required drafts and pending requests to survive. Resume may report an attachment failure
+    while keeping their provider alive; the guide now describes that outcome.</p>
+  <p><small>Public wording implemented. No open product choice.
+    Configured recovery remains unverified. This headless review requests no response or live handoff.</small></p>
 
   <div class="mismatch">
     <p><strong>The consequential mismatch</strong></p>
-    <p>An unreachable owner was treated as replaceable. Saved history can reopen a conversation;
-      it cannot reconstruct the native editor or an unanswered provider request.</p>
+    <p>The guide previously promised resume “always gets you back.” The branch preserves an unreachable protected owner
+      and can fail to attach. Saved history can reopen a conversation; it cannot reconstruct the native
+      editor or an unanswered provider request. Preservation and successful recovery need separate evidence.</p>
   </div>
 
-  <h2>Before → branch behavior → next direction</h2>
+  <h2>Before → branch behavior</h2>
   <p><strong>Before:</strong> resume or rollover could end a superseded protected owner when its socket failed.</p>
   <p><strong>Existing branch:</strong> protected work retains its provider even when attachment fails.
     A busy store pauses input delivery while control remains responsive.</p>
-  <p><strong>Proposed integration:</strong> use LOO-725's single <code>owner_retention</code> judgment across resume,
-    rollover and retirement. Replace <code>owner_waits_for_person</code>: an approval can wait for a person
-    while still requiring its provider to stay. No new Session state or recovery mode.</p>
+  <p><strong>Implemented integration:</strong> resume, rollover and retirement use the single
+    <code>owner_retention</code> judgment. <code>owner_waits_for_person</code> is deleted.
+    An approval can wait for a person while still requiring its provider to stay.</p>
+  <p>The <a href="../docs/sessions.md#come-back-to-a-conversation">Session guide</a> replaces the
+    unconditional resume promise and client-stop row. No new Session state, schema, recovery mode or global skill rule.</p>
 
   <h2>Actions → concepts → APIs</h2>
   <div class="route">
@@ -72,13 +76,11 @@
   <div class="route">
     <p><strong>Upgrade and continue</strong> → retention, then safe replacement</p>
     <p><code>owner_retention → existing launch lock → saved-thread continuation</code></p>
-    <p class="label">Proposed shared judgment. Protected providers stay; safe replacement changes AgentProcess and fence,
+    <p class="label">Implemented shared judgment. Protected providers stay; safe replacement changes AgentProcess and fence,
       preserving Session/native identity. Persistent helper survivors still prevent replacement.</p>
   </div>
 
-  <h2>Proposed usage copy</h2>
-  <p><code>lf resume SESSION</code> — return to the same conversation. If attachment fails,
-    Loopflow leaves pending work intact and reports the failure. Returning does not resend input.</p>
+  <h2>Remaining verification</h2>
   <p>For this Task's demo and verification: complete a turn in the affected Session, return through
     the configured path, and complete another. Check retained drafts, requests and history.
     Existing skills already require real-path proof; no global instruction change is needed.</p>
@@ -86,8 +88,10 @@
   <h2>What could disprove recovery?</h2>
   <p>LOO-718 answered control while input appeared frozen. A successful handshake is therefore insufficient.
     The paused-owner fixture proves temporary-outage preservation, not repair of that freeze.
-    LOO-582's timeout also remains unexplained. Next: correlate a coordinated input attempt through
-    viewer, owner and provider; repair the demonstrated failure without selecting the paused goal or replaying input.</p>
+    LOO-582's later completed turns do not explain its earlier timeout or prove this build's recovery.
+    The composed fixture uses candidate executables, not a released older reader. Next: exercise that released
+    frontier and correlate a coordinated input attempt through viewer, owner and provider; repair the demonstrated
+    failure without selecting the paused goal or replaying input.</p>
 
   <h2>Review questions and disposition</h2>
   <ol>

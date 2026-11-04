@@ -213,65 +213,60 @@ fn watch(
         }
         next_poll = Instant::now() + POLL;
         if store.is_none() {
-            match crate::journal::process_ledger() {
-                Ok(opened) => {
-                    store = Some(opened);
-                    store_failure = None;
-                }
-                Err(error) => {
-                    failure(&mut store_failure, owner, "open Session store", &error);
-                }
-            }
+            store = report_result(
+                &mut store_failure,
+                owner,
+                "open Session store",
+                crate::journal::process_ledger(),
+            );
         }
         let Some(store) = store.as_ref() else {
             continue;
         };
         let viewed = grace.activity.viewed;
-        if recorded_viewed != Some(viewed) {
-            match store.record_owner_viewers(owner, viewed) {
-                Ok(()) => {
-                    recorded_viewed = Some(viewed);
-                    viewer_failure = None;
-                }
-                Err(error) => {
-                    failure(&mut viewer_failure, owner, "record Session viewers", &error);
-                }
-            }
+        if recorded_viewed != Some(viewed)
+            && report_result(
+                &mut viewer_failure,
+                owner,
+                "record Session viewers",
+                store.record_owner_viewers(owner, viewed),
+            )
+            .is_some()
+        {
+            recorded_viewed = Some(viewed);
         }
         if terminal && grace.limit.is_none() {
-            match store.process(owner) {
-                Ok(process) => {
-                    grace.limit = process.map(|process| limit(process.repo.as_deref()));
-                    repository_failure = None;
-                }
-                Err(error) => {
-                    failure(
-                        &mut repository_failure,
-                        owner,
-                        "load Session repository",
-                        &error,
-                    );
-                }
-            }
+            grace.limit = report_result(
+                &mut repository_failure,
+                owner,
+                "load Session repository",
+                store.process(owner),
+            )
+            .flatten()
+            .map(|process| limit(process.repo.as_deref()));
         }
         let now = SystemTime::now();
-        let change = executable.and_then(|executable| {
-            executable
-                .change()
-                .map(|change| (change, executable.path.clone()))
-        });
+        let change = executable
+            .and_then(|executable| executable.change().map(|change| (change, &executable.path)));
         // Native turns may leave only terminal output. Viewers never prolong a
         // vanished build, so their activity cannot reset this quiet interval.
         let quiet = match change {
             Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
             None => grace.expired(now),
         };
+        let mut retained = |reason: &dyn std::fmt::Display| match change {
+            Some((change, path)) => warn_changed(
+                &mut decision,
+                owner,
+                format!(
+                    "retaining Session whose lf at {} was {change}: {reason}",
+                    path.display()
+                ),
+            ),
+            None => decision = None,
+        };
         if !quiet {
-            if let Some((change, path)) = &change {
-                retention(&mut decision, owner, *change, path, "command output".into());
-            } else {
-                decision = None;
-            }
+            retained(&"command output");
             continue;
         }
         match store.owner_retention(owner) {
@@ -279,20 +274,19 @@ fn watch(
             // A turn or a running Graph holds it: activity, and the grace
             // runs again from here.
             Ok(Some(reason)) => {
-                if let Some((change, path)) = &change {
-                    retention(&mut decision, owner, *change, path, format!("{reason:?}"));
-                }
+                retained(&reason);
                 grace.quiet_since = now;
                 continue;
             }
             Err(error) => {
-                failure(&mut decision, owner, "judge Session retention", &error);
+                let message = format!("cannot judge Session retention; retrying: {error}");
+                warn_changed(&mut decision, owner, message);
                 continue;
             }
         }
         if end
             .send(Ending {
-                change,
+                change: change.map(|(change, path)| (change, path.clone())),
                 activity: grace.activity,
             })
             .is_err()
@@ -305,29 +299,30 @@ fn watch(
     }
 }
 
-pub(super) fn failure(
+/// Keep each operation's warning until that operation succeeds. Other policy
+/// work can succeed during an outage without making the same error log again.
+pub(super) fn report_result<T>(
     previous: &mut Option<String>,
     owner: &LfProcessId,
     operation: &str,
-    error: &impl std::fmt::Display,
-) {
-    let message = format!("{operation}: {error}");
-    if previous.as_ref() != Some(&message) {
-        tracing::warn!(%owner, %message, "Session policy failed; retrying at the next poll");
-        *previous = Some(message);
-    }
+    result: Result<T, impl std::fmt::Display>,
+) -> Option<T> {
+    result
+        .inspect(|_| *previous = None)
+        .inspect_err(|error| {
+            warn_changed(
+                previous,
+                owner,
+                format!("cannot {operation}; retrying: {error}"),
+            );
+        })
+        .ok()
 }
 
-fn retention(
-    previous: &mut Option<String>,
-    owner: &LfProcessId,
-    change: Change,
-    path: &Path,
-    reason: String,
-) {
-    let message = format!("{change}: {reason}");
+/// One line per changed condition, however often a poll or retry repeats it.
+pub(super) fn warn_changed(previous: &mut Option<String>, owner: &LfProcessId, message: String) {
     if previous.as_ref() != Some(&message) {
-        tracing::warn!(%owner, ?path, %change, %reason, "retaining Session with obsolete lf");
+        tracing::warn!(%owner, "{message}");
         *previous = Some(message);
     }
 }

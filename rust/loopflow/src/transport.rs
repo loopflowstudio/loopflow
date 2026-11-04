@@ -1300,16 +1300,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         #[cfg(test)]
         lifetime_tests::before_judgment();
         if let Ok(ending) = ending.try_recv() {
-            let event = match ending.confirm(&id, observed, !pending_input.is_empty()) {
-                Ok(event) => {
-                    ending_failure = None;
-                    event
-                }
-                Err(error) => {
-                    lifetime::failure(&mut ending_failure, &id, "confirm Session ending", &error);
-                    None
-                }
-            };
+            let event = lifetime::report_result(
+                &mut ending_failure,
+                &id,
+                "confirm Session ending",
+                ending.confirm(&id, observed, !pending_input.is_empty()),
+            )
+            .flatten();
             if let Some(event) = event {
                 end_viewers(&mut viewers, event);
                 snapshot::leave(&id, &output);

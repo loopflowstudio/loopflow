@@ -4104,8 +4104,8 @@ fn ensure_commit_local(repo: &Path, revision: &str, lock: &ReleaseLock) -> OpsRe
     )))
 }
 
-fn commit_exists_locally(repo: &Path, sha: &str) -> bool {
-    run_output(repo, "git", &["cat-file", "-e", sha])
+fn commit_exists_locally(repo: &Path, revision: &str) -> bool {
+    run_output(repo, "git", &["cat-file", "-e", revision])
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
@@ -4328,8 +4328,6 @@ impl Regression {
     }
 }
 
-const REGRESSED_IN_LABEL: &str = "regressed-in:";
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhRegressionIssue {
@@ -4362,10 +4360,7 @@ impl GhRegressionIssue {
 fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
     let mut regressions = Vec::new();
     for label in labels(repo)? {
-        let Some(version) = label
-            .strip_prefix(REGRESSED_IN_LABEL)
-            .and_then(parse_version)
-        else {
+        let Some(version) = label.strip_prefix("regressed-in:").and_then(parse_version) else {
             continue;
         };
         let json = run_stdout(

@@ -1493,12 +1493,16 @@ pub fn task_create(
             tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
         }
 
-        let source = promotion::resolve_source(&store, repo, &promotion).await?;
+        let source = if promotion.session.is_some() || promotion.worktree.is_some() {
+            promotion::resolve_source(&store, repo, &promotion).await?
+        } else {
+            promotion::Source::default()
+        };
         if let Some(task) = source.task.as_ref() {
             if let Some(selected) = select_task_creation_wave(&store, &main, wave).await? {
                 if task.wave_id.as_ref() != Some(selected.id()) {
                     return Err(task_error(format!(
-                        "{} already belongs to different planning; use `lf task move` or file separate work with --new",
+                        "{} already belongs to different planning; use `lf task move` or file separate work without --session or --worktree",
                         task.identifier,
                     )));
                 }

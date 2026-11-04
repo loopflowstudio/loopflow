@@ -152,16 +152,16 @@ fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreR
     Ok(())
 }
 
-pub(super) fn place_task_in(
+fn place_task_in(
     conn: &Connection,
     task_id: &TaskId,
-    worktree: &std::path::Path,
+    worktree: &Path,
     workspace_slug: &str,
     pr: &TaskPr,
-) -> StoreResult<Task> {
+) -> StoreResult<()> {
     let mut task = task_on(conn, task_id)?.ok_or(StoreError::NotFound)?;
     if task.worktree.is_some() {
-        return Ok(task);
+        return Ok(());
     }
     if super::durable::task_state_in(conn, task_id)?.is_terminal() {
         return Err(StoreError::InvalidAuthority(
@@ -205,7 +205,7 @@ pub(super) fn place_task_in(
             base_commit: pr.base_commit.clone(),
         },
     )?;
-    task_on(conn, task_id)?.ok_or(StoreError::NotFound)
+    Ok(())
 }
 
 impl SqliteStore {
@@ -230,7 +230,8 @@ impl SqliteStore {
         let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = place_task_in(&tx, task_id, worktree, workspace_slug, pr)?;
+        place_task_in(&tx, task_id, worktree, workspace_slug, pr)?;
+        let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)
     }

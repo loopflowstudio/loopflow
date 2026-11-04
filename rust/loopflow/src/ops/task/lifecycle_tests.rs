@@ -203,7 +203,7 @@ while not (home / 'release').exists():
         // Exercise buffered filing while the selected planning transport is offline.
         provider.lock().unwrap().unavailable = true;
         let child = crate::ops::task::task_create(repo.path(), Some(wave.slug()),
-            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into()), None, crate::ops::task::TaskPromotionOptions { new: true, ..Default::default() },).unwrap();
+            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into()), None, crate::ops::task::TaskPromotionOptions::default(),).unwrap();
         let thread = crate::ops::task::task_comment(repo.path(), "FIX-1", None,
             Some(&format!("Installed verification continues in {}.", child.identifier)), false).unwrap();
         assert!(thread.comments.iter().any(|comment| comment.body.contains(&child.identifier)));

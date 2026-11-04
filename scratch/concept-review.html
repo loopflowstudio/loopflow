@@ -7,10 +7,26 @@
 @media(prefers-color-scheme:dark){:root{--paper:#191e1b;--ink:#eceee8;--muted:#b5c0b8;--line:#45544a;--accent:#a1d7b4;--wash:#263129}}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 system-ui,sans-serif}main{max-width:770px;margin:auto;padding:30px 24px 54px}header,.note{font-size:.85rem;color:var(--muted)}h1{font-size:clamp(1.9rem,5vw,2.5rem);line-height:1.15;letter-spacing:-.025em;margin:24px 0 14px}h2{font-size:1.15rem;margin:26px 0 10px}p{margin:10px 0}a,summary{color:var(--accent)}summary{cursor:pointer}details{margin:16px 0}code{font:.86em/1.5 ui-monospace,monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--wash);padding:14px 16px}blockquote{margin:18px 0;padding:4px 0 4px 18px;border-left:3px solid var(--accent);font-size:1.15rem}table{width:100%;border-collapse:collapse;font-size:.88rem}th,td{text-align:left;vertical-align:top;padding:10px 8px 10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.decision{border-top:1px solid var(--line);padding-top:12px}.sources{overflow-wrap:anywhere}@media(max-width:520px){main{padding:22px 16px 38px}body{font-size:16px}table{font-size:.8rem}}
 </style></head><body><main>
-<header>LOO-582 · concept-review · November 3, 2026 · headless review of Jack Heart’s accepted direction
+<header>LOO-582 · concept-review · November 3, 2026 · creation-default correction with Jack Heart
 <details class="sources"><summary>Files behind this screen</summary><a href="loo-582.md">scratch/loo-582.md</a>; docs/work.md; rust/loopflow/src/builtins/ops/skill/work.md; rust/loopflow/src/ops/task/promotion.rs; rust/loopflow/src/store/sqlite/children.rs; rust/loopflow/src/store/sqlite/processes.rs; rust/loopflow/src/ops/human_session/primary.rs; rust/loopflow/tests/session_lifecycle_tests.rs; swift/LoopflowMac/Views/SessionActionSheet.swift; swift/LoopflowMac/Views/WorkspacePanesView.swift; swift/LoopflowTests/SessionControlsTests.swift.</details></header>
-<h1>Create a Task around this chat and worktree.</h1>
-<p><strong>Review outcome: no design change and no open product choice.</strong> The branch follows the accepted model. Combined gate checks and the configured demo remain outstanding.</p>
+<h1>Create normally. Adopt explicitly.</h1>
+<p><strong>Jack Heart’s correction:</strong> adoption must never be the default. <code>--run</code> only starts the Task. Remove <code>--new</code>; explicit source selection preserves the existing-work flow. The working tree implements the correction; publication is pending.</p>
+<pre><code># Revised direction: file a new Task, leave current work alone
+lf task create "Build the thing"
+
+# Create and start a new Task; no implicit adoption
+lf task create --run "Build the thing"
+
+# Explicitly keep this conversation, even without starting a Graph
+lf task create --session SESSION --title "Finish the prototype"</code></pre>
+<table><thead><tr><th>Action</th><th>Before</th><th>Current correction</th></tr></thead><tbody>
+<tr><td>Create only</td><td>Implicit source resolution; requires --new to escape</td><td>New Task; no implicit adoption</td></tr>
+<tr><td>Create and run</td><td>May return the current Task</td><td>Create new work and start its Graph; no implicit adoption</td></tr>
+<tr><td>Explicit source</td><td>Adopt/bind selected work</td><td>Retain adoption and explicit-source retry recovery</td></tr>
+</tbody></table>
+<p><strong>API consequence:</strong> creation resolves adoption only when --session or --worktree is supplied before the existing placement/binding transaction. <code>TaskPromotionOptions.new</code> and the CLI flag are removed; planning callers use ordinary creation. Desktop’s create-from-chat action already selects its Session explicitly.</p>
+<p><strong>Recovery edge:</strong> explicit adoption retries recover the selected work’s Task. Plain creation creates new work even inside an owned checkout. Existing creation-recovery machinery handles failures; titles and recency never identify retries.</p>
+<h2>Preserved experience: explicitly create from this work</h2>
 <p><strong>Accepted priority.</strong> Keep the work already happening. Selecting a conversation for an <em>existing</em> Task should continue it in that Task’s worktree, where supported; creation keeps the existing chat and checkout together.</p>
 <blockquote>“Create a Task for this work and keep this conversation.”</blockquote>
 <pre><code>Before: this chat S · checkout B · branch + unfinished edits
@@ -25,15 +41,15 @@ After:  Task T → this same chat S, in checkout B
 </tbody></table>
 <p class="note">Creation, adoption and binding commit together. No extra chat, checkout, provider process, replayed turn, Graph or Auto-Ship approval. Implemented on the branch; installed/configured-provider and rendered acceptance remain pending.</p>
 <details><summary>Implemented usage and skill guidance</summary>
-<pre><code># Issued by the existing chat
-lf task create --title "Finish the prototype"
+<pre><code># Issued by the existing chat, using its own Loopflow Session ID
+lf task create --session SESSION --title "Finish the prototype"
 
 # From a shell: select the chat explicitly
 lf session list --json
 lf task create --session SESSION --title "Finish the prototype"</code></pre>
 <p><strong>Desktop wording:</strong> “Create Task from this conversation”<br><span class="note">Keep this chat, worktree, branch and unfinished edits.</span></p>
-<p><strong>Skill guidance:</strong> When asked to make current work a new Task, create it using the invoking Session or its exact Loopflow Session ID. Adopt the existing unassociated linked checkout and make that conversation primary. Continue in place.</p>
-<p class="note">Shared checkouts remain shared. Preserve permanent bindings, target-Machine locality, explicit selection and the separate --new backlog path. Recency never chooses the conversation.</p>
+<p><strong>Skill guidance:</strong> When asked to make current work a new Task, pass --session with the exact Loopflow Session ID; read LF_AGENT_CALLER.session_id or look it up. Adopt the existing unassociated linked checkout and make that conversation primary. Continue in place.</p>
+<p class="note">Shared checkouts remain shared. Preserve permanent bindings, target-Machine locality and explicit selection. Plain creation files independent backlog work. Recency never chooses the conversation.</p>
 </details>
 <details><summary>Failure, recovery and next proof</summary>
 <p>A conflicting owner or failed reservation leaves local creation/adoption/binding uncommitted. Correct the cause and retry. If commit succeeds but the reply is lost, the same selected Session or adopted checkout recovers the same Task.</p>
@@ -61,9 +77,8 @@ Session:     ~/src/loopflow.&lt;worktree&gt;
 Cmd-T → pwd: ~/src/loopflow.&lt;worktree&gt;   ← expected</code></pre>
 <p><strong>Working hypothesis:</strong> the terminal retains the launcher’s directory while the provider works in the worktree. The earlier viewer path updated terminal names without publishing cwd; the branch now serializes cwd reports with provider output and replays them on attachment. Bundled shell integration reports its own cwd; a child process using another directory does not change the parent shell.</p>
 <p class="note">This is not yet a reproduced diagnosis. Check cmux and Rex directly, then Warp. Publish the real location on attachment and after a completed move through a safe terminal output/control path. Keep host new-tab preferences intact.</p>
-<h2 class="decision">Review questions, now resolved</h2>
-<p><strong>1. What happens on creation?</strong> Adopt the existing linked worktree and keep the same chat. Nothing moves or restarts.</p>
-<p><strong>2. What happens for an existing Task?</strong> Keep its worktree; continue the selected chat there through a supported move, retaining history and input.</p>
-<p><strong>3. What remains to prove?</strong> The combined gate after the Wave lifecycle merge; configured-provider relocation and recovery; draft or pending-input retention across promotion, idle ending and Task progress; and Cmd-T inheriting the actual Session directory in cmux and Rex. Warp remains unconfirmed.</p>
-<p class="note">No new product decision is requested. Jack Heart accepted this design and requested implementation on November 3. This review supplies evidence for loop-or-next; the accepted boundary remains interactive demo without Auto-Ship or landing.</p>
+<h2 class="decision">Resolved review</h2>
+<p><strong>1. Does --run opt into adoption?</strong> No. It starts the newly created Task. Existing work stays intact in owned and unowned checkouts.</p>
+<p><strong>2. How does adoption happen?</strong> Pass --session or --worktree explicitly, with or without --run. Desktop’s create-from-chat action selects its Session.</p>
+<p class="note">Jack Heart’s correction is implemented in the working tree of this Task and PR. Combined gate and configured demo remain, including drafts, continuation and Cmd-T in cmux/Rex. Auto-Ship and landing remain unapproved.</p>
 </main></body></html>

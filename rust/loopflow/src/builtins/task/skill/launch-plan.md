@@ -50,7 +50,7 @@ For each remaining independently shippable outcome, choose one of two actions:
 - If it can safely start against the current contract, create and launch it now
   when no local artifact needs staging:
   ```bash
-  lf task create --new --wave <wave> --title "<desired experience>" <<'BRIEF'
+  lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
   <short user-problem brief; durable design reference>
   BRIEF
   lf task run <issue>   # its graph: the Wave's or repository's default, else code
@@ -134,7 +134,7 @@ a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
 
 ```bash
-lf task create --new --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
+lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue>

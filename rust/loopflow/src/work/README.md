@@ -133,12 +133,13 @@ revision-checked pane/draft saves. Saved shell intent never authorizes a launch.
 ## Promote existing work
 
 ```sh
-lf task create --title "Finish prototype"
+lf task create --session SESSION --title "Finish prototype"
 lf task promote LOO-12 --session SESSION
 ```
 
-Creation keeps the existing chat and linked checkout. Select a conversation
-explicitly from a shell; `lf session list --json` supplies its ID. Use
-`lf task create --new` for separate backlog work. See
+Select `--session` to keep the chat and linked checkout, or `--worktree` for
+the checkout alone. Plain `lf task create` files new work; `--run` starts it
+without implicitly adopting anything. `lf session list --json` supplies
+conversation IDs. See
 [Work](../../../../docs/work.md#keep-work-already-in-progress) for shared checkouts,
 existing-Task continuation and recovery.

@@ -516,9 +516,9 @@ pub(super) fn bind_session_in(
     conn: &Connection,
     id: &str,
     expected_capture: Option<i64>,
-    expected_cwd: &std::path::Path,
+    expected_cwd: &Path,
     task: &TaskId,
-) -> StoreResult<LfSession> {
+) -> StoreResult<()> {
     let session = session_in(conn, id)?.ok_or(StoreError::NotFound)?;
     if session.cwd != expected_cwd {
         return Err(StoreError::InvalidAuthority(
@@ -553,15 +553,14 @@ pub(super) fn bind_session_in(
                 params![id, task.as_str(), wave.as_ref().map(crate::id::WaveId::as_str), crate::store::rows::now_unix()],
             )?;
     }
-    repair_session_title_in(conn, id, None)?;
-    session_in(conn, id)?.ok_or(StoreError::NotFound)
+    repair_session_title_in(conn, id, None)
 }
 
 pub(super) fn choose_task_primary_in(
     conn: &Connection,
     task: &TaskId,
     session: &str,
-) -> StoreResult<LfSession> {
+) -> StoreResult<()> {
     let chosen = conn.execute(
         &format!(
             "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
@@ -576,8 +575,7 @@ pub(super) fn choose_task_primary_in(
             "Session {session} is not an unfinished interactive conversation of this Task"
         )));
     }
-    task_primary_in(conn, task)?
-        .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
+    Ok(())
 }
 
 impl SqliteStore {
@@ -777,7 +775,9 @@ impl SqliteStore {
         session: &str,
     ) -> StoreResult<LfSession> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        choose_task_primary_in(&conn, task, session)
+        choose_task_primary_in(&conn, task, session)?;
+        task_primary_in(&conn, task)?
+            .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
     // Available filters run before pagination; absence/unknown cannot occupy a page.
@@ -1519,7 +1519,8 @@ impl SqliteStore {
         let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let bound = bind_session_in(&tx, id, expected_capture, &before.cwd, task)?;
+        bind_session_in(&tx, id, expected_capture, &before.cwd, task)?;
+        let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(bound)
     }

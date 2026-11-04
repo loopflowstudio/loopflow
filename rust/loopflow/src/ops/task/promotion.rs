@@ -17,11 +17,9 @@ use super::{task_error, TaskPlacement};
 pub struct TaskPromotionOptions {
     pub session: Option<String>,
     pub worktree: Option<PathBuf>,
-    /// File independent backlog work, without adopting a checkout or Session.
-    pub new: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct Source {
     pub task: Option<Task>,
     checkout: Option<PathBuf>,
@@ -36,18 +34,6 @@ pub(super) async fn resolve_source(
     repo: &Path,
     options: &TaskPromotionOptions,
 ) -> OpsResult<Source> {
-    if options.new {
-        if options.session.is_some() || options.worktree.is_some() {
-            return Err(task_error("--new cannot select existing work"));
-        }
-        return Ok(Source {
-            task: None,
-            checkout: None,
-            explicit_checkout: false,
-            session: None,
-            _admission: Vec::new(),
-        });
-    }
     let main = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
     let mut selected = match &options.session {
         Some(id) => Some(
@@ -56,22 +42,7 @@ pub(super) async fn resolve_source(
                 .map_err(task_error)?
                 .ok_or_else(|| task_error(format!("Session {id} was not found on this Machine")))?,
         ),
-        None => match crate::journal::agent_caller() {
-            Some(caller) => {
-                let root = crate::git::worktree_root(options.worktree.as_deref().unwrap_or(repo))
-                    .map_err(task_error)?;
-                store
-                    .session(&caller.session_id)
-                    .await
-                    .map_err(task_error)?
-                    .filter(|session| {
-                        session.interactive
-                            && session.completed_at.is_none()
-                            && crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(&root)
-                    })
-            }
-            None => None,
-        },
+        None => None,
     };
     let cwd = options
         .worktree
@@ -267,6 +238,23 @@ pub fn task_promote(repo: &Path, issue: &str, options: TaskPromotionOptions) -> 
         .map_err(task_error)?
         .ok_or_else(|| task_error("Task is unavailable"))?;
         let task = selected.task.expect("explicit Task selection");
+        let mut options = options;
+        if options.session.is_none() {
+            if let Some(caller) = crate::journal::agent_caller() {
+                let root = crate::git::worktree_root(options.worktree.as_deref().unwrap_or(repo))
+                    .map_err(task_error)?;
+                options.session = store
+                    .session(&caller.session_id)
+                    .await
+                    .map_err(task_error)?
+                    .filter(|session| {
+                        session.interactive
+                            && session.completed_at.is_none()
+                            && crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(&root)
+                    })
+                    .map(|session| session.id.to_string());
+            }
+        }
         let source = resolve_source(&store, repo, &options).await?;
         if source.checkout.is_none() && source.session.is_none() {
             return Err(task_error(

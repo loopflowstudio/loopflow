@@ -32,7 +32,7 @@ note under `scratch/` and in your final message:
   iterate: the fix continues in this Task's checkout from main and delivers as
   a new PR, keeping the merged one as history. Never revert.
 - **Follow-up.** Something outside this Task's outcome is wrong or missing.
-  Capture a linked follow-up Task with `lf task create --new`, then advance.
+  Capture a linked follow-up Task with `lf task create`, then advance.
 
 With a person present, show them what you checked and let them judge the
 experience. Headless, decide as they would and keep moving; there is no one to

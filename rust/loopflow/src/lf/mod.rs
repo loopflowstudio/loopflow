@@ -2024,20 +2024,17 @@ until `lf ship`."
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Create a Task from existing work; with --run, also start its Graph
+    /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "An unassociated linked checkout becomes the Task's home, preserving its branch and files. Its invoking Session becomes primary; from a shell, select one with --session (find its Loopflow ID with `lf session list --json`). Without either, no conversation is bound or made primary. Repeating creation there returns the same Task; use --new to file separate backlog work. Main and Wave checkouts stay shared. --session selects an existing conversation without restarting it. Promotion alone never starts a Graph or approves Auto-Ship. Remote calls use sources on the selected Machine."
+        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
     )]
     Create {
         /// Existing conversation to promote without replaying its input
-        #[arg(long, id = "create_session", conflicts_with = "new")]
+        #[arg(long, id = "create_session")]
         session: Option<String>,
         /// Existing linked checkout to adopt
-        #[arg(long, conflicts_with = "new")]
-        worktree: Option<PathBuf>,
-        /// File separate backlog work without adopting this checkout or Session
         #[arg(long)]
-        new: bool,
+        worktree: Option<PathBuf>,
         /// What you want, in your words: the Task's notes, its first line the title.
         /// With --run, also the first turn of its conversation
         #[arg(conflicts_with = "notes")]

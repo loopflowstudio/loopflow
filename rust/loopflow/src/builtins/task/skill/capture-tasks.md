@@ -58,7 +58,7 @@ its own scope and acceptance; never copy a common plan and toggle “current sli
 The later operator transfers it with `lf checkout <child> --stack-on <parent>
 --design <path>` before launch. Capture itself still launches no work.
 
-From the destination repository, file with `lf task create --new --wave <owner>` without
+From the destination repository, file with `lf task create --wave <owner>` without
 `--run`. Supply the title and complete brief through `--title` and stdin or
 `--notes`; use `lf task edit` for refinements to a confirmed Task.
 Return each actual Task as one readable link from

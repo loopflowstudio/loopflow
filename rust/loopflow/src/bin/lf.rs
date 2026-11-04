@@ -1126,7 +1126,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 loopflow::ops::task::TaskPromotionOptions {
                     session: session.clone(),
                     worktree: worktree.clone(),
-                    new: false,
                 },
             )?;
             if *json {
@@ -1139,7 +1138,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Create {
             session,
             worktree,
-            new,
             request,
             no_wave,
             wave,
@@ -1167,7 +1165,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 loopflow::ops::task::TaskPromotionOptions {
                     session: session.clone(),
                     worktree: worktree.clone(),
-                    new: *new,
                 },
             )?;
             match (*json, *run) {

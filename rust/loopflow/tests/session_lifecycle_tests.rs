@@ -137,6 +137,19 @@ impl Fixture {
         assert!(output.status.success(), "{output:?}");
     }
 
+    /// Release every live client even if a continuity assertion fails.
+    fn with_attached_clients<T>(
+        &self,
+        clients: impl IntoIterator<Item = Child>,
+        check: impl FnOnce() -> T,
+    ) -> T {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check));
+        for client in clients {
+            self.release(client);
+        }
+        result.unwrap_or_else(|error| std::panic::resume_unwind(error))
+    }
+
     fn db(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
     }
@@ -2541,6 +2554,269 @@ fn pi_managed_graph_routes_one_branch_and_nested_lf_retains_task_and_checkout() 
 // Promotion exercises the real CLI against a disposable Machine and native
 // provider stand-in. No configured account or live checkout participates.
 #[test]
+fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
+    for owned in [false, true] {
+        let fixture = Fixture::new(true);
+        fixture
+            .repo
+            .create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
+        fixture.repo.stage_all();
+        fixture
+            .repo
+            .commit("Add a graph that stops before launching work");
+        fixture.repo.push();
+        let root = fixture
+            .repo
+            .create_named_worktree("prototype")
+            .canonicalize()
+            .unwrap();
+        std::fs::write(root.join("README.md"), "unfinished research\n").unwrap();
+        std::fs::write(root.join("draft.txt"), "unsaved prototype\n").unwrap();
+        let (child, capture) = fixture.attach(&[
+            "--repo",
+            root.to_str().unwrap(),
+            "-i",
+            "--agent",
+            "opencode",
+            ":",
+            "Research",
+        ]);
+        fixture.with_attached_clients([child], || {
+            let id = fixture.session_row(&capture).0;
+            if owned {
+                fixture.json(&[
+                    "task",
+                    "create",
+                    "--session",
+                    &id,
+                    "--title",
+                    "Prototype",
+                    "--json",
+                ]);
+            }
+            let store =
+                loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+                    .unwrap();
+            let caller = serde_json::to_string(
+                &store
+                    .session_attachment(&id)
+                    .unwrap()
+                    .unwrap()
+                    .caller(id.clone().into()),
+            )
+            .unwrap();
+            let session_state = || -> String {
+                fixture.db().query_row(
+                    "SELECT json_array(cwd,task_id,primary_scope,requested_cwd,current_capture,input_published,agent_process_id,bound_at) FROM agent_sessions WHERE id=?1",
+                    [&id], |row| row.get(0),
+                ).unwrap()
+            };
+            let before = session_state();
+            let history = fixture.run_parents(&capture);
+            let mut tasks = Vec::new();
+            for run in [false, true] {
+                for invoking in [false, true] {
+                    let mut args = vec!["task", "create", "--title", "Independent work", "--json"];
+                    if run {
+                        args.extend(["--run", "--graph", "pause"]);
+                    }
+                    let mut command = fixture.command(&args);
+                    command.current_dir(&root).stdin(Stdio::null());
+                    if invoking {
+                        command.env("LF_AGENT_CALLER", &caller);
+                    }
+                    let output = command.output().unwrap();
+                    assert!(
+                        output.status.success(),
+                        "owned={owned}, run={run}, invoking={invoking}: {output:?}"
+                    );
+                    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+                    let task = if run { &receipt["task"] } else { &receipt };
+                    let task_id = task["id"].as_str().unwrap().to_owned();
+                    assert!(!tasks.contains(&task_id), "titles never identify a retry");
+                    tasks.push(task_id.clone());
+                    if run {
+                        assert_ne!(receipt["session_id"], id);
+                        let deadline = Instant::now() + PATIENCE;
+                        while support::recorded_graphs(fixture.home.path())
+                            .iter()
+                            .any(|(outcome, _)| outcome.is_none())
+                        {
+                            assert!(
+                                Instant::now() < deadline,
+                                "Graph did not stop at its interactive step"
+                            );
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        let checkout: String = fixture
+                            .db()
+                            .query_row(
+                                "SELECT worktree FROM tasks WHERE id=?1",
+                                [&task_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap();
+                        assert_ne!(checkout, root.to_str().unwrap());
+                        assert_eq!(receipt["graph"], "pause");
+                    } else {
+                        assert!(task["worktree"].is_null());
+                    }
+                    assert_eq!(session_state(), before);
+                    assert_eq!(fixture.run_parents(&capture), history);
+                    assert_eq!(fixture.launches().len(), 1);
+                }
+            }
+            assert_eq!(fixture.count("tasks"), 4 + i64::from(owned));
+            assert_eq!(
+                std::fs::read_to_string(root.join("README.md")).unwrap(),
+                "unfinished research\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("draft.txt")).unwrap(),
+                "unsaved prototype\n"
+            );
+            assert_eq!(
+                loopflow::git::current_branch(&root).unwrap().as_deref(),
+                Some("prototype")
+            );
+        });
+    }
+}
+
+#[test]
+fn promotion_explicit_sources_with_run_keep_the_selected_work() {
+    for select_session in [false, true] {
+        let fixture = Fixture::new(true);
+        fixture
+            .repo
+            .create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
+        fixture.repo.stage_all();
+        fixture
+            .repo
+            .commit("Add a graph that stops before launching work");
+        fixture.repo.push();
+        let root = fixture
+            .repo
+            .create_named_worktree("prototype")
+            .canonicalize()
+            .unwrap();
+        let (child, capture) = fixture.attach(&[
+            "--repo",
+            root.to_str().unwrap(),
+            "-i",
+            "--agent",
+            "opencode",
+            ":",
+            "Research",
+        ]);
+        fixture.with_attached_clients([child], || {
+            let id = fixture.session_row(&capture).0;
+            let store =
+                loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+                    .unwrap();
+            let attachment = store.session_attachment(&id).unwrap().unwrap();
+            let caller = serde_json::to_string(&attachment.caller(id.clone().into())).unwrap();
+            let source = if select_session {
+                ["--session", id.as_str()]
+            } else {
+                ["--worktree", root.to_str().unwrap()]
+            };
+            if !select_session {
+                let output = fixture
+                    .command(&[
+                        "task",
+                        "create",
+                        "--worktree",
+                        root.to_str().unwrap(),
+                        "--title",
+                        "Keep research",
+                        "--json",
+                    ])
+                    .current_dir(&root)
+                    .env("LF_AGENT_CALLER", &caller)
+                    .stdin(Stdio::null())
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "{output:?}");
+                let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert!(store.session(&id).unwrap().unwrap().task_id.is_none());
+                let primary: Option<String> = fixture
+                    .db()
+                    .query_row(
+                        "SELECT primary_session_id FROM tasks WHERE id=?1",
+                        [task["id"].as_str().unwrap()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert!(
+                    primary.is_none(),
+                    "worktree-only creation never selects the caller"
+                );
+            }
+            let args = [
+                vec![
+                    "task",
+                    "create",
+                    "--title",
+                    "Keep research",
+                    "--run",
+                    "--graph",
+                    "pause",
+                    "--json",
+                ],
+                source.to_vec(),
+            ]
+            .concat();
+            let output = fixture
+                .command(&args)
+                .current_dir(&root)
+                .env("LF_AGENT_CALLER", caller)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(receipt["task"]["worktree"], root.to_str().unwrap());
+            assert_eq!(receipt["task"]["branch"], "prototype");
+            // --run opens the Task's conversation through ordinary admission;
+            // the adopted checkout now associates this conversation with it.
+            assert_eq!(receipt["session_id"], id);
+            assert_eq!(store.session_attachment(&id).unwrap().unwrap(), attachment);
+            let session = store.session(&id).unwrap().unwrap();
+            assert_eq!(session.task_id.is_some(), select_session);
+            assert_eq!(session.cwd, root);
+            let summary = fixture
+                .sessions()
+                .into_iter()
+                .find(|s| s["id"] == id)
+                .unwrap();
+            assert!(summary["requested_cwd"].is_null());
+            assert_eq!(fixture.launches().len(), 1);
+            let deadline = Instant::now() + PATIENCE;
+            while support::recorded_graphs(fixture.home.path())
+                .iter()
+                .any(|(outcome, _)| outcome.is_none())
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "Graph did not stop at its interactive step"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let retry = fixture.json(
+                &[
+                    vec!["task", "create", "--title", "Keep research", "--json"],
+                    source.to_vec(),
+                ]
+                .concat(),
+            );
+            assert_eq!(retry["id"], receipt["task"]["id"]);
+            assert_eq!(fixture.count("tasks"), 1);
+        });
+    }
+}
+
+#[test]
 fn promotion_preserves_live_conversation_and_existing_work() {
     for existing in [false, true] {
         let fixture = Fixture::new(true);
@@ -2558,8 +2834,7 @@ fn promotion_preserves_live_conversation_and_existing_work() {
             ":",
             "Keep researching",
         ]);
-        // Always release the fixture provider, including when an assertion fails.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (task, id) = fixture.with_attached_clients([child], || {
             let id = fixture.session_row(&capture).0;
             let before = fixture
                 .sessions()
@@ -2578,14 +2853,8 @@ fn promotion_preserves_live_conversation_and_existing_work() {
             let captures = fixture.captures();
             let history = fixture.run_parents(&capture);
             let created = if existing {
-                let filed = fixture.json(&[
-                    "task",
-                    "create",
-                    "--new",
-                    "--title",
-                    "Research prototype",
-                    "--json",
-                ]);
+                let filed =
+                    fixture.json(&["task", "create", "--title", "Research prototype", "--json"]);
                 let promoted = fixture.json(&[
                     "task",
                     "promote",
@@ -2633,6 +2902,8 @@ fn promotion_preserves_live_conversation_and_existing_work() {
                 path,
                 "task",
                 "create",
+                "--session",
+                &id,
                 "--title",
                 "Research prototype",
                 "--json",
@@ -2665,12 +2936,7 @@ fn promotion_preserves_live_conversation_and_existing_work() {
                 Some("prototype")
             );
             (task.to_owned(), id)
-        }));
-        fixture.release(child);
-        let (task, id) = match result {
-            Ok(value) => value,
-            Err(error) => std::panic::resume_unwind(error),
-        };
+        });
         std::fs::write(
             fixture.home.path().join("bin/opencode"),
             include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
@@ -2725,7 +2991,7 @@ fn promotion_continues_in_existing_task_after_live_client_exits() {
         ":",
         "Research",
     ]);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let id = fixture.with_attached_clients([child], || {
         let id = fixture.session_row(&capture).0;
         let before = fixture
             .sessions()
@@ -2772,9 +3038,7 @@ fn promotion_continues_in_existing_task_after_live_client_exits() {
         assert_eq!(fixture.launches().len(), 1);
         assert_eq!(fixture.count("task_graphs"), 0);
         id
-    }));
-    fixture.release(child);
-    let id = result.unwrap();
+    });
     // Selecting another primary does not cancel this Session's accepted move.
     let other = tokio::runtime::Runtime::new().unwrap().block_on(async {
         let store = loopflow::store::open_store(&loopflow::store::StorageConfig::Sqlite {
@@ -2931,14 +3195,7 @@ fn promotion_worktree_only_records_pr_and_rejects_conflicting_owner() {
         )
         .unwrap();
     assert_eq!(publication, "https://github.com/test/repo/pull/42");
-    let second = fixture.json(&[
-        "task",
-        "create",
-        "--new",
-        "--title",
-        "Independent",
-        "--json",
-    ]);
+    let second = fixture.json(&["task", "create", "--title", "Independent", "--json"]);
     let refused = fixture.run(&[
         "task",
         "promote",
@@ -2964,7 +3221,7 @@ fn promotion_worktree_only_records_pr_and_rejects_conflicting_owner() {
 fn promotion_session_only_keeps_main_cwd_and_permanent_binding() {
     let fixture = Fixture::new(true);
     let (child, capture) = fixture.attach(&LAUNCH);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let (task, id) = fixture.with_attached_clients([child], || {
         let id = fixture.session_row(&capture).0;
         let before = fixture
             .sessions()
@@ -2995,7 +3252,7 @@ fn promotion_session_only_keeps_main_cwd_and_permanent_binding() {
             "--json",
         ]);
         assert_eq!(repeated["id"], task);
-        let other = fixture.json(&["task", "create", "--new", "--title", "Another", "--json"]);
+        let other = fixture.json(&["task", "create", "--title", "Another", "--json"]);
         let refused = fixture.run(&[
             "task",
             "promote",
@@ -3009,12 +3266,7 @@ fn promotion_session_only_keeps_main_cwd_and_permanent_binding() {
         assert_eq!(fixture.count("task_graphs"), 0);
         assert_eq!(fixture.launches().len(), 1);
         (task.to_owned(), id)
-    }));
-    fixture.release(child);
-    let (task, id) = match result {
-        Ok(value) => value,
-        Err(error) => std::panic::resume_unwind(error),
-    };
+    });
     std::fs::write(
         fixture.home.path().join("bin/opencode"),
         include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
@@ -3162,14 +3414,7 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
             rusqlite::params![id, created as i64 + 1, root.to_str().unwrap(), fixture.repo.path().to_str().unwrap()],
         ).unwrap();
     }
-    let other = fixture.json(&[
-        "task",
-        "create",
-        "--new",
-        "--title",
-        "Other question",
-        "--json",
-    ]);
+    let other = fixture.json(&["task", "create", "--title", "Other question", "--json"]);
     fixture.json(&[
         "session",
         "bind",
@@ -3185,6 +3430,8 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
         root.to_str().unwrap(),
         "task",
         "create",
+        "--worktree",
+        root.to_str().unwrap(),
         "--title",
         "Prototype",
         "--json",
@@ -3228,7 +3475,7 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
 }
 
 #[test]
-fn promotion_invoking_session_replaces_primary_in_owned_and_shared_checkouts() {
+fn promotion_selects_session_in_owned_and_shared_checkouts() {
     for (create, shared) in [(false, false), (true, false), (false, true), (true, true)] {
         let fixture = Fixture::new(true);
         let root = if shared {
@@ -3251,7 +3498,7 @@ fn promotion_invoking_session_replaces_primary_in_owned_and_shared_checkouts() {
         ];
         let (first, first_capture) = fixture.attach(&args);
         let (second, second_capture) = fixture.attach(&args);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (task, session, cwd) = fixture.with_attached_clients([first, second], || {
             let ids = [
                 fixture.session_row(&first_capture).0,
                 fixture.session_row(&second_capture).0,
@@ -3277,12 +3524,20 @@ fn promotion_invoking_session_replaces_primary_in_owned_and_shared_checkouts() {
                 ids[0]
             );
             if create && shared {
-                // A shared checkout cannot identify a Task. The invoking
+                // A shared checkout cannot identify a Task. The selected
                 // conversation's existing bind supplies it for repeat creation.
                 fixture.json(&["session", "bind", &ids[1], "--task", task, "--json"]);
             }
             let args = if create {
-                vec!["task", "create", "--title", "Same work", "--json"]
+                vec![
+                    "task",
+                    "create",
+                    "--session",
+                    &ids[1],
+                    "--title",
+                    "Same work",
+                    "--json",
+                ]
             } else {
                 vec!["task", "promote", task, "--json"]
             };
@@ -3309,10 +3564,7 @@ fn promotion_invoking_session_replaces_primary_in_owned_and_shared_checkouts() {
             assert_eq!(fixture.count("task_graphs"), 0);
             assert_eq!(fixture.launches().len(), 2);
             (task.to_owned(), ids[1].clone(), caller_cwd)
-        }));
-        fixture.release(first);
-        fixture.release(second);
-        let (task, session, cwd) = result.unwrap_or_else(|error| std::panic::resume_unwind(error));
+        });
         std::fs::write(
             fixture.home.path().join("bin/opencode"),
             include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
@@ -3427,10 +3679,13 @@ fn promotion_background_run_does_not_claim_primary() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        assert_eq!(
-            serde_json::from_slice::<Value>(&output.stdout).unwrap()["id"],
-            task
-        );
+        let returned = serde_json::from_slice::<Value>(&output.stdout).unwrap();
+        if args[1] == "create" {
+            assert_ne!(returned["id"], task);
+            assert!(returned["worktree"].is_null());
+        } else {
+            assert_eq!(returned["id"], task);
+        }
     }
     let refused = fixture.run(&["task", "promote", task, "--session", "background"]);
     assert!(!refused.status.success());
@@ -3453,6 +3708,6 @@ fn promotion_background_run_does_not_claim_primary() {
         )
         .unwrap();
     assert_eq!(bound, None);
-    assert_eq!(fixture.count("tasks"), 1);
+    assert_eq!(fixture.count("tasks"), 2);
     assert!(fixture.launches().is_empty());
 }

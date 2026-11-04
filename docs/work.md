@@ -8,7 +8,7 @@ Waves.
 ## Hand off more than one
 
 ```bash
-pbpaste | lf task create --new               # first line is the title, the rest its notes
+pbpaste | lf task create                     # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
 lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before it merges
 lf capture-tasks                             # talk it through; the Session files the Tasks
@@ -25,7 +25,7 @@ memory and KRs.
 ## Keep work already in progress
 
 ```bash
-lf task create --title "Finish the prototype"    # adopt this linked checkout
+lf task create --worktree . --title "Finish the prototype"
 lf session list --json                         # find the Loopflow Session ID
 lf task create --session SESSION --title "Finish the prototype"
 lf task promote LOO-12 --session SESSION         # use work for an existing Task
@@ -35,13 +35,19 @@ lf task promote LOO-12 --worktree ../prototype   # select an existing checkout
 Promotion preserves the branch, dirty and untracked files, and the Session's
 provider history and live attachment. The selected Session becomes the Task's
 primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
-An interactive Session issuing the command selects itself through `LF_AGENT_CALLER.session_id`.
-From a shell, use `--session` with an ID from `lf session list --json`. Without
-a selected or invoking Session, only the checkout is adopted; no conversation
-is bound or made primary. Opening a conversation more recently never selects it.
-Promotion starts no Graph and approves no Auto-Ship. Repeating it keeps the same
-Task; conflicting Task ownership fails without moving either person's work.
-Use `--new` when filing independent backlog work from an existing Task checkout.
+Pass `--session` explicitly to keep a conversation. An agent uses its own
+`LF_AGENT_CALLER.session_id` or looks it up with `lf session list --json`.
+Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
+no conversation. `--run` then uses ordinary Task conversation admission.
+Opening a conversation more recently never selects it. Explicit-source retries
+keep the same Task; conflicting Task ownership fails without moving either
+person's work.
+
+Plain `lf task create` files new work, including from an owned checkout or
+Session. `--run` starts the created Task; it does not opt into adoption.
+Explicit sources work with or without `--run`. Creation alone starts no Graph
+and approves no Auto-Ship. `lf task promote` retains current-work selection:
+an invoking interactive Session in the selected checkout can make itself primary.
 
 Main and Wave checkouts remain shared. A selected Session there can become a
 Task conversation without moving its cwd; an explicit later `lf task checkout`

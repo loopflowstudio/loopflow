@@ -72,7 +72,7 @@ fn wave_detail_preserves_graph_and_machine() {
     assert_eq!(snapshot.setup.graph.value.as_deref(), Some("code"));
     assert_eq!(
         snapshot.setup.skill_agents["implement"].source,
-        loopflow::work::wave::setup::SetupSource::Wave
+        loopflow::config::ConfigSource::Repository
     );
     assert_eq!(snapshot.setup.accounts["claude"].accounts, ["work"]);
     let Evidence::Ok {

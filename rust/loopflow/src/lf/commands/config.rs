@@ -1,3 +1,11 @@
+pub fn retained(replace: bool, keep: bool) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&crate::config::remote::inspect(replace, keep)?)?
+    );
+    Ok(())
+}
+
 pub fn print_user(json: bool) -> anyhow::Result<()> {
     let name = crate::config::participant_name()?;
     if json {
@@ -28,18 +36,15 @@ pub fn show(
                 for (key, setting) in settings {
                     println!("{key}: {}", setting["value"]);
                     if let Some(candidates) = setting["candidates"].as_array() {
-                        for (index, candidate) in candidates.iter().enumerate().rev() {
-                            let status = if index + 1 == candidates.len() {
-                                "selected"
-                            } else {
-                                "earlier"
-                            };
+                        for candidate in candidates.iter().rev() {
+                            let status = candidate["reason"].as_str().expect("resolver reason");
                             println!(
-                                "  {status}: {} · {} · {} · {} = {}",
+                                "  {status}: {} · {} · {} · {} · {} = {}",
                                 candidate["key"].as_str().expect("candidate key"),
                                 candidate["source"].as_str().unwrap_or("builtin"),
                                 candidate["scope"].as_str().unwrap_or("global"),
-                                candidate["target"].as_str().unwrap_or("general"),
+                                candidate["target"],
+                                candidate["locator"].as_str().expect("candidate locator"),
                                 candidate["value"]
                             );
                         }
@@ -115,4 +120,56 @@ pub fn inspect(
         output.push(serde_json::json!({"skill": selection.map(|s| &s.name), "occurrence": selection.and_then(|s| s.occurrence.as_ref()), "settings": resolved.settings}));
     }
     Ok(output)
+}
+
+/// The catalogue is available before a store or provider is installed.
+pub fn catalog(json: bool) -> anyhow::Result<()> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(crate::config::catalog::DEFINITIONS)?
+        );
+    } else {
+        for definition in crate::config::catalog::DEFINITIONS {
+            println!(
+                "{}: {}{}",
+                definition.key,
+                definition.description,
+                if definition.lifecycle == crate::config::catalog::Lifecycle::Inactive {
+                    " (inactive)"
+                } else {
+                    ""
+                }
+            );
+            println!(
+                "  {:?} · {:?} · {:?}",
+                definition.applicability, definition.combination, definition.portability
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn file(
+    path: &std::path::Path,
+    key: &str,
+    value: Option<&str>,
+    unset: bool,
+    scope: crate::config::settings::SettingScope,
+    shared: bool,
+) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&crate::config::api::run(
+            crate::config::api::Request::File {
+                path: path.to_owned(),
+                key: key.into(),
+                value: value.map(str::to_owned),
+                unset,
+                scope,
+                shared,
+            }
+        )?)?
+    );
+    Ok(())
 }

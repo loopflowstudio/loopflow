@@ -52,6 +52,7 @@ char *lf_read(const char *read, char **error);
 // write to another Machine: nothing was written; run its `lf` command. Free
 // either string with `lf_string_free`. Never call it on the app's main
 // thread: a write may wait on the store or the network.
+char *lf_config(const char *request, char **error);
 char *lf_write(const char *write, char **error);
 
 // End the watch; `wakeup` is not called after this returns.

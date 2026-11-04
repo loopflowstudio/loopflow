@@ -192,35 +192,40 @@ Jack Heart authorized selective cleanup without retries or a five-minute CI clai
 
 ## Settings authority (LOO-714, revised 2026-11-03)
 
-Jack Heart's November 3 revision selects every applicable `agent` choice before
-all `default_agent` fallbacks. Within either class: CLI > environment > lfdb >
-personal files > repository/Wave files > builtins; then scope, then graph-step /
-skill / general. Personal skill choice beats repository occurrence choice; personal
-skill fallback yields to repository general choice. Builtin skill recommendations
-moved to repository config. Eligible non-agent preferences retain source/scope/target
-and existing merge semantics; native model defaults and account order stay.
-Targeted reads and writes match the defining Graph's canonical name and authored
-ID, never flattened navigation IDs. Repeated children keep their origin;
-whole-Graph inspection retains them all. Same-ID and child-only regressions prove
-this distinction, including aliases.
+Jack Heart's November 3 extension supersedes DB-backed preference authority:
+one typed catalogue, file setters, root `lf.config.local.yaml` shared across linked
+Task worktrees, machine/account declarations and origin-owned remote preferences.
+Remote requests use the origin profile; direct remote work uses saved preferences.
+Retention preserves independent remote edits, separately from execution authority.
+Runtime identity, account observations, secrets and history remain domain-owned.
+The extension remains unimplemented.
 
-Session/resume `-a` selects that conversation; explicit Graph selection reaches
-its steps, not unrelated Tasks or agent-issued children. History is not future
-policy. A fallback on resume refreshes a same-provider model without requesting
-cross-provider import; that continuity assumption is covered by stand-ins, not a
-new product decision. Inspection retains the authored choice/default key.
-This supersedes LOO-440's inheritance; proof and unresolved lock cause:
+Every applicable `agent` choice precedes all `default_agent` fallbacks. Within each
+class the accepted order is CLI > environment > personal files > repository/Wave
+files > builtins, then scope, then occurrence/skill/general. Current code retains
+lfdb between environment and files. Non-agent merge semantics remain typed.
+No per-skill accounts or builtin agent recommendations.
+Targets retain defining Graph name and authored ID through composition/export;
+inspection retains the choice/default key. Captures preserve omitted/empty docs.
+
+Session/resume `-a` selects only that conversation; explicit Graph selection reaches
+its steps. History is not future policy. Same-provider fallback model refresh without
+cross-provider import remains a tested assumption, not a new product decision.
+This supersedes LOO-440's inheritance; earlier proof and unresolved lock cause:
 `d6d7057d97:.lf/wave/infrastructure/MEMORY.md`, Global agent override.
 
-Release's entry-point lesson applies: resolver proof cannot establish launch
-propagation. Exporting authored settings as CLI flags changes authority. Recipes
-retain occurrence authority and load repository skills; runtime captures retain
-bodies. Stand-ins prove recipe/inspection parity and Session/Task separation,
-not broader gate or demo acceptance. Publication is review only.
+Migration lesson: repository account routes use origin `owner/repo` without checkout
+registration. A main-checkout file cannot alone preserve policy across independent,
+future or absent clones. Selecting a registered clone invents an owner; copying to
+known clones loses shared authority. Checkout scope versus an origin-scoped file
+owner remains an unresolved product choice.
 
-Jack retained automatic limit recovery for Sessions and headless steps as a second
-PR. Routing and retry must agree; failed preparation cannot attribute an old thread
-to a new account. November 2's weekly rejection demonstrated that split, not recovery.
+Release's entry-point lesson: resolver tests prove neither launch propagation
+nor installation. Exporting declarations as CLI flags changes authority.
+Stand-ins prove earlier recipe/inspection and Session isolation, not the file-backed
+extension. Publication remains review only. Automatic limit recovery stays PR2:
+routing and retry must agree, and failed preparation cannot reattribute an old
+thread. November 2's weekly rejection demonstrated that split, not recovery.
 
 ## Plan ownership (LOO-406/412/449, curated 2026-11-03)
 

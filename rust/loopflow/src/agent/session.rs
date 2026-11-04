@@ -275,12 +275,12 @@ pub(crate) fn resolve_session_config(
         .expect("agent has a builtin fallback");
     let selected = (candidate.key == "agent"
         && matches!(
-            candidate.layer,
-            crate::config::ConfigLayer::CommandLine | crate::config::ConfigLayer::Environment
+            candidate.source,
+            crate::config::ConfigSource::CommandLine | crate::config::ConfigSource::Environment
         ))
     .then(|| current.agent());
     let configured_agent =
-        (candidate.layer != crate::config::ConfigLayer::Builtin).then(|| current.agent());
+        (candidate.source != crate::config::ConfigSource::Builtin).then(|| current.agent());
     let model = if let Some(agent) = configured_agent {
         let (harness, model) = crate::config::parse_agent(agent);
         if harness == provider {

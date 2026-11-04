@@ -31,6 +31,12 @@ The independent-clone account-scope answer is now recorded below. Finish the
 documentation contract first, then implement it end to end. Do not preserve old
 storage concepts merely to satisfy tests for the removed architecture.
 
+Documentation presentation follow-up: Jack Heart requested varied, outcome-first
+recipes across global/repository/Wave, skill/Graph occurrence, choice/fallback,
+CLI/environment, context, accounts and remote placement. Put clone/worktree,
+ignore, identity and migration details in the closing FAQ; keep their semantics.
+Verify the recipe outcomes through the real resolver before publication.
+
 ## Repository scope — resolved November 3
 
 Jack Heart explicitly chose private preferences per independent clone, including
@@ -56,37 +62,30 @@ config or DB migration occurred. The earlier run's blocked scope decision is res
 
 ## Reconciliation — November 3, 2026
 
-Accepted design and implemented behavior differ deliberately until cutover. At
-`de23763a03`, generic setters still write `scope_settings`, account routes still
-use `provider_routes`, and machine preferences still use `scope_defaults`.
-The resolver still uses `LAUNCH_KEYS`, `REPO_ONLY_KEYS`, `ADDITIVE_KEYS` and
-serialized `Config::default()` for discovery. These are remaining replacements,
-not the accepted catalogue. The earlier choice-before-fallback and invocation
-work remains; `4c95a728c8` also removed `StoredSkill` and duplicate docs storage.
-The prototype was restored before these later changes, not over them.
+The file-backed implementation now replaces ConfigLayer with source/scope/target,
+uses a typed catalogue for schema and validation, and routes CLI/Desktop edits
+through the comment-preserving writer. The single unreleased migration exports
+DB preferences with recovery evidence before removing their columns/tables.
+Pools/on-demand templates and auth browser selection are declarations; rental
+admission/history, acquired machine costs, discovered browser profiles, credential
+observations and actual saved layouts remain runtime records. No existing reusable
+layout-template setting was found; this cut introduces no new template product.
 
-Main was merged through `aef0c0a5cd` in `de23763a03`. Relevant changes:
+Jack Heart requested `lf sync` and Desktop Wave rename inspection. `lf sync --manual`
+completed conflict-free; main remains `aef0c0a5cd`, already merged in `de23763a03`.
+Desktop RenameWaveSheet delegates to the shared rename operation, which preserves
+Wave identity and moves authored files. Private preferences use the Wave ID and
+follow renames without applying to old-name reuse. Cross-repository relocation
+copies those declarations before changing addresses, then removes unchanged source
+entries after success. Linked worktrees still use their main checkout's private file.
 
-- LOO-709 / #1804 changes `session.end_detached_after` to a two-minute default
-  with duration/off parsing. The catalogue must describe this existing preference
-  and its applicability; owner activity and native draft records remain runtime
-  state. No bulk-resume setting or command exists.
-- #1803 adds identity-preserving Wave add/rename/removal. File-backed
-  Wave preferences must retain their owner through rename/relocation, including
-  descendants, without applying retired preferences to a new Wave at the old
-  name. Current DB preferences use Wave IDs; translating them to file selectors
-  is part of migration, not a reason to retain a second DB preference authority.
-- `settings_authority.sql` remains absent from the inspected `origin/main`
-  frontier and is this Task's one editable migration. Its current contents remove
-  Task agent policy and normalize skill keys; they do not migrate preferences to files.
+Origin profiles preserve authored declarations and executor-local bindings. Reads
+have no retention effect; inbound execution retains unchanged projections, tracks
+revisions by origin, and exposes keep/replace for divergence. Actual launch preparation
+and direct retained reads remain the behavioral proof, distinct from transport itself.
 
-Earlier test evidence remains in settings-scope.md and
-`4c95a728c8:scratch/settings-catalog.md`: the capture reduction passed its focused
-test and 153 related tests, formatting and Clippy. The archived prototype's 53
-config tests prove only that discarded prototype. Neither result establishes
-post-merge extension acceptance. That reconciliation preceded Jack's clone-scope
-decision recorded above; the former blocker is resolved, while implementation
-acceptance remains open.
+Earlier implementation evidence is retained at `03c678c676:scratch/settings-catalog.md`
+and in settings-scope.md. It is not proof of the current extension.
 
 ## Outcome and scope
 
@@ -270,26 +269,42 @@ retained JSON captures. Export ownership checks live in `skills::writable_target
 the caller no longer repeats them. These changes do not select a repository scope
 policy or perform the preference migration that can now proceed.
 
-Remaining predecessors to delete in the same coherent migration cut:
+Deletion cut (verify no live preference owner remains):
 
 - scope_settings preference reads/writes and replaced preference-only scope_defaults /
-  provider_routes paths after migrating their authored fields; preserve runtime facts.
+  provider_routes and auth_browser_bindings paths; migrate pool availability and on-demand templates/limits, preserving runtime facts.
 - LAUNCH_KEYS, REPO_ONLY_KEYS, ADDITIVE_KEYS and duplicate applicability/key discovery.
 - Schema inference from serializing Config::default().
 - Separate preference parsers/writers in special settings and mirrored client key lists.
 - Inspector guesses based only on last candidate; render resolver-owned reasons.
 - Historical DB/file or per-repo duplicate authorities after cutover.
 
-Existing code owners: config.rs, config/settings.rs, lf/mod.rs, lf/commands/setting.rs,
-lf/commands/config.rs, lf/commands/machine.rs, lf/commands/ssh.rs, store/sqlite/durable.rs,
-work/wave/setup.rs and Desktop AppearanceStore. Follow actual call paths before changing.
+The deletion cut is complete in the current tree. Catalogue lifecycle alone marks
+inactive preferences; no parallel `active` flag or numeric target ranks remain.
+Typed domain readers select `Config` fields directly, without the generic
+`global_declarations` YAML round trip. Account SQL selects only runtime columns;
+file preferences are applied once per read/selection batch. Migration and remote
+retention share the authored-document overlay, independently of resolution policy.
+Copied Session list/history reads also drop the obsolete machine-table join and
+NULL label placeholder; configured aliases supply their names, including renames.
 
-## Remaining implementation and proof
+Removed `route_edits_invalidate_wave_setup`: it asserted revisions on the retired
+provider_routes table. File and route behavior remain covered by configuration,
+Wave setup and provider inspection tests. Concrete remaining gap: Wave watches
+reread on the five-minute planning clock (`lf/commands/watch.rs:PLANNING_CLOCK`),
+so file-only edits have no prompt invalidation signal. DB trigger counts no longer
+prove that behavior. Gate must verify and repair file-watch propagation across
+interfaces before publication.
+
+## Remaining proof
 
 The repository scope decision is resolved. The rewritten configuration docs precede
 the coherent migration cut and define its expected behavior.
-Remaining implementation comprises catalogue and file ownership/cutover; all
-consumer/API/UI writers and provenance; and remote authority and retention.
+Catalogue, file ownership, cutover, remote retention and provenance are implemented.
+Focused consumer checks cover launch recipes, migration recovery, Wave identity,
+machine/account placement and Desktop/FFI. Bootstrap inspection also exposes retained
+preferences without opening the Work store. Complete affected-suite acceptance and
+configured-provider demonstration remain with gate and review.
 Previous PR1 behavior remains required alongside complete setting-by-setting coverage.
 
 Headless acceptance covers:
@@ -314,6 +329,4 @@ Gate owns affected-suite and complete extension acceptance after implementation;
 configured/installed behavior remains distinct from stand-in proof. Automatic
 failure recovery remains unimplemented as PR2.
 
-Check: `git diff --check` passed; `lf context` remains within both memory and scratch limits; no code changed or tests rerun during reconciliation.
-
-Documentation-first check: `git diff --check` and `uv run --no-sync python scripts/check_architecture.py --json` passed; code/behavior parity remains the implementation run's acceptance.
+Check (November 3): `cargo test -p loopflow --lib` with focused filters `config::` (64), `store::sqlite::account_observation_tests::` (3), `store::sqlite::rentals::tests::` (9), `machine_records::tests::` (5), and `automatic_selection_prefers_the_account_with_more_room` (1) passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; `scripts/test_desktop.sh --filter 'ThemeWorkflowTests|NewTaskTests' -Xswiftc -gnone` built Desktop headlessly and passed 5 tests. Gate owns the full affected suites and the file-watch propagation gap above; demo/review owns installed-provider acceptance.

@@ -53,3 +53,12 @@ Assumption for Jack Heart's choice-before-fallback revision: a CLI/env default_a
 is not an explicit cross-provider import request on resume. Keep native history's
 provider, applying the fallback model when it names that same provider. Explicit
 agent choices retain the existing switch behavior.
+
+## Reversible implementation choices — November 3
+
+Private Wave selectors use authored UUIDs; CLI names resolve to those IDs. Setting
+`machine` names a Machine for Tasks and Sessions; capacity uses `machine.capacity`.
+On-demand declarations created through a generic file edit default to zero permitted
+machines and a zero hourly limit until explicitly configured. Pool availability,
+rental templates/limits and authentication browser selection are file preferences;
+observed browser identities and acquired-machine commitments remain runtime facts.

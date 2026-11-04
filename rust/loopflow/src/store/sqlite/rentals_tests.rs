@@ -34,6 +34,29 @@ fn code(max: u32) -> OnDemand {
 }
 
 #[test]
+fn file_edits_change_admission_without_rewriting_live_rentals() {
+    let (home, store) = store();
+    store.add_ondemand(&code(1)).unwrap();
+    let admitted = store.admit_rental("code", None, None, false).unwrap();
+    let path = home.path().join("config.yaml");
+    crate::config::api::run(crate::config::api::Request::File {
+        path,
+        key: "ondemands.code.max_machines".into(),
+        value: Some("0".into()),
+        unset: false,
+        scope: crate::config::settings::SettingScope::Global,
+        shared: false,
+    })
+    .unwrap();
+    assert_eq!(store.ondemand("code").unwrap().unwrap().max_machines, 0);
+    assert!(store.admit_rental("code", None, None, false).is_err());
+    assert_eq!(
+        store.rental(&admitted.id).unwrap().cap_usd,
+        admitted.cap_usd
+    );
+}
+
+#[test]
 fn pools_and_ondemands_share_one_namespace() {
     let (_dir, store) = store();
     store.add_pool("lab").unwrap();
@@ -174,6 +197,8 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     // Claiming reads the global Git identity, which isolating tests replace.
     let _env = crate::journal::test_env_lock();
     let (_dir, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", _dir.path().to_str().unwrap());
     store.add_ondemand(&code(1)).unwrap();
     let rental = store.admit_rental("code", None, None, false).unwrap();
     store

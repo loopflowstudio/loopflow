@@ -574,6 +574,26 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
 }
 
 #[test]
+fn selecting_the_current_machine_executes_locally() {
+    let fixture = Machines::new();
+    let local = fixture.json(&["machine", "id", "--json"]);
+    let output = fixture.run(&[
+        "--machine",
+        local["id"].as_str().unwrap(),
+        "config",
+        "catalog",
+        "--json",
+    ]);
+    assert_success(&output);
+    let definitions: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(definitions
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|definition| definition["key"] == "machine"));
+}
+
+#[test]
 fn machine_selector_dispatches_before_local_help_and_placement() {
     let fixture = Machines::new();
     let added = fixture.json(&["machine", "add", "mini", "--json"]);
@@ -892,7 +912,7 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
     let remote_before = checkpoint_bytes(&remote_db);
     let expected_id: String = rusqlite::Connection::open(&remote_db)
         .unwrap()
-        .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
+        .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
             row.get(0)
         })
         .unwrap();
@@ -1007,7 +1027,7 @@ fn remote_preview_preserves_absent_corrupt_and_changed_machine_evidence() {
     {
         let db = rusqlite::Connection::open(&remote_db).unwrap();
         db.execute(
-            "UPDATE machines SET id='home_99999999999999999999999999999999' WHERE route='local'",
+            "UPDATE machines SET id='home_99999999999999999999999999999999' WHERE is_local=1",
             [],
         )
         .unwrap();
@@ -1644,105 +1664,49 @@ fn task_ownership_never_routes_to_another_persons_machine() {
 }
 
 #[test]
-fn set_machine_copies_wave_and_repository_defaults_to_your_other_machines() {
-    use loopflow::durable::{MachineSetting, OwningMachineSource};
+fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
+    use loopflow::durable::MachineSetting;
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
     plan.to_local();
     let mini = plan.remote.local_machine().unwrap().id;
     let laptop = plan.local.local_machine().unwrap().id;
-    let repository = ["--repository", plan.repository.as_str()];
-    let mut wave = repository.to_vec();
-    wave.extend(["--wave", "owners", "set", "machine", "mini"]);
-    let output = fixture.run(&wave);
-    assert_success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners:"));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("copied to mini"));
-    // A selected repository with no Wave sets the repository's default.
-    let mut bare = repository.to_vec();
-    bare.extend(["set", "machine", "mini"]);
-    let output = fixture.run(&bare);
-    assert_success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("This repository:"));
-    // The Wave Session comes back to the laptop; its Tasks stay on mini.
-    let mut session = repository.to_vec();
-    session.extend([
+    let wave = plan
+        .local
+        .ensure_wave_project(plan.local_path.to_str().unwrap(), "owners")
+        .unwrap()
+        .wave_id;
+    let output = fixture.run(&[
+        "--repository",
+        plan.repository.as_str(),
         "--wave",
         "owners",
         "set",
-        "machine.session",
-        laptop.as_str(),
+        "machine.tasks",
+        mini.as_str(),
     ]);
-    let output = fixture.run(&session);
     assert_success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners: its Session runs"));
-    for (store, path) in [
-        (&plan.local, &plan.local_path),
-        (&plan.remote, &plan.remote_path),
-    ] {
-        let wave = store
-            .ensure_wave_project(path.to_str().unwrap(), "owners")
-            .unwrap()
-            .wave_id;
-        assert_eq!(
-            store
-                .wave_owning_machine(&wave, MachineSetting::Tasks)
-                .unwrap(),
-            (mini.clone(), OwningMachineSource::Wave("owners".into()))
-        );
-        assert_eq!(
-            store
-                .wave_owning_machine(&wave, MachineSetting::Session)
-                .unwrap(),
-            (laptop.clone(), OwningMachineSource::Wave("owners".into()))
-        );
-        for setting in [MachineSetting::Tasks, MachineSetting::Session] {
-            assert_eq!(
-                store
-                    .repository_owning_machine(&plan.repository, setting)
-                    .unwrap(),
-                (mini.clone(), OwningMachineSource::Repository)
-            );
-        }
-    }
-    let listed = fixture.json(&["machine", "list", "--json"]);
-    let listing = |id: &str| {
-        listed
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|listing| listing["id"] == id)
-            .unwrap()
-            .clone()
-    };
-    let scopes = listing(mini.as_str())["defaults"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|d| {
-            format!(
-                "{} {}",
-                d["scope"]["kind"].as_str().unwrap(),
-                d["setting"].as_str().unwrap()
-            )
-        })
-        .collect::<Vec<_>>();
     assert_eq!(
-        listing(laptop.as_str())["defaults"][0]["setting"],
-        "session"
+        plan.local
+            .wave_owning_machine(&wave, MachineSetting::Tasks)
+            .unwrap()
+            .0,
+        mini
     );
     assert_eq!(
-        scopes,
-        ["wave tasks", "repository tasks", "repository session"]
+        plan.local
+            .wave_owning_machine(&wave, MachineSetting::Session)
+            .unwrap()
+            .0,
+        laptop
     );
-    // The laptop routes the unowned Task to mini; mini claims it for itself.
+    assert!(!plan.remote_path.join("lf.config.local.yaml").exists());
     assert_eq!(
         plan.local.task_execution_route(&task).unwrap().machine_id,
         mini
     );
-    assert!(plan.local.claim_task(&task).is_err());
-    plan.remote.claim_task(&task).unwrap().unwrap();
+    assert!(plan.local.task_ownership(&task).unwrap().log.is_empty());
 }
 
 #[test]

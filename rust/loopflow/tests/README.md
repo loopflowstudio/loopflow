@@ -376,8 +376,8 @@ cargo test -p loopflow --test integration settings_launch_tests::
 
 It executes exported commands and runtime Graphs, comparing inspected settings
 with provider arguments and delivered documents. Preserve defining Graph IDs
-through composition, live repository skill overrides in global recipes, DB/YAML
-scope precedence, explicit CLI/environment selection and empty/false/unset values.
+through composition, live repository skill overrides in global recipes, personal/shared
+file precedence, explicit CLI/environment selection and empty/false/unset values.
 Session/resume fixtures create local Tasks through the CLI and wait for each
 worker before reading its selection. Stand-ins establish launch behavior, not
 configured-provider recovery. Claude's headless permission floor is independent

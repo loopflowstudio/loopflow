@@ -1070,7 +1070,7 @@ public struct TaskCreateRunFailed: LocalizedError, Sendable {
 public struct WaveGraph: Decodable, Sendable, Hashable {
     public struct Default: Decodable, Sendable, Hashable {
         public let name: String
-        /// `personal`, `wave`, `repo`, `global` or `default`
+        /// `builtin`, `repository`, `personal`, `environment` or `command_line`
         public let source: String
     }
     public let waveId: String?

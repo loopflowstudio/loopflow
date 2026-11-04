@@ -103,6 +103,27 @@ fn copies_arrive_from_their_origin_without_becoming_local_rows() {
     assert_eq!(copied[0].id, SESSION);
     assert_eq!(copied[0].title, "Rent pods");
     assert_eq!(copied[0].origin_name(), "code-1");
+    assert_eq!(
+        here.copied_history(SESSION)
+            .unwrap()
+            .unwrap()
+            .session
+            .origin_name(),
+        "code-1"
+    );
+    here.rename_machine("code-1", "builder").unwrap();
+    assert_eq!(
+        here.copied_sessions(None, None).unwrap()[0].origin_name(),
+        "builder"
+    );
+    assert_eq!(
+        here.copied_history(SESSION)
+            .unwrap()
+            .unwrap()
+            .session
+            .origin_name(),
+        "builder"
+    );
 
     // No local surface finds them: not as Processes to reconcile, not as Sessions to attach.
     let conn = here.conn.lock().unwrap();

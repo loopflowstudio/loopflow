@@ -6,6 +6,17 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+fn write_preferences(home: &Path, text: &str) -> std::io::Result<()> {
+    let path = home.join("config.yaml");
+    let saved: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&fs::read_to_string(&path).unwrap_or_default()).unwrap();
+    let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).unwrap();
+    if let Some(accounts) = saved.get("accounts") {
+        value["accounts"] = accounts.clone();
+    }
+    fs::write(path, serde_yaml_ng::to_string(&value).unwrap())
+}
+
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (name, _) in
@@ -418,8 +429,8 @@ fn runtime_and_exported_occurrences_resolve_live_preferences_at_the_same_authori
     }
     repo.stage_all();
     repo.commit("Define occurrence preferences");
-    fs::write(
-        home.path().join("config.yaml"),
+    write_preferences(
+        home.path(),
         r#"
 agent: claude:personal
 isolate: true
@@ -505,9 +516,9 @@ graphs:
         );
     }
     for (key, value) in [
-        ("agent", "claude:db-general"),
-        ("skills.probe.agent", "claude:db-skill"),
-        ("graphs.inner.steps.work.agent", "claude:db-step"),
+        ("agent", "claude:edited-general"),
+        ("skills.probe.agent", "claude:edited-skill"),
+        ("graphs.inner.steps.work.agent", "claude:edited-step"),
         ("graphs.inner.steps.work.chrome", "true"),
         ("graphs.inner.steps.work.docs", "[db.txt]"),
     ] {
@@ -517,9 +528,15 @@ graphs:
             &["set", "--global", key, value],
         ));
     }
-    let db = launch_pair(&[], None, true);
-    assert_eq!(db[0]["settings"]["agent"]["value"], "claude:db-step");
-    assert_eq!(db[4]["settings"]["agent"]["value"], "claude:db-skill");
+    let edited = launch_pair(&[], None, true);
+    assert_eq!(
+        edited[0]["settings"]["agent"]["value"],
+        "claude:edited-step"
+    );
+    assert_eq!(
+        edited[4]["settings"]["agent"]["value"],
+        "claude:edited-skill"
+    );
     for key in [
         "graphs.inner.steps.work.agent",
         "skills.probe.agent",
@@ -532,20 +549,20 @@ graphs:
             &["unset", "--global", key],
         ));
     }
-    // Source beats specificity: broad DB beats the personal occurrence.
+    // Unset removes the edited occurrence and skill declarations from the file.
     assert_eq!(
         launch_pair(&[], None, false)[0]["settings"]["agent"]["value"],
-        "claude:db-general"
+        "claude:edited-general"
     );
     success(command(repo.path(), home.path(), &["repository"]));
     success(command(
         repo.path(),
         home.path(),
-        &["set", "agent", "claude:db-repo"],
+        &["set", "agent", "claude:edited-repo"],
     ));
     assert_eq!(
         launch_pair(&[], None, false)[0]["settings"]["agent"]["value"],
-        "claude:db-repo"
+        "claude:edited-repo"
     );
     let wave = loopflow::work::wave::Wave::new(
         loopflow::id::WaveId::new(),
@@ -556,15 +573,18 @@ graphs:
         .unwrap()
         .block_on(store.create_wave(&wave))
         .unwrap();
-    repo.create_file(".lf/wave/settings/GOAL.md", "Exercise settings scope.");
+    repo.create_file(
+        ".lf/wave/settings/GOAL.md",
+        &format!("---\nid: {}\n---\nExercise settings scope.", wave.id()),
+    );
     success(command(
         repo.path(),
         home.path(),
-        &["--wave", "settings", "set", "agent", "claude:db-wave"],
+        &["--wave", "settings", "set", "agent", "claude:edited-wave"],
     ));
     assert_eq!(
         launch_pair(&["--wave", "settings"], None, false)[0]["settings"]["agent"]["value"],
-        "claude:db-wave"
+        "claude:edited-wave"
     );
     success(command(
         repo.path(),
@@ -579,7 +599,7 @@ graphs:
     ));
     assert_eq!(
         launch_pair(&[], None, false)[0]["settings"]["agent"]["value"],
-        "claude:personal-step"
+        "claude:authored"
     );
     assert_eq!(
         launch_pair(&[], Some("claude:environment"), false)[0]["settings"]["agent"]["value"],
@@ -600,8 +620,11 @@ graphs:
         )[0]["settings"]["agent"]["value"],
         "claude:cli"
     );
-    fs::write(home.path().join("config.yaml"), "isolate: true\n").unwrap();
-    repo.create_file(".lf/wave/settings/config.yaml", "agent: claude:wave\n");
+    write_preferences(home.path(), "isolate: true\n").unwrap();
+    repo.create_file(
+        ".lf/wave/settings/config.yaml",
+        &format!("id: {}\nagent: claude:wave\n", wave.id()),
+    );
     assert_eq!(
         launch_pair(&["--wave", "settings"], None, false)[0]["settings"]["agent"]["value"],
         "claude:wave"
@@ -640,8 +663,8 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
         ".lf/graphs/fallback.yaml",
         "- step: {name: probe, id: work, default_agent: 'claude:occurrence'}\n",
     );
-    fs::write(
-        home.path().join("config.yaml"),
+    write_preferences(
+        home.path(),
         "isolate: true\nskills: {probe: {default_agent: claude:personal}}\n",
     )
     .unwrap();
@@ -691,10 +714,10 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
             "set",
             "--global",
             "graphs.fallback.steps.work.default_agent",
-            "claude:database",
+            "claude:edited",
         ],
     ));
-    check(&[], None, "claude:database", "default_agent");
+    check(&[], None, "claude:edited", "default_agent");
     check(
         &[],
         Some("default_agent: claude:environment"),
@@ -729,7 +752,7 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
     ));
     repo.create_file(".lf/config.yaml", "diff: false\ndiff_files: false\n");
     check(&[], None, "claude:personal", "default_agent");
-    fs::write(home.path().join("config.yaml"), "isolate: true\n").unwrap();
+    write_preferences(home.path(), "isolate: true\n").unwrap();
     check(&[], None, "claude:occurrence", "default_agent");
 }
 
@@ -842,8 +865,8 @@ with (home / 'session-children.jsonl').open('a') as output:
     };
     connect_fixture_claude(home.path(), &store);
     support::managed_codex_account(home.path());
-    fs::write(
-        home.path().join("config.yaml"),
+    write_preferences(
+        home.path(),
         "agent: claude\nisolate: true\nskills: {implement: {agent: codex}}\n",
     )
     .unwrap();

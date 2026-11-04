@@ -2015,11 +2015,11 @@ for line in sys.stdin:
 fn shipping_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    task.registered
-        .store
-        .sqlite
-        .set_scope_setting(None, "agent", "claude")
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     task
 }
 
@@ -2377,11 +2377,11 @@ sys.exit(3)
 fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    task.registered
-        .store
-        .sqlite
-        .set_scope_setting(None, "agent", "claude")
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     let output = task.run(&["-b", "--task", "INF-123", "ship"]);
     assert!(!output.status.success());
     // The ship's Task run started its failing Graph three times, then gave up.
@@ -2455,11 +2455,11 @@ for line in sys.stdin:
 fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    task.registered
-        .store
-        .sqlite
-        .set_scope_setting(None, "agent", "claude")
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     task.repo.create_file(
         ".lf/graphs/verifying.yaml",
         "- graph: proof\n- loop: proof\n  interactive: {name: verify, id: check}\n",

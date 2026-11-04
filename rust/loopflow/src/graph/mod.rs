@@ -474,7 +474,7 @@ impl<'a> DefinitionLoader<'a> {
         fn retain_origin(
             steps: &mut [Step],
             graph: &str,
-            layer: crate::config::ConfigLayer,
+            layer: crate::config::ConfigSource,
         ) -> Result<(), LoadError> {
             for step in steps {
                 match &mut step.target {
@@ -501,7 +501,7 @@ impl<'a> DefinitionLoader<'a> {
         retain_origin(
             &mut items,
             &name,
-            crate::config::settings::definition_layer(source.as_deref()),
+            crate::config::settings::definition_source(source.as_deref()),
         )?;
         Ok(GraphDefinition { name, items })
     }
@@ -1201,7 +1201,7 @@ fn compile_steps(
                             Box::new(crate::config::settings::OccurrenceSettings::capture(
                                 graph,
                                 step.id.as_deref(),
-                                crate::config::settings::definition_layer(source.as_deref()),
+                                crate::config::settings::definition_source(source.as_deref()),
                                 skill,
                             )?)
                         }

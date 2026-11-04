@@ -8,7 +8,16 @@ use crate::prompt::{count_tokens, Document, DocumentSource};
 
 /// Keys in the existing `context_budgets` configuration block.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

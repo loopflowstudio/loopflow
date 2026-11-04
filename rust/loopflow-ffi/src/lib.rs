@@ -98,6 +98,27 @@ pub unsafe extern "C" fn lf_write(write: *const c_char, error: *mut *mut c_char)
         .map_or(std::ptr::null_mut(), |text| c_string(&text).into_raw())
 }
 
+/// Read the settings catalogue or edit a declaration through the common file owner.
+///
+/// # Safety
+/// `request` is NUL-terminated; `error` is null or writable. Free returned strings.
+#[no_mangle]
+pub unsafe extern "C" fn lf_config(request: *const c_char, error: *mut *mut c_char) -> *mut c_char {
+    // SAFETY: the caller's guarantees are passed through to the shared decoder.
+    unsafe {
+        serve(
+            "lf_config",
+            request,
+            error,
+            |request: loopflow::config::api::Request| {
+                loopflow::config::api::run(request)
+                    .and_then(|value| Ok(serde_json::to_string(&value)?))
+            },
+        )
+    }
+    .map_or(std::ptr::null_mut(), |text| c_string(&text).into_raw())
+}
+
 /// `serve` applied to the JSON `request` (a `Read` or a `Write`), or `None`
 /// with `*error` set when it is invalid, fails or panics.
 ///

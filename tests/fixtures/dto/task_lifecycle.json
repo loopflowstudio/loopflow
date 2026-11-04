@@ -27,7 +27,7 @@
         "step": null
       },
       "graph_name": "delivery",
-      "graph_source": "task",
+      "graph_source": null,
       "latest_graph_process": {
         "compiled": {
           "name": "delivery",
@@ -723,7 +723,7 @@
           "step": null
         },
         "graph_name": "delivery",
-        "graph_source": "task",
+        "graph_source": null,
         "latest_graph_process": {
           "compiled": {
             "name": "delivery",
@@ -1045,7 +1045,7 @@
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
       },
       "graph_name": "delivery",
-      "graph_source": "task",
+      "graph_source": null,
       "latest_graph_process": {
         "compiled": {
           "name": "delivery",
@@ -1694,7 +1694,7 @@
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
         },
         "graph_name": "delivery",
-        "graph_source": "task",
+        "graph_source": null,
         "latest_graph_process": {
           "compiled": {
             "name": "delivery",
@@ -2001,7 +2001,7 @@
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
       },
       "graph_name": "delivery",
-      "graph_source": "task",
+      "graph_source": null,
       "latest_graph_process": {
         "compiled": {
           "name": "delivery",
@@ -2622,7 +2622,7 @@
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
         },
         "graph_name": "delivery",
-        "graph_source": "task",
+        "graph_source": null,
         "latest_graph_process": {
           "compiled": {
             "name": "delivery",

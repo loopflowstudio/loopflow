@@ -547,7 +547,7 @@ pub struct RoadmapTask {
     /// The graph the Task took up, else the one its first `lf task run` takes up.
     pub graph_name: Option<String>,
     /// The layer that chose it: `task`, `personal`, `wave`, `repo`, `global` or `default`.
-    pub graph_source: Option<crate::work::wave::setup::SetupSource>,
+    pub graph_source: Option<crate::config::ConfigSource>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -1805,7 +1805,7 @@ struct DetailReads<'a> {
     facts: crate::store::sqlite::TaskDetailFacts,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
-    selections: HashMap<crate::durable::TaskId, (String, crate::work::wave::setup::SetupSource)>,
+    selections: HashMap<crate::durable::TaskId, (String, Option<crate::config::ConfigSource>)>,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
     wave_names: HashMap<crate::id::WaveId, String>,
     /// Each Task Wave's and repository's checkout with your `lf set` values,
@@ -1828,17 +1828,20 @@ impl<'a> DetailReads<'a> {
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
         let execution = store.sqlite.graph_execution_facts(graphs.values())?;
-        let mut defaults = HashMap::<_, (String, crate::work::wave::setup::SetupSource)>::new();
+        let mut defaults = HashMap::<_, (String, Option<crate::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
         let mut personal = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
-                Some(name) => (name.clone(), crate::work::wave::setup::SetupSource::Task),
+                Some(name) => (name.clone(), None),
                 None => match defaults.entry((task.wave_id.clone(), task.repository_id.clone())) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
                     std::collections::hash_map::Entry::Vacant(entry) => entry
-                        .insert(crate::ops::task::task_graph_default(store, task)?)
+                        .insert({
+                            let (name, source) = crate::ops::task::task_graph_default(store, task)?;
+                            (name, Some(source))
+                        })
                         .clone(),
                 },
             };
@@ -2116,7 +2119,7 @@ async fn snapshot_task_detail(
         condition,
         actions,
         graph_name: Some(graph_name),
-        graph_source: Some(graph_source),
+        graph_source,
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,

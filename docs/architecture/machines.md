@@ -230,7 +230,7 @@ Session bindings retain membership independently of checkout location.
 ## Own and rent Machines
 
 A **pool** names machines you own (`machines.pool`, with `cost_usd` and
-`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a
+`expires_at`); it knows no provider. An **on-demand** declaration in personal configuration is a
 provider (Daytona, Modal, RunPod or AWS), hardware with at most one GPU
 (RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
 meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the
@@ -253,7 +253,7 @@ resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
 binary instead of the published `lf`, so a development build rents sandboxes
 running its own code.
 
-`lf [--repo REPO] [--wave WAVE] set machine R`, naming a pool or on-demand, sets the
+`lf [--repo REPO] [--wave WAVE] set machine.capacity R`, naming a pool or on-demand, sets the
 scope's personal Tasks capacity preference in place of a Tasks
 Machine; the nearest scope that sets either wins. `lf task run` places an
 unowned Task by that default as `--pool` or `--rent` would. Its Session stays

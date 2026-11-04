@@ -8,65 +8,19 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{config_layers, ConfigLayer};
+use crate::config::{config_layers, ConfigSource};
 use crate::durable::{MachineSetting, OwningMachineSource};
-use crate::profile::RouteScope;
-use crate::provider_account::nearest_provider_route;
 use crate::provider_auth::Provider;
-use crate::repository::RepoId;
 use crate::store::SharedStore;
 use crate::work::wave::Wave;
-
-/// Which layer chose a setting. `Task` is a Task's own choice, which outranks
-/// the rest; a Wave's setup never reports it. `Personal` is your own `lf set`
-/// value for the Wave or repository, above the committed `Wave` and `Repo`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SetupSource {
-    Task,
-    CommandLine,
-    Environment,
-    Personal,
-    Wave,
-    Repo,
-    Global,
-    Default,
-}
-
-impl SetupSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Task => "task",
-            Self::CommandLine => "command_line",
-            Self::Environment => "environment",
-            Self::Personal => "personal",
-            Self::Wave => "wave",
-            Self::Repo => "repo",
-            Self::Global => "global",
-            Self::Default => "default",
-        }
-    }
-}
-
-impl From<ConfigLayer> for SetupSource {
-    fn from(layer: ConfigLayer) -> Self {
-        match layer {
-            ConfigLayer::Builtin => Self::Default,
-            ConfigLayer::CommandLine => Self::CommandLine,
-            ConfigLayer::Environment => Self::Environment,
-            ConfigLayer::Personal => Self::Personal,
-            ConfigLayer::Wave => Self::Wave,
-            ConfigLayer::Repo => Self::Repo,
-            ConfigLayer::Global => Self::Global,
-        }
-    }
-}
 
 /// One effective setting; `value` is absent when nothing chooses one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetupValue {
     pub value: Option<String>,
-    pub source: SetupSource,
+    pub source: ConfigSource,
+    pub scope: Option<crate::config::settings::SettingScope>,
+    pub locator: Option<String>,
 }
 
 /// The accounts a provider's launches try in order; empty means no route, so
@@ -75,7 +29,9 @@ pub struct SetupValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountSetup {
     pub accounts: Vec<String>,
-    pub source: SetupSource,
+    pub source: ConfigSource,
+    pub scope: Option<crate::config::settings::SettingScope>,
+    pub locator: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,24 +68,28 @@ pub async fn read_wave_setup(
         let selected = crate::config::settings::resolve_layers(&layers, Some(&definition))?;
         skill_agents.insert(skill.to_owned(), effective_setting(&selected, "agent"));
     }
-    let repo = RepoId::discover(checkout).ok();
     let mut accounts = BTreeMap::new();
     for provider in [Provider::Claude, Provider::Codex] {
-        let route = nearest_provider_route(store, repo.as_ref(), Some(wave.id()), provider).await?;
-        let setup = match route {
-            Some(route) => AccountSetup {
-                accounts: route.accounts.iter().map(ToString::to_string).collect(),
-                source: match route.scope {
-                    RouteScope::Wave(_) | RouteScope::Repo(_) => SetupSource::Personal,
-                    RouteScope::Default => SetupSource::Global,
-                },
+        let setting = resolved
+            .settings
+            .get(&format!("account.{}", provider.as_str()));
+        let selected = setting.and_then(|setting| setting.selected());
+        accounts.insert(
+            provider.as_str().to_owned(),
+            AccountSetup {
+                accounts: resolved
+                    .config
+                    .account
+                    .get(provider.as_str())
+                    .into_iter()
+                    .flat_map(|order| order.iter())
+                    .map(ToString::to_string)
+                    .collect(),
+                source: selected.map_or(ConfigSource::Builtin, |candidate| candidate.source),
+                scope: selected.map(|candidate| candidate.scope),
+                locator: selected.map(|candidate| candidate.locator.clone()),
             },
-            None => AccountSetup {
-                accounts: Vec::new(),
-                source: SetupSource::Default,
-            },
-        };
-        accounts.insert(provider.as_str().to_owned(), setup);
+        );
     }
     Ok(WaveSetup {
         graph: effective_setting(&resolved, "graph"),
@@ -151,8 +111,14 @@ fn effective_setting(
             .and_then(|setting| setting.value.as_str())
             .map(str::to_owned),
         source: setting
-            .and_then(|setting| setting.candidates.last())
-            .map_or(SetupSource::Default, |candidate| candidate.layer.into()),
+            .and_then(|setting| setting.selected())
+            .map_or(ConfigSource::Builtin, |candidate| candidate.source),
+        scope: setting
+            .and_then(|setting| setting.selected())
+            .map(|candidate| candidate.scope),
+        locator: setting
+            .and_then(|setting| setting.selected())
+            .map(|candidate| candidate.locator.clone()),
     }
 }
 
@@ -162,11 +128,14 @@ fn machine(
     setting: MachineSetting,
 ) -> anyhow::Result<SetupValue> {
     let (machine, source) = store.sqlite.wave_owning_machine(wave.id(), setting)?;
+    let selected = match &source {
+        OwningMachineSource::Preference(selected) => Some(selected.as_ref()),
+        OwningMachineSource::ThisMachine => None,
+    };
     Ok(SetupValue {
         value: Some(machine.to_string()),
-        source: match source {
-            OwningMachineSource::Wave(_) | OwningMachineSource::Repository => SetupSource::Personal,
-            OwningMachineSource::ThisMachine => SetupSource::Default,
-        },
+        source: selected.map_or(ConfigSource::Builtin, |selected| selected.source),
+        scope: selected.map(|selected| selected.scope),
+        locator: selected.map(|selected| selected.locator.clone()),
     })
 }

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::git::worktree_root;
 use crate::git::worktrees::main_repo_root;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PortfolioMode {
     Folder,
@@ -31,8 +31,9 @@ pub struct Portfolio {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Selection {
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Selection {
     mode: PortfolioMode,
     paths: BTreeSet<PathBuf>,
 }

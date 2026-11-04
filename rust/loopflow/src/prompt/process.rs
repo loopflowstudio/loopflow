@@ -812,8 +812,8 @@ Test skill body.
         .expect("write skill");
 
         let mut config = default_test_config();
-        config.setting_layers = Some(vec![crate::config::ConfigLayerValues {
-            layer: crate::config::ConfigLayer::Global,
+        config.setting_layers = Some(vec![crate::config::ConfigDeclarations {
+            source: crate::config::ConfigSource::Personal,
             scope: crate::config::settings::SettingScope::Global,
             path: "personal config".into(),
             value: serde_yaml_ng::from_str("agent: codex:o3").unwrap(),

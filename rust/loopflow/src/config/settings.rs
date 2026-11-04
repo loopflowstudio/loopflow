@@ -5,11 +5,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
-use super::{Config, ConfigLayer, ConfigLayerValues};
+use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, clap::ValueEnum,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingScope {
     Global,
@@ -17,12 +19,20 @@ pub enum SettingScope {
     Wave,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SettingTarget {
+    General,
+    Skill { name: String },
+    GraphOccurrence { graph: String, id: Option<String> },
+}
+
 /// A Graph occurrence retains its defining graph through composition and capture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OccurrenceSettings {
     pub graph: String,
     pub id: Option<String>,
-    pub layer: ConfigLayer,
+    pub source: ConfigSource,
     pub values: Value,
 }
 
@@ -30,13 +40,13 @@ impl OccurrenceSettings {
     pub(crate) fn capture(
         graph: &str,
         id: Option<&str>,
-        layer: ConfigLayer,
+        layer: ConfigSource,
         skill: &Skill,
     ) -> Result<Self, LoadError> {
         Ok(Self {
             graph: graph.into(),
             id: id.map(str::to_owned),
-            layer,
+            source: layer,
             // Bare references already contain the loaded skill. Its preferences
             // remain skill defaults, not declarations of this Graph occurrence.
             values: if skill.content.is_some() {
@@ -54,10 +64,11 @@ impl OccurrenceSettings {
 pub struct SettingCandidate {
     /// Authored key; agent and default_agent retain their choice strength.
     pub key: String,
-    pub source: String,
-    pub layer: ConfigLayer,
+    pub locator: String,
+    pub reason: String,
+    pub source: ConfigSource,
     pub scope: SettingScope,
-    pub target: String,
+    pub target: SettingTarget,
     pub value: Value,
 }
 
@@ -67,47 +78,33 @@ pub struct EffectiveSetting {
     pub candidates: Vec<SettingCandidate>,
 }
 
+impl EffectiveSetting {
+    pub fn selected(&self) -> Option<&SettingCandidate> {
+        self.candidates
+            .iter()
+            .find(|candidate| candidate.reason == "selected")
+    }
+}
+
 #[derive(Debug)]
 pub struct ResolvedSettings {
     pub config: Config,
     pub settings: BTreeMap<String, EffectiveSetting>,
 }
 
-const LAUNCH_KEYS: &[&str] = &[
-    "agent",
-    "default_agent",
-    "yolo",
-    "chrome",
-    "context",
-    "docs",
-    "exclude",
-    "diff",
-    "diff_files",
-    "paste",
-    "summaries",
-    "summary_tokens",
-    "isolate",
-];
-
 fn invalid(message: impl Into<String>) -> LoadError {
     LoadError::InvalidGraph(message.into())
 }
 
-pub fn validate_scope(key: &str, layer: ConfigLayer, scope: SettingScope) -> Result<(), LoadError> {
+pub fn validate_scope(
+    key: &str,
+    layer: ConfigSource,
+    scope: SettingScope,
+) -> Result<(), LoadError> {
     let preference = preference_path(key)?;
-    if ["user", "repo_root", "session"].contains(&preference[0])
-        && (scope != SettingScope::Global || matches!(layer, ConfigLayer::Repo | ConfigLayer::Wave))
-    {
-        return Err(invalid(format!(
-            "{} is Machine-local; use personal global settings",
-            preference[0]
-        )));
-    }
-    if scope == SettingScope::Wave && super::REPO_ONLY_KEYS.contains(&preference[0]) {
-        return Err(invalid(format!(
-            "{} describes repository setup, not a Wave",
-            preference[0]
-        )));
+    let definition = super::catalog::definition(preference[0]).expect("validated key");
+    if !definition.applies(layer, scope, preference.len() != key.split('.').count()) {
+        return Err(invalid(format!("{key} does not apply at {layer:?}/{scope:?}; inspect `lf config catalog` for supported destinations")));
     }
     Ok(())
 }
@@ -128,40 +125,18 @@ pub fn preference_path(key: &str) -> Result<Vec<&str>, LoadError> {
         }
         _ => parts.clone(),
     };
-    if path.len() != parts.len() && !LAUNCH_KEYS.contains(&path[0]) {
-        return Err(invalid(format!(
-            "{} describes repository or personal setup, not an agent step",
-            path[0]
-        )));
-    }
-    let defaults = serde_yaml_ng::to_value(Config::default()).expect("Config is serializable");
-    let release_target = serde_yaml_ng::to_value(super::ReleaseTargetConfig::default())
-        .expect("release target serializes");
-    if path.first() == Some(&"release") && path.get(1) == Some(&"targets") && path.len() >= 3 {
-        if path.len() == 3 || (path.len() == 4 && release_target.get(path[3]).is_some()) {
-            return Ok(path);
-        }
-        return Err(invalid(format!("unknown setting {key}")));
-    }
-    let mut current = &defaults;
-    for (index, part) in path.iter().enumerate() {
-        if index == 1 && path[0] == "context_budgets" {
-            serde_yaml_ng::from_value::<crate::prompt::context_budget::BudgetKey>(Value::String(
-                (*part).into(),
-            ))
-            .map_err(|error| invalid(error.to_string()))?;
-            if path.len() == 2 {
-                return Ok(path);
-            }
-        }
-        current = current
-            .get(*part)
-            .ok_or_else(|| invalid(format!("unknown setting {key}")))?;
+    let definition = super::catalog::definition(path[0])
+        .ok_or_else(|| invalid(format!("unknown setting {key}")))?;
+    if !definition.accepts(&path)
+        || (path.len() != parts.len()
+            && definition.applicability != super::catalog::Applicability::Launch)
+    {
+        return Err(invalid(format!("unknown or ineligible setting {key}")));
     }
     Ok(path)
 }
 
-/// CLI and database values use the same YAML types as configuration files.
+/// CLI and file values use the same YAML types as configuration files.
 pub fn parse_value(key: &str, text: &str) -> Result<Value, LoadError> {
     let path = preference_path(key)?;
     let value: Value = serde_yaml_ng::from_str(text).map_err(|error| invalid(error.to_string()))?;
@@ -169,7 +144,7 @@ pub fn parse_value(key: &str, text: &str) -> Result<Value, LoadError> {
     Ok(value)
 }
 
-fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
+pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
     if value.is_null() {
         return Err(invalid(
             "omit a file value or use unset to remove a preference",
@@ -182,10 +157,66 @@ fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
             .ok_or_else(|| invalid("agent needs harness[:model]"))?;
         validate_agent_policy(agent)?;
     }
-    let mut check = serde_yaml_ng::to_value(Config::default()).expect("Config is serializable");
+    let mut check = super::catalog::defaults();
     insert(&mut check, path, value.clone());
     let parsed = serde_yaml_ng::from_value::<Config>(check)
         .map_err(|error| invalid(format!("{}: {error}", path.join("."))))?;
+    if let Some(stream) = parsed.stream.as_deref() {
+        if !["stable", "preview", "dev"].contains(&stream) {
+            return Err(invalid("stream must be stable, preview or dev"));
+        }
+    }
+    if !["gh", "local"].contains(&parsed.land.as_str()) {
+        return Err(invalid("land must be gh or local"));
+    }
+    if parsed.machine.tasks.is_some() && parsed.machine.capacity.is_some() {
+        return Err(invalid(
+            "choose machine.tasks or machine.capacity in one declaration",
+        ));
+    }
+    for provider in parsed.account.keys() {
+        if !["claude", "codex"].contains(&provider.as_str()) {
+            return Err(invalid("account routes require claude or codex"));
+        }
+    }
+    for (provider, browsers) in &parsed.auth_browsers {
+        provider
+            .parse::<crate::provider_auth::Provider>()
+            .map_err(|error| invalid(error.to_string()))?;
+        for profiles in std::iter::once(&browsers.default).chain(browsers.accounts.values()) {
+            let mut seen = std::collections::HashSet::new();
+            for profile in profiles {
+                crate::profile::ProfileId::parse(profile).map_err(invalid)?;
+                if !seen.insert(profile) {
+                    return Err(invalid("browser profiles must be unique"));
+                }
+            }
+        }
+    }
+    for (name, template) in &parsed.ondemands {
+        if name.trim().is_empty() || name.trim() != name || parsed.pools.contains_key(name) {
+            return Err(invalid(
+                "pools and on-demands require distinct nonempty names",
+            ));
+        }
+        if !template.hours.is_finite()
+            || template.hours <= 0.0
+            || template.hours > crate::rental::MAX_HOURS
+        {
+            return Err(invalid("rental hours must be positive and at most 24"));
+        }
+        template
+            .provider
+            .offer(&template.hardware)
+            .map_err(invalid)?;
+    }
+    for accounts in parsed.accounts.values() {
+        for declaration in accounts.values() {
+            if let Some(date) = &declaration.paid_through {
+                super::placement::parse_date(date).map_err(|error| invalid(error.to_string()))?;
+            }
+        }
+    }
     if path[0] == "context_budgets" {
         crate::prompt::context_budget::ContextBudgets::resolve(&parsed)
             .map_err(|error| invalid(error.to_string()))?;
@@ -257,24 +288,31 @@ pub(crate) fn insert(root: &mut Value, path: &[&str], value: Value) {
 
 pub(crate) fn metadata(value: &Value) -> Result<BTreeMap<String, Value>, LoadError> {
     let mut settings = BTreeMap::new();
-    for key in LAUNCH_KEYS {
-        if let Some(value) = value.get(*key).filter(|v| !v.is_null()) {
+    for key in super::catalog::DEFINITIONS
+        .iter()
+        .filter(|definition| definition.applicability == super::catalog::Applicability::Launch)
+        .map(|definition| definition.key)
+    {
+        if let Some(value) = value.get(key).filter(|v| !v.is_null()) {
             validate_value(&[key], value)?;
-            settings.insert((*key).into(), value.clone());
+            settings.insert(key.into(), value.clone());
         }
     }
     Ok(settings)
 }
 
 // Validate every authored candidate, even when another source shadows it.
-fn validate_preferences(value: &Value, targeted: bool, strict: bool) -> Result<(), LoadError> {
+pub(crate) fn validate_preferences(
+    value: &Value,
+    targeted: bool,
+    strict: bool,
+) -> Result<(), LoadError> {
     let Some(map) = value.as_mapping() else {
         if value.is_null() && !strict {
             return Ok(());
         }
         return Err(invalid("settings must be a mapping"));
     };
-    let defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
     for (key, value) in map {
         let key = key
             .as_str()
@@ -311,33 +349,24 @@ fn validate_preferences(value: &Value, targeted: bool, strict: bool) -> Result<(
                     }
                 }
             }
-        } else if (targeted && LAUNCH_KEYS.contains(&key))
-            || (!targeted && defaults.get(key).is_some())
-        {
+        } else if super::catalog::definition(key).is_some_and(|definition| {
+            !targeted || definition.applicability == super::catalog::Applicability::Launch
+        }) {
             if !value.is_null() {
                 validate_value(&[key], value)?;
             }
         } else if strict || targeted {
             return Err(invalid(format!("unknown or ineligible setting {key}")));
+        } else {
+            tracing::warn!(key, "unknown LF configuration key");
         }
     }
     Ok(())
 }
 
-fn rank(layer: ConfigLayer) -> u8 {
-    match layer {
-        ConfigLayer::Builtin => 0,
-        ConfigLayer::Repo | ConfigLayer::Wave => 1,
-        ConfigLayer::Global => 2,
-        ConfigLayer::Personal => 3,
-        ConfigLayer::Environment => 4,
-        ConfigLayer::CommandLine => 5,
-    }
-}
-
-pub fn definition_layer(path: Option<&std::path::Path>) -> ConfigLayer {
+pub fn definition_source(path: Option<&std::path::Path>) -> ConfigSource {
     let Some(path) = path else {
-        return ConfigLayer::Builtin;
+        return ConfigSource::Builtin;
     };
     if path.starts_with(crate::store::lf_home_dir())
         || dirs::home_dir().is_some_and(|home| {
@@ -346,9 +375,9 @@ pub fn definition_layer(path: Option<&std::path::Path>) -> ConfigLayer {
                 .any(|dir| path.starts_with(home.join(dir)))
         })
     {
-        ConfigLayer::Global
+        ConfigSource::Personal
     } else {
-        ConfigLayer::Repo
+        ConfigSource::Repository
     }
 }
 
@@ -368,7 +397,12 @@ fn skill_values(skill: &Skill) -> Value {
 }
 
 fn leaves(value: &Value, prefix: &str, result: &mut Vec<(String, Value)>) {
-    if prefix == "planning" {
+    if value.is_null() {
+        return;
+    }
+    if super::catalog::definition(prefix).is_some_and(|definition| {
+        definition.key == prefix && definition.combination == super::catalog::Combination::Replace
+    }) {
         result.push((prefix.into(), value.clone()));
     } else if let Some(map) = value.as_mapping() {
         for (key, value) in map {
@@ -388,7 +422,7 @@ fn leaves(value: &Value, prefix: &str, result: &mut Vec<(String, Value)>) {
 
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
-    layers: &[ConfigLayerValues],
+    layers: &[ConfigDeclarations],
     skill: Option<&Skill>,
 ) -> Result<ResolvedSettings, LoadError> {
     // Each block shares provenance; specificity orders blocks within a source/scope.
@@ -416,81 +450,79 @@ pub fn resolve_layers(
             key.default_limit().into(),
         );
     }
-    candidates.push((
-        0,
-        SettingCandidate {
-            key: String::new(),
-            layer: ConfigLayer::Builtin,
-            scope: SettingScope::Global,
-            source: "builtin".into(),
-            target: "general".into(),
-            value: defaults,
-        },
-    ));
+    candidates.push(SettingCandidate {
+        key: String::new(),
+        reason: String::new(),
+        source: ConfigSource::Builtin,
+        scope: SettingScope::Global,
+        locator: "builtin".into(),
+        target: SettingTarget::General,
+        value: defaults,
+    });
     if let Some(skill) = skill {
         let source = skill.source.as_ref();
-        let layer = definition_layer(source.map(|source| source.path.as_path()));
-        candidates.push((
-            1,
-            SettingCandidate {
+        let layer = definition_source(source.map(|source| source.path.as_path()));
+        candidates.push(SettingCandidate {
+            key: String::new(),
+            reason: String::new(),
+            source: layer,
+            scope: if layer == ConfigSource::Repository {
+                SettingScope::Repository
+            } else {
+                SettingScope::Global
+            },
+            locator: source.map_or_else(
+                || "builtin".into(),
+                |source| source.path.display().to_string(),
+            ),
+            target: SettingTarget::Skill {
+                name: skill.name.clone(),
+            },
+            value: skill_values(skill),
+        });
+        if let Some(occurrence) = &skill.occurrence {
+            candidates.push(SettingCandidate {
                 key: String::new(),
-                layer,
-                scope: if layer == ConfigLayer::Repo {
+                reason: String::new(),
+                source: occurrence.source,
+                scope: if occurrence.source == ConfigSource::Repository {
                     SettingScope::Repository
                 } else {
                     SettingScope::Global
                 },
-                source: source.map_or_else(
-                    || "builtin".into(),
-                    |source| source.path.display().to_string(),
-                ),
-                target: format!("skill:{}", skill.name),
-                value: skill_values(skill),
-            },
-        ));
-        if let Some(occurrence) = &skill.occurrence {
-            candidates.push((
-                2,
-                SettingCandidate {
-                    key: String::new(),
-                    layer: occurrence.layer,
-                    scope: if occurrence.layer == ConfigLayer::Repo {
-                        SettingScope::Repository
-                    } else {
-                        SettingScope::Global
-                    },
-                    source: format!("graph:{}", occurrence.graph),
-                    target: format!(
-                        "graph:{}/{}",
-                        occurrence.graph,
-                        occurrence.id.as_deref().unwrap_or("anonymous")
-                    ),
-                    value: occurrence.values.clone(),
+                locator: format!("graph:{}", occurrence.graph),
+                target: SettingTarget::GraphOccurrence {
+                    graph: occurrence.graph.clone(),
+                    id: occurrence.id.clone(),
                 },
-            ));
+                value: occurrence.values.clone(),
+            });
         }
     }
     let invocation = [
-        ConfigLayerValues {
-            layer: ConfigLayer::Environment,
+        ConfigDeclarations {
+            source: ConfigSource::Environment,
             scope: SettingScope::Global,
             path: "environment".into(),
             value: environment()?,
         },
-        ConfigLayerValues {
-            layer: ConfigLayer::CommandLine,
+        ConfigDeclarations {
+            source: ConfigSource::CommandLine,
             scope: SettingScope::Global,
             path: "CLI".into(),
             value: invocation_values(),
         },
     ];
     for layer in layers.iter().chain(&invocation) {
-        validate_preferences(&layer.value, false, layer.layer == ConfigLayer::Wave)
+        if layer.value.is_null() {
+            continue;
+        }
+        validate_preferences(&layer.value, false, true)
             .map_err(|error| invalid(format!("{}: {error}", layer.path.display())))?;
         if let Some(values) = layer.value.as_mapping() {
             for key in values.keys().filter_map(Value::as_str) {
                 if !["skills", "graphs"].contains(&key) && preference_path(key).is_ok() {
-                    validate_scope(key, layer.layer, layer.scope)
+                    validate_scope(key, layer.source, layer.scope)
                         .map_err(|error| invalid(format!("{}: {error}", layer.path.display())))?;
                 }
             }
@@ -498,10 +530,11 @@ pub fn resolve_layers(
         // Scope orders scopes within one source; authored repo metadata shares repo scope.
         let mut candidate = SettingCandidate {
             key: String::new(),
-            layer: layer.layer,
+            reason: String::new(),
+            source: layer.source,
             scope: layer.scope,
-            source: layer.path.display().to_string(),
-            target: "general".into(),
+            locator: layer.path.display().to_string(),
+            target: SettingTarget::General,
             value: Value::Null,
         };
         if let Some(skill) = skill {
@@ -511,14 +544,13 @@ pub fn resolve_layers(
                 .get("skills")
                 .and_then(|skills| skills.get(&skill.name).or_else(|| skills.get(&portable)))
             {
-                candidates.push((
-                    1,
-                    SettingCandidate {
-                        target: format!("skill:{}", skill.name),
-                        value: value.clone(),
-                        ..candidate.clone()
+                candidates.push(SettingCandidate {
+                    target: SettingTarget::Skill {
+                        name: skill.name.clone(),
                     },
-                ));
+                    value: value.clone(),
+                    ..candidate.clone()
+                });
             }
             if let Some(occurrence) = &skill.occurrence {
                 if let Some(value) = occurrence.id.as_ref().and_then(|id| {
@@ -529,39 +561,49 @@ pub fn resolve_layers(
                         .get("steps")?
                         .get(id)
                 }) {
-                    candidates.push((
-                        2,
-                        SettingCandidate {
-                            target: format!(
-                                "graph:{}/{}",
-                                occurrence.graph,
-                                occurrence.id.as_deref().expect("matched id")
-                            ),
-                            value: value.clone(),
-                            ..candidate.clone()
+                    candidates.push(SettingCandidate {
+                        target: SettingTarget::GraphOccurrence {
+                            graph: occurrence.graph.clone(),
+                            id: occurrence.id.clone(),
                         },
-                    ));
+                        value: value.clone(),
+                        ..candidate.clone()
+                    });
                 }
             }
         }
         candidate.value = layer.value.clone();
-        candidates.push((0, candidate));
+        candidates.push(candidate);
     }
-    candidates.sort_by_key(|(specificity, candidate)| {
-        (rank(candidate.layer), candidate.scope, *specificity)
-    });
-    let allowed = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
+    candidates
+        .sort_by_key(|candidate| (candidate.source, candidate.scope, candidate.target.clone()));
     let mut explanations: BTreeMap<String, EffectiveSetting> = BTreeMap::new();
-    for (_, mut candidate) in candidates {
+    for mut candidate in candidates {
         let mut values = std::mem::replace(&mut candidate.value, Value::Null);
         if let Some(map) = values.as_mapping_mut() {
             if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
                 map.entry(Value::String("graph".into())).or_insert(graph);
             }
+            if let Some(value) = map.get_mut("machine").filter(|value| value.is_string()) {
+                *value = serde_yaml_ng::to_value(
+                    serde_yaml_ng::from_value::<super::placement::Placement>(value.clone())
+                        .map_err(|error| invalid(error.to_string()))?,
+                )
+                .expect("placement serializes");
+            }
+            if let Some(accounts) = map.get_mut("account").and_then(Value::as_mapping_mut) {
+                for value in accounts.values_mut() {
+                    *value = serde_yaml_ng::to_value(
+                        serde_yaml_ng::from_value::<super::placement::AccountOrder>(value.clone())
+                            .map_err(|error| invalid(error.to_string()))?,
+                    )
+                    .expect("account order serializes");
+                }
+            }
             map.retain(|key, _| {
                 key.as_str().is_some_and(|key| {
                     !["skills", "graphs", "repos", "waves"].contains(&key)
-                        && allowed.get(key).is_some()
+                        && super::catalog::definition(key).is_some()
                 })
             });
         }
@@ -579,7 +621,9 @@ pub fn resolve_layers(
                 value: value.clone(),
                 ..candidate.clone()
             });
-            entry.value = if super::ADDITIVE_KEYS.contains(&key.as_str()) {
+            entry.value = if super::catalog::definition(&key).is_some_and(|definition| {
+                definition.combination == super::catalog::Combination::AppendReset
+            }) {
                 match (std::mem::replace(&mut entry.value, Value::Null), value) {
                     (Value::Sequence(mut old), Value::Sequence(new)) if !new.is_empty() => {
                         old.extend(new);
@@ -591,6 +635,29 @@ pub fn resolve_layers(
                 value
             };
         }
+    }
+    // A Tasks destination and a capacity select the same placement. The same
+    // precedence used for all declarations selects which one applies.
+    if let (Some(machine), Some(capacity)) = (
+        explanations.get("machine.tasks"),
+        explanations.get("machine.capacity"),
+    ) {
+        let priority = |setting: &EffectiveSetting| {
+            let candidate = setting
+                .candidates
+                .last()
+                .expect("setting has a declaration");
+            (candidate.source, candidate.scope, candidate.target.clone())
+        };
+        let removed = if priority(machine) > priority(capacity) {
+            "machine.capacity"
+        } else {
+            "machine.tasks"
+        };
+        explanations
+            .get_mut(removed)
+            .expect("matched placement")
+            .value = Value::Null;
     }
     // Execution and inspection share the final values, including list resets.
     let mut merged = Value::Mapping(Default::default());
@@ -611,10 +678,10 @@ pub fn resolve_layers(
             if let Some(winner) = setting.candidates.last() {
                 config.context_budget_sources.insert(
                     key,
-                    if winner.layer == ConfigLayer::Builtin {
+                    if winner.source == ConfigSource::Builtin {
                         "default".into()
                     } else {
-                        winner.source.clone()
+                        winner.locator.clone()
                     },
                 );
             }
@@ -628,6 +695,38 @@ pub fn resolve_layers(
         agent.candidates.extend(choices.candidates);
     }
     explanations.insert("agent".into(), agent);
+    for (key, setting) in &mut explanations {
+        let append = super::catalog::definition(key).is_some_and(|definition| {
+            definition.combination == super::catalog::Combination::AppendReset
+        });
+        let reset = setting
+            .candidates
+            .iter()
+            .rposition(|candidate| candidate.value.as_sequence().is_some_and(Vec::is_empty));
+        let last = setting.candidates.len().saturating_sub(1);
+        for (index, candidate) in setting.candidates.iter_mut().enumerate() {
+            candidate.reason = if super::catalog::definition(key).is_some_and(|definition| {
+                definition.lifecycle == super::catalog::Lifecycle::Inactive
+            }) {
+                "inactive: parsed but no runtime consumer"
+            } else if append && reset.is_none_or(|reset| index >= reset) {
+                if candidate.value.as_sequence().is_some_and(Vec::is_empty) {
+                    "clears earlier contributions"
+                } else {
+                    "contributes"
+                }
+            } else if index == last && !setting.value.is_null() {
+                "selected"
+            } else if key == "agent" && candidate.key == "default_agent" && config.agent.is_some() {
+                "fallback: an applicable agent choice wins"
+            } else if append {
+                "cleared by a higher declaration"
+            } else {
+                "overridden by a higher declaration"
+            }
+            .into();
+        }
+    }
     Ok(ResolvedSettings {
         config,
         settings: explanations,
@@ -644,8 +743,8 @@ pub fn resolve(config: &Config, skill: Option<&Skill>) -> Result<ResolvedSetting
         map.retain(|key, value| defaults.get(key) != Some(value));
     }
     resolve_layers(
-        &[ConfigLayerValues {
-            layer: ConfigLayer::Repo,
+        &[ConfigDeclarations {
+            source: ConfigSource::Repository,
             scope: SettingScope::Repository,
             path: PathBuf::from("configuration"),
             value,
@@ -754,15 +853,15 @@ fn environment() -> Result<Value, LoadError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        resolve_layers, select_invocation, ConfigLayer, ConfigLayerValues, OccurrenceSettings,
+        resolve_layers, select_invocation, ConfigDeclarations, ConfigSource, OccurrenceSettings,
         SettingScope,
     };
     use crate::graph::Skill;
     use serde_yaml_ng::Value;
 
-    fn layer(kind: ConfigLayer, scope: SettingScope, text: &str) -> ConfigLayerValues {
-        ConfigLayerValues {
-            layer: kind,
+    fn layer(kind: ConfigSource, scope: SettingScope, text: &str) -> ConfigDeclarations {
+        ConfigDeclarations {
+            source: kind,
             scope,
             path: format!("{kind:?}/{scope:?}").into(),
             value: serde_yaml_ng::from_str(text).unwrap(),
@@ -773,7 +872,7 @@ mod tests {
         skill.occurrence = Some(Box::new(OccurrenceSettings {
             graph: "release".into(),
             id: Some("write-code".into()),
-            layer: ConfigLayer::Repo,
+            source: ConfigSource::Repository,
             values: Value::Null,
         }));
         skill
@@ -786,7 +885,7 @@ mod tests {
             serde_yaml_ng::from_str("agent: claude:occurrence").unwrap();
         for (key, expected) in [("agent", "codex"), ("default_agent", "claude:occurrence")] {
             let personal = layer(
-                ConfigLayer::Global,
+                ConfigSource::Personal,
                 SettingScope::Global,
                 &format!("skills: {{implement: {{{key}: codex}}}}"),
             );
@@ -800,11 +899,15 @@ mod tests {
         }
         skill.occurrence.as_mut().unwrap().values = Value::Null;
         let personal = layer(
-            ConfigLayer::Global,
+            ConfigSource::Personal,
             SettingScope::Global,
             "skills: {implement: {default_agent: codex}}",
         );
-        let repo = layer(ConfigLayer::Repo, SettingScope::Repository, "agent: claude");
+        let repo = layer(
+            ConfigSource::Repository,
+            SettingScope::Repository,
+            "agent: claude",
+        );
         assert_eq!(
             resolve_layers(&[personal.clone(), repo], Some(&skill))
                 .unwrap()
@@ -813,7 +916,7 @@ mod tests {
             "claude"
         );
         let repo = layer(
-            ConfigLayer::Repo,
+            ConfigSource::Repository,
             SettingScope::Repository,
             "graphs: {release: {steps: {write-code: {default_agent: claude}}}}",
         );
@@ -827,19 +930,19 @@ mod tests {
     }
 
     #[test]
-    fn fallback_sources_keep_cli_environment_database_and_target_order() {
+    fn fallback_sources_keep_cli_environment_file_scope_and_target_order() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let layers = [
-            layer(ConfigLayer::Global, SettingScope::Global,
+            layer(ConfigSource::Personal, SettingScope::Global,
                 "graphs: {release: {steps: {write-code: {default_agent: claude:personal}}}}"),
-            layer(ConfigLayer::Personal, SettingScope::Global, "default_agent: codex:database"),
-            layer(ConfigLayer::Personal, SettingScope::Repository, "default_agent: codex:repo"),
-            layer(ConfigLayer::Personal, SettingScope::Wave,
+            layer(ConfigSource::Personal, SettingScope::Global, "default_agent: codex:global"),
+            layer(ConfigSource::Personal, SettingScope::Repository, "default_agent: codex:repo"),
+            layer(ConfigSource::Personal, SettingScope::Wave,
                 "default_agent: codex:wave\nskills: {implement: {default_agent: codex:skill}}\ngraphs: {release: {steps: {write-code: {default_agent: codex:step}}}}"),
         ];
         for (count, expected) in [
             (1, "claude:personal"),
-            (2, "codex:database"),
+            (2, "claude:personal"),
             (3, "codex:repo"),
             (4, "codex:step"),
         ] {
@@ -899,7 +1002,7 @@ mod tests {
         assert_eq!(saved["default_agent"], "codex");
         let resolved = resolve_layers(
             &[layer(
-                ConfigLayer::Repo,
+                ConfigSource::Repository,
                 SettingScope::Repository,
                 "agent: claude\ndocs: [repo.md]",
             )],
@@ -932,7 +1035,7 @@ mod tests {
             assert!(!skill.settings.contains_key("docs"));
             let resolved = resolve_layers(
                 &[layer(
-                    ConfigLayer::Builtin,
+                    ConfigSource::Builtin,
                     SettingScope::Global,
                     "docs: [inherited.md]",
                 )],
@@ -952,15 +1055,16 @@ mod tests {
         let selected = super::resolve(&general.config, Some(&skill)).unwrap();
         assert_eq!(selected.config.agent(), "claude");
         assert_eq!(
-            selected.settings["agent"].candidates.last().unwrap().layer,
-            ConfigLayer::Builtin
+            selected.settings["agent"].candidates.last().unwrap().source,
+            ConfigSource::Builtin
         );
     }
 
     #[test]
-    fn files_and_database_share_personal_and_repository_scope_rules() {
+    fn files_share_personal_and_repository_scope_rules() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
-        for source in [ConfigLayer::Global, ConfigLayer::Personal] {
+        {
+            let source = ConfigSource::Personal;
             assert!(resolve_layers(
                 &[layer(
                     source,
@@ -996,17 +1100,17 @@ mod tests {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let skill = occurrence();
         let layers = vec![
-            layer(ConfigLayer::Wave, SettingScope::Wave, "agent: claude\nyolo: true"),
-            layer(ConfigLayer::Global, SettingScope::Global, "agent: claude\nskills: {implement: {agent: codex, chrome: true}}\ngraphs: {release: {steps: {write-code: {agent: claude:sonnet, chrome: false}}}}"),
-            layer(ConfigLayer::Personal, SettingScope::Global, "agent: codex\nyolo: false"),
+            layer(ConfigSource::Repository, SettingScope::Wave, "agent: claude\nyolo: true"),
+            layer(ConfigSource::Personal, SettingScope::Global, "agent: claude\nskills: {implement: {agent: codex, chrome: true}}\ngraphs: {release: {steps: {write-code: {agent: claude:sonnet, chrome: false}}}}"),
+            layer(ConfigSource::Personal, SettingScope::Repository, "agent: codex\nyolo: false"),
         ];
         let resolved = resolve_layers(&layers, Some(&skill)).unwrap();
         assert_eq!(resolved.config.agent(), "codex");
         assert!(!resolved.config.yolo);
         assert!(!resolved.config.chrome);
         let source = resolved.settings["agent"].candidates.last().unwrap();
-        assert_eq!(source.source, "Personal/Global");
-        assert_eq!(source.target, "general");
+        assert_eq!(source.locator, "Personal/Repository");
+        assert_eq!(source.target, super::SettingTarget::General);
         let revealed = resolve_layers(&layers[..2], Some(&skill)).unwrap();
         assert_eq!(revealed.config.agent(), "claude:sonnet");
         assert!(revealed.config.yolo);
@@ -1032,7 +1136,11 @@ mod tests {
         }
         assert_eq!(resolve_layers(&[], None).unwrap().config.agent(), "codex");
         assert_eq!(
-            resolved.settings["agent"].candidates.last().unwrap().source,
+            resolved.settings["agent"]
+                .candidates
+                .last()
+                .unwrap()
+                .locator,
             "CLI"
         );
         assert_eq!(
@@ -1046,12 +1154,12 @@ mod tests {
         let resolved = resolve_layers(
             &[
                 layer(
-                    ConfigLayer::Repo,
+                    ConfigSource::Repository,
                     SettingScope::Repository,
                     "docs: [a.md]\ncontext_budgets: {scratch_tokens: 100, scratch_bytes: 200}",
                 ),
                 layer(
-                    ConfigLayer::Global,
+                    ConfigSource::Personal,
                     SettingScope::Global,
                     "docs: [b.md]\ncontext_budgets: {scratch_tokens: 50}",
                 ),
@@ -1070,7 +1178,7 @@ mod tests {
         );
         let mut layers = resolved.config.setting_layers.unwrap();
         layers.push(layer(
-            ConfigLayer::Personal,
+            ConfigSource::Personal,
             SettingScope::Global,
             "docs: []",
         ));
@@ -1182,8 +1290,8 @@ mod tests {
             let resolved = super::resolve(&config, Some(&step.skill)).unwrap();
             assert_eq!(resolved.config.agent(), "codex");
             assert_eq!(
-                resolved.settings["agent"].candidates.last().unwrap().layer,
-                ConfigLayer::Repo
+                resolved.settings["agent"].candidates.last().unwrap().source,
+                ConfigSource::Repository
             );
         }
     }

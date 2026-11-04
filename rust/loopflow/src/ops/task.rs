@@ -44,8 +44,8 @@ pub mod ship;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
+use crate::config::ConfigSource;
 use crate::work::task::comment::TaskComments;
-use crate::work::wave::setup::SetupSource;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -608,7 +608,7 @@ impl TaskRunSelection {
 
 /// The graph a Task takes up when it names none: your `lf set graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
-pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, SetupSource)> {
+pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
     let repo = repository_for_task(store, task)?;
     let wave = match &task.wave_id {
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
@@ -622,17 +622,16 @@ pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(Strin
 pub(crate) fn scope_graph_default(
     repo: &Path,
     wave: Option<&str>,
-) -> OpsResult<(String, SetupSource)> {
+) -> OpsResult<(String, ConfigSource)> {
     let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
     let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
     let source = resolved.settings["graph"]
-        .candidates
-        .last()
+        .selected()
         .expect("graph has a builtin default")
-        .layer;
+        .source;
     Ok((
         resolved.config.graph.expect("graph has a builtin default"),
-        source.into(),
+        source,
     ))
 }
 

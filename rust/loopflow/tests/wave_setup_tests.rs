@@ -54,6 +54,125 @@ fn launch_agent(repo: &Path, home: &Path, wave: Option<&str>) -> String {
 }
 
 #[test]
+fn documented_recipes_share_file_cli_and_inspection_without_a_database() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let wave = loopflow::id::WaveId::new();
+    repo.create_file(
+        ".lf/skills/design/SKILL.md",
+        "---\ndefault_agent: claude\n---\nDesign.",
+    );
+    repo.create_file(".lf/skills/implement/SKILL.md", "Implement.");
+    repo.create_file(".lf/wave/frontend/config.yaml", &format!("id: {wave}\n"));
+    repo.create_file(".lf/graphs/release.yaml", "- step: {name: implement, id: write-code}\n- step: {name: implement, id: fix-review, agent: claude}\n");
+    let selected = |args: &[&str]| {
+        json(lf(repo.path(), home.path(), args))[0]["settings"]["agent"]["value"].clone()
+    };
+    for args in [
+        vec!["set", "--global", "default_agent", "codex"],
+        vec!["set", "--global", "skills.design.agent", "claude"],
+        vec!["set", "skills.implement.agent", "codex"],
+        vec![
+            "--wave",
+            "frontend",
+            "set",
+            "skills.implement.agent",
+            "claude",
+        ],
+        vec![
+            "--wave",
+            "frontend",
+            "set",
+            "--shared",
+            "default_agent",
+            "claude",
+        ],
+        vec!["set", "graphs.release.steps.fix-review.agent", "claude"],
+        vec!["set", "account.claude", "[work@example.com]"],
+    ] {
+        let output = lf(repo.path(), home.path(), &args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(
+        selected(&["config", "show", "--skill", "design", "--json"]),
+        "claude"
+    );
+    assert_eq!(
+        selected(&[
+            "config",
+            "show",
+            "--graph",
+            "release",
+            "--step",
+            "write-code",
+            "--json"
+        ]),
+        "codex"
+    );
+    assert_eq!(
+        selected(&[
+            "config",
+            "show",
+            "--graph",
+            "release",
+            "--step",
+            "fix-review",
+            "--json"
+        ]),
+        "claude"
+    );
+    assert_eq!(
+        selected(&[
+            "--wave",
+            "frontend",
+            "config",
+            "show",
+            "--skill",
+            "implement",
+            "--json"
+        ]),
+        "claude"
+    );
+    assert_eq!(
+        selected(&[
+            "-a",
+            "codex",
+            "--wave",
+            "frontend",
+            "config",
+            "show",
+            "--skill",
+            "implement",
+            "--json"
+        ]),
+        "codex"
+    );
+    let settings = json(lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--setting",
+            "skills.implement.yolo=false",
+            "config",
+            "show",
+            "--skill",
+            "implement",
+            "--json",
+        ],
+    ));
+    assert_eq!(settings[0]["settings"]["yolo"]["value"], false);
+    assert_eq!(
+        json(lf(repo.path(), home.path(), &["config", "retained"])),
+        serde_json::json!([])
+    );
+    assert!(!home.path().join("loopflow.db").exists());
+}
+
+#[test]
 fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -136,27 +255,27 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     };
     let infra = setup("infra");
     assert_eq!(infra["graph"]["value"], "code");
-    assert_eq!(infra["graph"]["source"], "wave");
+    assert_eq!(infra["graph"]["source"], "repository");
     assert_eq!(infra["agent"]["value"], "claude");
     assert_eq!(infra["skill_agents"]["probe"]["value"], "claude:opus");
     assert_eq!(infra["tasks_machine"]["value"], here.as_str());
     assert_eq!(infra["tasks_machine"]["source"], "personal");
-    assert_eq!(infra["session_machine"]["source"], "default");
-    assert_eq!(infra["accounts"]["codex"]["source"], "default");
+    assert_eq!(infra["session_machine"]["source"], "builtin");
+    assert_eq!(infra["accounts"]["codex"]["source"], "builtin");
 
     let research = setup("research");
     assert_eq!(research["graph"]["value"], "repo-flow");
-    assert_eq!(research["graph"]["source"], "repo");
+    assert_eq!(research["graph"]["source"], "repository");
     assert_eq!(research["agent"]["value"], "codex:o3");
-    assert_eq!(research["agent"]["source"], "wave");
-    assert_eq!(research["tasks_machine"]["source"], "default");
+    assert_eq!(research["agent"]["source"], "repository");
+    assert_eq!(research["tasks_machine"]["source"], "builtin");
     assert_eq!(research["accounts"]["codex"]["accounts"][0], "work");
     assert_eq!(research["accounts"]["codex"]["source"], "personal");
 
     let plain = setup("plain");
-    assert_eq!(plain["graph"]["source"], "repo");
+    assert_eq!(plain["graph"]["source"], "repository");
     assert_eq!(plain["agent"]["value"], "codex");
-    assert_eq!(plain["agent"]["source"], "repo");
+    assert_eq!(plain["agent"]["source"], "repository");
 }
 
 #[test]
@@ -193,6 +312,8 @@ fn your_own_value_wins_for_you_until_you_unset_it() {
         ))["setup"]["agent"]
             .clone()
     };
+    let shared_path = repo.path().join(".lf/wave/research/config.yaml");
+    let shared = std::fs::read_to_string(&shared_path).unwrap();
 
     ok(&["--wave", "research", "set", "agent", "claude:haiku"]);
     assert_eq!(
@@ -200,12 +321,11 @@ fn your_own_value_wins_for_you_until_you_unset_it() {
         "claude:haiku"
     );
     assert_eq!(agent()["source"], "personal");
-    let committed = std::fs::read_to_string(repo.path().join(".lf/wave/research/config.yaml"));
-    assert_eq!(committed.unwrap(), "agent: codex:o3\n");
+    assert_eq!(std::fs::read_to_string(&shared_path).unwrap(), shared);
 
     ok(&["--wave", "research", "unset", "agent"]);
     assert_eq!(agent()["value"], "codex:o3");
-    assert_eq!(agent()["source"], "wave");
+    assert_eq!(agent()["source"], "repository");
     assert!(!lf(repo.path(), home.path(), &["set", "release", "x"])
         .status
         .success());
@@ -232,7 +352,8 @@ fn a_wave_file_rejects_repository_settings() {
     );
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("release describes repository setup"),
+        String::from_utf8_lossy(&output.stderr)
+            .contains("release does not apply at Repository/Wave"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -273,12 +394,17 @@ fn settings_scope_by_the_typed_wave_only() {
         &["--wave", "research", "set", "skills.probe.agent", "codex"],
     );
     assert!(typed.status.success());
-    let settings = store
-        .scope_settings(checkout.to_str(), Some("research"))
-        .unwrap();
-    assert_eq!(settings.repository["agent"].trim(), "claude:haiku");
-    assert_eq!(settings.wave["skills.probe.agent"].trim(), "codex");
-    assert!(!settings.wave.contains_key("agent"));
+    let settings: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+        &std::fs::read_to_string(loopflow::config::files::private_path(&checkout).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(settings["agent"].as_str(), Some("claude:haiku"));
+    assert_eq!(
+        settings["waves"][wave.as_str()]["skills"]["probe"]["agent"].as_str(),
+        Some("codex")
+    );
+    assert!(settings["waves"][wave.as_str()].get("agent").is_none());
 }
 
 #[test]
@@ -316,7 +442,8 @@ fn setting_targets_inspect_and_unset_through_the_cli() {
         );
     }
     let changed = inspect();
-    assert_eq!(changed[0]["settings"]["agent"]["value"], "codex");
+    // Editing the general declaration retains this source's occurrence choice.
+    assert_eq!(changed[0]["settings"]["agent"]["value"], "claude");
     assert_eq!(changed[0]["settings"]["chrome"]["value"], false);
     assert_eq!(changed[1]["settings"]["chrome"]["value"], true);
     let candidates = changed[0]["settings"]["chrome"]["candidates"]
@@ -324,7 +451,7 @@ fn setting_targets_inspect_and_unset_through_the_cli() {
         .unwrap();
     assert_eq!(
         candidates.last().unwrap()["target"],
-        "graph:release/write-code"
+        serde_json::json!({"kind": "graph_occurrence", "graph": "release", "id": "write-code"})
     );
     let output = lf(
         repo.path(),

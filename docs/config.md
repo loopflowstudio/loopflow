@@ -1,18 +1,243 @@
 # Configuration
 
+## Use Claude for design and Codex for implementation
+
 ```bash
-lf set --global default_agent codex      # fallback for your work
-lf set skills.implement.agent claude     # implement in this checkout and its Task worktrees
-lf config show --skill implement --json  # effective values and their sources
-lf unset skills.implement.agent          # reveal the next applicable value
+lf set --global default_agent codex
+lf set --global skills.design.agent claude
+lf set --global skills.implement.agent codex
 ```
 
-`set` and `unset` edit your configuration files. Desktop settings edit the same
-files. Hand edits, CLI edits and Desktop edits have the same meaning.
+Design uses Claude, implementation uses Codex, and other work falls back to Codex.
+These commands edit `~/.lf/config.yaml`; writing the same YAML has the same effect:
 
-Use `default_agent` for a fallback and `agent` for a choice. In this example,
-implementation uses Claude; other steps fall back to Codex unless another
-applicable setting chooses an agent. Built-in skills recommend no harness.
+```yaml
+# ~/.lf/config.yaml
+default_agent: codex
+skills:
+  design:
+    agent: claude
+  implement:
+    agent: codex
+```
+
+Use `agent` for a choice you want applied. Use `default_agent` for a fallback
+that lets another applicable `agent` choose differently. The examples below are
+separate setups; combine the pieces that fit your work.
+
+## Let a project choose its exceptions
+
+Keep just a fallback in your personal global file:
+
+```yaml
+# ~/.lf/config.yaml
+default_agent: codex
+```
+
+Then give the team a design preference in the repository:
+
+```yaml
+# .lf/config.yaml
+skills:
+  design:
+    agent: claude
+```
+
+Design uses Claude; implementation and other steps fall back to Codex. This is
+useful when you want one everyday default while each project chooses exceptions.
+
+To insist on Codex for design across your projects, make a personal choice:
+
+```bash
+lf set --global skills.design.agent codex
+```
+
+That personal choice wins over the repository's Claude choice. Change `agent` to
+`default_agent` if you want the repository's choice to win again.
+
+## Keep a preference just for this project or Wave
+
+```bash
+lf set skills.design.agent claude
+lf set skills.implement.agent codex
+lf --wave frontend set skills.implement.agent claude
+```
+
+The first two commands save your project preferences in `lf.config.local.yaml`.
+The third makes implementation use Claude for the `frontend` Wave; the rest of
+the project still uses Codex. These private settings do not change the team's files.
+
+To set a shared Wave default instead:
+
+```bash
+lf --wave frontend set --shared default_agent claude
+```
+
+This writes `.lf/wave/frontend/config.yaml`. It applies when no applicable
+`agent` choice takes precedence. [The FAQ](#what-happens-when-a-wave-is-renamed)
+explains how preferences follow a renamed Wave.
+
+## Change one step in one Graph
+
+Suppose `release` runs implementation twice:
+
+```yaml
+# .lf/graphs/release.yaml
+- step: {name: implement, id: write-code}
+- gate
+- step: {name: implement, id: fix-review}
+```
+
+Give implementation a personal default, then make one occurrence an exception:
+
+```yaml
+# lf.config.local.yaml
+skills:
+  implement:
+    agent: codex
+graphs:
+  release:
+    steps:
+      fix-review:
+        agent: claude
+```
+
+`write-code` uses Codex; `fix-review` uses Claude. Implementation in other Graphs
+still uses Codex. Both choices are in the same personal scope, so the named step
+wins over the skill. The equivalent setter is:
+
+```bash
+lf set graphs.release.steps.fix-review.agent claude
+```
+
+For a shared convention, put that `graphs:` block in `.lf/config.yaml`. A personal
+`agent` choice still wins over a shared choice; use a personal `default_agent`
+when you want to leave room for shared exceptions.
+
+## Put a convention alongside the skill or Graph step
+
+A repository-owned skill, such as `.lf/skills/design/SKILL.md`, can carry its own fallback:
+
+```markdown
+---
+default_agent: claude
+---
+Help develop the design.
+```
+
+This is another way to author a shared skill preference. Centralize preferences
+under `skills:` when you want to see them together; put them in the skill when
+they belong with its instructions. Built-in skills recommend no harness.
+A repository Graph can make a choice for one occurrence:
+
+```yaml
+# .lf/graphs/release.yaml
+- step: {name: implement, id: fix-review, agent: claude}
+```
+
+That shared choice beats every fallback. A personal `agent` choice still wins.
+For Graph authoring, see [Orchestration](orchestration.md).
+
+## Override one launch
+
+```bash
+lf -a claude design                   # this design conversation
+lf -a codex graph release             # every step in this Graph
+lf -a claude resume --task LOO-123     # this Task conversation
+```
+
+The Graph override reaches its composed steps and routers. The conversation
+override does not change the preferences of Tasks or Graphs you launch from it.
+None of these commands saves a new preference.
+
+Other settings use the same typed values as YAML:
+
+```bash
+lf --setting 'skills.implement.yolo=false' implement
+LF_SETTINGS='{skills: {design: {agent: claude}}}' lf design
+```
+
+An explicit command-line choice wins over an environment choice. Shell-exported
+settings can reach child commands, so use a command-local assignment when that is
+the intended lifetime.
+
+## Give different work different context
+
+```yaml
+# .lf/config.yaml
+docs: [README.md]
+skills:
+  design:
+    docs: [docs/product.md]
+  implement:
+    docs: [scripts/testing.md]
+graphs:
+  release:
+    steps:
+      fix-review:
+        chrome: false
+```
+
+Design gets the README and product notes; implementation gets the README and
+testing instructions. The named release step explicitly disables Chrome.
+Lists such as `docs` add contributions; `[]` clears earlier contributions.
+`false` is an explicit value, while omitting or unsetting a key reveals the next
+applicable setting.
+
+## Choose accounts and where work runs
+
+```yaml
+# ~/.lf/config.yaml
+account:
+  claude: [work@example.com, personal@example.com]
+  codex: [work@example.com]
+```
+
+Use your connected accounts' login names or IDs, in preference order. To use only
+your work Claude account in this project:
+
+```bash
+lf set account.claude '[work@example.com]'
+```
+
+The project list replaces the global list. Accounts apply to a global, repository
+or Wave scope; they are not selected per skill.
+
+Once a remote machine is registered, select its durable ID for new Tasks:
+
+```bash
+lf set machine.tasks '<machine-id>'
+```
+
+Work initiated on your laptop uses the laptop's personal preferences on the remote.
+A phone connecting through the laptop uses those preferences too. Work initiated
+directly on the remote uses its saved preferences. The executor supplies its own
+tools and credentials. See [Remote work](#remote-work) for retaining preferences
+there for later use.
+
+## Inspect and edit
+
+```bash
+lf config catalog --json
+lf config show --skill implement --json
+lf config show --graph release --step write-code --json
+lf context --json
+```
+
+Inspection shows the effective value, authored key, source, scope, target and file
+location. It explains why candidates won, lost, contributed or cleared earlier
+values. A fallback remains identifiable as `default_agent`. CLI and Desktop read
+the same resolution used to prepare a launch.
+
+The catalogue lists supported keys, value types, destinations and lifecycle.
+A successful write reports where it was saved and whether it applies immediately,
+on a later launch or only after a domain action. Saving a preference does not
+itself log into an account, provision a machine or move existing work.
+
+Setters validate before writing, preserve unrelated content and comments, and
+protect against concurrent edits. Hand edits invalidate the same readers. Config
+inspection and bootstrap preferences do not require a compatible database; account
+or machine availability can still require runtime observations.
 
 ## Where settings live
 
@@ -25,65 +250,7 @@ applicable setting chooses an agent. Built-in skills recommend no harness.
 
 `LF_HOME` changes the personal global directory. Run `set --global` to edit the
 personal global file. Bare `set` edits private repository settings; `--wave`
-selects a Wave within that private file. Edit committed files deliberately when
-changing the team's configuration.
-
-Independent clones have independent private preferences, even when they have the
-same Git remote. This includes account order and machine preferences. New clones
-start without another clone's private overrides; copy or import them deliberately.
-Task worktrees share the main checkout's `lf.config.local.yaml`. LF resolves that
-file through Git's worktree metadata; a Task's working directory does not give it
-another private preference file. The first LF write adds `/lf.config.local.yaml`
-to the repository's private Git exclude file if needed. It preserves existing
-ignore rules and does not edit the committed `.gitignore`. An already tracked
-file needs to be removed from tracking before Git can ignore it.
-
-```yaml
-# ~/.lf/config.yaml
-default_agent: codex
-session:
-  terminal: Ghostty
-  end_detached_after: 2m
-```
-
-```yaml
-# ./lf.config.local.yaml
-skills:
-  implement:
-    agent: claude
-```
-
-```yaml
-# .lf/config.yaml — team preferences
-docs: [README.md, docs/api.md]
-```
-
-Files hold declared preferences, including account order, preferred machines and
-layout templates. The database holds live state and observations: account usage,
-cooldowns, machine identity, Sessions, execution history and actual saved Task
-arrangements. A saved arrangement remains state; applying a template changes it.
-Credentials stay with their secret/provider owner. The database is not an
-additional preference override layer.
-
-## Source, scope and target
-
-Every declaration has three independent dimensions:
-
-| Dimension | Answers | Values |
-| --- | --- | --- |
-| Source | Who supplied it? | Builtin, repository, personal, environment, command line |
-| Scope | Where does it apply? | Global, repository, Wave |
-| Target | Which work does it select? | General, a skill, a named occurrence in a Graph |
-
-A personal Wave preference is **personal source, Wave scope**. The same Wave's
-committed preference is **repository source, Wave scope**. A file path records
-where the declaration was written; it does not create another authority tier.
-
-A setting supports only meaningful combinations. Account order has global,
-repository and Wave scopes but no skill target. Appearance has no Graph-step
-target. Native provider settings remain owned by the provider. The settings
-catalogue supplies the same applicability and validation to files, CLI and Desktop;
-unsupported combinations report an explanation rather than being silently ignored.
+selects a Wave within that private file. Add `--shared` to edit the committed repository or Wave file.
 
 ## Which value wins
 
@@ -116,65 +283,25 @@ clears earlier contributions. Keyed maps merge by key. Account lists preserve
 order and replace as a unit. `planning` replaces its complete tagged provider
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
 
-## Skills and Graph occurrences
+## Source, scope and target
 
-Use the same nesting in personal and repository configuration:
+Every declaration has three independent dimensions:
 
-```yaml
-skills:
-  implement:
-    default_agent: codex
-    docs: [scripts/testing.md]
-graphs:
-  release:
-    steps:
-      write-code:
-        agent: claude
-        chrome: false
-```
+| Dimension | Answers | Values |
+| --- | --- | --- |
+| Source | Who supplied it? | Builtin, repository, personal, environment, command line |
+| Scope | Where does it apply? | Global, repository, Wave |
+| Target | Which work does it select? | General, a skill, a named occurrence in a Graph |
 
-The skill rule applies wherever `implement` runs. The Graph rule applies to
-`id: write-code` authored in `release`. Reusing that Graph applies the rule to
-each copy. Composition and loops retain the defining Graph and original step ID;
-another Graph's same-named step does not match. Steps without IDs use skill and
-general settings. Duplicate IDs within one definition are invalid.
+A personal Wave preference is **personal source, Wave scope**. The same Wave's
+committed preference is **repository source, Wave scope**. A file path records
+where the declaration was written; it does not create another authority tier.
 
-```bash
-lf set --global skills.implement.default_agent codex
-lf set graphs.release.steps.write-code.agent claude
-lf config show --graph release --step write-code --json
-lf config show --graph outer --json
-```
-
-Whole-Graph inspection includes composed steps and routers. Targeting
-`outer/work` does not select a step authored only in `inner/work`. Navigation
-labels such as `review#1` do not change setting addresses.
-
-Launch targets support agent selection and context/launch preferences. Planning,
-release policy, a Task's default Graph and context budgets describe broader work;
-they do not acquire skill targets merely because their values are configurable.
-Theme, installation stream, portfolio and terminal preferences retain their
-appropriate lifecycle. Reserved summary settings do not start a summarization run.
-
-## Invocation and inheritance
-
-```bash
-lf -a claude resume --task LOO-123
-lf -a codex graph release
-lf --setting 'skills.implement.yolo=false' implement
-```
-
-The first command selects Claude for that conversation. It does not change the
-preferences of Tasks the conversation creates. The second explicitly selects
-Codex for all steps in the Graph, including composed steps and routers.
-
-`--setting KEY=YAML` uses the same typed values as configuration files.
-`LF_SETTINGS` accepts a YAML mapping. Explicit `LF_AGENT_OVERRIDE`,
-`LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME` and
-`LF_ACCOUNT_ISOLATION` retain their invocation meanings. User-supplied environment
-can flow into children; LF does not export a resolved preference as an environment
-override. Internal process identity variables carry execution context, not settings.
-Neither environment nor command-line choices are saved as future preferences.
+A setting supports only meaningful combinations. Account order has global,
+repository and Wave scopes but no skill target. Appearance has no Graph-step
+target. Native provider settings remain owned by the provider. The settings
+catalogue supplies the same applicability and validation to files, CLI and Desktop;
+unsupported combinations report an explanation rather than being silently ignored.
 
 ## Remote work
 
@@ -204,29 +331,6 @@ Resolve machine selection once at the origin to a durable identity. A selection
 that names the current machine runs locally. Existing assigned work does not
 forward itself again. Preferences neither install tools nor transfer credentials;
 provider conversation/account continuity still constrains resume.
-
-## Inspect and edit
-
-```bash
-lf config show --skill implement --json
-lf config show --graph release --step write-code --json
-lf context --json
-```
-
-Inspection shows the effective value, authored key, source, scope, target and file
-location. It explains why candidates won, lost, contributed or cleared earlier
-values. A fallback remains identifiable as `default_agent`. CLI and Desktop read
-the same resolution used to prepare a launch.
-
-The catalogue lists supported keys, value types, destinations and lifecycle.
-A successful write reports where it was saved and whether it applies immediately,
-on a later launch or only after a domain action. Saving a preference does not
-itself log into an account, provision a machine or move existing work.
-
-Setters validate before writing, preserve unrelated content and comments, and
-protect against concurrent edits. Hand edits invalidate the same readers. Config
-inspection and bootstrap preferences do not require a compatible database; account
-or machine availability can still require runtime observations.
 
 ## Your display name
 
@@ -716,8 +820,8 @@ summaries:
 
 ### Accounts and Profiles
 
-Account state and repository routes are managed through CLI commands rather
-than `config.yaml`:
+Account registration uses domain commands. Ordered account preferences use the
+same file-backed settings as other declarations:
 
 ```bash
 lf account connect claude primary@example.com --chrome-profile primary@example.com
@@ -839,3 +943,87 @@ something different. Release targets already expose `verify`, `prepare`,
 `workflow`, `publisher`, and `completion`; use those boundaries for repository
 build and packaging tools. Current PR and release observation supports GitHub;
 other hosts need publication, identity and completion support together.
+
+## FAQ
+
+### How do Task worktrees and independent clones share preferences?
+
+Independent clones have independent private preferences, even when they have the
+same Git remote. This includes account order and machine preferences. New clones
+start without another clone's private overrides; copy or import them deliberately.
+Task worktrees share the main checkout's `lf.config.local.yaml`. LF resolves that
+file through Git's worktree metadata; a Task's working directory does not give it
+another private preference file. The first LF write adds `/lf.config.local.yaml`
+to the repository's private Git exclude file if needed. It preserves existing
+ignore rules and does not edit the committed `.gitignore`. An already tracked
+file needs to be removed from tracking before Git can ignore it.
+
+### What happens when a Wave is renamed?
+
+Renaming a Wave in Desktop uses the same operation as `lf wave rename`. Its
+`.lf/wave/<name>/` directory moves with its shared `config.yaml`, while the Wave's
+ID stays the same.
+
+Private Wave declarations are keyed by the Wave's authored UUID under `waves:`.
+`--wave <name>` resolves that identity from its authored files; `--wave <UUID>`
+addresses it directly. Rename and relocation retain the UUID. Reusing a retired
+name does not reuse its preferences.
+
+### What stays in the database?
+
+Files hold declared preferences, including account order, preferred machines,
+pool availability, rental templates and admission limits. The database holds live state and observations: account usage,
+cooldowns, machine identity, Sessions, execution history and actual saved Task
+arrangements. A saved arrangement remains live workspace state.
+Credentials stay with their secret/provider owner. The database is not an
+additional preference override layer.
+
+### How are skill and Graph-step settings addressed?
+
+The skill rule applies wherever `implement` runs. The Graph rule applies to
+`id: fix-review` authored in `release`. Reusing that Graph applies the rule to
+each copy. Composition and loops retain the defining Graph and original step ID;
+another Graph's same-named step does not match. Steps without IDs use skill and
+general settings. Duplicate IDs within one definition are invalid.
+
+```bash
+lf set --global skills.implement.default_agent codex
+lf set graphs.release.steps.write-code.agent claude
+lf config show --graph release --step write-code --json
+lf config show --graph outer --json
+```
+
+Whole-Graph inspection includes composed steps and routers. Targeting
+`outer/work` does not select a step authored only in `inner/work`. Navigation
+labels such as `review#1` do not change setting addresses.
+
+Launch targets support agent selection and context/launch preferences. Planning,
+release policy, a Task's default Graph and context budgets describe broader work;
+they do not acquire skill targets merely because their values are configurable.
+Theme, installation stream, portfolio and terminal preferences retain their
+appropriate lifecycle. Reserved summary settings do not start a summarization run.
+
+### What can an environment override inherit?
+
+`--setting KEY=YAML` uses the same typed values as configuration files.
+`LF_SETTINGS` accepts a YAML mapping. Explicit `LF_AGENT_OVERRIDE`,
+`LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME` and
+`LF_ACCOUNT_ISOLATION` retain their invocation meanings. User-supplied environment
+can flow into children; LF does not export a resolved preference as an environment
+override. Internal process identity variables carry execution context, not settings.
+Neither environment nor command-line choices are saved as future preferences.
+
+### How do I migrate or recover older preferences?
+
+```bash
+lf config migrate                         # inspect the existing preference cutover
+lf config migrate --accept                # accept file precedence when declarations collide
+lf config import ~/.lf/settings-recovery.yaml --pointer '/repo/owner~1project'
+lf config retained                        # compare incoming and retained remote profiles
+lf config retained --keep                 # preserve independent remote edits
+```
+
+Migration retains before/after files in `settings-cutover.json`. Unavailable legacy
+repository destinations remain in `settings-recovery.yaml`, which is never read
+as configuration. Import deliberately selects the destination clone; conflicting
+saved declarations require `--replace`. Future clones inherit nothing automatically.

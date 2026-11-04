@@ -2392,7 +2392,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     let before = native();
     let machine: String = fixture
         .db()
-        .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
+        .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
             row.get(0)
         })
         .unwrap();

@@ -559,9 +559,9 @@ pub enum Commands {
         /// Every repository
         #[arg(long)]
         global: bool,
-        /// Apply on this Machine only; set by the copy to your other Machines
-        #[arg(long, hide = true)]
-        here: bool,
+        /// Edit the committed repository or Wave configuration explicitly
+        #[arg(long, id = "set_shared", conflicts_with = "global")]
+        shared: bool,
     },
     /// Clear your own value of a setting, so the committed config chooses
     #[command(after_help = SETTING_KEYS)]
@@ -570,9 +570,9 @@ pub enum Commands {
         /// Every repository
         #[arg(long)]
         global: bool,
-        /// Apply on this Machine only; set by the copy to your other Machines
-        #[arg(long, hide = true)]
-        here: bool,
+        /// Edit the committed repository or Wave configuration explicitly
+        #[arg(long, id = "unset_shared", conflicts_with = "global")]
+        shared: bool,
     },
     /// Read Loopflow configuration
     Config {
@@ -1378,7 +1378,11 @@ impl MachineCommand {
 impl ConfigCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::User { .. } | Self::Show { .. } => false,
+            Self::User { .. } | Self::Show { .. } | Self::Catalog { .. } => false,
+            Self::Import { .. } => true,
+            Self::Migrate { accept } => *accept,
+            Self::File { value, unset, .. } => value.is_some() || *unset,
+            Self::Retained { replace, keep } => *replace || *keep,
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
             Self::Planning { cmd } => match cmd {
                 PlanningCommand::Key { new, recover } => *new || recover.is_some(),
@@ -1469,23 +1473,12 @@ impl WavePlanTarget {
     }
 }
 
-const SETTING_KEYS: &str = "Keys:
-  graph                 the graph new Tasks take up
-  agent                 the agent work launches on, such as claude:opus
-  default_agent         fallback when no applicable agent choice exists
-  skills.<skill>.<key>  a preference for one skill
-  graphs.<graph>.steps.<id>.<key>  a preference for an authored Graph step
-  yolo, chrome, docs, context, diff, isolate, ...  typed configuration preferences
-  machine               where new Tasks and the Session run; copied to your other
-                        Machines. A pool or on-demand sends new Tasks there.
-  machine.tasks         where new Tasks run
-  machine.session       where the Session runs; it moves there
-  account.<provider>    the logins that pay, in order: work@,personal@
-
-Scope: this repository; `lf --wave <wave> set` a Wave; --global every repository.
-Yours wins over the committed .lf/config.yaml and .lf/wave/<name>/config.yaml,
-for you only; `lf config show --skill <name> --json` explains effective values.
-Values are YAML; false disables a boolean and [] clears an additive list.";
+const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
+Values use YAML; false disables and [] clears an additive list.
+The default destination is root lf.config.local.yaml, shared across Task worktrees.
+--global edits ~/.lf/config.yaml; --shared explicitly edits committed configuration.
+`lf --wave <name> set` selects a Wave; unset removes only that declaration.
+`lf config show --skill <name> --json` explains effective values and sources.";
 
 #[derive(Subcommand, Debug)]
 pub enum WaveGraphCommand {
@@ -2590,6 +2583,47 @@ A stream whose build cannot open this Machine's store keeps the installed lf unt
 /// Read Loopflow configuration.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
+    /// Adopt a recovery mapping into this clone, or personal global configuration
+    Import {
+        path: PathBuf,
+        /// JSON pointer to the authored mapping, for example /repo/owner~1project
+        #[arg(long, default_value = "")]
+        pointer: String,
+        #[arg(long)]
+        global: bool,
+        /// Replace conflicting declarations explicitly
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Read or edit one declaration in an explicitly selected configuration file
+    File {
+        path: PathBuf,
+        key: String,
+        value: Option<String>,
+        #[arg(long, conflicts_with = "value")]
+        unset: bool,
+        #[arg(long, value_enum, default_value = "global")]
+        scope: crate::config::settings::SettingScope,
+        #[arg(long, id = "config_shared")]
+        shared: bool,
+    },
+    /// Inspect origin profile retention and explicitly keep or replace divergent files
+    Retained {
+        #[arg(long, conflicts_with = "keep")]
+        replace: bool,
+        #[arg(long)]
+        keep: bool,
+    },
+    /// Inspect the preference cutover; explicitly accept changed file precedence
+    Migrate {
+        #[arg(long)]
+        accept: bool,
+    },
+    /// Discover typed settings, destinations, combination rules and portability
+    Catalog {
+        #[arg(long)]
+        json: bool,
+    },
     /// Explain effective preferences and their candidates without launching
     Show {
         #[arg(long)]

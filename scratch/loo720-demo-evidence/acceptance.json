@@ -1,0 +1,35 @@
+{
+  "date": "2026-11-03",
+  "base": "f5dbc26c7571a551cbd89005381fdbd2f226ea90",
+  "claude": "2.1.318",
+  "rex": "0.0.1793377904-ge6592f (API 8)",
+  "candidate_cli_sha256": "ffb7f1fd5ad193e5a283f1b97e731c18b11a454c75e9d5b43c745478e79bf382",
+  "candidate_app_sha256": "35f39ab1902b8d02cdf8508c6f2a6ae591311e6eb9e9338f106d1003cf781fb9",
+  "rex_states": [
+    "working",
+    "blocked",
+    "working",
+    "working",
+    "done",
+    "done",
+    "working",
+    "working",
+    "done"
+  ],
+  "desktop_final": {
+    "records": [
+      {
+        "app": "claude-code",
+        "id": null,
+        "kind": null,
+        "msg": null,
+        "progress": null,
+        "state": "done",
+        "title": null
+      }
+    ],
+    "seen": true
+  },
+  "result": "pass",
+  "scope": "Candidate CLI and mounted candidate Desktop with configured Claude; not a global installation."
+}

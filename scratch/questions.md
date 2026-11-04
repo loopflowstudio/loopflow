@@ -3,12 +3,45 @@
 ## Settings catalogue design review — 2026-11-03
 
 Jack Heart requested a catalogue design while the approved choice-before-fallback
-pursue continues. Draft: `settings-catalog.md`. Proposed keystone unifies definition
-policy, discovery and explanation while retaining storage/domain owners. Review
-whether dedicated-action bindings are sufficient initially for theme, portfolio,
-accounts and machine movement. Editor generation, launch snapshots and distribution
-remain later outcomes. These are review decisions for the catalogue draft, not
-blockers or new instructions for the active pursue.
+pursue continues. Draft: `settings-catalog.md`. Jack chose to close appropriate
+coverage gaps, not only describe them. Jack accepted the file-backed direction and
+machine naming model: remove DB configuration, including machine/account preferences,
+using Git-style setters. Machine aliases, identity references and connections are
+config; each installation's own identity stays local. Resolve placement to an ID at
+origin; a matching local ID executes locally. This replaces the earlier DB-only setter.
+Registration, credentials, observations and
+execution history remain separately owned; classify mixed records field by field.
+Jack selected `./lf.config.local.yaml` at the repository root for private repository
+settings. Implement Git ignoring and sharing across Task worktrees. Define portable
+resource references, migration and file distribution explicitly. No live migration or change
+to the active pursue is approved by this design discussion.
+
+Jack clarified that openness to a personal home is conditional on solving a concrete
+problem; do not introduce it as an assumed concept. The actual requirement is that
+personal config set on the laptop applies to remote work, including work initiated
+from mobile. Decide availability while the laptop sleeps, freshness and which devices
+may edit before choosing distribution (replicated files versus a selected source
+and cache). Keep declarations file-backed and preserve precedence when transported.
+Explicit exclusion: shared-account servers and multi-user login servers. Paseo's
+file-backed host API and identity separation remain supporting evidence.
+
+Latest distribution candidate from Jack: the initiating machine/server pushes
+personal config; the remote retains it for follow-up commands from mobile or remote
+shells. This can satisfy disconnected-laptop use without a home role. Persist
+authored config only, never one-command CLI/env overrides. Resolve remote editing,
+conflicts and freshness next. Personal repository storage is now
+`./lf.config.local.yaml`; this replaces the external repository-keyed alternatives
+discussed earlier. The filename decision does not settle remote update conflicts.
+
+Research follow-up: config-distribution-research.md recommends forwarding and
+retention with refresh of unchanged copies, preserving remote edits rather than
+automatically merging them. The exact retention/conflict mechanism remains proposed.
+Jack accepted the per-launch authority rule: the initiating LF instance supplies
+personal preferences, and the executor supplies its environment. Laptop-origin work
+uses the laptop profile; phone requests through the laptop do too. Work initiated
+directly on the remote uses its saved preferences. Different entry points may differ.
+This neither requires automatic reverse synchronization nor authorizes overwriting
+independent remote edits. Repository and choice/default resolution remain intact.
 
 ## Duplicate implement run stopped (2026-11-02 14:25)
 

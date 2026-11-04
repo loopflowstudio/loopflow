@@ -1,10 +1,19 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-714 · One settings catalogue</title><style>*{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;background:#f7f6f1;color:#27302c;font:17px/1.65 system-ui,sans-serif}main{max-width:1000px;margin:auto;padding:48px 30px 90px}header,figcaption,.muted{color:#647269}header,figcaption{font-size:13px}h1{font-size:clamp(34px,5vw,48px);letter-spacing:-.035em;line-height:1.15}h2{font-size:27px;line-height:1.3;margin-top:50px}a{color:#176f5d;text-underline-offset:3px}p{margin:17px 0}code{font:0.87em ui-monospace,monospace;background:#e5ece3;padding:2px 5px;border-radius:3px}pre{background:#e5ece3;padding:18px;overflow:auto;font:14px/1.6 ui-monospace,monospace}pre code{padding:0}.table{overflow:auto}table{width:100%;min-width:650px;border-collapse:collapse;font-size:14px;line-height:1.5;margin:20px 0}th,td{text-align:left;vertical-align:top;padding:13px 10px;border-bottom:1px solid #cdd9ce}.flow{display:grid;gap:10px;text-align:center}.flow div{padding:20px;background:#e5ece3;border-radius:4px}.flow small,.flow strong,.flow span{display:block}.flow small{letter-spacing:.13em;font-size:11px}.flow strong{font-size:20px}.flow span{font-size:14px}figure{margin:28px 0}figcaption{margin-top:14px}select{width:100%;padding:12px;background:transparent;color:inherit;font:inherit;border:1px solid #789282;border-radius:4px}label{display:block;font-weight:600;margin:12px 0}li{margin:9px 0}section{padding-bottom:20px;border-bottom:1px solid #cdd9ce}@media(prefers-color-scheme:dark){body{background:#171e19;color:#e6eee7}header,figcaption,.muted{color:#abb9ae}a{color:#89d1b6}code,pre,.flow div{background:#2b3b30}th,td,section{border-color:#445d4c}}@media(max-width:600px){main{padding:26px 16px 60px}h2{font-size:24px}table{font-size:13px}}</style></head><body><main><header>LOO-714 · design draft · November 3, 2026<br>Built from settings-catalog.md, settings-portability-review.md and linked source files</header><h1>One settings catalogue</h1>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-714 · One settings catalogue</title><style>*{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;background:#f7f6f1;color:#27302c;font:17px/1.65 system-ui,sans-serif}main{max-width:1000px;margin:auto;padding:48px 30px 90px}header,figcaption,.muted{color:#647269}header,figcaption{font-size:13px}h1{font-size:clamp(34px,5vw,48px);letter-spacing:-.035em;line-height:1.15}h2{font-size:27px;line-height:1.3;margin-top:50px}a{color:#176f5d;text-underline-offset:3px}p{margin:17px 0}code{font:0.87em ui-monospace,monospace;background:#e5ece3;padding:2px 5px;border-radius:3px}pre{background:#e5ece3;padding:18px;overflow:auto;font:14px/1.6 ui-monospace,monospace}pre code{padding:0}.table{overflow:auto}table{width:100%;min-width:650px;border-collapse:collapse;font-size:14px;line-height:1.5;margin:20px 0}th,td{text-align:left;vertical-align:top;padding:13px 10px;border-bottom:1px solid #cdd9ce}.flow{display:grid;gap:10px;text-align:center}.flow div{padding:20px;background:#e5ece3;border-radius:4px}.flow small,.flow strong,.flow span{display:block}.flow small{letter-spacing:.13em;font-size:11px}.flow strong{font-size:20px}.flow span{font-size:14px}figure{margin:28px 0}figcaption{margin-top:14px}select{width:100%;padding:12px;background:transparent;color:inherit;font:inherit;border:1px solid #789282;border-radius:4px}label{display:block;font-weight:600;margin:12px 0}li{margin:9px 0}section{padding-bottom:20px;border-bottom:1px solid #cdd9ce}@media(prefers-color-scheme:dark){body{background:#171e19;color:#e6eee7}header,figcaption,.muted{color:#abb9ae}a{color:#89d1b6}code,pre,.flow div{background:#2b3b30}th,td,section{border-color:#445d4c}}@media(max-width:600px){main{padding:26px 16px 60px}h2{font-size:24px}table{font-size:13px}}</style></head><body><main><header>LOO-714 · design draft · November 3, 2026<br>Sources: settings-catalog.md, paseo-settings-reference.md and linked implementation</header><h1>One settings catalogue</h1>
 <p>Draft for Jack Heart · LOO-714 / infrastructure · 2026-11-03</p>
 <p>Build one executable definition of every LF-owned setting, so its accepted values,
 supported locations, editing path and explanation agree across CLI, files, DB and
 Desktop. This develops the existing settings-portability-review.md audit. It is a
 design for review, separate from the running choice-before-fallback implementation.
 No catalogue implementation or synchronization is approved by this draft.</p>
+<p>Jack Heart clarified the design goal on November 3: <strong>close the coverage gaps</strong>,
+not merely catalogue today's exceptions. For every supported setting, implement
+consistent access through appropriate surfaces or document a real domain/lifecycle
+constraint. Existing missing support is not its own justification.</p>
+<p>Writer policy remains open. Jack tentatively prefers <code>lf set</code> to mean a DB override,
+but is also considering limiting it to account/machine choices, with ordinary
+preferences file-backed. Paseo research in <code>paseo-settings-reference.md</code> informs
+that decision. The catalogue must not silently settle it by making storage depend
+on whichever writer happened to exist before.</p>
 <p>Jack's request: “designing a single settings catalog and explaining and clarifying
 what exists today versus what would need to change.” Preserve the accepted agent
 rule: choice before fallback, then source &gt; scope &gt; target. No built-in skill
@@ -60,7 +69,7 @@ its full validation is ongoing. These observations do not claim shipped behavior
 <tr>
 <td>Special settings</td>
 <td>Theme, stream, portfolio and logs have other readers/writers; account/machine choices have domain stores</td>
-<td>Include them in discovery through adapters, with explicit capabilities. Do not force them into <code>Config</code> or the DB.</td>
+<td>Close appropriate read/write/inspection gaps through common definitions and domain adapters. Storage policy remains open; visibility alone is insufficient.</td>
 </tr>
 <tr>
 <td>Portability</td>
@@ -182,12 +191,154 @@ including movement/copy semantics; generic writes must not bypass those effects.
 Theme keeps its draft/Apply/Cancel behavior and file writer. Installation settings
 retain bootstrap access. Portfolio remains a managed collection.</p>
 <p>The catalogue advertises whether an entry supports generic assignment or needs
-a domain action. Unsupported source/target combinations include the reason and
-the supported action. Inclusion does not automatically add every field to every
-surface. Native provider configuration is identified as delegated, not reimplemented.
+a domain action. Close missing appropriate CLI/file/DB/UI access; an adapter that
+only labels a current omission does not fulfill Jack's direction. Unsupported
+source/target combinations need an actual domain or lifecycle reason and the
+supported action. Which surfaces write files versus DB awaits the writer decision.
+Native provider configuration is identified as delegated, not reimplemented.
 Unknown LF keys are diagnosed after dispatching all known owners; native skill
 frontmatter and recognized non-setting structure are not treated as unknown LF keys.</p>
-<section aria-labelledby="examples-title"><h2 id="examples-title">What the shared explanation buys us</h2><p>Illustrative design examples, not live configuration.</p><label for="example">Example</label><select id="example"></select><pre id="inputs"></pre><p><strong>Result: <span id="value"></span></strong></p><p id="explanation" aria-live="polite"></p><p id="change" class="muted"></p></section><h2>The demo</h2>
+<h2>Paseo reference: lessons for the writer contract</h2>
+<p>Paseo's daemon CLI and settings patches write the same <code>config.json</code>; its project
+API writes <code>paseo.json</code>. Its schema supports validation and editor-schema generation,
+but lifecycle/mutable-field lists remain separate. Client-local remembered model
+choices are another launch input, not daemon configuration. Evidence and limits:
+<a href="paseo-settings-reference.md">Paseo settings reference</a>.</p>
+<p>For LF, a write result should identify the saved declaration and report whether
+it applies now, to the next launch, requires an explicit lifecycle action, or is
+shadowed by another declaration. Persist only requested intent; never serialize
+a resolved view back into a preference source. Include UI-carried choices in launch
+provenance rather than letting them become an invisible precedence tier.</p>
+<p>This strengthens the file-editor alternative without deciding it. “Close gaps”
+requires common semantic access through appropriate interfaces, not automatically
+a DB copy of every preference. Generic file edits can remain source-explicit if
+<code>lf set</code> keeps its tentative DB-only meaning.</p>
+<section aria-labelledby="examples-title"><h2 id="examples-title">What the shared explanation buys us</h2><p>Illustrative design examples, not live configuration.</p><label for="example">Example</label><select id="example"></select><pre id="inputs"></pre><p><strong>Result: <span id="value"></span></strong></p><p id="explanation" aria-live="polite"></p><p id="change" class="muted"></p></section><details><summary>Read the Paseo source comparison</summary><h1>Paseo: configuration ownership and editing</h1>
+<p>Research for Jack Heart · LOO-714 catalogue design · 2026-11-03</p>
+<p>Primary source snapshot: getpaseo/paseo
+<code>93b9ac9dedc122ab045b1724c782a778dd8119d9</code>, plus current official docs.
+Source and test inspection only; Paseo was not installed or executed. This answers
+the storage/authoring question, not a general product comparison.</p>
+<h2>Finding</h2>
+<p>For daemon preferences, Paseo's CLI and settings API edit the same configuration
+file. The inspected path does not introduce a parallel database override tier.
+Client-local remembered choices and project configuration are separate owners,
+so “everything lives in one config” would also be inaccurate.</p>
+<h2>The relevant paths</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Content</th>
+<th>Durable owner</th>
+<th>Editing path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Daemon settings, providers and named agent profiles</td>
+<td><code>$PASEO_HOME/config.json</code></td>
+<td>CLI get/set/unset and daemon settings patches</td>
+</tr>
+<tr>
+<td>Repository workspace setup/scripts</td>
+<td>Project <code>paseo.json</code></td>
+<td>File edits and project-config API</td>
+</tr>
+<tr>
+<td>Remembered new-agent provider/model/mode choices</td>
+<td>Client AsyncStorage</td>
+<td>Creation-form preference service</td>
+</tr>
+<tr>
+<td>Client appearance and layout preferences</td>
+<td>Client settings storage</td>
+<td>App settings</td>
+</tr>
+<tr>
+<td>Agent/project/workspace/timeline replicas</td>
+<td>Client IndexedDB or native SQLite</td>
+<td>Replication cache, not daemon config authority</td>
+</tr>
+</tbody>
+</table></div>
+<h3>CLI edits the file; API patches also edit the file</h3>
+<p><code>paseo daemon config set</code> calls <code>editPersistedConfig</code>, which validates the field
+against the persisted schema, edits the configured object, then saves it. The
+daemon's mutable settings owner separately merges only requested fields into
+that same file. An in-memory resolved snapshot is not persisted wholesale.
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/cli/src/commands/daemon/config.ts">CLI source</a>,
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/server/src/server/persisted-config.ts">persistence</a>,
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/server/src/server/daemon-config-store.ts">settings owner</a>.</p>
+<p>Tests explicitly cover preventing unrelated edits from persisting resolved defaults
+or one-launch overrides, serializing overlapping patches, and rollback on a failed
+transition. These are source assertions reviewed here, not tests executed here.
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/server/src/server/daemon-config-store.test.ts">Tests</a>.</p>
+<h3>Saving and taking effect are separate results</h3>
+<p>Configured-value reads report whether the key is set. After saving, the CLI attempts
+one reload and distinguishes application, restart requirements, deployment overrides
+and a saved file whose daemon could not apply it. Managed launches remove inherited
+daemon-setting env vars; foreground deployments may deliberately use them.
+<a href="https://paseo.sh/docs/configuration">Configuration docs</a>.</p>
+<p>This is a strong pattern for LF regardless of storage: explain the authored value,
+effective value, and when the edit takes effect. A successful write can still be
+shadowed by a stronger declaration. A default is not an override merely because
+it was the value visible when the UI opened.</p>
+<h3>Shared schema, with remaining hand-maintained policy</h3>
+<p><code>PersistedConfigSchema</code> supplies field validation, CLI path lookup and a generated
+JSON Schema for editors. But mutable patches, reloadable paths and persisted-to-
+runtime path mappings still have separate lists in the settings owner. Paseo
+therefore demonstrates useful shared typing, not a complete single catalogue of
+all lifecycle and applicability policy.
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/server/scripts/generate-config-schema.ts">Schema generation</a>,
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/server/src/server/daemon-config-store.ts">owner</a>.</p>
+<h3>Client-local preferences remain another input</h3>
+<p>The new-agent form persists provider, per-provider model/mode and per-model thinking
+choices in AsyncStorage. These are remembered client selections, separate from
+daemon profiles. They can affect a new launch, so the file is not the complete
+explanation of everything a person sees in the composer.
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/app/src/create-agent-preferences/preferences.ts">Form preferences</a>,
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/app/src/create-agent-preferences/storage.ts">storage</a>.</p>
+<p>The documented client replica persists agent/workspace/project/timeline data using
+IndexedDB or native SQLite; it is not another persisted daemon-config override.
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/docs/data-model.md">Data model</a>.</p>
+<h3>Repository and account choices</h3>
+<p>The project-config API writes <code>paseo.json</code> on disk and checks an expected revision.
+That repository file describes workspace setup; it is not a demonstrated copy of
+LF's same-setting global/repo/Wave/skill precedence matrix.
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/packages/server/src/server/session/project-config/project-config-session.ts">Project config API</a>.</p>
+<p>Multiple provider/account setups can be represented as provider aliases in daemon
+configuration. This is not evidence that LF's managed identities, usage observations
+or account failover should become file config.
+<a href="https://github.com/getpaseo/paseo/blob/93b9ac9dedc122ab045b1724c782a778dd8119d9/docs/custom-providers.md#multiple-profiles-for-the-same-provider">Provider profiles</a>.</p>
+<p>Profiles are saved on a host and affect future selections, not already-launched
+agents. Clients accessing that host share the host's configuration; this is not
+proof of profile synchronization between independent hosts.
+<a href="https://paseo.sh/docs/agent-profiles">Agent profiles</a>.</p>
+<h2>Consequences for the LF design</h2>
+<p>Two coherent storage choices remain:</p>
+<ol>
+<li><strong>General DB overrides.</strong> <code>lf set</code> always writes the DB layer; personal files
+remain a lower-authority declaration source. Close appropriate CLI/UI/file/DB
+gaps, and always explain the destination and any shadowing.</li>
+<li><strong>Ordinary preferences in files.</strong> CLI/UI become editors of the same personal
+config. Repository files keep shared intent; DB retains registrations, routing
+and execution state. <code>lf set</code> could be restricted to the DB-backed domain choices,
+with an explicit config-edit operation for ordinary preferences. Existing
+<code>scope_settings</code> values would need migration, not silent abandonment.</li>
+</ol>
+<p>Paseo makes option 2 more credible: file ownership does not require hand editing
+or giving up a settings UI. It does not settle LF's richer precedence policy, nor
+show that accounts/machines are the only legitimate DB settings. Storage remains
+an LF design decision, not a consequence of building a catalogue.</p>
+<p>For either option, adopt the useful contracts: one typed definition used by input
+surfaces; preserve authored intent when writing; report saved versus effective;
+make client-local remembered selections visible in launch provenance. LF's catalogue
+should additionally own applicability and lifecycle policy, avoiding Paseo's
+remaining parallel lists.</p>
+<p>Jack accepted closing coverage gaps. That goal means every appropriate read/write
+surface reaches the common semantics. It does not by itself mean every preference
+must have a DB copy. No LF storage migration or writer-policy change is accepted.</p>
+</details><h2>The demo</h2>
 <p>Command spelling is provisional; these are additions to the PR's inspector:</p>
 <pre><code class="language-text">lf config list
   agent          launch preference   general / skill / occurrence
@@ -225,8 +376,11 @@ inactive rather than advertised as working; removing them needs a consumer audit
 <h2>Delivery shape and acceptance</h2>
 <p><strong>Additive series. Keystone:</strong> replace scattered catalogue policy and wire discovery,
 validation, writers and explanation to it in one coherent PR. Include all existing
-LF-owned settings in discovery, with correct adapter capabilities. No new storage
-layer or database migration is required for the catalogue itself.</p>
+LF-owned settings and close appropriate access gaps, with correct adapter
+capabilities. The implementation inventory must identify each gap, its new entry
+points or justified restriction, and its behavioral proof. No new storage layer
+is required by the catalogue itself. If the writer decision removes ordinary DB
+preferences, their migration becomes a separate explicit cutover requirement.</p>
 <p>Internal sequence: (1) co-locate definitions and cut over validation/eligibility,
 removing the old lists; (2) bind special owners and CLI adapters; (3) expose catalogue
 and resolver explanations through shared DTOs and inspection. These are internal
@@ -253,11 +407,13 @@ identified by the final diff. Formatting/Clippy and relevant DTO checks are part
 that gate. No display, live provider or paid launch is required.</p>
 <h2>Review decisions</h2>
 <ol>
-<li>Approve the keystone boundary: one authoritative catalogue plus discovery and
-explanations, preserving existing storage owners and applicability?</li>
-<li>Is catalogue visibility with an explicit domain-action binding sufficient for
-theme, portfolio, account routes and machine movement initially, rather than
-requiring every operation to become a plain assignment?</li>
+<li>Choose the write/storage contract: general DB overrides, or ordinary personal
+config written through a common file API with account/machine state in the DB.
+Jack's tentative preference for <code>lf set</code> is DB-only; restricting that command
+to account/machine settings remains an alternative under review.</li>
+<li>For the chosen contract, complete the setting-by-setting gap inventory. Closing
+appropriate gaps is accepted direction; retaining today's omissions is not a
+viable implementation boundary. Domain operations need not become plain writes.</li>
 </ol>
 <p>Check: source audit only; no catalogue code or new tests executed. The active
 choice-before-fallback pursue continues independently; this draft is not its directive.</p>

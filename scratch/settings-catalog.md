@@ -47,32 +47,14 @@ The superseded prototype archive and research are documented at
 `a7a64269c6:scratch/settings-catalog.md`; current source implements the accepted
 clone scope and is authoritative over that unfinished prototype.
 
-## Reconciliation — November 3, 2026
+## Prior implementation evidence
 
-The file-backed implementation now replaces ConfigLayer with source/scope/target,
-uses a typed catalogue for schema and validation, and routes CLI/Desktop edits
-through the comment-preserving writer. The single unreleased migration exports
-DB preferences with recovery evidence before removing their columns/tables.
-Pools/on-demand templates and auth browser selection are declarations; rental
-admission/history, acquired machine costs, discovered browser profiles, credential
-observations and actual saved layouts remain runtime records. No existing reusable
-layout-template setting was found; this cut introduces no new template product.
-
-Sync and rename evidence is retained at `a7a64269c6:scratch/settings-catalog.md`.
-The conflict-free sync merged main `ac8e088f5f` in `ff8eb9a7f6`; preserve LOO-720's
-native/headless distinction. Wave renames/relocations retain authored UUIDs and
-private declarations; old-name reuse must not inherit them. Shared files move with
-the Wave. Linked worktrees share their main checkout's private file.
-
-Origin profile reads never retain files. Execution retains unchanged portable
-projections and exposes keep/replace for divergence; remote local bindings remain.
-`config retained --replace` now reports the saved projection, covered by its
-preparation/adoption test. Transport alone does not prove launch behavior.
-
-Earlier implementation evidence is retained at `03c678c676:scratch/settings-catalog.md`
-and in settings-scope.md. It is not proof of the current extension. The extension's
-pre-sync focused Rust/Swift and lint results are retained at
-`b0a2b108a9:scratch/settings-catalog.md`; they are not full post-sync acceptance.
+The file-backed catalogue, independent source/scope/target model, file migration,
+configuration observation and destination repair stand. Detailed reconciliation
+and earlier check references are preserved in Git blob
+`d02b6b6595a90788f21de8c7e81b0b6ed1427c91`. The conflict-free sync merged main
+`ac8e088f5f` in `ff8eb9a7f6`; preserve LOO-720's native/headless distinction.
+Earlier passes are evidence for their named trees, not acceptance of this repair.
 
 ## Outcome and scope
 
@@ -256,91 +238,41 @@ retained JSON captures. Export ownership checks live in `skills::writable_target
 the caller no longer repeats them. The separate file migration now implements the
 accepted independent-clone scope.
 
-Deletion cut (verify no live preference owner remains):
+The prior deletion cut removed DB preference readers/writers, parallel key lists,
+serialized-default schema inference, duplicate parsers/writers and client schemas,
+inspector winner guesses, numeric target ranks and the duplicate inactive flag.
+Domain readers now select typed Config fields directly; account SQL retains runtime
+columns only. Migration and retention share the authored-document overlay. Domain
+setters delegate to `files::edit`, including private-file protection. Literal map
+keys survive editing/resolution; dotted labels are display text. Config-file
+subscriptions replace tests of retired provider_routes revisions. Session aliases
+come from configuration without obsolete machine-table joins.
 
-- scope_settings preference reads/writes and replaced preference-only scope_defaults /
-  provider_routes and auth_browser_bindings paths; migrate pool availability and on-demand templates/limits, preserving runtime facts.
-- LAUNCH_KEYS, REPO_ONLY_KEYS, ADDITIVE_KEYS and duplicate applicability/key discovery.
-- Schema inference from serializing Config::default().
-- Separate preference parsers/writers in special settings and mirrored client key lists.
-- Inspector guesses based only on last candidate; render resolver-owned reasons.
-- Historical DB/file or per-repo duplicate authorities after cutover.
-
-The deletion cut is complete in the current tree. Catalogue lifecycle alone marks
-inactive preferences; no parallel `active` flag or numeric target ranks remain.
-Typed domain readers select `Config` fields directly, without the generic
-`global_declarations` YAML round trip. Account SQL selects only runtime columns;
-file preferences are applied once per read/selection batch. Migration and remote
-retention share the authored-document overlay, independently of resolution policy.
-Copied Session list/history reads also drop the obsolete machine-table join and
-NULL label placeholder; configured aliases supply their names, including renames.
-
-Removed `route_edits_invalidate_wave_setup`: it asserted revisions on the retired
-provider_routes table. Fresh file and route reads remain covered by configuration,
-Wave setup and provider inspection tests. Subscription regressions now exercise
-file propagation without writing those retired revisions.
-
-Domain setters now delegate to `files::edit`, removing their duplicate mutation path.
-The common editor owns validation, removal results and private-file protection.
-Setting addresses retain literal map-key components through editing and resolution;
-dotted inspector labels are display text, not a path to parse back into YAML.
-Graph loading retains the source it read instead of rediscovering that source after
-parsing. The Desktop editor parses private Wave selectors once.
+The complete preceding reconciliation, including removed symbols/test names, is
+preserved in Git blob `e36ba458f227ee3b04f15e567588328d464c107c`.
 
 ## Configuration observation
 
-Reconciled November 3 against checkpoint `a7a64269c6`: the prior iteration's
-missing-observer finding is resolved in source. CLI and FFI/Desktop subscriptions
-share `watch::Reader`; the existing-subscription regression bounds each expected
-frame to five seconds and creates no database. This is fixture evidence, not a
-universal latency guarantee or configured Desktop acceptance.
+CLI/FFI/Desktop subscriptions share watch::Reader's one-second content observation
+of config inputs, missing paths and definition directories. Bounded Task workers
+inherit capture. Hand edits, replacement/removal and invalid-YAML repair retain
+coalescing and unchanged-frame suppression; planning refresh is separate. The
+five-second fixture at `a7a64269c6` is not a latency guarantee or configured Desktop
+acceptance. Full prior evidence: `d02b6b6595a90788f21de8c7e81b0b6ed1427c91`.
 
-The shared CLI/FFI/Desktop watch captures configuration inputs and checks their
-content on its one-second observation tick, including missing files and the main
-checkout's private file. Bounded Task workers inherit the capture; skill/Graph
-discovery includes directories so new overrides invalidate existing subscriptions.
-Setter writes and external edits use this same path. Replacement, removal and
-invalid-YAML repair retain normal coalescing, cost-based rest and unchanged-frame
-suppression. This removes the five-minute planning clock as the sole observer of
-configuration; Git and independent planning facts retain their own observation.
+## Destination repair and acceptance boundaries
 
-## Remaining proof
+### Destination ownership — preserved
 
-### Destination owns the edit address — November 3
+The destination repair at `aa4f3c75ee` binds CLI/Desktop edit and explanation to
+one file/source/scope/prefix. Its focused Rust, CLI, FFI, Swift and lint results
+remain evidence for that unchanged path. Detailed repair and review evidence,
+including the uncommitted reconciliation, is preserved in Git blob
+`d02b6b6595a90788f21de8c7e81b0b6ed1427c91` (this plan).
 
-Jack Heart's accepted source/scope ownership and CLI/Desktop parity require one
-edit destination. Review traced a counterexample at `a7a64269c6`: Desktop could
-validate Repository scope while writing the global file; a global-only key could
-be written to a shared file and then rejected by its reader. The full uncommitted
-review was preserved before consolidation at
-`/tmp/loo714-settings-catalog-before-destination.md`; concept-review.html retains
-its presentation. No product judgment remains unresolved.
-
-The implementation binds personal global, personal/shared repository and
-personal/shared Wave destinations to one resolved file/source/scope/prefix.
-CLI set/unset and Desktop use this owner. Desktop explanation derives the same
-checkout, Wave and skill/occurrence; its locator is output, not editable authority.
-UUID Wave selectors resolve authored files without requiring the Work database.
-Changing destinations clears the prior draft and explanation.
-
-Delete — do not maintain: `Request::File`, `ConfigCommand::File`, the separate
-CLI file wrapper, Desktop file/scope/shared and inspection-repository controls,
-and Swift's key-to-inspection selector parser. Also removed `files::set` and
-`update_global_config_at`: CLI and Desktop share `api::declaration`, including its
-receipt; inspection lives in that API. `files::read` owns authored documents and
-shares mapping parsing with writes. General settings use the common catalogue
-and writer. Placement shorthand expansion is shared by the resolver and both
-edit paths: changing or unsetting one field preserves the other destination.
-Appearance keeps its existing configured file and
-Apply/Cancel transaction via a fixed-key theme operation; it exposes no arbitrary
-key/source/scope combination. Recovery imports retain explicit file access.
-
-Required proof: FFI and CLI save → explanation → real prompt preparation;
-linked worktree sharing and independent clones; Wave rename and old-name reuse;
-rejection of global-only keys before writes; unset reveals lower declarations
-without changing global or other Wave settings; occurrence and fallback
-explanations; comment and concurrent-edit preservation. Gate owns affected-suite
-acceptance; review owns configured Desktop/provider demonstration.
+Remaining: gate's affected suites,
+review's configured demonstration, then review-only publication. Limit recovery
+remains PR2; neither merge nor Task completion is authorized.
 
 Headless acceptance covers:
 
@@ -360,4 +292,76 @@ Headless acceptance covers:
   and deletions, stale/concurrent deliveries, restart, host-only fields, no credential or
   CLI/env persistence, and nonblocking forwarded execution with clear persistence status.
 
-Check (November 3): `cargo test -p loopflow --lib -- config::files:: config::api:: graph::compiled::tests store::sqlite::rentals::tests::file_edits_change_admission` (18 tests, wire-shape repair rerun), `cargo test -p loopflow --test integration settings_launch_tests::cli_destinations_save_the_declaration_used_by_preparation_and_unset`, and `cargo test -p loopflow-ffi configuration_tests::` passed. `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'ConfigurationSettingsTests|ThemeTests|ThemeWorkflowTests'` built Desktop; stale quotation assertions in two tests were replaced by semantic value/comment preservation checks and passed on focused rerun (25 tests total). `cargo fmt --check`, Swift platform-boundary checks and `git diff --check` and `cargo clippy --all-targets -- -D warnings` passed. Inherited `LF_*` cleared, stdin closed. Gate owns affected suites; review owns configured behavior. Auto-Ship is stopped. Compression recheck: `cargo test` file/API/migration/retention/portfolio/install (32), file/resolver/placement (25), FFI and CLI save-to-launch passed. `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter ConfigurationSettingsTests` built Desktop and passed; formatting and Clippy passed.
+Check: with inherited LF_* unset, `rustup run stable cargo nextest run -p loopflow --lib -E 'test(config::remote::) | test(config::files::) | test(config::settings::) | test(skills::catalog::) | test(graph::tests::)'` — 94 passed, one nextest leak diagnostic on the scoped-thread file-write test (no remaining child); `rustup run stable cargo fmt --check` — passed. Gate owns affected-suite acceptance and leak diagnosis; lint owns current-tree Clippy; review owns configured behavior.
+
+## Concept review — one personal profile across declaration locations
+
+November 3, source reviewed at `aa4f3c75ee`. **Accepted ownership implemented;
+focused tests passed. No open product choice.** Jack Heart's accepted origin-owned
+profile includes portable LF settings wherever authored. The earlier destination
+repair stands. This finding concerns definition metadata, not another edit scope.
+
+The review reproduced a carried general `agent: codex` losing to executor
+personal skill `agent: claude`: config replacement left definition metadata
+outside profile ownership. Direct executor work correctly chose Claude; a
+repository choice correctly beat an origin fallback. Reproduction details and
+binary digest remain in Git blob `d02b6b6595a90788f21de8c7e81b0b6ed1427c91`.
+
+Ownership requirements:
+
+- Select the personal profile before collecting portable preference candidates,
+  regardless of whether their locator is config YAML, LF skill metadata or a
+  personal Graph occurrence. Include applicable origin-authored definition
+  declarations with their source, scope, target, locator and choice/fallback key.
+  Exclude competing executor portable metadata through that same ownership rule.
+  Remove the config-document-only assumption; do not add a new precedence tier.
+- Keep definition instructions/topology and preference authority distinct. Preserve
+  repository definition selection, native provider-owned fields, host-local settings,
+  defining Graph/step identity and captured instructions. This does not authorize
+  synchronizing whole skill bundles or changing how skill bodies are selected.
+- Use the same declaration ownership in inspection and real preparation, including
+  captured/composed/repeated occurrences. Preserve existing retention conflicts,
+  deletions, stale-delivery protection and use-versus-save reporting when retaining
+  these authored preferences. Receipts remain operational evidence, never policy.
+
+Proof: forwarded general choice plus executor personal skill choice selects the
+origin; origin personal skill metadata itself survives transport; an origin fallback
+still yields to a repository choice. Repeat for personal Graph metadata and a
+non-agent portable setting, with inspection agreeing with preparation. Direct
+executor work keeps its own policy. On a retention conflict, forwarded work still
+uses the origin, the executor file remains untouched, and later direct work uses
+that file; explicit adoption must not promote a fallback to a choice. Missing
+referenced assets retain their existing actionable failure rather than silently
+substituting executor policy.
+
+These counterexamples reject both a blanket removal of definition metadata and
+promotion of the carried profile to CLI authority. Gate, configured acceptance
+and review-only publication remain; recovery is PR2.
+
+### Current deletion cut
+
+Definition candidate construction and profile selection now belong to
+`config::definitions`; the resolver/transport mutation handoff is removed.
+Metadata normalization, occurrence address lookup and recursive YAML patching
+have one implementation each. Retention matches definition identities through
+one keyed lookup. Destination ownership and the profile/retention contract stand.
+
+Removed config-only profile collection and unconditional personal definition
+candidate insertion. One resolver and one retention compare/write policy remain;
+project definition preferences separately from instruction bodies/topology.
+Preference retention edits existing definitions, never installs a skill bundle.
+Graph metadata keeps defining graph, authored ID (or local position for unnamed
+metadata), locator and choice/fallback key through capture and composition.
+
+The profile now carries portable personal definition declarations with their
+locators. The resolver excludes executor portable metadata before ranking;
+captured work uses current executor host-local metadata. Skill captures record
+source authority; Graph captures retain defining name, authored address and path.
+Repository Graph selection stays first; personal Graph discovery supplies the
+previously absent fallback before builtins. Retention shares compare/write and
+receipt policy across config and definition projections, editing only preferences
+through the existing comment-preserving writer. No body or topology is copied.
+
+Focused boundary: config::remote, config::files, config::settings, graph::tests;
+direct consumers also include prompt::process, skills::catalog/invocation,
+definition, config::api and settings_launch_tests. Gate owns their full acceptance.

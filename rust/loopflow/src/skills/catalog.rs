@@ -27,6 +27,8 @@ pub enum SkillDialect {
 /// File provenance and declarations retained with a resolved Graph skill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillOrigin {
+    /// Older durable captures did not record authority; their path remains the locator.
+    pub config_source: Option<crate::config::ConfigSource>,
     pub path: PathBuf,
     pub dialect: SkillDialect,
     pub frontmatter: Option<String>,
@@ -70,25 +72,22 @@ impl SkillSource {
                 self.name
             );
         }
-        let docs = loopflow
-            .then(|| metadata.and_then(|map| map.get("docs")))
-            .flatten()
-            .map(skill_docs)
-            .transpose()?;
         let mut settings = if loopflow {
-            let mut value = metadata.cloned().map(Value::Mapping).unwrap_or(Value::Null);
-            if let Some(docs) = &docs {
-                value["docs"] = serde_yaml_ng::to_value(docs).expect("document paths serialize");
-            }
-            crate::config::settings::metadata(&value)?
+            crate::config::settings::metadata(
+                &metadata.cloned().map(Value::Mapping).unwrap_or(Value::Null),
+            )
+            .map_err(|error| LoadError::InvalidSkill(error.to_string()))?
         } else {
             BTreeMap::new()
         };
         settings.remove("agent");
-        settings.remove("docs");
+        let docs = settings.remove("docs").map(|value| {
+            serde_yaml_ng::from_value(value).expect("metadata validates document paths")
+        });
         Ok(Skill {
             name: self.name.clone(),
             source: self.path.as_ref().map(|path| SkillOrigin {
+                config_source: Some(crate::config::settings::definition_source(Some(path))),
                 path: path.clone(),
                 dialect: self.dialect,
                 frontmatter: frontmatter.map(str::to_string),
@@ -110,19 +109,6 @@ impl SkillSource {
                 .expect("embedded catalog entry names a builtin")
                 .to_string()),
         }
-    }
-}
-
-/// `docs:` names one target or a list, each resolved like `--docs`.
-fn skill_docs(value: &Value) -> Result<Vec<String>, LoadError> {
-    let invalid = || LoadError::InvalidSkill("`docs` must be a path or a list of paths".into());
-    match value {
-        Value::String(doc) => Ok(vec![doc.clone()]),
-        Value::Sequence(docs) => docs
-            .iter()
-            .map(|doc| doc.as_str().map(str::to_string).ok_or_else(invalid))
-            .collect(),
-        _ => Err(invalid()),
     }
 }
 

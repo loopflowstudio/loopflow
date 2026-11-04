@@ -1,6 +1,8 @@
 //! Origin-owned personal declarations. Delivery receipts describe persistence;
 //! they are never consulted by the settings resolver as preference values.
+pub use super::definitions::DefinitionPreferences;
 use super::{settings::SettingScope, ConfigDeclarations, ConfigSource};
+use crate::definition::DefinitionKind;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -18,10 +20,12 @@ pub struct Profile {
     pub global: Value,
     pub repository_path: Option<PathBuf>,
     pub repository_values: Value,
+    pub definitions: Vec<DefinitionPreferences>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Retention {
+    pub definition_kind: Option<DefinitionKind>,
     pub origin: String,
     pub revision: u64,
     pub seen: BTreeMap<String, u64>,
@@ -31,7 +35,7 @@ pub struct Retention {
     pub status: String,
 }
 
-fn project(value: &Value) -> Value {
+pub(super) fn project(value: &Value) -> Value {
     fn targets(value: &Value) -> Value {
         value
             .as_mapping()
@@ -83,7 +87,7 @@ fn replace_projection(document: &mut Value, incoming: &Value) {
     remove_projection(document, &previous);
     super::files::overlay(document, incoming);
 }
-fn remove_projection(document: &mut Value, portable: &Value) {
+pub(super) fn remove_projection(document: &mut Value, portable: &Value) {
     if let (Some(map), Some(keys)) = (document.as_mapping_mut(), portable.as_mapping()) {
         for (key, value) in keys {
             if value.is_mapping() {
@@ -135,6 +139,7 @@ pub fn outgoing(repo: Option<&Path>, origin: &str) -> Result<Profile> {
         global,
         repository_path,
         repository_values,
+        definitions: super::definitions::discover()?,
     })
 }
 
@@ -181,9 +186,40 @@ pub fn incoming() -> Result<Option<Profile>> {
             );
             validate_document(&profile.global, SettingScope::Global)?;
             validate_document(&profile.repository_values, SettingScope::Repository)?;
+            let mut definitions = std::collections::BTreeSet::new();
+            for definition in &profile.definitions {
+                super::definitions::validate(definition)?;
+                anyhow::ensure!(
+                    definitions.insert((definition.kind, &definition.name)),
+                    "duplicate personal definition"
+                );
+            }
             Ok(profile)
         })
         .transpose()
+}
+
+fn read_projection(path: &Path, kind: Option<DefinitionKind>) -> Result<Value> {
+    match kind {
+        Some(kind) => super::definitions::read(path, kind),
+        None => Ok(project(&super::files::read(path)?)),
+    }
+}
+
+fn update_projection<T>(
+    path: &Path,
+    kind: Option<DefinitionKind>,
+    change: impl FnOnce(&mut Value) -> Result<T>,
+) -> Result<T> {
+    match kind {
+        Some(kind) => super::definitions::update(path, kind, change),
+        None => super::files::update(path, |document| {
+            let mut portable = project(document);
+            let result = change(&mut portable)?;
+            replace_projection(document, &portable);
+            Ok(result)
+        }),
+    }
 }
 
 fn receipts(home: &Path) -> PathBuf {
@@ -198,7 +234,13 @@ fn read_receipts(path: &Path) -> Result<BTreeMap<PathBuf, Retention>> {
     }
 }
 
-fn retain(home: &Path, path: &Path, profile: &Profile, incoming: &Value) -> Result<()> {
+fn retain(
+    home: &Path,
+    path: &Path,
+    profile: &Profile,
+    incoming: &Value,
+    kind: Option<DefinitionKind>,
+) -> Result<()> {
     let metadata = receipts(home);
     let _lock = super::files::lock(&metadata)?;
     let mut records = read_receipts(&metadata)?;
@@ -235,21 +277,26 @@ fn retain(home: &Path, path: &Path, profile: &Profile, incoming: &Value) -> Resu
     } else {
         "conflict"
     };
-    super::files::update(path, |document| {
-        let current = project(document);
+    let applicable = kind
+        .map(|kind| super::definitions::can_retain(path, kind, incoming))
+        .transpose()?
+        .unwrap_or(true);
+    update_projection(path, kind, |document| {
+        let current = document.clone();
         let owned = previous.as_ref().is_some_and(|previous| {
             previous.applied_origin.as_deref() == Some(profile.origin.as_str())
                 && previous.status == "retained"
                 && previous.applied.as_ref() == Some(&current)
         });
-        if (current == *incoming
-            && previous.as_ref().is_none_or(|previous| {
-                previous.applied_origin.as_deref() == Some(profile.origin.as_str())
-            }))
-            || (previous.is_none() && current.as_mapping().is_some_and(|map| map.is_empty()))
-            || owned
+        if applicable
+            && ((current == *incoming
+                && previous.as_ref().is_none_or(|previous| {
+                    previous.applied_origin.as_deref() == Some(profile.origin.as_str())
+                }))
+                || (previous.is_none() && current.as_mapping().is_some_and(|map| map.is_empty()))
+                || owned)
         {
-            replace_projection(document, incoming);
+            *document = incoming.clone();
             applied = Some(incoming.clone());
             applied_origin = Some(profile.origin.clone());
             status = "retained";
@@ -267,6 +314,7 @@ fn retain(home: &Path, path: &Path, profile: &Profile, incoming: &Value) -> Resu
     records.insert(
         path.to_owned(),
         Retention {
+            definition_kind: kind,
             origin: profile.origin.clone(),
             revision: profile.revision,
             seen,
@@ -277,7 +325,9 @@ fn retain(home: &Path, path: &Path, profile: &Profile, incoming: &Value) -> Resu
         },
     );
     super::files::atomic_write(&metadata, &serde_json::to_string_pretty(&records)?)?;
-    if status == "conflict" && changed {
+    if status == "conflict" && changed && !applicable {
+        eprintln!("Origin preferences apply; {} needs its personal definition or matching occurrences installed before retention. `lf config retained` shows the pending declarations.", path.display());
+    } else if status == "conflict" && changed {
         eprintln!("Remote execution uses {} preferences; {} keeps its independent edits. `lf config retained` shows the difference.", profile.origin, path.display());
     }
     Ok(())
@@ -364,7 +414,30 @@ pub fn receive(repo: Option<&Path>) -> Result<()> {
         ));
     }
     for (path, incoming) in destinations {
-        if let Err(error) = retain(&home, &path, &profile, incoming) {
+        if let Err(error) = retain(&home, &path, &profile, incoming, None) {
+            eprintln!(
+                "Origin preferences apply; retention unavailable for {}: {error:#}",
+                path.display()
+            );
+        }
+    }
+    if let Err(error) = retain_definitions(&home, &profile) {
+        eprintln!("Origin preferences apply; definition retention unavailable: {error:#}");
+    }
+    Ok(())
+}
+
+fn retain_definitions(home: &Path, profile: &Profile) -> Result<()> {
+    let mut definitions = super::definitions::destinations(&profile.definitions)?;
+    for (path, receipt) in read_receipts(&receipts(home))? {
+        if let Some(kind) = receipt.definition_kind {
+            definitions
+                .entry(path)
+                .or_insert((kind, Value::Mapping(Default::default())));
+        }
+    }
+    for (path, (kind, incoming)) in definitions {
+        if let Err(error) = retain(home, &path, profile, &incoming, Some(kind)) {
             eprintln!(
                 "Origin preferences apply; retention unavailable for {}: {error:#}",
                 path.display()
@@ -381,11 +454,11 @@ pub fn inspect(replace: bool, keep: bool) -> Result<serde_json::Value> {
     let mut records = read_receipts(&metadata)?;
     let mut output = Vec::new();
     for (path, record) in &mut records {
-        let mut current = project(&super::files::read(path)?);
+        let mut current = read_projection(path, record.definition_kind)?;
         if record.status == "conflict" && replace {
-            current = super::files::update(path, |document| {
-                replace_projection(document, &record.incoming);
-                Ok(project(document))
+            current = update_projection(path, record.definition_kind, |document| {
+                *document = record.incoming.clone();
+                Ok(document.clone())
             })?;
             record.applied = Some(record.incoming.clone());
             record.applied_origin = Some(record.origin.clone());
@@ -434,7 +507,8 @@ mod tests {
             global_path: "/origin/config.yaml".into(),
             global: serde_yaml_ng::from_str(text).unwrap(),
             repository_path: None,
-            repository_values: Value::Null,
+            repository_values: Value::Mapping(Default::default()),
+            definitions: vec![],
         }
     }
     #[test]
@@ -443,6 +517,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _personal_home =
+            crate::lf::commands::graph::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/skills/probe.md",
@@ -496,12 +572,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
         let first = profile("agent: codex", 5);
-        retain(dir.path(), &path, &first, &first.global).unwrap();
+        retain(dir.path(), &path, &first, &first.global, None).unwrap();
         let mut competing = profile("agent: claude", 1);
         competing.origin = "other".into();
-        retain(dir.path(), &path, &competing, &competing.global).unwrap();
+        retain(dir.path(), &path, &competing, &competing.global, None).unwrap();
         let stale = profile("agent: codex:old", 4);
-        retain(dir.path(), &path, &stale, &stale.global).unwrap();
+        retain(dir.path(), &path, &stale, &stale.global, None).unwrap();
         let records = super::read_receipts(&super::receipts(dir.path())).unwrap();
         assert_eq!(records[&path].incoming, competing.global);
         assert_eq!(
@@ -515,20 +591,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
         let first = profile("agent: codex", 1);
-        retain(dir.path(), &path, &first, &first.global).unwrap();
+        retain(dir.path(), &path, &first, &first.global, None).unwrap();
         let next = profile("agent: claude", 2);
-        retain(dir.path(), &path, &next, &next.global).unwrap();
-        retain(dir.path(), &path, &first, &first.global).unwrap();
+        retain(dir.path(), &path, &next, &next.global, None).unwrap();
+        retain(dir.path(), &path, &first, &first.global, None).unwrap();
         assert_eq!(
             project(&crate::config::files::read(&path).unwrap()),
             next.global
         );
         std::fs::write(&path, "theme: custom\nlogs: {linear_requests: true}\n").unwrap();
         let later = profile("agent: codex", 3);
-        retain(dir.path(), &path, &later, &later.global).unwrap();
+        retain(dir.path(), &path, &later, &later.global, None).unwrap();
         let saved = crate::config::files::read(&path).unwrap();
         assert!(saved.get("agent").is_none());
         assert_eq!(saved["theme"], "custom");
         assert_eq!(saved["logs"]["linear_requests"], true);
     }
 }
+
+#[cfg(test)]
+mod definition_tests;

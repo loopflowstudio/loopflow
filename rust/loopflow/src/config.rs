@@ -16,6 +16,7 @@ use crate::error::LoadError;
 
 pub mod api;
 pub mod catalog;
+mod definitions;
 pub mod files;
 pub mod migrate;
 pub(crate) mod observation;

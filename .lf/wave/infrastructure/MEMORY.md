@@ -188,21 +188,19 @@ Jack Heart authorized selective cleanup without retries or a five-minute CI clai
 
 ## Settings authority (LOO-714, revised 2026-11-03)
 
-Jack Heart's November 3 extension supersedes DB-backed preference authority:
-one typed catalogue, file setters, root `lf.config.local.yaml` shared across linked
-Task worktrees, machine/account declarations and origin-owned remote preferences.
-Remote requests use the origin profile; direct remote work uses saved preferences.
-Retention preserves independent remote edits, separately from execution authority.
-Runtime identity, account observations, secrets and history remain domain-owned.
-The source cut and shared file-change observation are implemented.
+Jack Heart's November 3 extension replaces DB preferences with one typed catalogue
+and file writer, including machine/account declarations. Linked worktrees share
+root `lf.config.local.yaml`. Remote requests use origin preferences; direct remote
+work uses saved preferences. Retention preserves independent remote edits.
+Runtime identity, observations, secrets and history remain domain-owned.
 
 Every applicable `agent` choice precedes all `default_agent` fallbacks. Within each
-class the accepted order is CLI > environment > personal files > repository/Wave
-files > builtins, then scope, then occurrence/skill/general. Source, scope and
-target are independent; DB preference authority is removed. Non-agent merges remain typed.
+class: CLI > environment > personal files > repository/Wave files > builtins,
+then scope, then occurrence/skill/general. Source, scope and target are independent;
+non-agent merges remain typed.
 No per-skill accounts or builtin agent recommendations.
-Targets retain defining Graph name and authored ID through composition/export;
-inspection retains the choice/default key. Captures preserve omitted/empty docs.
+Targets retain Graph name/authored ID through composition/export; inspection
+retains choice/default keys. Captures preserve omitted/empty docs.
 
 Session/resume `-a` selects that conversation; Graph selection reaches its steps.
 Same-provider fallback refresh without cross-provider import remains an assumption.
@@ -214,14 +212,18 @@ order, belong to independent clones; linked worktrees share. Legacy routes mater
 after collision checks. Unavailable destinations retain non-executing exports for
 explicit import; future clones inherit nothing. Reads need no checkout registration.
 
-File cutover removes SQLite triggers; Git misses ignored configuration. Capture read
-dependencies, including absent paths and worker reads, and observe them separately
-from planning. Subscription fixtures prove edits/replacement/removal without DB
-writes, retaining coalescing. Adoption receipts describe the written projection.
+File cutover removes SQLite triggers; Git misses ignored configuration. Shared
+observation captures absent paths and worker reads separately from planning.
+Subscription fixtures prove edits/replacement/removal without DB writes, retaining
+coalescing. Adoption receipts describe the written projection.
 
-Release's entry-point lesson: source fixtures prove no installation. Exporting
-declarations as CLI flags changes authority. Full acceptance and configured behavior
-remain unproved. Publication is review only. Automatic limit recovery stays PR2:
+Independent file/scope inputs let Desktop validate repository scope while writing
+global preferences. One typed destination now owns path/source/scope/prefix for
+CLI/FFI read, write, unset and explanation. Save-to-preparation fixtures cover
+linked worktrees, Wave identity and preservation; mounted Desktop remains unproved.
+
+Source fixtures prove no installed/configured acceptance. Exporting declarations
+as CLI flags changes authority. Publication is review only. Limit recovery stays PR2:
 routing and retry must agree, and failed preparation cannot reattribute an old
 thread. November 2's weekly rejection demonstrated that split, not recovery.
 
@@ -379,10 +381,9 @@ this heading, and `06e88761d:wave/infrastructure/MEMORY.md`.
 
 Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
 version/identity commands suffice: retain versions when identity fails; report
-differences and the update command without a version gate. Named connections live
-on Machine rows. Removal clears label/repo and releases destination uniqueness;
-identity and route survive so a replacement can be added at that
-destination without deleting history or touching remote work. Only explicitly
+differences and the update command without a version gate. LOO-714 moves named
+connections and aliases to file declarations; runtime identity/history remain.
+Removal preserves history and remote work. Only explicitly
 added machines may receive foreground credentials.
 OpenSSH owns destination syntax. Exact-frontier fixtures seed released
 SQL. Local source proofs establish no installed migration or configured remote
@@ -398,7 +399,7 @@ has its own socket scope. Jack selected global `--machine <label>`, removing
 `lf ssh` without an alias; LOO-411 supplies the selector cutover. Loopback proofs
 establish reuse, not installation or account continuity.
 The target parses the command in its saved repository; Task, worktree and Wave
-selectors resolve there. `--machine Y machine add X` edits Y's registry. No SSH
+selectors resolve there. `--machine Y machine add X` edits Y's configuration. No SSH
 alias or per-call repository override remains.
 LOO-411 / PR #1489 merged (`35e759aaf`).
 

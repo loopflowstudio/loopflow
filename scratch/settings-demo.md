@@ -4,8 +4,9 @@ Jack Heart requested demo/status; design approval is not acceptance of the behav
 The original demo observed PR #1805 at `4b424ecafa`, eight CI failures and a misleading
 config-show agent warning. Complete dated record: `04bdec77e3:scratch/settings-demo.md`;
 GitHub run 41629160735. settings-scope.md records subsequent approved repairs and
-local passes. Current `04bdec77e3` is open, auto-merge off, hosted Rust/aggregate
-checks skipped. Gate and review remain; recovery is PR2.
+local passes. At `04bdec77e3`, the PR was open, auto-merge off, hosted Rust/aggregate
+checks skipped. This is historical status; the current plan owns acceptance and
+review-only delivery. Recovery is PR2.
 
 The demo used a disposable repository/Home, inherited LF variables removed, and
 a SHA256-identified branch binary. Eight successful commands proved personal skill
@@ -19,4 +20,4 @@ Session/Task isolation and forced Graph behavior rely on recorded stand-in tests
 non-agent demo coverage was chrome. No new demo acceptance is recorded.
 
 Historical review page: demo.html; raw commands/results: settings-demo-evidence.json.
-The current plan owns remaining work. Catalogue/portability drafts are separate.
+settings-catalog.md owns the accepted extension and remaining work.

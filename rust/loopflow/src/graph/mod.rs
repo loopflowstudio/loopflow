@@ -350,14 +350,14 @@ pub fn available_graph_names(repo: &Path) -> Result<Vec<String>, LoadError> {
         .into_iter()
         .map(ToOwned::to_owned)
         .collect();
-    names.extend(repo_graph_names(repo)?);
+    names.extend(graph_sources(repo)?.into_keys());
     names.sort();
     names.dedup();
     Ok(names)
 }
 
 pub(crate) fn repo_graph_names(repo: &Path) -> Result<Vec<String>, LoadError> {
-    Ok(repo_graph_sources(repo)?.into_keys().collect())
+    Ok(graph_sources_in(repo)?.into_keys().collect())
 }
 
 /// Load an authored graph without adapting a skill into a graph.
@@ -436,9 +436,9 @@ impl<'a> DefinitionLoader<'a> {
     }
 
     pub(crate) fn load_graph(&mut self, name: &str) -> Result<GraphDefinition, LoadError> {
-        let (name, content, source) = match self
+        let (name, content, source, source_path) = match self
             .repo
-            .map(|repo| find_repo_graph(name, repo))
+            .map(|repo| resolve_graph_source(name, repo))
             .transpose()?
             .flatten()
         {
@@ -446,6 +446,7 @@ impl<'a> DefinitionLoader<'a> {
                 key,
                 crate::config::observation::read_to_string(&path)?,
                 crate::config::settings::definition_source(Some(&path)),
+                Some(path),
             ),
             None => {
                 let key = crate::builtins::resolve_builtin_graph(name)
@@ -456,6 +457,7 @@ impl<'a> DefinitionLoader<'a> {
                     key.to_string(),
                     content.to_string(),
                     crate::config::ConfigSource::Builtin,
+                    None,
                 )
             }
         };
@@ -473,22 +475,36 @@ impl<'a> DefinitionLoader<'a> {
             steps: &mut [Step],
             graph: &str,
             layer: crate::config::ConfigSource,
+            source_path: Option<&Path>,
+            prefix: &str,
         ) -> Result<(), LoadError> {
-            for step in steps {
+            for (index, step) in steps.iter_mut().enumerate() {
+                let position = format!("{prefix}/{index}");
                 match &mut step.target {
                     Target::Skill(skill) => {
-                        skill.occurrence = Some(Box::new(
-                            crate::config::settings::OccurrenceSettings::capture(
-                                graph,
-                                step.id.as_deref(),
-                                layer,
-                                skill,
-                            )?,
-                        ));
+                        let mut occurrence = crate::config::settings::OccurrenceSettings::capture(
+                            graph,
+                            step.id.as_deref(),
+                            layer,
+                            skill,
+                        )?;
+                        occurrence.path = source_path.map(Path::to_path_buf);
+                        occurrence.address =
+                            Some(occurrence_address(step.id.as_deref(), &position));
+                        skill.occurrence = Some(Box::new(occurrence));
                     }
                     Target::Xor(branch) => {
-                        for path in branch.paths.values_mut() {
-                            retain_origin(&mut path.steps, graph, layer)?;
+                        for (name, path) in &mut branch.paths {
+                            retain_origin(
+                                &mut path.steps,
+                                graph,
+                                layer,
+                                source_path,
+                                &format!(
+                                    "{position}/{}",
+                                    name.replace('~', "~0").replace('/', "~1")
+                                ),
+                            )?;
                         }
                     }
                     _ => {}
@@ -496,7 +512,7 @@ impl<'a> DefinitionLoader<'a> {
             }
             Ok(())
         }
-        retain_origin(&mut items, &name, source)?;
+        retain_origin(&mut items, &name, source, source_path.as_deref(), "")?;
         Ok(GraphDefinition { name, items })
     }
 }
@@ -687,7 +703,7 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     Some((frontmatter, body))
 }
 
-fn repo_graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
+pub(crate) fn graph_sources_in(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
     let root = repo.join(".lf/graphs");
     crate::config::observation::directory(&root);
     let mut sources = BTreeMap::<String, PathBuf>::new();
@@ -733,12 +749,79 @@ fn repo_graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadErro
     Ok(sources)
 }
 
-pub fn find_graph_source_path(name: &str, repo: &Path) -> Result<Option<PathBuf>, LoadError> {
-    Ok(find_repo_graph(name, repo)?.map(|(_, path)| path))
+fn graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
+    let mut sources = graph_sources_in(repo)?;
+    if let Some(home) = dirs::home_dir() {
+        for (name, path) in graph_sources_in(&home)? {
+            sources.entry(name).or_insert(path);
+        }
+    }
+    Ok(sources)
 }
 
-fn find_repo_graph(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, LoadError> {
-    let mut sources = repo_graph_sources(repo)?;
+/// Named occurrences survive topology changes; unnamed metadata belongs to its authored position.
+pub(crate) fn occurrence_address(id: Option<&str>, position: &str) -> String {
+    id.map_or_else(|| format!("position:{position}"), |id| format!("id:{id}"))
+}
+
+/// Visit only authored LF occurrence mappings, never composed definitions or instruction bodies.
+pub(crate) fn visit_preferences(
+    value: &mut Value,
+    prefix: &str,
+    visit: &mut impl FnMut(&str, &mut Value) -> Result<(), LoadError>,
+) -> Result<(), LoadError> {
+    let value = if value.is_mapping() {
+        value
+            .get_mut("steps")
+            .ok_or_else(|| LoadError::InvalidGraph("graph root must be a list".into()))?
+    } else {
+        value
+    };
+    let items = value
+        .as_sequence_mut()
+        .ok_or_else(|| LoadError::InvalidGraph("graph root must be a list".into()))?;
+    for (index, item) in items.iter_mut().enumerate() {
+        let position = format!("{prefix}/{index}");
+        for key in ["step", "interactive"] {
+            if let Some(value) = item.get_mut(key).filter(|value| value.is_mapping()) {
+                let address =
+                    occurrence_address(value.get("id").and_then(Value::as_str), &position);
+                visit(&address, value)?;
+            }
+        }
+        // Inline skill mappings are also allowed inside xor path steps.
+        if item.get("name").is_some() {
+            let address = occurrence_address(item.get("id").and_then(Value::as_str), &position);
+            visit(&address, item)?;
+        }
+        if let Some(paths) = item
+            .get_mut("xor")
+            .and_then(|xor| xor.get_mut("paths"))
+            .and_then(Value::as_mapping_mut)
+        {
+            for (name, path) in paths {
+                if let Some(steps) = path.get_mut("steps") {
+                    let name = name
+                        .as_str()
+                        .ok_or_else(|| LoadError::InvalidGraph("path name must be text".into()))?;
+                    visit_preferences(
+                        steps,
+                        &format!("{position}/{}", name.replace('~', "~0").replace('/', "~1")),
+                        visit,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn find_graph_source_path(name: &str, repo: &Path) -> Result<Option<PathBuf>, LoadError> {
+    Ok(resolve_graph_source(name, repo)?.map(|(_, path)| path))
+}
+
+fn resolve_graph_source(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, LoadError> {
+    let mut sources = graph_sources(repo)?;
     let names = sources
         .keys()
         .map(String::as_str)

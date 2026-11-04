@@ -938,6 +938,7 @@ Test skill body.
                 skill: Some("team/skill-creator".to_string()),
                 resolved_skill: Some(Skill {
                     source: Some(crate::skills::catalog::SkillOrigin {
+                        config_source: None,
                         path: tmp.path().join(".lf/skills/team/skill-creator.md"),
                         dialect: crate::skills::catalog::SkillDialect::Loopflow,
                         frontmatter: None,
@@ -1023,6 +1024,7 @@ Test skill body.
         let source = Skill {
             content: Some("Audit $ARGUMENTS".into()),
             source: Some(crate::skills::catalog::SkillOrigin {
+                config_source: None,
                 path: tmp.path().join(".claude/skills/audit/SKILL.md"),
                 dialect: crate::skills::catalog::SkillDialect::Claude,
                 frontmatter: None,
@@ -1059,6 +1061,7 @@ Test skill body.
         let source = Skill {
             content: Some("Audit $ARGUMENTS using reference.md".into()),
             source: Some(crate::skills::catalog::SkillOrigin {
+                config_source: None,
                 path: tmp.path().join(".claude/skills/audit/SKILL.md"),
                 dialect: crate::skills::catalog::SkillDialect::Claude,
                 frontmatter: Some("\nallowed-tools: Read\n".into()),

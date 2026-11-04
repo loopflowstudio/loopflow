@@ -404,6 +404,7 @@ mod tests {
         let invocation = SkillInvocation {
             skill: Skill {
                 source: Some(SkillOrigin {
+                    config_source: None,
                     path: "/skills/audit/SKILL.md".into(),
                     dialect: SkillDialect::Claude,
                     frontmatter: Some("arguments: [first, second, absent]".into()),
@@ -433,6 +434,7 @@ mod tests {
         let invocation = SkillInvocation {
             skill: Skill {
                 source: Some(SkillOrigin {
+                    config_source: None,
                     path: "/skills/prompts/audit.md".into(),
                     dialect: SkillDialect::Codex,
                     frontmatter: None,
@@ -452,6 +454,7 @@ mod tests {
         let invocation = SkillInvocation {
             skill: Skill {
                 source: Some(SkillOrigin {
+                    config_source: None,
                     path: "/skills/audit/SKILL.md".into(),
                     dialect: SkillDialect::Claude,
                     frontmatter: Some("allowed-tools: Read\nmodel: sonnet".into()),

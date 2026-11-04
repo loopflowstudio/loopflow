@@ -314,13 +314,11 @@ fn patch(mapping: &Mapping, before: &Value, after: &Value) -> Result<()> {
         if old == Some(value) {
             continue;
         }
-        if let Some(child) = mapping
-            .get(name)
-            .and_then(|node| node.as_mapping().cloned())
-            .filter(|_| value.is_mapping())
-        {
-            patch(&child, old.unwrap_or(&Value::Null), value)?;
-        } else {
+        let patched = match mapping.get(name) {
+            Some(node) => patch_node(&node, old.unwrap_or(&Value::Null), value)?,
+            None => false,
+        };
+        if !patched {
             let fragment = yaml_edit::Document::from_str(&serde_yaml_ng::to_string(value)?)?;
             mapping.set(name, fragment);
         }
@@ -328,19 +326,66 @@ fn patch(mapping: &Mapping, before: &Value, after: &Value) -> Result<()> {
     Ok(())
 }
 
+// Patch compatible containers in place to retain comments; the parent replaces
+// scalars and containers whose shape changed.
+fn patch_node(node: &yaml_edit::YamlNode, before: &Value, after: &Value) -> Result<bool> {
+    if let Some(mapping) = node.as_mapping().filter(|_| after.is_mapping()) {
+        patch(mapping, before, after)?;
+        return Ok(true);
+    }
+    let (Some(sequence), Some(before), Some(after)) = (
+        node.as_sequence(),
+        before.as_sequence(),
+        after.as_sequence(),
+    ) else {
+        return Ok(false);
+    };
+    if before.len() != after.len() {
+        return Ok(false);
+    }
+    for (index, (old, value)) in before.iter().zip(after).enumerate() {
+        if old == value {
+            continue;
+        }
+        let child = sequence.get(index).context("missing sequence item")?;
+        if !patch_node(&child, old, value)? {
+            sequence.set(
+                index,
+                yaml_edit::Document::from_str(&serde_yaml_ng::to_string(value)?)?,
+            );
+        }
+    }
+    Ok(true)
+}
+
 pub fn update<T>(path: &Path, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
     if path.file_name().is_some_and(|name| name == PRIVATE_FILE) {
         protect_private_file(path)?;
     }
+    update_text(path, |original| {
+        let before = parse_document(original, path)?;
+        let mut after = before.clone();
+        let result = change(&mut after)?;
+        let text = if after == before {
+            original.to_owned()
+        } else {
+            edited_text(original, &after)?
+        };
+        Ok((text, result))
+    })
+}
+
+/// The same serialized, hand-edit-aware writer also edits definition frontmatter.
+pub(crate) fn update_text<T>(
+    path: &Path,
+    change: impl FnOnce(&str) -> Result<(String, T)>,
+) -> Result<T> {
     let _lock = lock(path)?;
     let original = read_text(path)?;
-    let before = parse_document(&original, path)?;
-    let mut after = before.clone();
-    let result = change(&mut after)?;
-    if after == before {
+    let (text, result) = change(&original)?;
+    if text == original {
         return Ok(result);
     }
-    let text = edited_text(&original, &after)?;
     ensure!(
         read_text(path)? == original,
         "{} changed during this edit; retry with the current file",
@@ -354,7 +399,12 @@ pub(crate) fn edited_text(original: &str, after: &Value) -> Result<String> {
     let before: Value = serde_yaml_ng::from_str(original)?;
     let file = YamlFile::from_str(original)?;
     let document = file.ensure_document();
-    if document.as_mapping().is_none() {
+    if let Some(sequence) = document.as_sequence() {
+        ensure!(
+            patch_node(&yaml_edit::YamlNode::Sequence(sequence), &before, after)?,
+            "definition edits preserve topology"
+        );
+    } else if document.as_mapping().is_none() {
         // A comment-only document has no root yet. Setting its first key creates it.
         for (key, value) in after
             .as_mapping()

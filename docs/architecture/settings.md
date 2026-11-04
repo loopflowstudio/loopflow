@@ -129,8 +129,11 @@ is explicit input; internally generated process plumbing is not.
 ## Remote requests and retained files
 
 A remote request selects one personal profile: its initiating LF instance's
-portable declarations. Executor-local bindings and runtime facts come from the
-executor. Do not merge the destination's competing portable personal profile as
+portable declarations across config files, LF skill metadata and Graph occurrence
+metadata. Select that ownership before collecting/ranking preference candidates;
+no executor portable definition metadata participates as another exception.
+Executor-local bindings and runtime facts come from the executor, including when
+the work uses captured origin instructions. Do not merge the destination's competing portable personal profile as
 an unnamed precedence tier. Repository inputs retain their ordinary authority.
 
 Transport preserves scope, target, authored key and source locator. A resolved
@@ -155,6 +158,15 @@ coverage so an omitted field is not confused with a deletion. Saved delivery
 metadata is evidence, not another writable configuration source. Direct remote
 work while offline uses its saved declarations. No automatic reverse propagation
 or global Home authority follows from retention.
+
+Definition transport contains preference projections and locators, never bodies or
+topology. Named Graph occurrences use their authored ID; unnamed metadata uses
+its position within the defining Graph. Capture preserves those addresses and
+source authority through composition. Retention uses the same compare/write
+policy for config mappings and definition projections. Existing definition files
+keep comments, native declarations, instructions and topology; a missing asset or
+occurrence requires explicit reconciliation. Removing an origin declaration is
+covered by the complete profile and follows the same deletion/conflict rules.
 
 ## Migration and code parity
 

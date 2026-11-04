@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-714 · Choose a settings destination once</title>
+<title>LOO-714 · One personal profile</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf9f5;--ink:#222e2a;--muted:#5d6963;--line:#ccd3cd;--panel:#eaf0e9;--accent:#215f4c}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,sans-serif}main{max-width:780px;margin:auto;padding:40px 24px 64px}header,small{font-size:13px;color:var(--muted)}h1{font-size:clamp(28px,6vw,40px);line-height:1.16;letter-spacing:-.025em;margin:24px 0 18px}h2{font-size:23px;margin:30px 0 12px}p{margin:12px 0}code,pre{font-family:ui-monospace,monospace;font-size:.88em}code{overflow-wrap:anywhere}pre{background:var(--panel);padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}aside{border-left:3px solid var(--accent);padding-left:18px;margin:24px 0}li{margin:10px 0}footer{margin-top:28px;border-top:1px solid var(--line);padding-top:10px}a{color:var(--accent)}dl{margin:18px 0}dt{font-weight:650;margin-top:18px}dd{margin:4px 0 0} @media(prefers-color-scheme:dark){:root{--bg:#18201d;--ink:#e6ece7;--muted:#a8b7af;--line:#43544a;--panel:#26382e;--accent:#91d4b5}}@media(max-width:480px){main{padding:26px 16px 44px}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,sans-serif}main{max-width:780px;margin:auto;padding:40px 24px 64px}header,small{font-size:13px;color:var(--muted)}h1{font-size:clamp(28px,6vw,40px);line-height:1.16;letter-spacing:-.025em;margin:24px 0 18px}h2{font-size:23px;margin:32px 0 12px}p{margin:12px 0}code,pre{font-family:ui-monospace,monospace;font-size:.88em}code{overflow-wrap:anywhere}pre{background:var(--panel);padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}aside{border-left:3px solid var(--accent);padding-left:18px;margin:24px 0}li{margin:10px 0}footer{margin-top:32px;border-top:1px solid var(--line);padding-top:10px}a{color:var(--accent)}dt{font-weight:650;margin-top:18px}dd{margin:4px 0 0}@media(prefers-color-scheme:dark){:root{--bg:#18201d;--ink:#e6ece7;--muted:#a8b7af;--line:#43544a;--panel:#26382e;--accent:#91d4b5}}@media(max-width:480px){main{padding:26px 16px 44px}}
 </style>
 </head>
 <body><main>
@@ -14,103 +14,107 @@
 Built from <a href="../docs/config.md">docs/config.md</a>,
 <a href="../docs/architecture/settings.md">docs/architecture/settings.md</a>,
 <a href="settings-catalog.md">scratch/settings-catalog.md</a>,
-config/{api,files,settings,remote,observation}.rs, config.rs and
-ConfigurationSettingsView.swift. Source reviewed at a7a64269c6.</header>
-<h1>Choose the destination once.</h1>
-<p><strong>Design changed; next implementation direction recorded.</strong>
-Jack Heart's accepted ownership contract already determines the answer. No new
-product decision is open. Desktop must derive the saved file and its scope from
-one destination, and explain settings for that same selection.</p>
+config/{api,files,remote,settings}.rs, skills/catalog.rs and
+ConfigurationSettingsView.swift. Source: aa4f3c75ee.</header>
+<h1>One personal profile must include settings in definitions.</h1>
+<p><strong>Design refined; implementation direction recorded.</strong> Jack Heart's
+accepted origin-owned profile settles this decision. No new product choice is open.</p>
 <aside><strong>The consequential mismatch</strong>
-<p>The current editor lets “Repository” scope accompany the global file.
-Apply succeeds, but the next launch reads a global preference. The file and scope
-controls describe two different destinations.</p></aside>
-<h2>Existing → proposed interaction</h2>
-<p><strong>Existing, source-traced:</strong> switch the scope picker to Repository,
-leave the initial file unchanged, then apply:</p>
-<pre>Configuration file: ~/.lf/config.yaml
-Scope:              Repository
-Shared:             off
-Setting:            agent
-Value:              codex
+<p>Forwarded work replaces the executor's personal config values, but still admits
+its personal skill settings. An executor skill can therefore change the selected
+agent even when the origin supplied a choice.</p></aside>
+<h2>Existing → required interaction</h2>
+<p><strong>Existing, reproduced in isolated inspection:</strong></p>
+<pre>Origin personal config:
+  agent: codex
 
-Apply → saved to ~/.lf/config.yaml
-Next launch → Personal / Global</pre>
-<p><strong>Proposed, not implemented:</strong> choose where the preference belongs.
-The resolved file is shown as a receipt.</p>
-<pre>Destination: My project preferences
-Project:     loopflow (selected Task checkout)
-Setting:     skills.implement.agent
-Value:       codex
+Executor ~/.lf/skills/probe.md:
+  ---
+  agent: claude
+  ---
+  Probe.
 
-Apply → &lt;main checkout&gt;/lf.config.local.yaml
-        Personal / Repository / Skill implement
-        Applies on the next launch
+Carried origin profile + config show --skill probe --json
+  → Claude selected
+  → executor Personal / Global / Skill beats
+    origin Personal / Global / General</pre>
+<p><strong>Required by the accepted design; repair not implemented:</strong></p>
+<pre>Start on laptop → run probe on executor
+  Personal preferences: laptop's
+  Selected agent:       Codex
 
-Explain → same project, Wave and work target
-Unset   → removes this declaration; shows what now applies</pre>
+Start directly on executor → run probe
+  Personal preferences: executor's saved profile
+  Selected agent:       Claude
+
+Origin default_agent: codex + repository skill agent: claude
+  Selected agent:       Claude (shared choice beats fallback)</pre>
+<p>No extra <code>-a</code> and no duplicated <code>skills.probe.agent</code> should
+be needed to make origin ownership hold.</p>
 <h2>Actions → concepts → APIs</h2>
 <dl>
-<dt>Choose My project preferences</dt>
-<dd>One edit destination → shared Rust destination resolution → main-checkout
-private file, Personal source, Repository scope. A Wave selection adds its
-stable ID and Wave scope. Shared destinations select the committed files.</dd>
-<dt>Apply an implementation choice</dt>
-<dd>Typed setting address and authored value → catalogue validation → existing
-<code>files::edit</code>/<code>update</code>. CLI and Desktop use that same address;
-file comments and unrelated keys survive.</dd>
-<dt>Explain and launch implementation</dt>
-<dd>Selected repository, Wave and target → <code>settings::resolve</code> →
-value and provenance for inspection and <code>prepare_process_prompt</code>.
-No independent inspection repository to keep synchronized.</dd>
-<dt>Unset and recover</dt>
-<dd>Remove the declaration at the selected destination → common writer → next
-resolution reveals lower declarations. The existing configuration observer updates
-subscriptions. No new persistent settings record is needed.</dd>
+<dt>Start work from the laptop</dt>
+<dd>One initiating personal profile → <code>remote::outgoing</code> → portable
+LF declarations from config and applicable personal definition metadata. Preserve
+source, scope, target, locator and choice/fallback strength.</dd>
+<dt>Prepare the remote step</dt>
+<dd>Selected profile plus executor-local facts plus repository conventions →
+shared candidate collection and <code>settings::resolve_layers</code> → inspection
+and launch preparation agree. Executor portable metadata cannot enter through a
+second path.</dd>
+<dt>Retain preferences for later</dt>
+<dd>Authored preferences → common writer and existing retention comparison → saved
+file or preserved conflict. Delivery receipts describe the outcome; they do not
+become another preference source.</dd>
+<dt>Recover from a retention conflict</dt>
+<dd>Forwarded work uses the origin profile; the executor keeps independent edits.
+Later direct work reads its saved files. Explicit adoption preserves fallback
+strength and target identity.</dd>
 </dl>
-<h2>Keep the distinctions that carry behavior</h2>
-<p><code>agent</code> choices still beat every <code>default_agent</code> fallback;
-within each class, source → scope → target decides. A personal skill choice beats
-a shared occurrence choice. A personal fallback yields to a shared choice.</p>
-<p>Independent clones keep independent private preferences, including account order.
-Linked Task worktrees share their main checkout's file. Wave identity survives
-rename; reusing an old name does not inherit its preferences.</p>
-<p>Remote execution still uses the initiating profile. Retention is a separate
-outcome: independent remote edits survive, forwarded work uses incoming declarations,
-and later direct remote work uses the saved file. This review proposes no new
-synchronization or recovery authority.</p>
-<h2>Failure, recovery, counterexamples</h2>
-<p><strong>Normal:</strong> save a project implementation choice from a Task checkout;
-CLI inspection, Desktop explanation and launch preparation agree. Another clone
-retains its own choice.</p>
-<p><strong>Failure:</strong> select a global-only preference for a repository.
-The catalogue explains why it cannot apply before any write. A concurrent hand
-edit survives; retry reloads the latest file.</p>
-<p><strong>Recovery:</strong> unset the project choice. The lower declaration becomes
-effective while global settings and other Waves remain unchanged.</p>
-<p><strong>Preserve as tests:</strong> changing the scope picker must never save a
-broader global preference. A personal-global <code>user.name</code> request cannot
-be validated as personal then written into shared repository configuration, where
-its real reader would reject it. Today's fixture supplies a matching path and scope
-and misses both cases.</p>
-<p><small>Source review only. No Desktop run, provider launch or new test pass is
-claimed. The prior observation repair remains resolved in source; gate and configured
-acceptance remain. Production code was not changed in this step.</small></p>
+<h2>Keep the boundaries already accepted</h2>
+<p>The earlier Desktop repair stands: one destination derives file, source, scope
+and prefix for save, unset and explanation. Independent clones retain separate
+private preferences; linked Task worktrees share their main checkout's file.</p>
+<p>Definition instructions and topology remain distinct from preference authority.
+Preserve repository definition selection, native provider-owned fields, host-local
+settings and captured instructions. This repair does not introduce whole-bundle
+synchronization or change which skill body runs.</p>
+<p>Every applicable <code>agent</code> still beats every <code>default_agent</code>;
+within each class, source → scope → target decides. Carrying a profile must never
+promote it to CLI authority.</p>
+<h2>Normal path, failure, recovery</h2>
+<p><strong>Normal:</strong> the origin selects Codex; an executor personal skill
+cannot silently select Claude. Origin-authored skill preferences must travel too.</p>
+<p><strong>Failure:</strong> the executor independently edits or deletes a retained
+preference. Forwarded work continues with the incoming profile while retention
+reports the conflict. Missing referenced assets still report their existing error.</p>
+<p><strong>Recovery:</strong> keep the executor's edits or explicitly adopt the
+incoming declarations. Direct work uses the saved result. Unset reveals lower
+settings without rewriting history or promoting fallbacks.</p>
+<p><strong>Counterexamples to preserve:</strong> direct executor work still uses its
+personal skill choice; a repository choice still beats an origin fallback;
+non-agent portable settings and personal Graph occurrences obey the same ownership.
+Blanket removal of definition metadata would fail these requirements.</p>
+<h2>Evidence and next proof</h2>
+<p>Three isolated CLI inspections exited zero: direct executor selected Claude;
+forwarded origin choice incorrectly selected Claude; repository choice correctly
+beat the origin fallback. Disposable Git/Home fixtures used no provider or real
+remote. The working design records the binary hash and source trace.</p>
+<p>Next proof must compare inspection with real preparation for personal skills,
+Graph occurrences, composition, non-agent settings and retention recovery. No new
+full-suite, mounted Desktop or configured provider acceptance is claimed.</p>
 <footer>
-<h2>Review questions, settled by the accepted design</h2>
+<h2>Review questions, settled by the accepted contract</h2>
 <ol>
-<li><strong>Who chooses the destination?</strong> The person selects its meaning;
-Rust derives file, source, scope and prefix. Remove the independent assertions
-from the ordinary editor API.</li>
-<li><strong>Does this change settings authority?</strong> No. It binds editing and
-inspection to the existing ownership model. Preserve bootstrap access, common
-file editing and Appearance Apply/Cancel.</li>
-<li><strong>What proves the change?</strong> Actual Desktop/FFI and CLI requests,
-then inspection and launch preparation across global, repository and Wave
-settings, including unset, linked worktrees and invalid destinations.</li>
-<li><strong>Any open product choice?</strong> None found. The working design records
-the next implementation direction. PR #1805 stays review-only with Auto-Ship
-stopped; automatic limit recovery remains PR2.</li>
+<li><strong>Does personal authority depend on the file containing a setting?</strong>
+No. LF skill and Graph metadata follow the same origin ownership as config YAML.</li>
+<li><strong>Should all executor definition settings disappear?</strong> No. Preserve
+host-local settings and repository conventions; exclude competing portable personal
+preferences only for forwarded work.</li>
+<li><strong>Is a new product decision needed?</strong> None found. The working design
+records the repair for the next implement pass. Loop-or-next determines navigation.</li>
 </ol>
+<p><small>PR #1805 remains review-only, Auto-Ship stopped. No code, publication or
+Task completion in this step. Automatic limit recovery remains PR2.</small></p>
 </footer>
 </main></body></html>

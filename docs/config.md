@@ -312,9 +312,12 @@ unsupported combinations report an explanation rather than being silently ignore
 
 ## Remote work
 
-The initiating LF instance supplies your personal preferences. The executor
-supplies its environment: installed tools, credentials, local paths and machine
-identity. Repository configuration keeps its normal source and scope.
+The initiating LF instance supplies your personal preferences, including LF
+settings authored alongside personal skills and Graph steps. Executor personal
+skill and Graph preferences do not become extra exceptions. The executor supplies
+its environment: installed tools, credentials, local paths and machine identity.
+Repository configuration keeps its normal source and scope. Skill instructions
+and Graph topology still come from the selected or captured definitions.
 
 | Start work from | Personal preferences used |
 | --- | --- |
@@ -333,6 +336,13 @@ the difference for explicit reconciliation. Forwarded work can use the incoming
 profile even when saving it would overwrite remote edits. Inspection distinguishes
 “used for this launch” from “saved for future launches.” Remote edits do not
 silently flow back to the laptop.
+
+Retaining definition preferences edits only LF settings in existing personal
+skills and Graphs. It preserves instruction bodies, topology, comments and native
+provider declarations. Missing definitions or Graph occurrences remain conflicts
+until the definitions are installed or reconciled; forwarding does not copy skill
+bundles or referenced assets. Captured work retains its instructions and occurrence
+identity, while host-local preferences come from the executor's current definitions.
 
 Resolve machine selection once at the origin to a durable identity. A selection
 that names the current machine runs locally. Existing assigned work does not
@@ -461,7 +471,8 @@ remain readable through complete-file pointers.
 
 ## Graphs
 
-Graphs are YAML files in `.lf/graphs/`:
+Graphs are YAML files in `.lf/graphs/`. Repository definitions win over
+same-named personal `~/.lf/graphs/` definitions, then builtins:
 
 ```yaml
 # .lf/graphs/ship-api.yaml

@@ -69,3 +69,9 @@ transaction as a fixed `theme` operation through the common writer. The ordinary
 editor accepts only typed destinations; no file/source/scope assertions remain.
 The removed `config file` command was introduced on this branch and has no
 documented external compatibility obligation.
+
+Remote definitions (November 3): preserve personal skill/Graph bodies and topology
+on the executor. Retention may edit LF preferences in existing definitions only;
+a missing definition is reported for installation/reconciliation, not synthesized.
+Unnamed occurrence metadata uses its defining Graph's authored position; named
+occurrences use their authored ID. These are addresses, not additional precedence.

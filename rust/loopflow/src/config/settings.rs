@@ -31,10 +31,19 @@ pub struct OccurrenceSettings {
     pub graph: String,
     pub id: Option<String>,
     pub source: ConfigSource,
+    pub path: Option<PathBuf>,
+    pub address: Option<String>,
     pub values: Value,
 }
 
 impl OccurrenceSettings {
+    pub(crate) fn address(&self) -> Option<String> {
+        self.id
+            .as_deref()
+            .map(|id| crate::graph::occurrence_address(Some(id), ""))
+            .or_else(|| self.address.clone())
+    }
+
     pub(crate) fn capture(
         graph: &str,
         id: Option<&str>,
@@ -45,6 +54,8 @@ impl OccurrenceSettings {
             graph: graph.into(),
             id: id.map(str::to_owned),
             source: layer,
+            path: None,
+            address: None,
             // Bare references already contain the loaded skill. Its preferences
             // remain skill defaults, not declarations of this Graph occurrence.
             values: if skill.content.is_some() {
@@ -296,9 +307,15 @@ pub(crate) fn metadata(value: &Value) -> Result<BTreeMap<String, Value>, LoadErr
         .filter(|definition| definition.applicability == super::catalog::Applicability::Launch)
         .map(|definition| definition.key)
     {
-        if let Some(value) = value.get(key).filter(|v| !v.is_null()) {
-            validate_value(&[key], value)?;
-            settings.insert(key.into(), value.clone());
+        if let Some(value) = value.get(key).filter(|v| key == "docs" || !v.is_null()) {
+            // Skill frontmatter accepts a single docs path as well as a list.
+            let value = if key == "docs" && value.is_string() {
+                Value::Sequence(vec![value.clone()])
+            } else {
+                value.clone()
+            };
+            validate_value(&[key], &value)?;
+            settings.insert(key.into(), value);
         }
     }
     Ok(settings)
@@ -373,7 +390,7 @@ pub fn definition_source(path: Option<&std::path::Path>) -> ConfigSource {
     };
     if path.starts_with(crate::store::lf_home_dir())
         || dirs::home_dir().is_some_and(|home| {
-            [".agents", ".claude", ".codex"]
+            [".lf", ".agents", ".claude", ".codex"]
                 .iter()
                 .any(|dir| path.starts_with(home.join(dir)))
         })
@@ -384,7 +401,7 @@ pub fn definition_source(path: Option<&std::path::Path>) -> ConfigSource {
     }
 }
 
-fn skill_values(skill: &Skill) -> Value {
+pub(super) fn skill_values(skill: &Skill) -> Value {
     let mut values = serde_yaml_ng::to_value(&skill.settings).expect("settings serialize");
     if let Some(agent) = &skill.agent {
         insert(&mut values, &["agent"], agent.clone().into());
@@ -462,44 +479,9 @@ pub fn resolve_layers(
         value: defaults,
     });
     if let Some(skill) = skill {
-        let source = skill.source.as_ref();
-        let layer = definition_source(source.map(|source| source.path.as_path()));
-        candidates.push(SettingCandidate {
-            key: String::new(),
-            reason: String::new(),
-            source: layer,
-            scope: if layer == ConfigSource::Repository {
-                SettingScope::Repository
-            } else {
-                SettingScope::Global
-            },
-            locator: source.map_or_else(
-                || "builtin".into(),
-                |source| source.path.display().to_string(),
-            ),
-            target: SettingTarget::Skill {
-                name: skill.name.clone(),
-            },
-            value: skill_values(skill),
-        });
-        if let Some(occurrence) = &skill.occurrence {
-            candidates.push(SettingCandidate {
-                key: String::new(),
-                reason: String::new(),
-                source: occurrence.source,
-                scope: if occurrence.source == ConfigSource::Repository {
-                    SettingScope::Repository
-                } else {
-                    SettingScope::Global
-                },
-                locator: format!("graph:{}", occurrence.graph),
-                target: SettingTarget::GraphOccurrence {
-                    graph: occurrence.graph.clone(),
-                    id: occurrence.id.clone(),
-                },
-                value: occurrence.values.clone(),
-            });
-        }
+        candidates.extend(
+            super::definitions::candidates(skill).map_err(|error| invalid(error.to_string()))?,
+        );
     }
     let invocation = [
         ConfigDeclarations {
@@ -877,6 +859,8 @@ mod tests {
             graph: "release".into(),
             id: Some("write-code".into()),
             source: ConfigSource::Repository,
+            path: None,
+            address: None,
             values: Value::Null,
         }));
         skill

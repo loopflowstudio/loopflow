@@ -448,11 +448,11 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Releas
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     if target.completion == ReleaseCompletion::GithubRelease {
-        // A home that cannot read them learns it here, before a run publishes
+        // A Machine that cannot read them learns it here, before a run publishes
         // and holds `stable`.
         regressions(&main_repo).map_err(|error| {
             OpsError::Message(format!(
-                "this home cannot read regressions, so stable would hold: {error}"
+                "this Machine cannot read regressions, so stable would hold: {error}"
             ))
         })?;
     }

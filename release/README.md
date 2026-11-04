@@ -144,6 +144,7 @@ first launch after an update runs `lf install adopt`, which migrates the store
 and links `lf` into the new bundle without moving files.
 
 ```bash
+gh label create regressed-in:v0.15.3                # once per release; gh refuses unknown labels
 gh issue create --title "Sessions lose their name" --label regressed-in:v0.15.3
 gh issue edit 12 --add-label regressed-in:v0.15.3    # mark an existing bug
 gh issue close 12 --reason completed                 # the fix landed

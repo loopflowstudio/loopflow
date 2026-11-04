@@ -16,6 +16,7 @@ Release fetches the revisions it builds or tags:
 A regression is a GitHub issue on the repository being released:
 
 ```bash
+gh label create regressed-in:v0.15.3
 gh issue create --title "Sessions lose their name" --label regressed-in:v0.15.3
 ```
 
@@ -33,7 +34,7 @@ Jack Heart chose the issue as the record: Tasks carry no regression field.
   regression. A label that does not parse as a version is ignored, as today.
 - Unreadable GitHub: the release publishes and `stable` holds, with the reason
   in the run log and `lf release status` (`RegressionsUnread`). `lf release
-  check` fails when this home cannot read them, for `completion:
+  check` fails when this Machine cannot read them, for `completion:
   github-release` targets. `loo-691-combined` has this shape; reuse it.
 - Remove regressions from Task management: `--regressed-in` on `lf task
   create|edit`, `regressed_in` on Task, `TaskUpdate`, DTOs and fixtures, Swift

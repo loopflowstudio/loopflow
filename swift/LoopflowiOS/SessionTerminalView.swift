@@ -35,8 +35,7 @@ final class SessionTerminalView: TerminalView {
             pasteUnavailable?("This program has not enabled multiline paste.")
             return
         }
-        let bytes = (bracketed ? "\u{1b}[200~" : "") + clean + (bracketed ? "\u{1b}[201~" : "")
-        send(txt: bytes)
+        send(txt: bracketed ? "\u{1b}[200~\(clean)\u{1b}[201~" : clean)
     }
 }
 

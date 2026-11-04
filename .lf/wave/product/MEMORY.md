@@ -170,53 +170,33 @@ claiming missing proof. LOO-397 owns broader explanations/discovery; LOO-391 nat
 Work-tab/input/read, configured remote panes and running-Flow exchange proof;
 LOO-416 relaunch persistence; LOO-452 richer keys; LOO-453 readiness/events.
 
-## Optional Task membership (LOO-505, accepted 2026-10-17)
+## Optional Task membership (LOO-505, reconciled 2026-11-03)
 
-Jack Heart approved shipping after required checks. His October 17 review correction
-makes creation standalone even in bound Sessions/checkouts: only explicit `--wave`
-selects membership; `--no-wave` equals omission. Repository identity is required;
-optional Project supplies the derived Wave. The read projection is validated on
-save, not a second owner. No synthetic inbox or query-owned workspace.
+Jack Heart's October 17 review made creation standalone even in bound
+Sessions/checkouts: explicit `--wave` selects membership; omission and `--no-wave`
+do not. Repository identity is required; optional Project derives the Wave.
+Membership moves preserve execution, checkout, PR and conversations; historical
+capture attribution stays unchanged. Membership never transfers execution.
 
-Jack selected **Task → Wave → repository** Workflow precedence and direct Wave
-default ownership, removing Project defaults/history. Repository `workflow:` uses
-strict local config; invalid selection is an error, absence needs selection.
-Captured graphs survive config, chapter and membership changes. Repository-default
-definitions bypass same-named Wave customizations.
-
-Jack renamed membership to `task move --wave/--no-wave`; position uses
-`task workflow move`. Same-repository moves may include active work and preserve
-execution, PR, checkout and conversation identity. Current Session membership
-follows the Task; capture/dispatch ownership, including null, remains historical.
-Next capture uses the new home; membership never transfers execution.
-
-Branch tests cover nullable transport, Linear recovery, Workflow defaults, live
-Flow detach/reattach and CLI-stream workspace/file-draft retention. A file draft
-does not prove unsent provider input. Broader gate, between-Wave and configured
-native proof remain; no external-progress credit follows. LOO-489 owns query UI;
-LOO-416 retains lifecycle scope.
+AGENTS.md owns current Graph defaults and position commands, superseding the
+Workflow spellings and missing-default behavior archived at
+`f4a51486aa6db4b77c0808d17319b5d6018abd93:.lf/wave/product/MEMORY.md`, this heading.
+Jack's shipping approval and component tests established neither unsent provider
+input retention nor configured native/between-Wave acceptance. LOO-489 owns query
+UI; LOO-416 retains lifecycle scope. No external-progress credit follows.
 
 
-## Task delivery boundary (LOO-418, revised 2026-10-11)
+## Task delivery boundary (LOO-418, reconciled 2026-11-03)
 
-Jack Heart clarified in LOO-427: follow-up is only an optional window after PR
-landing, with no required disposition or dedicated APIs. Ordinary Task creation
-handles new work. Bare landing keeps the Task open; explicit completion or an
-authored Workflow end completes it. Historical follow-through events remain history,
-not completion gates. Earlier implementation and decisions:
-`f1e8cd19ff:wave/product/MEMORY.md`, this heading.
-
-Zero or one PR per Task; dependencies use stacked Tasks. Task status, Workflow
-position and Process liveness are independent. Failed end requests retry without
-replaying the Flow; reopening supersedes old intent. Linear completion preserves
-execution. Completion rechecks a verified merge for a Task with a PR. Failed cleanup
-never reverses completion. Common planning owns creation and optional export;
-412 retains private recovery of historical filing intents and uncertain exports
-under their originally reserved identities; this adds no new filing API or gate.
-
-Jack authorized shipping #1499 October 9; native acceptance was not established.
-Observed provider conflicts win; matching readback does not guarantee atomic writes
-against an unseen reopening. LOO-385 overlap does not establish closure.
+Jack Heart made follow-up optional, without a required disposition or dedicated
+API. Landing, Task completion and execution remain separate; failed completion
+retries must not replay effects. AGENTS.md and current delivery APIs own the
+current-PR/history contract. The superseded one-PR limit, October 9 shipping
+approval and recovery details remain at
+`f4a51486aa6db4b77c0808d17319b5d6018abd93:.lf/wave/product/MEMORY.md`, this heading.
+That approval established no native acceptance or LOO-385 closure. Observed
+provider conflicts win; matching readback cannot exclude an unseen reopening.
+Failed cleanup never reverses completion.
 
 ## Historical pointers
 
@@ -526,28 +506,16 @@ Earlier finite-landing/watcher history: `070e5bb6a4:.lf/wave/product/MEMORY.md`,
 this heading. LOO-435 retains failed-step retry; whole-Flow retry and held exit 3
 remain distinct from waited delivery.
 
-## Skill reduction decisions (2026-09-28)
+## Skill reduction decisions (reconciled 2026-11-03)
 
-Jack requested a smaller library, then restored debug as the default in examples.
-Debug investigates and fixes a cause; unbreak restores a workflow. That distinction
-is the implementation interpretation, not Jack's explicit wording. Neither needs
-clipboard input. 5whys remains explicit systemic investigation; reduce and polish
-remain optional surveys, with no accepted removal. Research includes conversational
-codebase questions. Realign reconciles memory; pr-message owns PR authorship.
-
-Historical consolidation: `16e9c950b9:wave/product/MEMORY.md`, this heading.
-Workflow decisions supersede those recipes; missing launch history proves neither
-disuse nor caller authorship.
-
-Jack requested single S1–S5 skills and identified their sequence as VSM. The
-`vsm-operate` design composes delivery, coordination, capacity, adaptation and
-identity with one shared pass note; each skill can act independently. Repository
-scope is default unless the request narrows it. Whether wave/operate uses that
-sequence remained open. Jack's “soften, dont harden” rejects numeric move caps;
-October 5's pairs decision requires covering started work before choosing no action.
-Task findings may challenge Wave purpose and Wave findings repository direction;
-accepted decisions return to owners without adding control authority or making
-operation a prerequisite for independent Tasks.
+Jack requested a smaller library, restored debug in examples and identified
+single S1–S5 skills as VSM. His “soften, dont harden” rejects numeric move caps.
+Current skills/Graphs own procedures; historical consolidation, unaccepted removals,
+implementation interpretations and the unresolved wave/operate composition remain at
+`f4a51486aa6db4b77c0808d17319b5d6018abd93:.lf/wave/product/MEMORY.md`, this heading.
+Missing launch history proves neither disuse nor caller authorship. Task findings
+may challenge Wave purpose; accepted direction returns to owners without granting
+execution authority or requiring operation for independent Tasks.
 
 ## Named participants and review feedback (curated 2026-09-25)
 
@@ -957,6 +925,26 @@ filesystem placeholder scan: surviving files resurfaced retired Waves. Explicit
 writes register directories; reads list store rows only.
 AGENTS.md owns shared runtime vocabulary; earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
 `92d95edfe:wave/product/MEMORY.md`, this heading.
+
+## Native iOS boundary (LOO-718, 2026-11-03)
+
+Jack Heart selected open Tasks → existing Session terminal, Desktop styling and
+Paste / New line / keyboard visibility. No Wave view, shell panes or inspectors.
+He authorized native implementation alongside LOO-593 through interactive demo,
+without Auto-Ship. Describe-first creation follows recoverable shared create/start.
+
+The first native slice uses pinned SwiftTerm and shared Work DTOs. Its deterministic
+peer proves input effects, not live connectivity or device usability. Ghostty was
+compared at source/packaging level, not benchmarked on a phone. Native approval/Stop
+actions require trustworthy provider state and bindings; terminal text cannot
+authorize them. Viewing grants neither input nor geometry; reconnect never replays
+uncertain keys or creates another Session.
+
+LOO-593 owns the Machine codec and owner bridge. A client-authored WorkViewPlan
+fixture inside that envelope is not server admission or a terminal-wire proof.
+The same-user socket must not become a remote endpoint by proxying it through
+Tailscale. Carrier/pairing, takeover and hosting remain open; physical keyboard,
+IME/dictation and VoiceOver acceptance remain with device review.
 
 ## Performance — launch renders before any read (2026-10-04)
 

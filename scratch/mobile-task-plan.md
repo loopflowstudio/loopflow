@@ -26,6 +26,14 @@ claims and uncertain-input handling. Terminal recordings must match the actual
 owner protocol. Work revisions are not a replay log; request IDs alone are not
 durable command receipts.
 
+November 3 reconciliation: B has an offline SwiftTerm client; mobile-ios.md owns
+the current focused check result. A's working codec matches the consumed copy;
+its Session-owner lookup exists, but WorkViewPlan admission and the phone's
+binary terminal adapter do not. This leaves the joint live demo outstanding.
+The same-user Unix socket cannot serve as remote admission through a proxy.
+Terminal activity #1809 is included through main sync at ac8e088f5f; other
+coordination references below do not assert delivery status.
+
 Current backend design:
 `/Users/jack/src/loopflow.loo-593-decide-the-desktop/scratch/mobile-backend.md`.
 Current client: [mobile-ios.md](mobile-ios.md). Interaction:

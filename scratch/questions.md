@@ -3,8 +3,8 @@
 November 3, 2026: Jack Heart authorized native fixture implementation before
 live connectivity. Reversible choices: SwiftTerm 1.20.0 for the native input and
 accessibility proof; separate ios.yml including the shared project to avoid
-parallel Desktop edits; observe first and request a non-forcing fixture control
-grant. The fixture action does not select the eventual remote takeover gesture.
+parallel Desktop edits; observe first, then grant fixture control explicitly.
+This single-client peer proves no contention policy and selects no remote takeover gesture.
 
 LOO-593's codec and fixtures are consumed unchanged at their canonical paths.
 Its current server allowlist does not expose WorkViewPlan/primarySession; the

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>LOO-718 · Recover the selected Session</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292724;--muted:#68625b;--line:#d7d0c5;--panel:#f1ede6;--accent:#76513a}
+@media(prefers-color-scheme:dark){:root{--bg:#201e1c;--fg:#eee7dd;--muted:#bdb3a6;--line:#514940;--panel:#2c2824;--accent:#e2b797}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 system-ui,sans-serif}
+main{max-width:760px;margin:auto;padding:48px 24px 80px}header{font-size:13px;color:var(--muted)}
+h1,h2{font-family:Georgia,serif;line-height:1.15;font-weight:normal}h1{font-size:clamp(32px,7vw,46px);margin:28px 0 20px}h2{font-size:29px;margin-top:48px}
+p{margin:16px 0}a{color:var(--accent)}code,pre{font:13px/1.6 ui-monospace,monospace}code{overflow-wrap:anywhere}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}section{margin-top:30px}.example{background:var(--panel);border-left:3px solid var(--line);padding:20px;margin:20px 0}.example strong{display:block;margin-bottom:12px}.decision{border-left:3px solid var(--accent);padding-left:20px}
+.muted,small{color:var(--muted)}dl{margin:24px 0}dt{font-weight:650;margin-top:24px}dd{margin:6px 0}li{margin-bottom:18px}footer{border-top:1px solid var(--line);margin-top:44px;padding-top:12px}details{margin-top:10px}summary{cursor:pointer}
+@media(max-width:420px){main{padding:28px 18px 60px}.example{padding:16px}}
+</style>
+</head>
+<body><main>
+<header>
+LOO-718 · concept-review · November 3, 2026<br>
+Headless review of Jack Heart’s accepted native iOS experience.
+<details><summary>Source files</summary>
+<p><code>scratch/mobile-ios.md</code><br>
+<code>scratch/mobile-task-brief.md</code><br>
+<code>scratch/mobile-task-plan.md</code><br>
+<code>scratch/mobile-prototypes.md</code><br>
+<code>swift/LoopflowiOS/MobileClient.swift</code><br>
+<code>swift/LoopflowiOS/LoopflowiOSApp.swift</code><br>
+<code>swift/LoopflowiOS/SessionTerminalView.swift</code><br>
+<code>swift/LoopflowiOS/FixtureClient.swift</code><br>
+<code>swift/LoopflowiOSTests/MobileTerminalTests.swift</code></p>
+</details>
+</header>
+<h1>Keep Reconnect on the selected Session.</h1>
+<p class="decision">The accepted same-Session recovery contract implies this correction. A failed attachment attempt must not force a trip back through Tasks. Recorded as next implementation direction; code is unchanged.</p>
+<p>Jack Heart selected open Tasks → existing Session terminal, Desktop styling, and Paste / New line / keyboard visibility. The current native build is an explicit offline fixture. This review adds no screen, provider conversation, or remote takeover policy.</p>
+
+<h2>One failure, two experiences</h2>
+<div class="example">
+<strong>Existing behavior · inspected in code</strong>
+<pre>Tasks → selected Session → connection drops
+
+Disconnected                     [Reconnect]
+                           tap Reconnect ↓
+Attachment attempt fails
+Error text                       [no retry action]
+
+Back to Tasks → open the same row → try again</pre>
+</div>
+<p>The consequential mismatch: <code>open</code> maps an attachment exception to <code>unavailable</code>, but the screen only offers Reconnect for <code>disconnected</code>. The selected Session still exists in client state; its recovery action disappears.</p>
+<div class="example">
+<strong>Proposed correction · not implemented</strong>
+<pre>Tasks → selected Session → connection drops
+
+Disconnected                     [Reconnect]
+                           tap Reconnect ↓
+Couldn’t connect                  [Reconnect]
+                           tap Reconnect ↓
+Viewing                          [Use keyboard]
+
+Same Session. Fresh snapshot. No input replay.</pre>
+</div>
+<p><strong>Proposed usage copy:</strong> If opening or reconnecting fails, choose Reconnect on the Session screen. Reconnect restores viewing. In the offline fixture, choose Use keyboard again before typing; inspect the prompt before resubmitting anything whose delivery was uncertain.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<dl>
+<dt>Open a Task</dt>
+<dd>Existing Task → selected Session ID → <code>open(task)</code> → <code>attach(sessionID:)</code>. Opening observes; it does not grant input or geometry.</dd>
+<dt>Reconnect here</dt>
+<dd>Selected Session survives; attachment is replaced → <code>reconnect()</code>. Failed connection attempts stay retryable in the same screen. No automatic retry loop, launch operation, or second owner resolver.</dd>
+<dt>Type after recovery</dt>
+<dd>Program owns the draft; attachment owns revocable permissions → fresh snapshot → viewing → explicit fixture <code>requestControl()</code> → <code>send(bytes)</code>. Resize remains separately gated.</dd>
+<dt>Encounter a missing or ended Session</dt>
+<dd>Retain work identity → explicit unavailable/ended explanation → Tasks navigation. Do not manufacture a replacement Session. Reject a mismatched Session ID before rendering it.</dd>
+</dl>
+<p>The correction reuses existing UI states. It needs no persisted recovery record, client-side draft, domain DTO, or wire schema. LOO-593 remains the owner of Machine errors, Session lookup, and terminal transport. A future adapter must distinguish authoritative permanent failures from connection failures.</p>
+
+<h2>Challenge the recovery contract</h2>
+<p><strong>Normal path:</strong> open → observe → fixture control → type → Return. The reduced key bar and direct Task navigation stay intact.</p>
+<p><strong>Failure and recovery:</strong> first attach fails, a retry also fails, then attachment succeeds. Reconnect stays visible through both failures, and success restores the identical Session as an observer.</p>
+<p><strong>Uncertain input:</strong> the peer accepts bytes, then the send operation reports an error. Recovery must show those bytes once from the peer’s snapshot; it must not send them or Return again. The existing drop/reconnect test does not exercise this accepted-then-error boundary.</p>
+<p><strong>Counterexample:</strong> the returned attachment names another Session, or the owner reports an ended Session. Treating every failure as a retryable disconnection would erase useful evidence. Keep those outcomes explicit and never attach a replacement behind the selected Task.</p>
+
+<h2>Scope and next proof</h2>
+<p>Verify the visible retry action through repeated failure, observer-only recovery, wrong-Session rejection, and an uncertain send. Existing mounted UIKit tests are prior evidence for fixture input; no tests were rerun for this design-only review. No rendering environment was available to inspect this page visually.</p>
+<p>Carrier/pairing, remote takeover gesture, and hosting tier remain open for follow-up C. They do not block this fixture correction. Physical keyboard, IME/dictation, VoiceOver, and live Tailscale proof remain outstanding. Contextual approval/Stop controls still require trustworthy provider state and action bindings.</p>
+<footer>
+<h2>Review questions and disposition</h2>
+<ol>
+<li><strong>Should a failed attachment require returning to Tasks?</strong><br>No. The accepted recovery contract implies an in-place retry; implement the correction.</li>
+<li><strong>Does Reconnect restore keyboard control or resend input?</strong><br>No. It restores viewing of the same Session; existing control and no-replay rules remain.</li>
+<li><strong>Does this review select a remote takeover gesture or hosting tier?</strong><br>No. Those remain unresolved follow-up choices, outside this fixture correction.</li>
+</ol>
+</footer>
+</main></body></html>

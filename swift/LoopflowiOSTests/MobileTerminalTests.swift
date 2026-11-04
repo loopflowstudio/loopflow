@@ -1,5 +1,6 @@
 import Loopflow
 import SwiftTerm
+import ViewInspector
 import XCTest
 @testable import LoopflowiOS
 
@@ -156,24 +157,115 @@ final class MobileTerminalTests: XCTestCase {
         workspace.leave()
     }
 
-    func testReconnectPreservesSessionAndDoesNotReplayUncertainInput() async throws {
+    func testReconnectPreservesSessionAfterConnectionDropOrStreamEnd() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }
         workspace.send(Data("draft".utf8))
-        client.link.drop()
-        await settle()
-        workspace.send(Data("must not queue".utf8))
         let id = workspace.selected?.primarySession
-        await workspace.reconnect()
-        await settle()
-        XCTAssertEqual(workspace.selected?.primarySession, id)
-        XCTAssertEqual(client.link.sessionID, id)
+        for closeStream in [false, true] {
+            if closeStream { client.link.close() }
+            else { client.link.drop() }
+            await settle()
+            guard case .disconnected = workspace.state else { return XCTFail("Expected retryable disconnect") }
+            workspace.send(Data("must not queue".utf8))
+            await workspace.reconnect()
+            await settle()
+            XCTAssertEqual(workspace.selected?.primarySession, id)
+            XCTAssertEqual(client.link.sessionID, id)
+            XCTAssertEqual(workspace.state, .viewing)
+            XCTAssertEqual(client.terminal.draft, "draft")
+            XCTAssertTrue(client.terminal.submissions.isEmpty)
+            workspace.requestControl()
+            await settle()
+            XCTAssertEqual(client.terminal.draft, "draft")
+        }
+    }
+
+    func testSessionScreenKeepsRetryAfterInitialAndRepeatedAttachmentFailure() async throws {
+        let client = TestClient()
+        client.attachFailures = 2
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        let task = try await client.workingTasks()[0]
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+
+        await workspace.open(task)
+        for _ in 0..<2 {
+            guard case .disconnected = workspace.state else { return XCTFail("Expected retryable failure") }
+            XCTAssertEqual(workspace.selected?.primarySession, task.primarySession)
+            XCTAssertThrowsError(try screen.inspect().find(button: "Use keyboard"))
+            try screen.inspect().find(button: "Reconnect").tap()
+            await settle()
+        }
+
         XCTAssertEqual(workspace.state, .viewing)
-        XCTAssertEqual(client.terminal.draft, "draft")
-        XCTAssertTrue(client.terminal.submissions.isEmpty)
-        workspace.requestControl()
+        XCTAssertEqual(client.link.sessionID, task.primarySession)
+        XCTAssertThrowsError(try screen.inspect().find(button: "Reconnect"))
+        workspace.send(Data("must not queue".utf8))
+        workspace.resize(columns: 40, rows: 20)
+        XCTAssertTrue(client.terminal.draft.isEmpty)
+        XCTAssertTrue(client.link.sizes.isEmpty)
+        try screen.inspect().find(button: "Use keyboard").tap()
         await settle()
-        XCTAssertEqual(client.terminal.draft, "draft")
+        workspace.send(Data("same Session".utf8))
+        XCTAssertEqual(client.terminal.draft, "same Session")
+    }
+
+    func testWrongSessionIsRejectedBeforeRenderingAndHasNoRetry() async throws {
+        let client = TestClient()
+        client.attachmentSessionID = "another-session"
+        client.terminal.accept(Data("another Session's draft".utf8))
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        var output = Data()
+        workspace.render = { bytes, _ in output.append(bytes) }
+        let task = try await client.workingTasks()[0]
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        await workspace.open(task)
+        await settle()
+        workspace.suspend()
+        XCTAssertEqual(workspace.state, .unavailable("The attachment belongs to a different Session"))
+        XCTAssertEqual(workspace.selected?.primarySession, task.primarySession)
+        XCTAssertTrue(output.isEmpty)
+        XCTAssertThrowsError(try client.link.requestControl(), "Rejected attachment must be closed")
+        XCTAssertThrowsError(try screen.inspect().find(button: "Reconnect"))
+        XCTAssertThrowsError(try screen.inspect().find(button: "Use keyboard"))
+    }
+
+    func testAcceptedInputThenSendErrorRestoresDraftWithoutReplayOrDuplicateSubmission() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let task = try XCTUnwrap(workspace.selected)
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+
+        client.transport.failNextSendAfterAccept = true
+        controller.terminal.insertText("accepted once")
+        guard case .disconnected = workspace.state else { return XCTFail("Expected uncertain delivery") }
+        controller.terminal.insertText("must not queue")
+        controller.terminal.insertText("\n")
+        XCTAssertEqual(client.terminal.draft, "accepted once")
+        XCTAssertTrue(client.terminal.submissions.isEmpty)
+        try screen.inspect().find(button: "Reconnect").tap()
+        await settle()
+        XCTAssertEqual(client.link.sessionID, task.primarySession)
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.terminal.draft, "accepted once")
+        XCTAssertTrue(controller.terminal.accessibilityPageContent()?.contains("accepted once") == true)
+        XCTAssertTrue(client.terminal.submissions.isEmpty)
+
+        try screen.inspect().find(button: "Use keyboard").tap()
+        await settle()
+        client.transport.failNextSendAfterAccept = true
+        controller.terminal.insertText("\n")
+        XCTAssertEqual(client.terminal.submissions, ["accepted once"])
+        try screen.inspect().find(button: "Reconnect").tap()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.link.sessionID, task.primarySession)
+        try screen.inspect().find(button: "Use keyboard").tap()
+        await settle()
+        XCTAssertTrue(client.terminal.draft.isEmpty)
+        XCTAssertEqual(client.terminal.submissions, ["accepted once"])
     }
 
     func testEndedAndMissingSessionsRemainUnavailable() async throws {
@@ -181,12 +273,18 @@ final class MobileTerminalTests: XCTestCase {
         defer { workspace.leave(); controller.terminal.updateUiClosed() }
         client.link.end()
         await settle()
+        workspace.suspend()
         XCTAssertEqual(workspace.state, .ended)
+        let endedScreen = MobileSessionView(task: try XCTUnwrap(workspace.selected), workspace: workspace, theme: .light)
+        XCTAssertThrowsError(try endedScreen.inspect().find(button: "Reconnect"))
         workspace.send(Data("no".utf8))
         XCTAssertTrue(client.terminal.draft.isEmpty)
         let rows = try await FixtureClient().workingTasks()
         await workspace.open(rows[2])
+        workspace.suspend()
         XCTAssertEqual(workspace.state, .unavailable("No existing Session is recorded"))
+        let missingScreen = MobileSessionView(task: rows[2], workspace: workspace, theme: .light)
+        XCTAssertThrowsError(try missingScreen.inspect().find(button: "Reconnect"))
     }
 
     func testMultilinePasteWithoutBracketModeDoesNotSubmit() {
@@ -234,11 +332,40 @@ final class MobileTerminalTests: XCTestCase {
 @MainActor
 private final class TestClient: MobileClient {
     let terminal = FixtureTerminal()
-    var link: FixtureAttachment!
+    var transport: TestAttachment!
+    var link: FixtureAttachment { transport.link }
+    var attachFailures = 0
+    var attachmentSessionID: String?
 
     func workingTasks() async throws -> [WorkViewPlan.Content] { try await FixtureClient().workingTasks() }
     func attach(sessionID: String) async throws -> any MobileAttachment {
-        link = FixtureAttachment(sessionID: sessionID, terminal: terminal)
-        return link
+        if attachFailures > 0 {
+            attachFailures -= 1
+            throw URLError(.cannotConnectToHost)
+        }
+        let link = FixtureAttachment(sessionID: attachmentSessionID ?? sessionID, terminal: terminal)
+        transport = TestAttachment(link: link)
+        return transport
     }
+}
+
+@MainActor
+private final class TestAttachment: MobileAttachment {
+    let link: FixtureAttachment
+    var failNextSendAfterAccept = false
+    var sessionID: String { link.sessionID }
+    var events: AsyncStream<MobileTerminalEvent> { link.events }
+
+    init(link: FixtureAttachment) { self.link = link }
+
+    func requestControl() throws { try link.requestControl() }
+    func send(_ bytes: Data) throws {
+        try link.send(bytes)
+        if failNextSendAfterAccept {
+            failNextSendAfterAccept = false
+            throw URLError(.networkConnectionLost)
+        }
+    }
+    func resize(columns: Int, rows: Int) throws { try link.resize(columns: columns, rows: rows) }
+    func close() { link.close() }
 }

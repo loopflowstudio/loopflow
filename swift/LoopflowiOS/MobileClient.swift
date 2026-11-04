@@ -125,17 +125,16 @@ final class MobileWorkspace {
             state = .viewing
             eventTask = Task { [weak self] in
                 for await event in link.events {
-                    guard let self, self.generation == opening, !Task.isCancelled else { return }
+                    guard let self, self.generation == opening else { return }
                     self.receive(event)
                 }
-                guard let self, self.generation == opening, !Task.isCancelled else { return }
-                if self.state != .ended {
-                    self.fail("Connection closed; input was not retried")
-                }
+                // Explicit disconnects (including ended) invalidate this attachment's generation.
+                guard let self, self.generation == opening else { return }
+                self.fail("Connection closed; input was not retried")
             }
         } catch {
             guard opening == generation else { return }
-            state = .unavailable(error.localizedDescription)
+            fail(error.localizedDescription)
         }
     }
 
@@ -166,7 +165,10 @@ final class MobileWorkspace {
 
     func suspend() {
         guard selected != nil else { return }
-        fail("Paused while the app is away")
+        switch state {
+        case .loading, .viewing, .controlling: fail("Paused while the app is away")
+        case .disconnected, .unavailable, .ended: break
+        }
     }
 
     func leave() {

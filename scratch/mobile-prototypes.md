@@ -38,7 +38,12 @@ Task identifiers are familiar labels; output, availability and responses are fix
 
 ## Remaining technical choices
 
-The chosen navigation does not resolve the terminal library, viewport/geometry policy, input handoff when Desktop is also attached, stale/missing Session behavior or restoration after the host process ends. Preserve the same Session identity and never silently create a replacement conversation. The native proof must show real editing, submission, prompt response and continuity on a phone.
+The November 3 native implementation selects SwiftTerm and demonstrates editing,
+submission and prompt response with a deterministic peer; [mobile-ios.md](mobile-ios.md)
+owns that evidence and remaining acceptance. It displays missing/ended/disconnected
+Sessions without creating replacements. Canonical observer geometry, Desktop
+handoff, real owner recovery and physical-device input remain unproved. The HTML
+controls above remain interaction studies, not evidence of native provider actions.
 
 ## Verification
 

@@ -84,7 +84,7 @@ struct MobileTaskList: View {
     }
 }
 
-private struct MobileSessionView: View {
+struct MobileSessionView: View {
     let task: WorkViewPlan.Content
     let workspace: MobileWorkspace
     let theme: ThemeDefinition

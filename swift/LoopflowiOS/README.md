@@ -17,12 +17,16 @@ It contains no live network endpoint, pairing, provider launch or on-phone CLI.
 The fixture label stays visible in both screens. Backgrounding closes the
 attachment; **Reconnect** restores the same fixture Session as an observer.
 Input and geometry require a fresh grant. Failed input is never queued or retried.
+If opening or reconnecting fails, **Reconnect** stays on the Session screen.
+Inspect the restored prompt before resubmitting input whose delivery was uncertain.
+Missing, ended or mismatched Sessions retain their explanation without a retry.
 
 The app uses the shared Loopflow fonts, Light/Dark themes and WorkViewPlan types.
 `MobileClient` is an injectable UI boundary, not a serialized protocol.
 `MachineProtocol.swift` and `tests/fixtures/dto/machine/` come from LOO-593 at their
-canonical paths. Fixture Task reads pass through that codec. The current local
-service admits roadmap reads and resolves a Session to its existing owner. Live
+canonical paths. Client-authored Task data passes through that codec; it is not
+a recorded Machine reading. The current local service admits roadmap reads and
+resolves a Session to its existing owner. Live
 WorkViewPlan admission still needs joining before a remote adapter can use this screen.
 The deterministic peer owns its draft and consumes actual terminal bytes.
 Its small line editor is test/demo code, not another server or Session runtime.
@@ -63,7 +67,8 @@ The pinned package's build plugin only generates source-control version metadata
 `-skipPackagePluginValidation` permits that reviewed plugin in headless builds.
 The tests mount the actual UIKit terminal and assert editing, marked-text commit, combining characters,
 multiline paste, native replacement, selection, rendered accessibility text,
-viewport resizing, control loss, identity and no replay. They also consume the
+viewport resizing, control loss, repeated in-screen retry, identity rejection and
+accepted-then-failed input without replay or duplicate submission. They also consume the
 backend's shared Machine fixtures, without inventing a second codec.
 
 Device demo still owns actual software-keyboard layout, CJK keyboard/dictation

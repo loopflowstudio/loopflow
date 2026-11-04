@@ -159,6 +159,18 @@ demo. The review illustration is historical evidence, not a native demonstration
 
 ## Infrastructure and proof boundaries
 
+### Demo findings, November 4 — implementation remains
+
+The subsequent interactive demo supersedes the concept-review conclusion that
+no further implementation was needed. Jack Heart's screenshot shows a Task with
+no Session stuck at passive Open/Retry, plus a local-Machine cleanup error.
+Source and CLI reproduction confirm two gaps: provide an explicit Start when
+the Task has no Session (distinct from an existing Session missing native history),
+and send local retention to the local lifecycle owner rather than an unresolved
+remote-Machine lookup. Preserve passive navigation and remote semantics.
+Concrete correction direction and evidence are in [loo-672-demo.md](loo-672-demo.md).
+The design is unchanged; the native demonstration has not passed.
+
 708/#1802, 709/#1804, 710/#1801, 712/#1800 and 720/#1809 are merged. They supply
 thin viewers, protected idle retirement, persisted VT history, separate appearance
 and input ownership, and current provider status. Codex/OpenCode retain launchers;

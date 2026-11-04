@@ -575,9 +575,15 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    func restore(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity, completed: Bool) {
+    /// Restore saved intent or fill spare warmth from fresh working Tasks.
+    /// A visit, Close or eviction already decided an existing workspace's lifetime.
+    func prefetch(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity, completed: Bool) {
+        guard !presentationClosed, !quitting else { return }
+        let restoring = restoreCandidates.contains(key)
         restoreCandidates.removeAll { $0 == key }
-        guard !completed, !recentTasks.contains(key) else { return }
+        guard !completed, !closedConversations.contains(key), !recentTasks.contains(key),
+              restoring || workspaces[key] == nil,
+              recentTasks.count < Self.warmConversationLimit else { return }
         let workspace = workspace(for: key, title: title, location: location)
         workspace.requiresLocationValidation = true
         recentTasks.append(key)
@@ -629,7 +635,7 @@ final class SessionsWorkspaceRegistry {
         reconcileWarmth()
     }
 
-    /// Selected first, at most two preparations, and only explicitly visited Work.
+    /// Selected first, then bounded restored, visited and prefetched Work.
     func revealConversations(store: SessionsStore) {
         guard !presentationClosed, !quitting else { return }
         sessions = store
@@ -980,6 +986,7 @@ struct SessionItem: Identifiable, Equatable {
         case prepared
         case live
         case failed(String)
+        case unavailable(String)
         case ended(String)
     }
 
@@ -999,7 +1006,7 @@ struct SessionItem: Identifiable, Equatable {
     var surface: SessionRecord? {
         switch state {
         case .prepared, .live: record
-        case .pending, .elsewhere, .opening, .failed, .ended: nil
+        case .pending, .elsewhere, .opening, .failed, .unavailable, .ended: nil
         }
     }
 
@@ -1013,7 +1020,7 @@ struct SessionItem: Identifiable, Equatable {
         if intent == .reveal {
             if record.action(.moveHere) != nil { state = .elsewhere }
             else if let action = record.action(.reveal) {
-                state = action.unavailableReason.map(State.ended) ?? .prepared
+                state = action.unavailableReason.map(State.unavailable) ?? .prepared
             } else { state = .failed("Reveal preparation is unavailable") }
         } else if record.openArgv.isEmpty {
             // Nothing to start: retained work attaches when shown.
@@ -1112,6 +1119,9 @@ final class SessionsStore {
                 if case .opening = next[index].state { continue }
                 if observedState == .pending {
                     switch next[index].state {
+                    case .unavailable:
+                        next[index].state = record.action(.reveal)?.unavailableReason.map(SessionItem.State.unavailable) ?? .pending
+                        continue
                     case .failed, .ended: continue
                     default: break
                     }
@@ -1130,7 +1140,7 @@ final class SessionsStore {
         let replacing = intent == .moveHere
         if replacing, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
         switch sessions[index].state {
-        case .pending, .failed, .ended:
+        case .pending, .failed, .unavailable, .ended:
             sessions[index].state = .opening
         case .elsewhere where intent != .open:
             sessions[index].state = .opening
@@ -1166,7 +1176,7 @@ final class SessionsStore {
     func adoptPreparation(_ record: SessionRecord, intent: SessionActionKind = .open) {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
-        case .pending, .failed, .ended, .elsewhere:
+        case .pending, .failed, .unavailable, .ended, .elsewhere:
             sessions[index].adoptPreparation(record, intent: intent)
         case .opening, .prepared, .live:
             break
@@ -1266,7 +1276,7 @@ final class SessionsStore {
         case .prepared, .live:
             sessions[index].state = sessions[index].record.action(.moveHere) != nil
                 ? .elsewhere : .ended(output ?? "Terminal output is unavailable.")
-        case .pending, .elsewhere, .opening, .failed, .ended:
+        case .pending, .elsewhere, .opening, .failed, .unavailable, .ended:
             break
         }
     }

@@ -45,6 +45,7 @@ kernel locks                 live local exclusion authority
 | Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started |
 | Task graphs | `task_graphs` | The graph a Task took up, the step it stands at and the run carrying it |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
+| Task workspace lifetime | `task_shells`, `task_host_occurrences`, `task_retirements` | Shell identities, host retention and settlement evidence, and completion-scoped checkout retirement; Processes retain execution authority |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and provider observations |
 | Work adjuncts | `tool_responses`, `task_ownership` | Tool answers and the append-only Task ownership log |
 | Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order, the repository's Task order, and portable pane layouts |

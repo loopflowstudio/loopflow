@@ -802,7 +802,7 @@ struct DTOFixtureTests {
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
         #expect(session.workPath == "product / LOO-291")
-        #expect(session.actions.map(\.kind) == [.open, .moveHere])
+        #expect(session.actions.map(\.kind) == [.open, .moveHere, .reveal])
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
@@ -906,7 +906,7 @@ struct DTOFixtureTests {
         #expect(session.availability == .available)
         #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
-        #expect(session.actions.map(\.kind) == [.open])
+        #expect(session.actions.map(\.kind) == [.open, .reveal])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.statusLabel == "Available")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")

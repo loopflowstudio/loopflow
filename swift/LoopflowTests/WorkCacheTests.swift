@@ -150,6 +150,50 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
+    @Test("Fresh repository load prefetches working Tasks without saved visits and honors Close", arguments: [false, true])
+    func loadPrefetchesWorkingTasks(closed: Bool) async throws {
+        let source = try Source()
+        try await source.populateWorkingTasks()
+        await source.setLocationFailure(nil)
+        await source.holdPreparations()
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let closedKey = WorkWorkspaceKey(repository: repository, kind: .task, id: "prefetch-11")
+        if closed {
+            let previous = SessionsWorkspaceRegistry(localMachineId: "home-a")
+            previous.loadWarmIntent(repository: repository)
+            let workspace = previous.open(closedKey, title: "Closed", location: nil)
+            workspace.closePane(workspace.multiplexer.focusedPaneId)
+            previous.prepareForQuit()
+        }
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
+        let model = WorkModel(query: source.query, repoPath: Self.repo)
+        model.confirmMachine("home-a")
+        model.bindWorkspaces(registry, repository: repository)
+        #expect(registry.restoreCandidates.isEmpty)
+        #expect(registry.recentTasks.isEmpty)
+        await model.refresh()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while await source.preparedTasks.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(model.selection == nil)
+        #expect(model.workStatus == .current) // Rendering is not held by preparation.
+        #expect(registry.preparationCount == 2)
+        let newest = closed ? 10 : 11
+        let expected = stride(from: newest, through: newest - 7, by: -1).map { "prefetch-\($0)" }
+        #expect(registry.recentTasks.map(\.id) == expected)
+        #expect(Set(await source.preparedTasks) == Set(expected.prefix(2)))
+        await source.releasePreparations()
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        while store.sessions.filter({ $0.state == .prepared }).count < 8, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.filter { $0.state == .prepared }.count == 8)
+        #expect(Set(await source.preparedTasks) == Set(expected))
+        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments.contains("--reveal-existing") })
+        model.revealPrimaryConversation()
+        #expect(registry.recentTasks.count == 8)
+        if closed { #expect(registry.retained(closedKey) == nil) }
+        registry.prepareForQuit()
+    }
+
     @Test("Saved text never claims a live process or a legal mutation")
     func savedTextIsQuiet() async throws {
         let directory = try temporaryDirectory()
@@ -428,6 +472,8 @@ private actor Source {
     private(set) var reads = 0
     private var held: CheckedContinuation<Void, Never>?
     private var arrived: CheckedContinuation<Void, Never>?
+    private var preparationsHeld = false
+    private var preparationWaiters: [CheckedContinuation<Void, Never>] = []
 
     init() throws {
         let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -437,6 +483,37 @@ private actor Source {
     }
 
     nonisolated var query: RegistryQuery { RegistryQuery { args, _ in try await self.read(args) } }
+
+    func holdPreparations() { preparationsHeld = true }
+
+    func releasePreparations() {
+        preparationsHeld = false
+        let waiters = preparationWaiters
+        preparationWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func populateWorkingTasks() throws {
+        var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
+        var inventory = wire["tasks"] as! [String: Any]
+        let template = (inventory["items"] as! [[String: Any]])[0]
+        let states = (0..<12).map { ["idle", "active", "moving"][$0 % 3] } + ["shipping", "done", "abandoned", "unstarted"]
+        inventory["items"] = states.enumerated().map { index, state in
+            var row = template
+            var task = row["task"] as! [String: Any]
+            task["id"] = "prefetch-\(index)"
+            task["identifier"] = "PREFETCH-\(index)"
+            row["task"] = task
+            var runtime = row["runtime"] as! [String: Any]
+            runtime["work_id"] = "prefetch-\(index)"
+            runtime["status"] = state
+            runtime["updated_at"] = String(format: "2026-11-04T10:00:%02dZ", index)
+            row["runtime"] = runtime
+            return row
+        }
+        wire["tasks"] = inventory
+        roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+    }
 
     func setLocationFailure(_ reason: String?) { locationFailure = reason }
 
@@ -506,9 +583,12 @@ private actor Source {
             record["task_primary"] = true
             record["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree, "task_id": id]
             record["state"] = "closed"
-            record["actions"] = sessionActionFixture(state: "closed") + [["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": NSNull()]]
+            record["actions"] = sessionActionFixture(state: "closed")
             record["open_argv"] = ["lf", "session", "resume", "conversation-" + id, "--reveal-existing"]
             preparedTasks.append(id)
+            if preparationsHeld {
+                await withCheckedContinuation { preparationWaiters.append($0) }
+            }
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
         switch command.first {

@@ -100,6 +100,29 @@ struct WorkspaceRetentionTests {
         UserDefaults.standard.removeObject(forKey: "warm-conversations-local-\(repository.lowercased())")
     }
 
+    @Test("Saved unfinished Tasks fill spare warmth without evicting working Tasks", arguments: [7, 8])
+    func restoredTasksFillSpareWarmth(workingCount: Int) {
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-local-\(repository.lowercased())") }
+        let saved = WorkWorkspaceKey(repository: repository, kind: .task, id: "saved")
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/task")
+        let previous = SessionsWorkspaceRegistry(localMachineId: "local")
+        previous.loadWarmIntent(repository: repository)
+        previous.open(saved, title: "Saved", location: location)
+        previous.prepareForQuit()
+
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        registry.loadWarmIntent(repository: repository)
+        let working = (0..<workingCount).map { WorkWorkspaceKey(repository: repository, kind: .task, id: "working-\($0)") }
+        for key in working {
+            registry.prefetch(key, title: key.id, location: location, completed: false)
+        }
+        registry.prefetch(saved, title: "Saved", location: location, completed: false)
+        #expect(registry.recentTasks == working + (workingCount < 8 ? [saved] : []))
+        #expect(registry.restoreCandidates.isEmpty)
+        #expect(registry.retained(saved)?.requiresLocationValidation == (workingCount < 8 ? true : nil))
+    }
+
     @Test("Quit acknowledges settled presentation as away and preserves an existing deadline")
     func quitReleasesWithoutClose() async throws {
         let application = RepositoryWorkspaces(localMachineId: "local")

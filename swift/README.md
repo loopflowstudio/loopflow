@@ -100,9 +100,16 @@ Machine/checkout evidence must arrive before background retention. Close removes
 Deliberately selecting that Task again permits reconnection. Completed Tasks
 release on departure through the shared two-minute/fifteen-minute lifecycle.
 
+Repository load prefetches existing conversations for working Tasks (idle, active
+or moving), even with no saved recent visits. The selected Task comes first, then
+recent working Tasks within the same eight-conversation and two-preparation bounds.
+Saved Close remains closed; initial rendering does not wait for preparation.
+
 Task navigation reveals existing history without starting a first turn or taking
-another client's input. Missing history needs explicit **Start conversation**;
-external ownership offers **Take back**. Close and eviction discard late opening
+another client's input. With no saved history, the pane explains why and offers
+**Start conversation**. Refresh keeps that action accurate; only selecting Start
+creates a first provider thread. **Retry** continues to reveal existing history.
+External ownership offers **Take back**. Close and eviction discard late opening
 results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only

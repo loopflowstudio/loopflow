@@ -967,21 +967,26 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
 `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`, this heading.
 
-Rust owns Session projection, holder labels and executable actions. Jack Heart's
-November 4 LOO-672 approval selects automatic existing-history reveal, recent
-unfinished Tasks kept warm, bottom-on-return and explicit **Take back** over the
-last available screen. No Fork button or simultaneous input; CLI fork remains.
-Close suppresses refresh reopening; completed departure releases through 717.
-Eight warm conversations and two preparations are provisional engineering values,
-not a measured budget. Visible panes and protected work retain their lifetimes.
+Jack Heart's November 4 LOO-672 approval selects existing-history reveal, warm
+unfinished Tasks, bottom-on-return and explicit **Take back** over the last screen.
+No Fork button or shared input; CLI fork remains. Jack also requested load-prefetch
+of fresh idle/active/moving Tasks without saved visits. Selected-first admission
+shares the bounded warm set and Close policy; saved display grants no retention.
+Eight conversations/two preparations are provisional, not measured limits.
+Visible/protected work survives; completed departure releases through 717.
 
-Reveal must remain non-replacing through the actual launch/claim boundary.
-Navigation creates no provider thread, turn or Graph. Cached layout/status cannot
-authorize retention; restore selected first from fresh ownership/completion facts.
-Surface creation and live relay attachment do not prove usable provider input.
-Native Claude/Codex/Rex, reboot and twenty-Task footprint proof remain with demo.
-Jack approved publication for review, not landing or installation. LOO-491's earlier action/fixture history:
-`a32c385044:.lf/wave/product/MEMORY.md`, this heading; no native proof follows.
+Rust projects recovery from current-input history and ownership on every read.
+Preparation-only labels were lost on refresh: missing history must retain explicit
+Start, and a new holder supplies Take back. Desktop renders actions without label
+tests; unavailable opening differs from terminal completion. Retry remains reveal.
+Navigation creates no thread, turn or Graph; launch/claim rechecks non-replacement.
+Close/eviction fence pending preparation before Session identity arrives and settle
+discarded opening receipts.
+
+Focused checks do not prove usable provider input.
+Native Claude/Codex/Rex, reboot and twenty-Task footprint remain
+with demo. Jack approved review publication, not landing/installation. Earlier
+LOO-491 evidence: `a32c385044:.lf/wave/product/MEMORY.md`, this heading.
 
 ### Task observation and retired Watch
 

@@ -15,6 +15,12 @@
         "kind": "open",
         "label": "Open here",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": null
       }
     ],
     "agent_process_id": null,
@@ -63,6 +69,12 @@
         "help": "Open this Session in a terminal",
         "kind": "open",
         "label": "Open here",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -277,6 +289,12 @@
           "kind": "open",
           "label": "Open here",
           "unavailable_reason": null
+        },
+        {
+          "kind": "reveal",
+          "label": "Show conversation",
+          "help": "Continue existing history without taking another terminal's input",
+          "unavailable_reason": null
         }
       ],
       "agent_process_id": null,
@@ -325,6 +343,12 @@
           "help": "Open this Session in a terminal",
           "kind": "open",
           "label": "Open here",
+          "unavailable_reason": null
+        },
+        {
+          "kind": "reveal",
+          "label": "Show conversation",
+          "help": "Continue existing history without taking another terminal's input",
           "unavailable_reason": null
         }
       ],
@@ -380,6 +404,12 @@
           "kind": "open",
           "label": "Open here",
           "unavailable_reason": null
+        },
+        {
+          "kind": "reveal",
+          "label": "Show conversation",
+          "help": "Continue existing history without taking another terminal's input",
+          "unavailable_reason": null
         }
       ],
       "agent_process_id": "cbe8d875-580e-4683-89d4-bd6b51fc277b",
@@ -428,6 +458,12 @@
         "help": "Open this Session in a terminal",
         "kind": "open",
         "label": "Open here",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],

@@ -802,6 +802,11 @@ struct SessionPaneView: View {
                 }
                 openButton(item)
             }.padding()
+        case .unavailable(let message):
+            PaneEmptyState(title: "Conversation unavailable", systemImage: "terminal",
+                           description: message) {
+                openButton(item)
+            }
         case .failed(let message):
             PaneEmptyState(title: "Session failed to open", systemImage: "exclamationmark.triangle",
                            description: message) {
@@ -819,13 +824,12 @@ struct SessionPaneView: View {
         }
     }
 
-    /// The one way back, as `lf resume`: Resume attaches to a running
-    /// conversation or reopens its saved history; Move here takes it over.
+    /// Rust supplies the current recovery action; Retry only reveals existing history.
     @ViewBuilder
     private func openButton(_ item: SessionItem) -> some View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
             let retry = item.error != nil
-            Button(retry ? "Retry" : action.label == "Start conversation" ? action.label : action.kind == .open ? "Resume" : action.label) {
+            Button(retry ? "Retry" : action.label) {
                 sessions.beginPaneLoad(item.id)
                 Task { @MainActor in
                     if retry { await sessions.select(item.id) }
@@ -836,8 +840,8 @@ struct SessionPaneView: View {
             .buttonStyle(.bordered)
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
-            .disabled(action.kind == .moveHere && action.unavailableReason != nil)
-            .help(action.kind == .open ? "Attach to the running conversation, or reopen its saved history" : action.unavailableReason ?? action.help)
+            .disabled(!retry && action.unavailableReason != nil)
+            .help(retry ? "Show existing history without taking another terminal’s input" : action.unavailableReason ?? action.help)
             .accessibilityIdentifier("session-open-here-\(item.id)")
         }
     }

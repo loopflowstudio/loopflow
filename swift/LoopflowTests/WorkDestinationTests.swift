@@ -96,7 +96,7 @@ struct WorkDestinationTests {
             #expect(item.state == .elsewhere)
             #expect(item.record.action(.moveHere) != nil)
         } else {
-            #expect(item.state == .ended("No saved provider history; start this conversation explicitly"))
+            #expect(item.state == .unavailable("No saved provider history; start this conversation explicitly"))
             #expect(model.taskOpening?.status == .failed)
         }
     }
@@ -144,8 +144,10 @@ struct WorkDestinationTests {
         let record = try renameFixtureRecord("revealed", title: "Conversation", work: .task(id: #require(task.runtime?.workId)))
         var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         var actions = sessionActionFixture(state: occupied ? "active" : "closed")
-        actions.append(["kind": "reveal", "label": "Show conversation", "help": "Continue saved history",
-                        "unavailable_reason": reason as Any? ?? NSNull()])
+        if let reason {
+            let reveal = try #require(actions.firstIndex { $0["kind"] as? String == "reveal" })
+            actions[reveal]["unavailable_reason"] = reason
+        }
         wire["actions"] = actions
         wire["open_argv"] = ["lf", "session", "resume", record.id, "--reveal-existing"]
         wire["workspace"] = ["machine_id": "machine-local", "worktree": "/src/task",
@@ -341,7 +343,7 @@ struct WorkDestinationTests {
         let task = try #require(wave.tasks.items.first)
         var record = try renameFixtureRecord("primary", title: "Conversation", work: .task(id: #require(task.runtime?.workId)))
         var wire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        wire["actions"] = sessionActionFixture(state: "closed") + [["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": NSNull()]]
+        wire["actions"] = sessionActionFixture(state: "closed")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
         record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
             "machine_id": "machine-local", "worktree": "/src/task", "task_id": task.runtime?.workId ?? task.id
@@ -398,7 +400,7 @@ struct WorkDestinationTests {
         let task = try #require(wave.tasks.items.first)
         var record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
         var wire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        wire["actions"] = sessionActionFixture(state: "closed") + [["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": NSNull()]]
+        wire["actions"] = sessionActionFixture(state: "closed")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
         record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
             "machine_id": "machine-local", "worktree": "/src/task", "task_id": task.runtime?.workId ?? task.id
@@ -606,7 +608,7 @@ struct WorkDestinationTests {
         var surface = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
         // Its agent runs on the peer with no terminal showing it.
         surface["state"] = "detached"
-        surface["actions"] = sessionActionFixture(state: "detached") + [["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": NSNull()]]
+        surface["actions"] = sessionActionFixture(state: "detached")
         surface["open_argv"] = ["ssh", "-tt", "peer", "owned-fixture"]
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -972,7 +974,7 @@ struct WorkDestinationTests {
         ]))
         var sessionJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
         sessionJSON["state"] = "detached"
-        sessionJSON["actions"] = sessionActionFixture(state: "detached") + [["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": NSNull()]]
+        sessionJSON["actions"] = sessionActionFixture(state: "detached")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()

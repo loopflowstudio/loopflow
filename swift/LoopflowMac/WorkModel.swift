@@ -225,10 +225,28 @@ final class WorkModel {
               let repoPath, !showsSavedWork, roadmap.errorMessage == nil,
               registry.localMachineId != nil, sessions.errorMessage == nil, let records = sessions.value else { return }
         registry.loadWarmIntent(repository: repository)
+        let savedOrder = Dictionary(registry.restoreCandidates.enumerated().map { ($0.element, $0.offset) },
+                                    uniquingKeysWith: min)
+        let working = visibleTasks.filter { task in
+            guard let state = task.runtime?.status else { return false }
+            return state == .idle || state == .active || state == .moving
+        }.map { task in
+            (task: task, key: workspaceKey(for: .task(id: task.id), repository: repository))
+        }.sorted {
+            let firstVisit = savedOrder[$0.key] ?? Int.max
+            let secondVisit = savedOrder[$1.key] ?? Int.max
+            if firstVisit != secondVisit { return firstVisit < secondVisit }
+            let first = $0.task.runtime?.updatedAt ?? "", second = $1.task.runtime?.updatedAt ?? ""
+            return first == second ? $0.task.id < $1.task.id : first > second
+        }
+        for (task, key) in working {
+            guard let location = task.reference.workspace?.identity else { continue }
+            registry.prefetch(key, title: task.task.name, location: location, completed: false)
+        }
         for key in registry.restoreCandidates {
             guard let task = task(id: key.id)?.task,
                   let location = task.reference.workspace?.identity else { continue }
-            registry.restore(key, title: task.task.name, location: location,
+            registry.prefetch(key, title: task.task.name, location: location,
                 completed: task.runtime?.status.isTerminal ?? task.task.isTerminal)
         }
         let store = registry.sessionStore(repository: repository, repoPath: repoPath, query: query)
@@ -650,7 +668,7 @@ final class WorkModel {
             reason = "The Session checkout changed while opening; retry its current location."
         } else {
             switch item.state {
-            case .failed(let message), .ended(let message): reason = message
+            case .failed(let message), .unavailable(let message), .ended(let message): reason = message
             case .pending where item.record.action(.open) == nil:
                 reason = "Session has no available opening action."
             default: reason = files?.isRefreshingChanges == true ? nil : files?.changesError

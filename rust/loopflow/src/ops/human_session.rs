@@ -254,14 +254,23 @@ pub struct SessionAction {
 }
 
 /// A Run opens nowhere: `lf resume` takes only Sessions.
-pub(crate) fn session_actions(state: SessionState, interactive: bool) -> Vec<SessionAction> {
-    use SessionActionKind::{MoveHere, Open};
+pub(crate) fn session_actions(
+    state: SessionState,
+    interactive: bool,
+    has_provider_history: bool,
+    occupied: bool,
+) -> Vec<SessionAction> {
+    use SessionActionKind::{MoveHere, Open, Reveal};
     if !interactive {
         return Vec::new();
     }
-    let active_client = state == SessionState::Active;
+    let active_client = occupied && state != SessionState::Detached;
     let (label, help) = match state {
         SessionState::Detached => ("Reconnect", "Show the running Session in this terminal"),
+        _ if !occupied && !has_provider_history => (
+            "Start conversation",
+            "No saved provider history; start this conversation explicitly",
+        ),
         _ => ("Open here", "Open this Session in a terminal"),
     };
     let mut actions = vec![(
@@ -279,6 +288,18 @@ pub(crate) fn session_actions(state: SessionState, interactive: bool) -> Vec<Ses
             None,
         ));
     }
+    actions.push((
+        Reveal,
+        "Show conversation",
+        "Continue existing history without taking another terminal's input",
+        if active_client {
+            Some("This conversation is controlled elsewhere; use Take back to continue here")
+        } else if !occupied && !has_provider_history {
+            Some("No saved provider history; start this conversation explicitly")
+        } else {
+            None
+        },
+    ));
     actions
         .into_iter()
         .map(|(kind, label, help, reason)| SessionAction {
@@ -288,6 +309,19 @@ pub(crate) fn session_actions(state: SessionState, interactive: bool) -> Vec<Ses
             unavailable_reason: reason.map(str::to_string),
         })
         .collect()
+}
+
+fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    let occupied = session.agent_process_id.is_some()
+        && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead;
+    let mut actions = session_actions(
+        session_state(session),
+        session.interactive,
+        session.has_provider_history,
+        occupied,
+    );
+    name_session_holder(&mut actions, session.terminal_id.as_deref());
+    actions
 }
 
 fn name_session_holder(actions: &mut [SessionAction], terminal: Option<&str>) {
@@ -568,8 +602,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         },
     };
     let state = session_state(session);
-    let mut actions = session_actions(state, session.interactive);
-    name_session_holder(&mut actions, session.terminal_id.as_deref());
+    let mut actions = projected_actions(session);
     let open_argv = match human_session_argv(&session.id) {
         Ok(argv) => argv,
         Err(error) => {
@@ -998,20 +1031,12 @@ pub(crate) async fn reveal(
     } else {
         None
     };
-    record.actions.push(SessionAction {
-        kind: SessionActionKind::Reveal,
-        label: "Show conversation".to_string(),
-        help: "Continue existing history without taking another terminal's input".to_string(),
-        unavailable_reason: reason.clone(),
-    });
-    if attachable.is_none() && native.is_none() && !occupied {
-        if let Some(action) = record
-            .actions
-            .iter_mut()
-            .find(|action| action.kind == SessionActionKind::Open)
-        {
-            action.label = "Start conversation".to_string();
-        }
+    if let Some(action) = record
+        .actions
+        .iter_mut()
+        .find(|action| action.kind == SessionActionKind::Reveal)
+    {
+        action.unavailable_reason = reason.clone();
     }
     if !record
         .actions
@@ -1432,8 +1457,7 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
     let metadata = viewed_summary(&store.sqlite, &session.id)?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let mut actions = session_actions(state, session.interactive);
-    name_session_holder(&mut actions, metadata.terminal_id.as_deref());
+    let actions = projected_actions(&metadata);
     let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
         (None, _) if metadata.independent => SessionGraphMembership::Independent,

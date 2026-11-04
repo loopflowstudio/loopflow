@@ -7,6 +7,12 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": null
       }
     ]
   },
@@ -24,6 +30,12 @@
         "label": "Take back",
         "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
       }
     ]
   },
@@ -35,6 +47,12 @@
         "label": "Reconnect",
         "help": "Show the running Session in this terminal",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": null
       }
     ]
   },
@@ -45,6 +63,12 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ]

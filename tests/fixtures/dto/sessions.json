@@ -37,6 +37,12 @@
         "label": "Take back",
         "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
       }
     ],
     "graph_membership": {

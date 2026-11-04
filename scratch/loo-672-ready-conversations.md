@@ -1,7 +1,7 @@
 # LOO-672 — Ready Task conversations
 
-Accepted design, reconciled November 4, 2026 against the working diff on
-`a32c385044`, merged infrastructure through `ac8e088f5f`, and fresh LOO-717/498
+Accepted design, reconciled November 4, 2026 against the working implementation
+above `7bc74405fa`, merged infrastructure through `ac8e088f5f`, and fresh LOO-717/498
 Task status. Jack Heart approved the revised November 4 design: “ok, proceed.”
 Implementation and review publication are authorized through interactive demo;
 shipping, merging and installation are not. The pre-infrastructure plan is
@@ -32,6 +32,15 @@ The selected Task opens first after relaunch, followed by the bounded saved warm
 set where safe. Saved layout and status are display evidence, not retention or
 readiness. Cold return paints existing history while reconnecting the surviving
 owner or resuming the same provider thread; connecting and failure remain visible.
+
+Jack Heart added on November 4: “make sure to prefetch working tasks on load”
+(source: `loo-672-load-prefetch.md`). Fresh repository state discovers idle, active
+and moving Tasks, including those absent from saved recent history. The selected
+Task leads, then saved recent working Tasks, then other working Tasks by their
+shared update time; other saved unfinished Tasks fill remaining space. Prefetch
+uses the existing reveal queue and location validation, preserves Close, and
+never waits before rendering. A Task with no existing conversation stays
+unavailable; prefetch never creates one.
 
 The initial engineering limits are eight recent unfinished Task conversations
 across repository windows and two concurrent preparations. Visible panes remain
@@ -88,24 +97,65 @@ now supply confirmed-host-exit recovery, per-process Desktop occurrences and
 optional retaining-owner evidence. Parent design/coordination details are preserved
 at that commit. No competing migration or cleanup executor was introduced.
 
-## Delete — do not maintain
-
-- Removed automatic resume/adopt-open in `prepareLinkedTask` /
-  `connectLinkedOpening`; explicit Start/New and Take back remain.
-- Removed selection-discarding `WorkModel.restore` behavior and its nil-selection
-  expectations in `WorkCacheTests`; Machine-change invalidation remains.
-- Removed cached-reading authorization of background retention/preparation.
-  Saved layout, drafts and history remain display evidence.
-- Removed the duplicate restore-location preflight in `revealConversations`;
-  `revealConversation` checks location and cancellation before adoption.
-- Parent integration removed stable `desktop:<Machine>:<Task>` occurrences and
-  their persisted wall-clock revision keys. Per-process owner evidence now uses
-  LOO-717's sole retirement path and migration.
-
-The three reconciled implementation gaps are closed. Close/eviction also settle
+Source inspection at `7bc74405fa` confirms the three earlier implementation gaps
+are closed: linked preparation/adoption uses reveal, WorkCache preserves selection
+behind fresh-read validation, and Desktop reports per-instance owner evidence.
+Machine-change invalidation remains. Close/eviction also settle
 the opening receipt as failed, so a discarded late result leaves no permanent
 opening indicator. Focused checks passed; gate and interactive demo retain the
 boundaries below.
+
+## Concept review — November 4
+
+Outcome of the follow-up concept review: nothing to change in the design and no
+open product choice. Recovery and the later load-prefetch requirement are
+implemented, with focused headless passes recorded above. This
+follows Jack Heart's accepted requirement that missing history needs explicit
+Start/New; it does not authorize a new thread through navigation.
+
+The review traced normal return, missing-history recovery, competing ownership
+and cached-to-fresh repository load through the shared actions and reveal claim.
+Keep the existing usage guidance and lifecycle owners. No next implement direction
+is added; the next proof remains gate coverage and the native demo below. This
+review inspected source and fixtures without rerunning runtime checks or claiming
+native acceptance.
+
+Normal return, takeover, Close and restart retain the accepted model above:
+one durable Session, one input owner, bounded Desktop warmth, and LOO-717's
+release owner. No additional lifecycle or persistence owner is needed.
+
+The counterexample at `7bc74405fa` was a preparation-only **Start conversation**
+label: ordinary Session refresh replaced it with **Resume**, while the opening
+refusal survived as terminal `.ended` output. Preparation-only tests missed the
+refresh. The review illustration preserves that dated finding; it is not a
+description of the repaired working tree.
+
+The shared Rust Session projection now supplies Start, Take back and reveal
+availability to preparation, ordinary listings and resume explanation. It reads
+the current input's recorded resume reference,
+including imported history before attachment. Native-history, account, checkout
+and non-replacing claim validation remain at launch. No persisted recovery owner
+or migration was added.
+
+Desktop renders the supplied action label and help without English-label
+conditions. A refused reveal has transient `.unavailable` state, distinct from
+terminal `.ended` output; fresh actions can replace it with Take back or clear it
+when saved history arrives. A transient failure retains Retry, which prepares
+reveal rather than explicit resume. The README explains the explicit Start rule.
+
+Saved and newly discovered Tasks share `prefetch` admission; the separate
+registry `restore` path is removed. Saved non-working Tasks fill spare capacity
+without evicting working Tasks. Ordering resolves each Task key and saved rank
+once; location validation and LOO-717 retention remain unchanged.
+
+Focused proof covers reveal → ordinary read → Start with no attachment or input
+publication; current holder and imported-history changes; rendered Start and
+Take back; and non-replacing Retry. The fresh-load fixture discovers twelve working Tasks
+without saved visits, warms eight with two preparations, excludes other Task
+states, preserves saved Close and leaves selection unchanged while loading
+completes. Restart fixtures retain selected-first preparation and fresh-read
+validation. Native/provider demonstration remains with
+demo. The review illustration is historical evidence, not a native demonstration.
 
 ## Infrastructure and proof boundaries
 
@@ -114,7 +164,8 @@ thin viewers, protected idle retirement, persisted VT history, separate appearan
 and input ownership, and current provider status. Codex/OpenCode retain launchers;
 VT replay has bounded history and does not repaint images. Reuse those owners.
 
-LOO-717 owns eligible two-minute idle-agent retirement and fifteen-minute-total
+LOO-717/#1811 is published and stands at demo; its latest integrated base is
+`b81df60579`. It owns eligible two-minute idle-agent retirement and fifteen-minute-total
 completed-and-away shell/checkout retirement, cancellation on return, protected
 work and other-host retention. Eligible uncommitted files may be discarded under
 its existing safeguards; LOO-672 adds no deletion policy. LOO-498/#1814 remains
@@ -143,4 +194,37 @@ substitute. No unresolved product decision remains before that evidence.
 Product GOAL and full MEMORY were read; no immediate child memory directories
 exist in this checkout. The Wave records durable direction separately from this plan.
 
-Checks (November 4): `scripts/test_desktop.sh --jobs 4 --filter 'WorkDestinationTests|WorkCacheTests|WorkspaceRetentionTests|DTOFixtureTests.taskHostOwner'` passed 93 tests; after the opening-receipt correction, `--filter WorkDestinationTests.lateSidebarRevealIsDiscarded` passed both Close/eviction cases. After simplification, `scripts/test_desktop.sh --jobs 4 --filter 'WorkCacheTests|WorkspaceSessionLifecycleTests|WorkDestinationTests.lateSidebarRevealIsDiscarded'` passed 24 tests and `cargo test -p loopflow --test transport_tests prepared_reveal_preserves_a_later_controlling_viewer` passed. The unchanged `cargo test -p loopflow --lib reveal_requires_history_and_never_publishes_a_first_turn` and `cargo test -p loopflow --lib retirement_confirmed_host_exit_finishes_without_desktop_and_still_waits_for_shell_jobs` each passed one test; `cargo fmt --all --check`, `git diff --check` and `lf context` passed. Gate owns broader suites/Clippy; configured/rendered usability and memory proof remain with demo.
+Checks (November 4): `git diff --check` and `lf context` — passed after documentation reconciliation; no runtime edits or test reruns. Reused `scripts/test_desktop.sh --jobs 4 --filter 'WorkspaceSessionLifecycleTests|WorkDestinationTests|WorkCacheTests|WorkspaceRetentionTests'` — build and 105 tests passed headless with inherited `LF_*` unset and stdin closed; Rust recovery retains its recorded 18-test pass, plus DTO and entry/restore/owner-evidence passes. Gate owns affected suites, Clippy/formatting and Linux; demo owns native usability and memory. Earlier evidence: `7bc74405fa:scratch/loo-672-ready-conversations.md`.
+
+
+## Review publication evidence — November 4
+
+`lf sync --manual` completed without conflicts against the accepted LOO-717
+parent `b81df60579`; the planned strategy is now noop. Reviewed the entire parent
+range and uncommitted recovery/prefetch work. Publication remains for review,
+with interactive demo before any landing decision.
+
+`uv run python scripts/test.py --base b81df60579 --reuse-passing --rust-filter
+'test(ops::human_session::) | test(store::sqlite::sessions::) | test(transport::) |
+test(lf::commands::write::) | test(session_cli_tests::) | test(agent_startup_tests::) |
+test(transport_tests::) | test(served_reads::) | test(dto_fixtures::) | binary(lf) |
+binary(session_lifecycle_tests)'` passed 218 Rust tests, inventory, formatting,
+CLI build and Clippy. The initial architecture check exposed three inherited
+LOO-717 tables missing from the map; documented their existing owners in the
+architecture map and table inventory, then `scripts/check_architecture.py` passed.
+
+The headless Desktop build passed. The broad Swift run was stopped by the runner
+for host security pressure: syspolicyd held 225% CPU for three samples above the
+200% limit. It was not a product timeout or test assertion; that run is incomplete.
+The previous 105-test focused pass remains recorded above. Full Swift and broader
+transport coverage remain for gate/CI; Linux isolation remains with capable CI.
+`check_swift_multiplatform_boundaries.py`, `cargo fmt` and `git diff --check` passed.
+
+The initial filter did not select standalone served_reads or transport_tests.
+After checking host pressure, ran the served-read contract (1 passed, 106.38s,
+including its isolated CLI fixture build) and
+`transport_tests prepared_reveal_preserves_a_later_controlling_viewer` (1 passed,
+5.55s), both through `scripts/test_network.py` with inherited LF variables unset
+and stdin closed. Total publication Rust evidence: 220 passing tests. Logs are in
+`.lf/tmp/gate/run-56483/`, `/tmp/loo-672-served-reads.log` and
+`/tmp/loo-672-reveal-race.log`. No native usability or memory claim follows.

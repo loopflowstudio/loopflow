@@ -479,6 +479,86 @@ struct WorkspaceSessionLifecycleTests {
         #expect(await calls.count == 1)
     }
 
+    @Test("Missing history remains an explicit Start through refresh and rendering")
+    func missingHistoryRecovery() async throws {
+        let missing = try missingHistorySession()
+        let wire = String(decoding: try JSONEncoder().encode(missing), as: UTF8.self)
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            args.contains("--reveal-existing") ? wire : session(id: missing.id, state: "closed")
+        })
+        store.reconcile([missing])
+        await store.select(missing.id)
+        store.reconcile([missing])
+        let before = try #require(store.sessions.first)
+        #expect(before.state == .unavailable(try #require(missing.action(.reveal)?.unavailableReason)))
+        #expect(before.surface == nil)
+        #expect(before.lastScreen == nil)
+        let view = recoveryPane(store)._sessionPlaceholder(before)
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "No longer open here") }
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "session-open-here-\(missing.id)").button()
+        #expect(try button.labelView().text().string() == missing.action(.open)?.label)
+        try button.tap()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.surface == nil, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", missing.id])
+    }
+
+    @Test("Fresh ownership replaces unavailable opening with Take back")
+    func missingHistoryThenHolder() async throws {
+        let missing = try missingHistorySession()
+        let store = SessionsStore(repoPath: "/tmp/repo")
+        store.reconcile([missing])
+        store.adoptPreparation(missing, intent: .reveal)
+        let active = try #require(records([session(id: missing.id, state: "active")]).first)
+        store.reconcile([active])
+        let current = try #require(store.sessions.first)
+        #expect(current.state == .elsewhere)
+        #expect(current.surface == nil)
+        let view = recoveryPane(store)._sessionPlaceholder(current)
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "session-move-here-\(missing.id)").button()
+        #expect(try button.labelView().find(text: try #require(active.action(.moveHere)?.label)).string() == active.action(.moveHere)?.label)
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-open-here-\(missing.id)")
+        }
+    }
+
+    @Test("Fresh saved history clears an unavailable opening without starting it")
+    func missingHistoryThenSavedHistory() throws {
+        let missing = try missingHistorySession()
+        let store = SessionsStore(repoPath: "/tmp/repo")
+        store.reconcile([missing])
+        store.adoptPreparation(missing, intent: .reveal)
+        store.reconcile(try records([session(id: missing.id, state: "closed")]))
+        #expect(store.sessions.first?.state == .pending)
+        #expect(store.sessions.first?.surface == nil)
+    }
+
+    @Test("Retry after a transient failure only reveals and retains a newly observed holder")
+    func retryRecoveryNeverReplaces() async throws {
+        let reads = AttachmentReads()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            await reads.record()
+            #expect(args.contains("--reveal-existing"))
+            if await reads.count == 1 { throw RegistryQueryError("Temporary transport failure") }
+            return session(id: "retry", state: "active")
+        })
+        let closed = try #require(records([session(id: "retry", state: "closed")]).first)
+        store.reconcile([closed])
+        await store.select(closed.id)
+        store.reconcile([closed])
+        let failed = try #require(store.sessions.first)
+        #expect(failed.surface == nil)
+        let view = recoveryPane(store)._sessionPlaceholder(failed)
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "session-open-here-retry").button()
+        #expect(try button.labelView().text().string() == "Retry")
+        try button.tap()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.state != .elsewhere, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.first?.state == .elsewhere)
+        #expect(store.sessions.first?.surface == nil)
+    }
+
     @Test("Eviction fences a preparation that returns after release")
     func releaseFencesLatePreparation() async throws {
         let started = AsyncStream<Void>.makeStream(), response = AsyncStream<Void>.makeStream()
@@ -562,6 +642,24 @@ private actor AttachmentReads {
 }
 
 @MainActor
+private func recoveryPane(_ store: SessionsStore) -> SessionPaneView {
+    let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task"),
+        title: "Task", location: nil, localMachineId: fixtureMachineId)
+    let model = WorkModel(query: store.query, repoPath: store.repoPath)
+    return SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
+        sessions: store, workspace: workspace, model: model, onFocus: { _, _ in })
+}
+
+private func missingHistorySession() throws -> SessionRecord {
+    var wire = try #require(JSONSerialization.jsonObject(with: Data(session(id: "missing", state: "closed").utf8)) as? [String: Any])
+    wire["actions"] = [
+        ["kind": "open", "label": "Start conversation", "help": "Start explicitly", "unavailable_reason": NSNull()],
+        ["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": "No saved provider history; start this conversation explicitly"],
+    ]
+    return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+}
+
+@MainActor
 private func item(_ store: SessionsStore, _ id: String) -> SessionItem? {
     store.sessions.first { $0.id == id }
 }
@@ -587,7 +685,7 @@ private func session(id: String, state: String, primary: Bool = false) -> String
       "state": "\(wire)", "availability": \(state == "available" ? "\"available\"" : "null"),
       "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
-      "actions": \(sessionActionFixtureJSON(state: wire).dropLast()), {"kind":"reveal","label":"Show conversation","help":"Existing history","unavailable_reason":null}],
+      "actions": \(sessionActionFixtureJSON(state: wire)),
       "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
       "open_argv": ["lf", "session", "resume", "\(id)"]
     }

@@ -296,9 +296,45 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(workspace.state, .unavailable("The attachment belongs to a different Session"))
         XCTAssertEqual(workspace.selected?.primarySession, task.primarySession)
         XCTAssertTrue(output.isEmpty)
-        XCTAssertThrowsError(try client.link.requestControl(), "Rejected attachment must be closed")
+        XCTAssertThrowsError(try client.link.requestControl(size: TerminalGeometry(columns: 80, rows: 24)), "Rejected attachment must be closed")
         XCTAssertThrowsError(try screen.inspect().find(button: "Reconnect"))
         XCTAssertThrowsError(try screen.inspect().find(button: "Use keyboard"))
+    }
+
+    func testDelayedKeyboardGrantDoesNotQueueTypingOrRepeatTakeover() async throws {
+        let client = TestClient()
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        await workspace.open(try await client.workingTasks()[0])
+        await settle()
+        client.transport.delayControl = true
+        workspace.requestControl()
+        workspace.requestControl()
+        workspace.send(Data("do not queue".utf8))
+        XCTAssertEqual(workspace.state, .requestingControl)
+        XCTAssertEqual(client.transport.controlRequests, 1)
+        XCTAssertTrue(client.terminal.draft.isEmpty)
+        try client.link.requestControl(size: TerminalGeometry(columns: 44, rows: 20))
+        await settle()
+        XCTAssertEqual(workspace.state, .controlling)
+        XCTAssertTrue(client.terminal.draft.isEmpty)
+        workspace.send(Data("deliberate input".utf8))
+        XCTAssertEqual(client.terminal.draft, "deliberate input")
+    }
+
+    func testMissingOwnerRemainsUnavailableAfterBackgrounding() async throws {
+        let client = TestClient()
+        client.ownerUnavailable = true
+        let workspace = MobileWorkspace(client: client)
+        defer { workspace.leave() }
+        let task = try await client.workingTasks()[0]
+        await workspace.open(task)
+        workspace.suspend()
+        XCTAssertEqual(workspace.state, .unavailable("No running owner"))
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        XCTAssertThrowsError(try screen.inspect().find(button: "Reconnect"))
+        XCTAssertThrowsError(try screen.inspect().find(button: "Use keyboard"))
+        XCTAssertNil(client.transport)
     }
 
     func testAcceptedInputThenSendErrorRestoresDraftWithoutReplayOrDuplicateSubmission() async throws {
@@ -405,9 +441,11 @@ private final class TestClient: MobileClient {
     var link: FixtureAttachment { transport.link }
     var attachFailures = 0
     var attachmentSessionID: String?
+    var ownerUnavailable = false
 
     func workingTasks() async throws -> [WorkViewPlan.Content] { try await FixtureClient().workingTasks() }
     func attach(sessionID: String) async throws -> any MobileAttachment {
+        if ownerUnavailable { throw SessionUnavailable("No running owner") }
         if attachFailures > 0 {
             attachFailures -= 1
             throw URLError(.cannotConnectToHost)
@@ -422,12 +460,17 @@ private final class TestClient: MobileClient {
 private final class TestAttachment: MobileAttachment {
     let link: FixtureAttachment
     var failNextSendAfterAccept = false
+    var delayControl = false
+    var controlRequests = 0
     var sessionID: String { link.sessionID }
     var events: AsyncStream<MobileTerminalEvent> { link.events }
 
     init(link: FixtureAttachment) { self.link = link }
 
-    func requestControl() throws { try link.requestControl() }
+    func requestControl(size: TerminalGeometry) throws {
+        controlRequests += 1
+        if !delayControl { try link.requestControl(size: size) }
+    }
     func send(_ bytes: Data) throws {
         try link.send(bytes)
         if failNextSendAfterAccept {

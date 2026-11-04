@@ -38,6 +38,9 @@ targets:
       - path: ../tests/fixtures/dto/machine
         type: folder
         buildPhase: resources
+      - path: ../tests/fixtures/dto/owner
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: LoopflowiOS
       - package: ViewInspector

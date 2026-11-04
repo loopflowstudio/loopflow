@@ -1,0 +1,126 @@
+import Foundation
+import Loopflow
+
+/// Local saved state, stored only in Keychain. Never include this value in logs.
+struct MachineCredential: Codable {
+    let endpoint: URL
+    let deviceID: String
+    let name: String
+    let token: String
+    // A newly issued grant is saved before its first bootstrap succeeds.
+    let machineID: String?
+}
+
+/// One application operation per WebSocket. Message boundaries are unrelated
+/// to the Machine/owner framing; all reads and writes are bounded.
+@MainActor
+final class MachineConnection {
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        return URLSession(configuration: configuration)
+    }()
+    private let socket: URLSessionWebSocketTask
+    private var buffered = Data()
+    private var closed = false
+    private var timedOut = false
+
+    init(endpoint: URL, token: String, path: String = "/v1/machine") throws {
+        let url = try Self.socketURL(endpoint: endpoint, path: path)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        socket = Self.session.webSocketTask(with: request)
+        socket.maximumMessageSize = 64 * 1024
+        socket.resume()
+    }
+
+    static func socketURL(endpoint: URL, path: String) throws -> URL {
+        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
+              components.scheme == "https", components.host?.hasSuffix(".ts.net") == true,
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil,
+              components.path.isEmpty || components.path == "/" else {
+            throw RegistryQueryError("Use the HTTPS address provided by this Machine’s Tailscale setup")
+        }
+        components.scheme = "wss"
+        components.path = path
+        guard let url = components.url else { throw RegistryQueryError("Invalid Machine address") }
+        return url
+    }
+
+    func close() {
+        guard !closed else { return }
+        closed = true
+        socket.cancel(with: .goingAway, reason: nil)
+        buffered.removeAll()
+    }
+
+    func deadline(seconds: Int = 15) -> Task<Void, Never> {
+        Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(seconds))
+                self?.timedOut = true
+                self?.close()
+            } catch { /* The operation completed or its owner canceled it. */ }
+        }
+    }
+
+    func send(_ bytes: Data) async throws {
+        guard !closed else { throw RegistryQueryError("Machine connection is closed") }
+        let timeout = deadline(seconds: 5)
+        defer { timeout.cancel() }
+        var index = bytes.startIndex
+        while index < bytes.endIndex {
+            try Task.checkCancellation()
+            let end = min(index + 64 * 1024, bytes.endIndex)
+            try await socket.send(.data(Data(bytes[index..<end])))
+            index = end
+        }
+    }
+
+    func request(_ operation: MachineOperation) async throws -> MachineResponse {
+        let timeout = deadline()
+        defer { timeout.cancel() }
+        let id = UUID().uuidString
+        let body = try JSONEncoder().encode(MachineRequest(version: 1, id: id, operation: operation))
+        guard body.count <= 65536 else { throw RegistryQueryError("Machine request exceeds its limit") }
+        var length = UInt32(body.count).bigEndian
+        var bytes = withUnsafeBytes(of: &length) { Data($0) }
+        bytes.append(body)
+        try await send(bytes)
+        let header = try await read(4)
+        let size = header.reduce(0) { ($0 << 8) | Int($1) }
+        guard size <= 32 * 1024 * 1024 else { throw RegistryQueryError("Machine reading exceeds its limit") }
+        let response = try JSONDecoder().decode(MachineResponse.self, from: await read(size))
+        guard response.id == id else { throw RegistryQueryError("Machine response belongs to another request") }
+        if case .error(_, let message) = response.result { throw RegistryQueryError(message) }
+        return response
+    }
+
+    func receiveBytes() async throws -> Data {
+        if !buffered.isEmpty {
+            let data = buffered
+            buffered = Data()
+            return data
+        }
+        return try await nextMessage()
+    }
+
+    private func read(_ count: Int) async throws -> Data {
+        while buffered.count < count { buffered.append(try await nextMessage()) }
+        let result = Data(buffered.prefix(count))
+        buffered.removeFirst(count)
+        return result
+    }
+
+    private func nextMessage() async throws -> Data {
+        guard !closed else { throw RegistryQueryError(timedOut ? "The Machine did not respond in time" : "Machine connection closed") }
+        return try await withTaskCancellationHandler {
+            guard case .data(let data) = try await socket.receive() else {
+                throw RegistryQueryError("The Machine sent an unsupported message")
+            }
+            return data
+        } onCancel: { [socket] in socket.cancel(with: .goingAway, reason: nil) }
+    }
+}

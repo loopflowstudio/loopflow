@@ -383,6 +383,63 @@ mod tests {
     };
 
     #[test]
+    fn mobile_observer_fixture_is_the_actual_owner_stream() {
+        let mut bytes = frame(
+            Tag::Reply,
+            &serde_json::to_vec(&super::Outgoing {
+                answers: 1,
+                seq: 0,
+                reply: super::Reply::Attached {
+                    viewer: "mobile-viewer".into(),
+                    reconnect: "test-reconnect".into(),
+                    nonce: "fixture-nonce".into(),
+                    token: None,
+                    terminal: true,
+                    grace_ms: 60_000,
+                    owner: Some("desktop-viewer".into()),
+                },
+            })
+            .unwrap(),
+        );
+        bytes.extend(frame(Tag::Snapshot, b"\x1b[?2004h\x1b[2J\x1b[HHello "));
+        bytes.extend(frame(Tag::Snapshot, b"from a retained Session\r\n> "));
+        let resize = event(
+            "fixture-nonce",
+            1,
+            Event::Resize {
+                rows: 40,
+                cols: 120,
+            },
+        );
+        bytes.extend(frame(Tag::Out, &resize[..12]));
+        let mut tail = resize[12..].to_vec();
+        tail.extend(event(
+            "fixture-nonce",
+            2,
+            Event::Owner {
+                viewer: Some("desktop-viewer".into()),
+                name: Some("Desktop".into()),
+                held: false,
+            },
+        ));
+        tail.extend(b"live\r\n");
+        tail.extend(event(
+            "other-nonce",
+            3,
+            Event::Control {
+                held: false,
+                notice: None,
+                successor: None,
+            },
+        ));
+        bytes.extend(frame(Tag::Out, &tail));
+        assert_eq!(
+            bytes,
+            include_bytes!("../../../../tests/fixtures/dto/owner/observer.bin")
+        );
+    }
+
+    #[test]
     fn a_maximum_frame_can_share_a_read_with_the_next_frame() {
         let payload = vec![b'x'; MAX_PAYLOAD];
         let mut bytes = frame(Tag::Input, &payload);

@@ -12,8 +12,7 @@ struct LoopflowiOSApp: App {
             if fixture {
                 MobileTaskList(client: FixtureClient())
             } else {
-                ContentUnavailableView("Machine connection unavailable", systemImage: "network.slash",
-                    description: Text("This build contains an offline fixture. Live Machine pairing is not configured."))
+                MachineConnectionView()
             }
         }
     }
@@ -22,6 +21,8 @@ struct LoopflowiOSApp: App {
 struct MobileTaskList: View {
     @State private var workspace: MobileWorkspace
     @State private var search = ""
+    private let connectionLabel: String
+    private let onForget: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
@@ -29,7 +30,11 @@ struct MobileTaskList: View {
         workspace.tasks.filter { $0.matchesMobileSearch(search) }
     }
 
-    init(client: any MobileClient) { _workspace = State(initialValue: MobileWorkspace(client: client)) }
+    init(client: any MobileClient, connectionLabel: String = "Offline fixture", onForget: (() -> Void)? = nil) {
+        _workspace = State(initialValue: MobileWorkspace(client: client))
+        self.connectionLabel = connectionLabel
+        self.onForget = onForget
+    }
 
     var body: some View {
         NavigationStack {
@@ -48,7 +53,7 @@ struct MobileTaskList: View {
                     }
                     ForEach(visibleTasks, id: \.work) { task in
                         NavigationLink {
-                            MobileSessionView(task: task, workspace: workspace, theme: theme)
+                            MobileSessionView(task: task, workspace: workspace, theme: theme, connectionLabel: connectionLabel)
                         } label: {
                             MobileTaskRow(task: task, theme: theme)
                         }
@@ -70,7 +75,7 @@ struct MobileTaskList: View {
                     .textCase(nil)
                     .accessibilityElement(children: .combine)
                 } footer: {
-                    Label("Offline fixture · no Machine connection", systemImage: "iphone")
+                    Label(connectionLabel, systemImage: "iphone")
                         .font(Typography.caption(12))
                         .foregroundStyle(theme.palette.textSecondary)
                         .padding(.top, 16)
@@ -96,6 +101,20 @@ struct MobileTaskList: View {
             .searchable(text: $search, prompt: "Find a Task")
             .navigationTitle("Tasks")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                if let onForget {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Text(connectionLabel)
+                            Button("Forget Machine", role: .destructive) {
+                                workspace.leave()
+                                onForget()
+                            }
+                        } label: { Image(systemName: "network") }
+                        .accessibilityLabel("Machine connection")
+                    }
+                }
+            }
         }
         .tint(theme.palette.accentInk)
         .environment(\.palette, theme.palette)
@@ -150,6 +169,7 @@ struct MobileSessionView: View {
     let task: WorkViewPlan.Content
     let workspace: MobileWorkspace
     let theme: ThemeDefinition
+    var connectionLabel: String = "Offline fixture"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -162,12 +182,12 @@ struct MobileSessionView: View {
                         Text(workspace.state.label)
                             .font(Typography.body(14))
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("Offline fixture")
+                        Text(connectionLabel)
                             .font(Typography.caption(11))
                             .foregroundStyle(theme.palette.textSecondary)
                     }
                     Spacer(minLength: 0)
-                    if workspace.state == .loading {
+                    if workspace.state == .loading || workspace.state == .requestingControl {
                         ProgressView().accessibilityLabel("Opening Session")
                     }
                     if workspace.state == .viewing {

@@ -20,10 +20,19 @@ the owner's grid. Layout changes send a resize only when the granted size change
 A fresh keyboard grant restores the software keyboard even if it was hidden in
 the previous attachment. Theme colors are installed only when the theme changes.
 
-Without `--fixture`, this build displays an unavailable Machine connection.
-It contains no live network endpoint, pairing, provider launch or on-phone CLI.
-The fixture label stays visible in both screens. Backgrounding closes the
-attachment; **Reconnect** restores the same fixture Session as an observer.
+Disable `--fixture` to connect to a Machine. Sign into host Tailscale on both
+devices, enable the Machine service’s private HTTPS carrier, then import or paste
+its one-use setup file and choose **Connect Machine**.
+[Machine setup commands](../../rust/loopflow/src/machine_service/README.md#pair-a-phone-through-host-tailscale)
+currently require manual host setup; automatic discovery and QR pairing remain
+unfinished. The app saves the device grant in Keychain, pins the Machine identity
+on first bootstrap, reads actual open Tasks and attaches their recorded Session
+owners. It installs no CLI on the phone and never starts a provider.
+
+The connected Machine’s hostname replaces the fixture label in both screens.
+**Forget Machine** removes the phone’s saved credential; use the Machine’s device
+revocation command to withdraw its server grant. Backgrounding closes the
+attachment; **Reconnect** restores the same Session as an observer.
 Input and geometry require a fresh grant. Failed input is never queued or retried.
 If opening or reconnecting fails, **Reconnect** stays on the Session screen.
 Inspect the restored prompt before resubmitting input whose delivery was uncertain.
@@ -33,10 +42,12 @@ The app uses the shared Loopflow fonts, Light/Dark themes and WorkViewPlan types
 `MobileClient` is an injectable UI boundary, not a serialized protocol.
 `MachineProtocol.swift` and `tests/fixtures/dto/machine/` come from LOO-593 at their
 canonical paths. Client-authored Task data passes through that codec; it is not
-a recorded Machine reading. LOO-593's current local service admits WorkViewPlan
-and repository-path reads and resolves a Session to its existing owner. Joining
-that service still requires authenticated remote admission and the binary owner
-adapter; its private Unix socket must not be forwarded to remote callers.
+a recorded Machine reading. The live adapter uses authenticated WSS to the
+Machine service’s separate remote admission boundary. Its private Unix socket
+is never forwarded to remote callers. OwnerStream consumes Rust’s binary frames
+and nonce-qualified events; snapshots are assembled before rendering at the
+owner’s geometry. Every reconnect requests a fresh screen. Output/input queues,
+message sizes and connection deadlines are bounded.
 The deterministic peer owns its draft and consumes actual terminal bytes.
 Its small line editor is test/demo code, not another server or Session runtime.
 
@@ -67,14 +78,16 @@ env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') xcodebuild test \
   -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -derivedDataPath swift/.build/ios -skipPackagePluginValidation \
-  -parallel-testing-enabled NO -only-testing:LoopflowiOSTests/MobileTerminalTests \
-  CODE_SIGNING_ALLOWED=NO < /dev/null
+  -parallel-testing-enabled NO \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- < /dev/null
 ```
 
 Xcode 26.2/iOS 26.2 simulator is the tested toolchain; deployment target is iOS 18.
 The pinned package's build plugin only generates source-control version metadata;
 `-skipPackagePluginValidation` permits that reviewed plugin in headless builds.
-The tests mount the actual UIKit terminal and assert editing, marked-text commit, combining characters,
+Keep ad-hoc simulator signing enabled: an unsigned host cannot access Keychain.
+Xcode supplies the simulator’s application identifier; device signing and
+TestFlight belong to LOO-721. The tests mount the actual UIKit terminal and assert editing, marked-text commit, combining characters,
 multiline paste, native replacement, selection, rendered accessibility text,
 viewport resizing, preserved observer geometry, control loss, repeated in-screen retry, identity rejection and
 accepted-then-failed input without replay or duplicate submission. They also consume the
@@ -83,8 +96,24 @@ backend's shared Machine fixtures, without inventing a second codec.
 Device demo still owns actual software-keyboard layout, CJK keyboard/dictation
 quality, physical key combinations, VoiceOver navigation and sustained-output
 energy use. The tests exercise UIKit input methods; they do not manufacture real
-hardware presses or prove every IME. Live owner snapshots, canonical geometry
-while observing, authenticated control handoff, bounded output recovery and
-Tailscale are integration work. Contextual approvals/Stop stay absent until the
+hardware presses or prove every IME. The owner decoder consumes a Rust-generated binary fixture across fragmented
+reads. Actual Tailscale pairing, Keychain persistence, Machine identity and empty
+Task reads have passed in Simulator against an isolated service. Editable live
+owners, authenticated control handoff, bounded output recovery and a separate
+physical phone remain integration work. Contextual approvals/Stop stay absent until the
 backend supplies trustworthy state and action semantics; terminal prompts remain
 answerable through ordinary typing.
+
+
+### Opt-in host Tailscale acceptance
+
+`MachineConnectionIntegrationTests` skips unless the installed simulator app’s
+Documents directory contains `LoopflowIntegration/setup.json`. Supply a fresh
+setup file generated by an **isolated, empty** development Machine registry and
+its temporary host Tailscale Serve route. Transfer the file directly; never print
+its credential. Then run the signed test command above. The test removes the
+setup file, redeems it, saves/reloads the grant, checks bootstrap identity and
+reads the empty Task list twice. It restores any prior simulator credential.
+Afterward revoke the test device, stop that development service and remove only
+its temporary Serve route. This test deliberately does not assert that an empty
+Task list proves Session attachment.

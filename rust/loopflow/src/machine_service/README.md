@@ -61,8 +61,10 @@ stopping execution. Browser origins and credentials in URLs are rejected.
 The remote carrier checks its own device grant before shared operation dispatch.
 It never forwards to the private Unix socket or trusts a reverse proxy's UID or
 identity headers. The same connection capacity covers both carriers.
-Phone adapter, setup UI and actual host-Tailscale/device proof remain integration
-work; this endpoint alone does not make the current iOS fixture live.
+The native iOS adapter imports/pastes this setup file and stores its grant in
+Keychain. Pairing and Work reads have passed through actual host Tailscale in
+Simulator. Editable owner attachment, control handoff and separate physical-phone
+acceptance remain integration work; endpoint availability alone proves none of them.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/MachineProtocol.swift`
 mirrors them. Executable fixtures live in `tests/fixtures/dto/machine/`.

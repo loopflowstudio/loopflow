@@ -2,11 +2,14 @@ import Foundation
 import Loopflow
 import Observation
 
-/// The fixture exercises the backend-owned envelope and existing Work projection.
-/// Live view-plan admission remains with the Machine service.
+/// The fixture and live client consume the same backend-owned Work projection.
 func decodeMobileTasks(_ data: Data, requestID: String) throws -> [WorkViewPlan.Content] {
     let response = try JSONDecoder().decode(MachineResponse.self, from: data)
     guard response.id == requestID else { throw RegistryQueryError("Received a different Task request") }
+    return try mobileTasks(response)
+}
+
+func mobileTasks(_ response: MachineResponse) throws -> [WorkViewPlan.Content] {
     guard case .read(let output) = response.result else {
         if case .error(_, let message) = response.result { throw RegistryQueryError(message) }
         throw RegistryQueryError("The Machine did not return a Task reading")
@@ -33,7 +36,7 @@ protocol MobileClient {
 protocol MobileAttachment: AnyObject {
     var sessionID: String { get }
     var events: AsyncStream<MobileTerminalEvent> { get }
-    func requestControl() throws
+    func requestControl(size: TerminalGeometry) throws
     func send(_ bytes: Data) throws
     func resize(columns: Int, rows: Int) throws
     func close()
@@ -55,14 +58,21 @@ struct TerminalGeometry: Equatable {
     let rows: Int
 }
 
+struct SessionUnavailable: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
 enum MobileConnectionState: Equatable {
-    case loading, viewing, controlling, ended
+    case loading, viewing, requestingControl, controlling, ended
     case disconnected(String), unavailable(String)
 
     var label: String {
         switch self {
         case .loading: "Opening Session…"
         case .viewing: "Viewing Session"
+        case .requestingControl: "Connecting keyboard…"
         case .controlling: "Keyboard connected"
         case .ended: "Session ended"
         case .disconnected(let reason): "Disconnected · \(reason)"
@@ -146,6 +156,10 @@ final class MobileWorkspace {
                 guard let self, self.generation == opening else { return }
                 self.fail("Connection closed; input was not retried")
             }
+        } catch let error as SessionUnavailable {
+            guard opening == generation else { return }
+            disconnect()
+            state = .unavailable(error.message)
         } catch {
             guard opening == generation else { return }
             fail(error.localizedDescription)
@@ -159,7 +173,8 @@ final class MobileWorkspace {
 
     func requestControl() {
         guard state == .viewing else { return }
-        do { try attachment?.requestControl() }
+        state = .requestingControl
+        do { try attachment?.requestControl(size: viewport ?? TerminalGeometry(columns: 80, rows: 24)) }
         catch { fail(error.localizedDescription) }
     }
 
@@ -183,7 +198,7 @@ final class MobileWorkspace {
     func suspend() {
         guard selected != nil else { return }
         switch state {
-        case .loading, .viewing, .controlling: fail("Paused while the app is away")
+        case .loading, .viewing, .requestingControl, .controlling: fail("Paused while the app is away")
         case .disconnected, .unavailable, .ended: break
         }
     }

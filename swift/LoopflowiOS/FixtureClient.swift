@@ -39,7 +39,7 @@ final class FixtureAttachment: MobileAttachment {
         continuation.yield(.control(input: false, geometry: false))
     }
 
-    func requestControl() throws {
+    func requestControl(size: TerminalGeometry) throws {
         guard !closed else { throw CocoaError(.fileReadUnknown) }
         controlling = true
         continuation.yield(.control(input: true, geometry: true))

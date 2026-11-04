@@ -26,11 +26,14 @@ claims and uncertain-input handling. Terminal recordings must match the actual
 owner protocol. Work revisions are not a replay log; request IDs alone are not
 durable command receipts.
 
-November 3 reconciliation: B has an offline SwiftTerm client; mobile-ios.md owns
-the current focused check result. A's working codec matches the consumed copy;
-its Session-owner lookup exists, but WorkViewPlan admission and the phone's
-binary terminal adapter do not. This leaves the joint live demo outstanding.
-The same-user Unix socket cannot serve as remote admission through a proxy.
+November 4 reconciliation: Jack Heart authorized sustained native improvement
+beyond the initial fixture. The local backend is merged into this checkout;
+WorkViewPlan and the phone’s owner decoder are implemented. C now has a separate
+authenticated WSS carrier and native Keychain pairing. Simulator acceptance passed
+through actual host Tailscale against an isolated empty registry; editable owner
+handoff and a separate physical phone remain unproven. mobile-ios.md records
+current evidence and remaining work. The same-user Unix socket is never proxied
+for remote admission. Automatic setup and installed remote enablement remain open.
 Terminal activity #1809 is included through main sync at ac8e088f5f; other
 coordination references below do not assert delivery status.
 

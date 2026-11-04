@@ -11,6 +11,56 @@ import XCTest
 final class MobileTerminalTests: XCTestCase {
     private var window: UIWindow?
 
+    func testLargeTextDraftRemainsSearchableAfterNarrowingTheControllingViewport() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        controller.traitOverrides.preferredContentSizeCategory = .accessibilityExtraLarge
+        controller.view.frame.size = CGSize(width: 874, height: 250)
+        controller.view.layoutIfNeeded()
+        controller.terminal.insertText("landscape draft + continued")
+        await settle()
+        XCTAssertEqual(client.terminal.draft, "landscape draft + continued")
+        XCTAssertTrue(controller.terminal.findNext("landscape draft + continued"))
+        controller.terminal.clearSearch()
+        controller.view.frame.size = CGSize(width: 402, height: 500)
+        controller.view.layoutIfNeeded()
+        await settle()
+        XCTAssertEqual(client.terminal.draft, "landscape draft + continued")
+        XCTAssertTrue(controller.terminal.findNext("landscape draft + continued"),
+                      controller.terminal.accessibilityPageContent() ?? "No rendered text")
+    }
+
+    func testObservationReclaimsTypingBarAndFindDoesNotCoverMatchesWithLatest() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let bar = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }.first {
+            $0.arrangedSubviews.contains { $0.accessibilityLabel == "Hide keyboard" }
+        })
+        XCTAssertFalse(bar.isHidden)
+        client.link.loseControl()
+        await settle()
+        controller.update(theme: .light)
+        controller.view.layoutIfNeeded()
+        XCTAssertTrue(bar.isHidden)
+        XCTAssertEqual(bar.bounds.height, 0)
+        let sent = client.transport.sent.count, sizes = client.link.sizes.count
+        workspace.render?(Data((0..<100).map { "Line \($0)\r\n" }.joined().utf8), false)
+        controller.terminal.scroll(toPosition: 0.2)
+        let latest = try XCTUnwrap(controller.view.subviews.first { $0.accessibilityIdentifier == "terminal-latest" })
+        XCTAssertFalse(latest.isHidden)
+        workspace.findInTerminal?()
+        XCTAssertFalse(bar.isHidden)
+        XCTAssertTrue(latest.isHidden)
+        let done = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }
+            .flatMap(\.arrangedSubviews).first { $0.accessibilityLabel == "Close Find" } as? UIButton)
+        done.sendActions(for: .touchUpInside)
+        XCTAssertTrue(bar.isHidden)
+        XCTAssertFalse(latest.isHidden)
+        XCTAssertEqual(client.transport.sent.count, sent)
+        XCTAssertEqual(client.link.sizes.count, sizes)
+        XCTAssertEqual(workspace.state, .viewing)
+    }
+
     func testChosenSessionSurvivesReconnectForegroundAndExplicitOpening() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }

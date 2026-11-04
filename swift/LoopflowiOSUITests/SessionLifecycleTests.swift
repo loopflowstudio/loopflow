@@ -4,6 +4,53 @@ import XCTest
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testLandscapeKeepsTheTerminalAndFindAboveTheKeyboard() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        app.launch()
+        defer { XCUIDevice.shared.orientation = .portrait; app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let keyboard = app.buttons["Use keyboard"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(keyboard.isHittable)
+        keyboard.tap()
+        app.typeText("landscape draft")
+        XCTAssertTrue(app.buttons["New line"].waitForExistence(timeout: 5))
+        capture(app, "session-landscape-keyboard")
+        let viewport = app.descendants(matching: .any).matching(identifier: "terminal-viewport").firstMatch
+        XCTAssertGreaterThan(viewport.frame.height, 30)
+        XCTAssertLessThan(app.buttons["New line"].frame.midY, app.keyboards.firstMatch.frame.minY)
+        app.buttons["Find in Session"].tap()
+        let query = app.textFields["terminal-find-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.typeText("landscape draft")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+        capture(app, "session-landscape-find")
+        XCTAssertGreaterThan(viewport.frame.height, 20)
+        XCTAssertTrue(app.buttons["Close Find"].isHittable)
+        app.buttons["Close Find"].tap()
+        app.buttons["Session details"].tap()
+        XCTAssertTrue(app.alerts["Session details"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.alerts.staticTexts["Session input study\n\nOffline fixture\n\nKeyboard connected"].exists)
+        app.alerts.buttons["Close"].tap()
+        app.typeText(" + continued")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.staticTexts["Keyboard connected"].waitForExistence(timeout: 5))
+        capture(app, "session-portrait-after-rotation")
+        app.buttons["Find in Session"].tap()
+        query.buttons["Clear text"].tap()
+        query.typeText("landscape draft + continued")
+        XCTAssertEqual(query.value as? String, "landscape draft + continued")
+        XCTAssertTrue((app.textViews["session-terminal"].value as? String)?.contains("landscape draft + continued") == true,
+                      "Terminal input value: \(String(describing: app.textViews["session-terminal"].value))")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Close Find"].isHittable)
+        capture(app, "session-portrait-find-after-rotation")
+    }
+
     func testChooseAnotherSessionAndReturnToTheOriginalDraft() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture"]
@@ -143,7 +190,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

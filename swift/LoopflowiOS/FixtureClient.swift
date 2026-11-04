@@ -85,6 +85,8 @@ final class FixtureAttachment: MobileAttachment {
         guard controlling, !closed else { throw CocoaError(.fileWriteNoPermission) }
         sizes.append((columns, rows))
         reportGeometry(columns: columns, rows: rows)
+        // A terminal leaves cursor-line reflow to the program after a resize.
+        continuation.yield(.output(Data(terminal.screen.utf8)))
     }
 
     func reportGeometry(columns: Int, rows: Int) {
@@ -126,16 +128,14 @@ final class FixtureTerminal {
 
     var screen: String {
         let prompt = asking ? "Allow fixture action? [y/N] " : "> "
-        // CUP restores the editor cursor after the full repaint, including multiline input.
-        let prefix = String(draft.prefix(cursor))
-        let lines = prefix.split(separator: "\n", omittingEmptySubsequences: false)
-        let row = 5 + lines.count - 1
-        let column = (lines.count == 1 ? prompt.count : 0) + (lines.last?.count ?? 0) + 1
+        // Let the renderer account for wide characters and soft wraps. Save the
+        // cursor at the edit point instead of guessing a fixed screen row/column.
+        let prefix = String(draft.prefix(cursor)).replacingOccurrences(of: "\n", with: "\r\n")
+        let suffix = String(draft.dropFirst(cursor)).replacingOccurrences(of: "\n", with: "\r\n")
         // This deterministic peer requests a steady cursor for native UI captures.
         return "\u{1b}[2 q\u{1b}[?2004h\u{1b}[2J\u{1b}[H\u{1b}[1m\u{1b}]8;;https://loopflow.studio\u{1b}\\Loopflow\u{1b}]8;;\u{1b}\\ · fixture Session\u{1b}[0m\r\n"
             + "Offline input harness · no commands execute\r\n\(result)\r\n\r\n"
-            + prompt + draft.replacingOccurrences(of: "\n", with: "\r\n")
-            + "\u{1b}[\(row);\(column)H"
+            + prompt + prefix + "\u{1b}7" + suffix + "\u{1b}8"
     }
 
     func accept(_ data: Data) {

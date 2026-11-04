@@ -209,10 +209,13 @@ struct MobileSessionView: View {
     let theme: ThemeDefinition
     var connectionLabel: String = "Offline fixture"
     @Environment(\.dynamicTypeSize) private var textSize
+    @Environment(\.verticalSizeClass) private var verticalSize
     @State private var opening: Task<Void, Never>?
-    @State private var showingActivity = false
     @State private var showingSessions = false
     @State private var chosenSession: SessionRecord?
+    @State private var showingDetails = false
+
+    private var compact: Bool { verticalSize == .compact }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -233,10 +236,12 @@ struct MobileSessionView: View {
                     }
                 }
             } else {
-                header
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                Divider().overlay(theme.palette.border)
+                if !compact {
+                    header
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    Divider().overlay(theme.palette.border)
+                }
                 SessionTerminal(workspace: workspace, theme: theme)
             }
         }
@@ -245,6 +250,27 @@ struct MobileSessionView: View {
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if compact {
+                ToolbarItem(placement: .principal) {
+                    Button { showingDetails = true } label: {
+                        HStack(spacing: 6) {
+                            if activityLabel != nil {
+                                Image(systemName: "circle.fill")
+                                    .font(.system(size: 6))
+                                    .foregroundStyle(activityColor)
+                                    .accessibilityHidden(true)
+                            }
+                            Text(workspace.state.label).font(Typography.body(15)).lineLimit(1)
+                            Image(systemName: "chevron.down").font(.caption2)
+                        }
+                    }
+                    .accessibilityLabel("Session details")
+                    .accessibilityValue([workspace.state.label, activityLabel].compactMap { $0 }.joined(separator: ", "))
+                }
+                if workspace.state != .notRunning {
+                    ToolbarItem(placement: .topBarTrailing) { sessionActions }
+                }
+            }
             if workspace.sessionListingClient != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Sessions", systemImage: "bubble.left.and.bubble.right") { showingSessions = true }
@@ -267,10 +293,12 @@ struct MobileSessionView: View {
                 }
             }
         }
-        .alert("Session activity", isPresented: $showingActivity) {
+        .alert("Session details", isPresented: $showingDetails) {
             Button("Close", role: .cancel) {}
         } message: {
-            Text(activityDetail)
+            Text(([task.title, chosenSession?.title, connectionLabel, workspace.state.label,
+                   activityLabel, activityLabel == nil ? nil : activityDetail]
+                .compactMap { $0 }).joined(separator: "\n\n"))
         }
     }
 
@@ -286,7 +314,7 @@ struct MobileSessionView: View {
                         .lineLimit(2)
                 }
                 if let activityLabel {
-                    Button { showingActivity = true } label: {
+                    Button { showingDetails = true } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Image(systemName: "circle.fill")
                                 .font(.system(size: 6))
@@ -312,18 +340,23 @@ struct MobileSessionView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !textSize.isAccessibilitySize { Spacer(minLength: 0) }
-            if workspace.state == .loading || workspace.state == .requestingControl {
-                ProgressView().accessibilityLabel("Opening Session")
-            }
-            if workspace.state == .viewing {
-                Button { workspace.requestControl() } label: { actionLabel("Use keyboard") }
-            }
-            if case .disconnected = workspace.state {
-                Button { Task { await workspace.reconnect() } } label: { actionLabel("Reconnect") }
-            }
-            if workspace.canStartSession { openSessionButton }
+            sessionActions
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var sessionActions: some View {
+        if workspace.state == .loading || workspace.state == .requestingControl {
+            ProgressView().accessibilityLabel("Opening Session")
+        }
+        if workspace.state == .viewing {
+            Button { workspace.requestControl() } label: { actionLabel("Use keyboard") }
+        }
+        if case .disconnected = workspace.state {
+            Button { Task { await workspace.reconnect() } } label: { actionLabel("Reconnect") }
+        }
+        if workspace.canStartSession { openSessionButton }
     }
 
     private var activityLabel: String? {

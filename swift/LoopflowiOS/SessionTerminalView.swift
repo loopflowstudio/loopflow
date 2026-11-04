@@ -101,6 +101,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private var geometry: TerminalGeometry?
     private var appliedTheme: String?
     private let bar = UIStackView()
+    private var barHeight: NSLayoutConstraint!
     private let message = UILabel()
     private let pasteButton = UIButton(type: .system)
     private let newlineButton = UIButton(type: .system)
@@ -221,7 +222,6 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             message.bottomAnchor.constraint(equalTo: bar.topAnchor),
             bar.leadingAnchor.constraint(equalTo: viewport.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: viewport.trailingAnchor),
-            bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             bar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
             latestButton.centerXAnchor.constraint(equalTo: viewport.centerXAnchor),
             latestButton.bottomAnchor.constraint(equalTo: viewport.bottomAnchor, constant: -8),
@@ -230,6 +230,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         ])
         findHeight = finder.heightAnchor.constraint(equalToConstant: 0)
         findHeight.isActive = true
+        updateBar()
     }
 
     override func viewDidLayoutSubviews() {
@@ -333,6 +334,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         terminal.canWrite = canWrite
         terminal.allowMouseReporting = canWrite && !finding
         for button in [pasteButton, newlineButton, keyboardButton] { button.isEnabled = canWrite }
+        updateBar()
         if changed {
             if canWrite {
                 // A new input grant starts an intentional typing interaction, even if
@@ -381,7 +383,19 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private func updateLatestButton() {
         let readingHistory = terminal.canScroll && terminal.scrollPosition < 1
         let aboveBottom = viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
-        latestButton.isHidden = !(readingHistory || aboveBottom)
+        latestButton.isHidden = finding || !(readingHistory || aboveBottom)
+    }
+
+    private func updateBar() {
+        let hidden = !finding && workspace.state != .controlling
+        guard barHeight == nil || bar.isHidden != hidden else { return }
+        barHeight?.isActive = false
+        bar.isHidden = hidden
+        barHeight = hidden ? bar.heightAnchor.constraint(equalToConstant: 0)
+                           : bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        barHeight.isActive = true
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
     }
 
     private func configureFind() {
@@ -398,12 +412,14 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         findField.autocapitalizationType = .none
         findField.spellCheckingType = .no
         findField.returnKeyType = .search
+        findField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         findField.delegate = self
         findField.addAction(UIAction { [weak self] _ in self?.queryChanged() }, for: .editingChanged)
         findDone.setTitle("Done", for: .normal)
         findDone.accessibilityLabel = "Close Find"
         findDone.addAction(UIAction { [weak self] _ in self?.endFind() }, for: .touchUpInside)
         findDone.setContentHuggingPriority(.required, for: .horizontal)
+        findDone.setContentCompressionResistancePriority(.required, for: .horizontal)
         for item in [findField, findDone] {
             finder.addArrangedSubview(item)
             let height = item.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
@@ -437,6 +453,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             bar.arrangedSubviews.forEach { $0.removeFromSuperview() }
             bar.distribution = .fill
             [findPrevious, findFeedback, findNext].forEach { bar.addArrangedSubview($0) }
+            updateBar()
             view.setNeedsLayout()
             view.layoutIfNeeded()
             queryChanged()
@@ -457,6 +474,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         bar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         bar.distribution = .fillEqually
         [pasteButton, newlineButton, keyboardButton].forEach { bar.addArrangedSubview($0) }
+        updateBar()
         view.setNeedsLayout()
         view.layoutIfNeeded()
         if restoreFocus { _ = terminal.becomeFirstResponder() }

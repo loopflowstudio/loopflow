@@ -10,6 +10,7 @@ passes `--fixture`: open a Task, choose **Use keyboard**, then type in its exist
 Session. Paste and **New line** preserve multiline input; Return submits. Try
 `permission`, then `y` or `n` and Return. Nothing executes outside the app.
 The keyboard button hides the software keyboard while retaining hardware input.
+Typing controls disappear while observing, leaving more room to read.
 Text selection and VoiceOver reading belong to the native terminal.
 Reading and selecting text do not require keyboard control. Tap an underlined
 program-supplied web link to open the native browser, then Close to return to the
@@ -43,6 +44,13 @@ fits the larger text to the phone.
 When reading earlier output or the top of a taller remote screen, **Latest**
 returns to the bottom locally. New output leaves the reading position alone;
 Latest preserves selection and never takes keyboard or geometry control.
+Find hides Latest so it cannot cover a highlighted match.
+
+In landscape, Session state and actions move into the navigation bar to keep the
+terminal readable above the keyboard. Tap the status for the Task, Session,
+Machine and current program report. Rotating preserves the draft; observers keep
+the owner's grid. Long Find queries scroll inside their field and keep **Done**
+visible, including at accessibility text sizes.
 
 Disable `--fixture` to connect to a Machine. Sign into host Tailscale on both
 devices. In Desktop, open Settings → Mobile → **Pair a phone**. On iPhone, choose

@@ -907,3 +907,54 @@ feed CPU was 16.716 seconds across 32,770 calls. Logs:
 `/tmp/mobile-sessions-live.log`, `/tmp/mobile-sessions-live-native.log`. Temporary
 Serve route removed; empty configuration verified. This remains Simulator plus
 stand-in-provider acceptance, not physical-phone or actual-provider UX proof.
+
+### Compact-height terminal — November 4 implementation
+
+Landscape touch testing exposed a 10-point terminal viewport while Find and the
+software keyboard were open. Preserve the keyboard and readable terminal first.
+In compact vertical size, fold Session state/actions into navigation chrome and
+keep the detailed Machine, chosen Session and program report available through a
+status disclosure. Portrait keeps its existing header. Keep ordinary input and
+observer geometry semantics unchanged; search remains local. Verify actual device
+rotation with keyboard/Find, readable viewport and reachable actions, large text,
+and no observer resize or replay during geometry transitions.
+
+
+Compact height now uses navigation-bar state/actions and one Session-details
+alert; program activity remains visible as a status dot and accessibility value.
+Portrait retains its header. The typing bar collapses while observing and appears
+for Find or explicit input control. Its constraints settle immediately, so the
+next unchanged layout does not send a late geometry update. Find hides Latest
+while selecting matches, and its Done button resists compression by a long query.
+
+Baseline touch test (07:05:51) exposed the 10-point viewport. The first rotated
+captures used app.screenshot and were cropped by XCTest's transformed app frame;
+XCUIScreen captures now show the complete rotated display. A strict keyboard-edge
+assertion also counted the keyboard's rounded decoration; the test checks that the
+control's active center is above it and that the action is reachable.
+
+Large-text testing found two separate issues: the search test placed its caret
+mid-query, and the offline peer did not repaint on resize. The test now explicitly
+clears/re-enters the query and checks both its value and the terminal input value.
+Pinned SwiftTerm Buffer.reflowNarrower intentionally leaves cursor-line reflow to
+the program (revision 5d14406844143538cd8f8851d2d8a67c1fe443e5, Buffer.swift:1365).
+The native regression proved the peer still held the exact draft while its stale
+screen was clipped. FixtureAttachment now repaints after a granted resize, and
+FixtureTerminal saves/restores the rendered cursor at the edit point instead of
+assuming fixed rows/columns. This fixes the explicit offline demo, not a second
+live provider or transport path.
+
+Native terminal/activity run at 07:21:49 passed the reflow and reading tests;
+two deferred typing-bar layout counts failed. Immediate layout fixed those, with
+focused observer geometry/Find/control checks passing at
+`Test-LoopflowiOS-2026.11.04_07-22-54--0800.xcresult`, along with actual landscape
+keyboard input, Find, details disclosure and return to portrait. Earlier portrait
+hit-target/description audit passed at 07:11:35. The final full rotation flow also
+passed with system accessibility-extra-large text at
+`Test-LoopflowiOS-2026.11.04_07-23-53--0800.xcresult`; the Simulator's previous
+large text setting was restored and verified. Final landscape and portrait Find
+captures under `scratch/demo-assets/session-*-large-text.png` were inspected.
+Logs: `/tmp/mobile-compact-native-final.log`, `/tmp/mobile-compact-controls-final.log`,
+`/tmp/mobile-landscape-large-confirmed.log`. Physical device rotation, VoiceOver
+navigation and actual-provider redraw behavior remain acceptance work. No carrier
+or engine code changed in this layout pass.

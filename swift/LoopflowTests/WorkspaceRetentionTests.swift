@@ -44,6 +44,12 @@ struct WorkspaceRetentionTests {
             func value(_ flag: String) -> String? {
                 args.firstIndex(of: flag).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
             }
+            let ownerJSON = try #require(value("--owner"))
+            let owner = try JSONDecoder().decode(TaskHostOwner.self, from: Data(ownerJSON.utf8))
+            #expect(owner.machineID == "local")
+            #expect(owner.pid == UInt32(ProcessInfo.processInfo.processIdentifier))
+            #expect(owner.startedAt == Int64(try #require(Perf.processStartedAt)))
+            #expect(owner.settlesOnExit)
             let deadline = value("--state") == "closed" ? 0 : 900
             let reason = value("--native-settled") == "true" ? "null" : "\"Native resources remain\""
             return """

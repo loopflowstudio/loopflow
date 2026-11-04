@@ -47,3 +47,27 @@ Earlier coordination: outgoing `aa155162-7bd6-4d4c-b3c0-374f6d89768d`, incoming
 `2f7f49fd-5c75-45e0-a688-cb70a3917bcd`. Superseded proposals and discussion are
 preserved at `17cf6a71f9:scratch/rex-coordination.md`; accepted decisions above
 replace their open timing, retention and post-cleanup restoration questions.
+
+## Confirmed host exit — accepted November 4
+
+Jack Heart selected 1a in the interactive review: positive evidence that the exact
+retaining host instance exited releases retention and starts ordinary absence
+cleanup without requiring relaunch. Lost contact or lease expiry alone stays
+unknown. Rex client exit does not establish retaining-server or native-job
+settlement. Active requested work, other retaining hosts and newer-instance
+retention remain protected. This was the accepted behavior before implementation.
+Shared with LOO-498 in comment `512d1b03-c6de-4fda-878b-d8f5d723f3b5`.
+
+Implementation contract shared November 4 in comment
+`153fc21e-333c-44c5-ba19-6eec49ca2165`: optional `--owner` JSON carries
+`machine_id`, `pid`, kernel `started_at` (Unix seconds), and `settles_on_exit`.
+Name the retaining server, never a Rex client or SSH attachment; give independent
+instances distinct occurrences. The existing retirement executor observes local
+kernel identity or uses an already registered route back to the retaining Machine.
+No route, failed reads and lease expiry remain unknown. Confirmed exit releases
+only the inspected occurrence/revision/owner as away, preserving ordinary grace.
+Newer retention wins. `settles_on_exit` applies only to resources that die with
+that process; Rex native jobs otherwise need independent `native-settled` evidence.
+Destination owners always settle their own jobs. TaskRetirement fields are unchanged.
+Focused local, real SSH and headless Swift checks passed; no native Rex
+implementation or Graph launch is included. Its existing independent delivery remains untouched.

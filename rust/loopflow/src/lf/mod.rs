@@ -1306,7 +1306,9 @@ impl WtCommand {
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
+            Self::Id { .. } | Self::Process { .. } | Self::List { .. } | Self::Status { .. } => {
+                false
+            }
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
                 MachineCredentialCommand::Receive => true,
@@ -1897,6 +1899,15 @@ pub struct SyncArgs {
     pub onto: Option<String>,
 }
 
+fn parse_task_host_owner(value: &str) -> Result<crate::store::sqlite::TaskHostOwner, String> {
+    let owner: crate::store::sqlite::TaskHostOwner =
+        serde_json::from_str(value).map_err(|e| e.to_string())?;
+    if owner.pid == 0 || owner.started_at <= 0 {
+        return Err("Host owner requires a positive PID and kernel start time".into());
+    }
+    Ok(owner)
+}
+
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
     /// List the open Tasks in the selected repository
@@ -2090,7 +2101,7 @@ until `lf ship`."
         issue: String,
         #[arg(long, requires_all = ["state", "revision", "native_settled"])]
         occurrence: Option<String>,
-        /// Increasing observation revision, persisted by the host per occurrence
+        /// Increasing observation revision, retained for the occurrence's lifetime
         #[arg(long, requires = "occurrence")]
         revision: Option<i64>,
         #[arg(long, requires = "occurrence")]
@@ -2098,6 +2109,9 @@ until `lf ship`."
         /// No native resources remain to settle before checkout deletion (true/false)
         #[arg(long, requires = "occurrence")]
         native_settled: Option<bool>,
+        /// Retaining process identity as JSON; omit when its exit cannot be verified
+        #[arg(long, requires = "occurrence", value_parser = parse_task_host_owner)]
+        owner: Option<crate::store::sqlite::TaskHostOwner>,
     },
     /// Run the Task's recorded workspace retirement
     #[command(hide = true)]
@@ -2611,6 +2625,9 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
+    /// Read an exact local process instance's liveness as JSON
+    #[command(hide = true)]
+    Process { pid: u32, started_at: i64 },
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,

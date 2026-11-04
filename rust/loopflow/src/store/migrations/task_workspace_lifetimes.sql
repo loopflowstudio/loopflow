@@ -30,6 +30,8 @@ CREATE TABLE task_host_occurrences (
     native_settled INTEGER NOT NULL CHECK(native_settled IN (0,1)),
     lease_until INTEGER NOT NULL,
     revision INTEGER NOT NULL,
+    owner TEXT,
+    owner_exited INTEGER NOT NULL DEFAULT 0 CHECK(owner_exited IN (0,1)),
     PRIMARY KEY(task_id,occurrence)
 );
 CREATE TABLE task_retirements (

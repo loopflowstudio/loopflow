@@ -1126,7 +1126,11 @@ Quit Desktop to leave shells running. For a completed Task, acknowledged quit
 preserves its fifteen-minute absence deadline; eligible idle agents end under
 the two-minute policy. Cleanup can finish while Desktop stays quit. Desktop waits
 up to five seconds for release reports. A failed request leaves its result unknown;
-cleanup stays pending if the destination never received the release.
+cleanup stays pending until the destination receives release or confirms that
+exact Desktop instance has exited. Confirmed exit starts ordinary absence grace;
+it does not skip fifteen minutes. Requested work finishes first. Remote contact
+loss alone is unknown. Verifying a remote retaining process uses the destination's
+existing Machine route back to its host; an unavailable route keeps cleanup pending.
 Explicitly closing the last Task workspace skips absence grace, after
 requested work settles. Return before cleanup to retain the workspace again.
 Conversation history remains after cleanup; a deleted checkout is not recreated.

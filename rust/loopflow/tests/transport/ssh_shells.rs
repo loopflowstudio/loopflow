@@ -16,6 +16,15 @@ use loopflow::store::sqlite::SqliteStore;
 
 const TASK: &str = "task_5e55105e000040008000000000000007";
 
+struct OwnedChild(Child);
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 fn quote(value: &Path) -> String {
     shlex::try_quote(value.to_str().unwrap())
         .unwrap()
@@ -31,6 +40,142 @@ fn success(mut command: Command) -> String {
     let output = command.output().unwrap();
     assert!(output.status.success(), "{command:?}: {output:?}");
     String::from_utf8(output.stdout).unwrap()
+}
+
+#[track_caller]
+fn wait_for(mut condition: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !condition() {
+        assert!(Instant::now() < deadline, "host exit observation timed out");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "sshd sandbox cannot nest inside test_network.py; run directly with --ignored"
+)]
+fn retirement_observes_remote_host_exit_after_disconnect_without_a_new_presence_report() {
+    let fixture = Ssh::new();
+    fixture.source.shell_task(TASK);
+    let mut host = OwnedChild(Command::new("/bin/sleep").arg("300").spawn().unwrap());
+    let owner = serde_json::json!({
+        "machine_id": fixture.machine, "pid": host.0.id(),
+        "started_at": time::OffsetDateTime::now_utc().unix_timestamp(), "settles_on_exit": true
+    })
+    .to_string();
+    // The Task executes at source; its retaining presentation lives on the SSH peer.
+    success(fixture.source.command(&[
+        "task",
+        "presence",
+        TASK,
+        "--occurrence",
+        "desktop",
+        "--state",
+        "retained",
+        "--revision",
+        "1",
+        "--native-settled",
+        "false",
+        "--owner",
+        &owner,
+    ]));
+    fixture
+        .source
+        .sql()
+        .execute(
+            "UPDATE tasks SET issue_title='Retire task',issue_description='',workspace_slug='task',updated_at=1,planning_completed=1,planning_completed_at='completed' WHERE id=?1",
+            [TASK],
+        )
+        .unwrap();
+    fixture
+        .source
+        .sql()
+        .execute("UPDATE task_host_occurrences SET lease_until=0", [])
+        .unwrap();
+    let mut command = fixture.source.command(&["task", "retire", TASK]);
+    command
+        .current_dir(fixture.source.home.path())
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", fixture.bin.display()),
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
+    let mut executor = OwnedChild(command.spawn().unwrap());
+    wait_for(|| {
+        assert!(
+            executor.0.try_wait().unwrap().is_none(),
+            "retirement executor exited before observing hosts"
+        );
+        fixture
+            .source
+            .sql()
+            .query_row("SELECT count(*) FROM task_retirements", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+            == 1
+    });
+    assert!(executor.0.try_wait().unwrap().is_none());
+
+    let ssh = fixture.bin.join("ssh");
+    let original = std::fs::read_to_string(&ssh).unwrap();
+    let attempted = fixture.source.home.path().join("disconnected-read");
+    script(
+        &ssh,
+        &format!("#!/bin/sh\ntouch {}\nexit 255\n", quote(&attempted)),
+    );
+    wait_for(|| attempted.exists());
+    host.0.kill().unwrap();
+    host.0.wait().unwrap();
+    std::fs::remove_file(&attempted).unwrap();
+    wait_for(|| attempted.exists());
+    let state: String = fixture
+        .source
+        .sql()
+        .query_row("SELECT state FROM task_host_occurrences", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        state, "retained",
+        "a failed remote read is not exit evidence"
+    );
+    assert!(executor.0.try_wait().unwrap().is_none());
+
+    script(&ssh, &original);
+    wait_for(|| {
+        fixture
+            .source
+            .sql()
+            .query_row("SELECT owner_exited FROM task_host_occurrences", [], |r| {
+                r.get::<_, bool>(0)
+            })
+            .unwrap()
+    });
+    wait_for(|| {
+        fixture
+            .source
+            .sql()
+            .query_row("SELECT due_at IS NOT NULL FROM task_retirements", [], |r| {
+                r.get::<_, bool>(0)
+            })
+            .unwrap()
+    });
+    let (state, settled, due): (String, bool, i64) = fixture.source.sql().query_row(
+        "SELECT h.state,h.native_settled,r.due_at FROM task_host_occurrences h JOIN task_retirements r ON r.task_id=h.task_id", [],
+        |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(state, "away");
+    assert!(settled);
+    assert!(due >= time::OffsetDateTime::now_utc().unix_timestamp() + 895);
+    assert!(fixture.source.repo.path().exists());
+    // Reopening revokes the intent and lets the same executor exit normally.
+    fixture
+        .source
+        .sql()
+        .execute("UPDATE tasks SET planning_completed=0 WHERE id=?1", [TASK])
+        .unwrap();
+    wait_for(|| executor.0.try_wait().unwrap().is_some());
 }
 
 struct Ssh {

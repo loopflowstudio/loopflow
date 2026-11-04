@@ -236,8 +236,10 @@ lf task presence TASK
 ```
 
 Each host chooses its own occurrence identity and release policy. Use distinct
-identities for independent occurrences; persist increasing revisions so reordered
-reports cannot undo a return or Close. Retry an identical report safely. Renew
+identities for independent occurrences; keep increasing revisions for each
+occurrence's lifetime so reordered reports cannot undo a return or Close. A host
+that restores the same occurrence must persist its revision too; Desktop uses
+fresh occurrences per app process. Retry an identical report safely. Renew
 `retained` within 30 seconds. `away` releases retention; `closed` is an explicit
 Close request that skips absence grace. Every write also supplies
 `--native-settled true|false`: true means this occurrence has no host-owned
@@ -250,13 +252,29 @@ reply does not undo a release already recorded there; retry its identical revisi
 Rex owns its native shell/window cleanup and reports this contract without
 relaying its shells through lf.
 
+Supply `--owner` with a JSON object containing `machine_id`, `pid`, `started_at`
+(kernel start time, Unix seconds), and `settles_on_exit` to enable confirmed-exit
+recovery. Identify the retaining process, not its SSH attachment or a Rex client.
+Use a distinct occurrence for each independently retaining instance. The existing
+retirement executor observes that process on its Machine; remote observation
+uses a registered route from the execution Machine back to the retaining Machine.
+Missing routes, failed reads and lease expiry remain unknown. An old exit read
+cannot release a newer revision or instance. Confirmed exit releases as away,
+never explicit Close. Set `settles_on_exit` only when all native resources die
+with that process, as Desktop's surfaces do. Rex-native jobs still require their
+adapter's independent settlement report. Destination shell jobs always settle
+through their own owners. Hosts without verifiable owner evidence omit `--owner`;
+their unavailable observations remain pending until a fresh report.
+
 Desktop reports retained for the selected Task, away on departure, and closed
 when its repository window explicitly closes. Detached Desktop surfaces can
 acknowledge native settlement while destination-owned shells still run. Quit
 releases as away and waits up to five seconds for acknowledgements; it preserves
 an existing absence deadline and does not become explicit Close. Acknowledged
-cleanup can finish without relaunching Desktop. A crash before release reaches
-the destination leaves cleanup pending. Away Sessions follow the usual two-minute
+cleanup can finish without relaunching Desktop. Confirmed exit of that exact
+Desktop instance also releases retention and starts ordinary absence grace.
+Lease expiry or a failed remote read alone leaves cleanup pending. Away Sessions
+follow the usual two-minute
 eligible idle policy. A completed, released Task keeps its checkout and shells
 for fifteen minutes total. Return cancels that deadline; later departure starts
 a new one. Closing every occurrence skips that grace. Requested active work,

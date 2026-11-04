@@ -6,9 +6,9 @@ use std::sync::Arc;
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
-use super::{advance, now};
+use super::{advance, now, owner_evidence, reconcile_hosts};
 use crate::durable::TaskId;
-use crate::store::sqlite::HostUse;
+use crate::store::sqlite::{HostUse, TaskHostOwner};
 use crate::store::{SharedStore, StorageConfig};
 use crate::work::task::Task;
 
@@ -19,6 +19,209 @@ struct Workspace {
     remote: PathBuf,
     store: SharedStore,
     task: Task,
+}
+
+struct Host(std::process::Child);
+
+impl Host {
+    fn new() -> Self {
+        Self(Command::new("/bin/sleep").arg("60").spawn().unwrap())
+    }
+
+    fn owner(&self, fixture: &Workspace, settles_on_exit: bool) -> TaskHostOwner {
+        let process = crate::journal::OsProcess::read(self.0.id())
+            .unwrap()
+            .unwrap();
+        TaskHostOwner {
+            machine_id: fixture.store.sqlite.local_machine().unwrap().id,
+            pid: process.pid,
+            started_at: process.started_at,
+            settles_on_exit,
+        }
+    }
+
+    fn exit(&mut self) {
+        self.0.kill().unwrap();
+        self.0.wait().unwrap();
+    }
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn retirement_confirmed_host_exit_finishes_without_desktop_and_still_waits_for_shell_jobs() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Workspace::new().await;
+        let mut desktop = Host::new();
+        let owner = desktop.owner(&fixture, true);
+        fixture
+            .store
+            .sqlite
+            .observe_task_host(
+                &fixture.task.id,
+                "desktop",
+                HostUse::Retained,
+                now() - 1000,
+                1,
+                false,
+                Some(&owner),
+            )
+            .unwrap();
+        reconcile_hosts(&fixture.store, &fixture.task.id)
+            .await
+            .unwrap();
+        // Even an expired lease cannot release a live process. Keep the executor watching.
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        fixture.assert_retained();
+        desktop.exit();
+        reconcile_hosts(&fixture.store, &fixture.task.id)
+            .await
+            .unwrap();
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        let intent = fixture
+            .store
+            .sqlite
+            .task_retirement(&fixture.task.id)
+            .unwrap()
+            .unwrap();
+        assert!(intent.due_at.unwrap() >= now() + 899);
+        assert!(fixture
+            .store
+            .sqlite
+            .retirement_hosts_settled(&fixture.task.id)
+            .unwrap());
+        fixture.assert_retained();
+
+        let shell = fixture.store.sqlite.test_lf_process();
+        fixture
+            .store
+            .sqlite
+            .create_task_shell(
+                "shell",
+                &fixture.task.id,
+                fixture.checkout.to_str().unwrap(),
+            )
+            .unwrap();
+        fixture
+            .store
+            .sqlite
+            .bind_task_shell("shell", &shell)
+            .unwrap();
+        fixture
+            .sql()
+            .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&shell])
+            .unwrap();
+        fixture
+            .sql()
+            .execute("UPDATE task_retirements SET due_at=?1", [now() - 1])
+            .unwrap();
+        let agent = fixture.store.sqlite.test_lf_process();
+        let mut worker = Host::new();
+        let worker_owner = worker.owner(&fixture, false);
+        fixture.sql().execute("UPDATE processes SET started_at=?2,pid=?3,os_started_at=?2 WHERE id=?1",
+            params![agent,worker_owner.started_at,worker_owner.pid]).unwrap();
+        fixture.store.sqlite.test_session("final-turn", &crate::session_record::new_artifact_key());
+        fixture.sql().execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2,agent_process_id=?2 WHERE id='final-turn'",
+            params![fixture.task.id.as_str(),agent]).unwrap();
+        fixture.sql().execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('final-turn',?1,1,1,0,0)", [&agent]).unwrap();
+        for (tools, pending, yielded) in [(1, 0, 0), (0, 1, 1), (0, 0, 0)] {
+            fixture.sql().execute("UPDATE session_activity SET open_tools=?1,pending_input=?2,yielded=?3", params![tools,pending,yielded]).unwrap();
+            assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+            fixture.assert_retained();
+        }
+        fixture.sql().execute("UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1", []).unwrap();
+        fixture.store.sqlite.record_owner_input(&agent, b"unfinished draft").unwrap();
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        fixture.store.sqlite.clear_owner_input(&agent).unwrap();
+        worker.exit();
+        fixture.sql().execute("UPDATE agent_sessions SET completed_at=1 WHERE id='final-turn'", []).unwrap();
+        fixture.sql().execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&agent]).unwrap();
+        let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
+        assert!(error.to_string().contains("without confirmed job cleanup"));
+        fixture.assert_retained();
+        fixture.store.sqlite.settle_shell_jobs(&shell).unwrap();
+        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        assert!(!fixture.checkout.exists());
+        assert!(fixture
+            .store
+            .get_task(&fixture.task.id)
+            .await
+            .unwrap()
+            .is_some());
+    });
+}
+
+#[test]
+fn retirement_rex_client_loss_and_unreachable_origin_do_not_prove_retaining_server_exit() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Workspace::new().await;
+        let mut client = Host::new();
+        let mut server = Host::new();
+        let owner = server.owner(&fixture, false);
+        fixture
+            .store
+            .sqlite
+            .observe_task_host(
+                &fixture.task.id,
+                "rex",
+                HostUse::Retained,
+                now() - 1000,
+                1,
+                false,
+                Some(&owner),
+            )
+            .unwrap();
+        client.exit();
+        reconcile_hosts(&fixture.store, &fixture.task.id)
+            .await
+            .unwrap();
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        fixture.assert_retained();
+        let remote = TaskHostOwner {
+            machine_id: crate::durable::MachineId::new(),
+            ..owner.clone()
+        };
+        assert_eq!(
+            owner_evidence(&fixture.store, &remote).await,
+            crate::journal::ProcessIdentityEvidence::Unknown
+        );
+        // Reusing a PID with another start time does not identify the current process as the old owner.
+        let replaced = TaskHostOwner {
+            started_at: owner.started_at - 100,
+            ..owner.clone()
+        };
+        assert_eq!(
+            owner_evidence(&fixture.store, &replaced).await,
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+        server.exit();
+        reconcile_hosts(&fixture.store, &fixture.task.id)
+            .await
+            .unwrap();
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        assert!(!fixture
+            .store
+            .sqlite
+            .retirement_hosts_settled(&fixture.task.id)
+            .unwrap());
+        fixture
+            .sql()
+            .execute("UPDATE task_retirements SET due_at=?1", [now() - 1])
+            .unwrap();
+        assert!(advance(&fixture.store, &fixture.task)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Waiting for native hosts"));
+        fixture.assert_retained();
+    });
 }
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -94,6 +297,7 @@ impl Workspace {
                 now(),
                 revision,
                 state == HostUse::Closed,
+                None,
             )
             .unwrap();
     }
@@ -176,7 +380,8 @@ fn retirement_return_and_reopen_cancel_closing_before_git_deletion() {
                         HostUse::Closed,
                         now(),
                         1,
-                        true
+                        true,
+                        None
                     )
                     .is_err());
                 fixture.host(HostUse::Closed, 3);
@@ -218,6 +423,7 @@ fn retirement_acknowledged_quit_finishes_without_another_host_report() {
                 now(),
                 2,
                 true,
+                None,
             )
             .unwrap();
         assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
@@ -270,6 +476,7 @@ fn retirement_unacknowledged_quit_keeps_checkout_and_recovers_on_return() {
                 now() - 1000,
                 1,
                 false,
+                None,
             )
             .unwrap();
         assert!(advance(&fixture.store, &fixture.task).await.unwrap());
@@ -292,7 +499,8 @@ fn retirement_unacknowledged_quit_keeps_checkout_and_recovers_on_return() {
                 HostUse::Away,
                 now(),
                 2,
-                true
+                true,
+                None
             )
             .is_err());
         assert!(advance(&fixture.store, &fixture.task).await.unwrap());

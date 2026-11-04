@@ -63,8 +63,10 @@ It never forwards to the private Unix socket or trusts a reverse proxy's UID or
 identity headers. The same connection capacity covers both carriers.
 The native iOS adapter imports/pastes this setup file and stores its grant in
 Keychain. Pairing and Work reads have passed through actual host Tailscale in
-Simulator. Editable owner attachment, control handoff and separate physical-phone
-acceptance remain integration work; endpoint availability alone proves none of them.
+Simulator. The opt-in native acceptance also exercises a real retained owner,
+editing, competing viewers, passive reconnect and one exact submission without
+provider relaunch. Manual Desktop and separate physical-phone acceptance remain
+open. [Run the native proof](../../../../swift/LoopflowiOS/README.md#opt-in-host-tailscale-acceptance).
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/MachineProtocol.swift`
 mirrors them. Executable fixtures live in `tests/fixtures/dto/machine/`.

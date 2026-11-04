@@ -3762,6 +3762,7 @@ struct MachineServiceProof<'a> {
     fixture: &'a Fixture,
     child: Option<Child>,
     supervised: bool,
+    remote_port: Option<u16>,
 }
 
 impl<'a> MachineServiceProof<'a> {
@@ -3770,6 +3771,7 @@ impl<'a> MachineServiceProof<'a> {
             fixture,
             child: None,
             supervised,
+            remote_port: None,
         };
         if supervised {
             let results = std::thread::scope(|scope| {
@@ -3806,8 +3808,11 @@ impl<'a> MachineServiceProof<'a> {
     }
 
     fn launch(&self) -> Child {
-        self.fixture
-            .command(&["machine", "service", "run"])
+        let mut command = self.fixture.command(&["machine", "service", "run"]);
+        if let Some(port) = self.remote_port {
+            command.args(["--remote-port", &port.to_string()]);
+        }
+        command
             .env_remove("RUST_LOG")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -3895,6 +3900,166 @@ impl<'a> MachineServiceProof<'a> {
             json!({"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80}),
         )
     }
+}
+
+/// Cross-language acceptance, explicitly opted into an already configured private
+/// Tailscale route and installed Simulator. Ordinary CI never needs either.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires LOOPFLOW_MOBILE_SIMULATOR, ENDPOINT and PORT, plus host Tailscale Serve"]
+fn mobile_machine_native_acceptance() {
+    let simulator = std::env::var("LOOPFLOW_MOBILE_SIMULATOR").unwrap();
+    let endpoint = std::env::var("LOOPFLOW_MOBILE_ENDPOINT").unwrap();
+    let port: u16 = std::env::var("LOOPFLOW_MOBILE_PORT")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty echo icanon < /dev/tty
+printf '%s\n' "$$" >> "$HOME/launches"
+printf '\033[?2004hmobile-owner-ready\r\n> '
+read -r answer < /dev/tty
+printf '%s\n' "$answer" >> "$HOME/answers"
+printf '\r\naccepted: %s\r\n' "$answer"
+"#,
+    );
+    let mut command = fixture.native(
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &path,
+        "Mobile acceptance",
+    );
+    command.env("PATH", &path);
+    let owner = fixture.owner(command);
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let first_launch = fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    let task = support::register_task_without_pr(
+        fixture.home.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
+        "mobile-proof",
+        &fixture.repo.head_sha(),
+    );
+    fixture
+        .sql()
+        .execute(
+            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            rusqlite::params![task.task.id.as_str(), session],
+        )
+        .unwrap();
+
+    let mut desktop = fixture.viewer(&owner, true);
+    desktop.input("desktop draft");
+    // Wait until the PTY has echoed it; attaching too early could snapshot the
+    // screen before input queued by this viewer has reached the child.
+    until_out(&mut desktop, "desktop draft");
+    let mut service = MachineServiceProof {
+        fixture: &fixture,
+        child: None,
+        supervised: false,
+        remote_port: Some(port),
+    };
+    service.child = Some(service.launch());
+    service.ready();
+
+    let container = Command::new("xcrun")
+        .args([
+            "simctl",
+            "get_app_container",
+            &simulator,
+            "com.loopflow.ios.dev",
+            "data",
+        ])
+        .output()
+        .unwrap();
+    assert!(container.status.success());
+    let container = PathBuf::from(String::from_utf8(container.stdout).unwrap().trim());
+    let setup_dir = container.join("Documents/LoopflowIntegration");
+    std::fs::create_dir_all(&setup_dir).unwrap();
+    let setup = setup_dir.join("setup.json");
+    let pairing = fixture
+        .command(&[
+            "machine",
+            "service",
+            "pair",
+            "--endpoint",
+            &endpoint,
+            "--name",
+            "Native Session acceptance",
+            "--output",
+            setup.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        pairing.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pairing.stderr)
+    );
+    std::fs::write(
+        setup_dir.join("session.json"),
+        json!({"session":session}).to_string(),
+    )
+    .unwrap();
+
+    let log_path = root.join("swift/.build/mobile-acceptance.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut test = Command::new("xcodebuild");
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("LF_") {
+            test.env_remove(key);
+        }
+    }
+    let result = test
+        .current_dir(root)
+        .args([
+            "test",
+            "-project",
+            "swift/LoopflowMobile.xcodeproj",
+            "-scheme",
+            "LoopflowiOS",
+            "-destination",
+            &format!("platform=iOS Simulator,id={simulator}"),
+            "-derivedDataPath",
+            "swift/.build/ios",
+            "-skipPackagePluginValidation",
+            "-parallel-testing-enabled",
+            "NO",
+            "-only-testing:LoopflowiOSTests/MachineConnectionIntegrationTests",
+            "CODE_SIGNING_ALLOWED=YES",
+            "CODE_SIGN_IDENTITY=-",
+        ])
+        .stdin(Stdio::null())
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .status()
+        .unwrap();
+    // Failed runs must not leave a one-use grant available to another test.
+    let _ = std::fs::remove_file(setup);
+    let _ = std::fs::remove_file(setup_dir.join("session.json"));
+    assert!(
+        result.success(),
+        "Native acceptance failed; inspect {}",
+        log_path.display()
+    );
+    fixture.ends(&owner);
+    assert_eq!(
+        fixture.launches(1),
+        first_launch,
+        "No reconnect may relaunch the provider"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
+        "desktop draft + phone + desktop\n",
+        "Input must reach the child exactly once"
+    );
 }
 
 impl Drop for MachineServiceProof<'_> {

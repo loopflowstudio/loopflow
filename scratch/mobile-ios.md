@@ -63,10 +63,11 @@ grant restores the software keyboard even if the earlier attachment hid it.
 
 ## Next work and acceptance
 
-1. Prove actual retained-owner attachment over WSS: native terminal rendering,
-   editing an unfinished draft, Desktop handoff, background/reconnect, owner exit,
-   slow output and uncertain input without replay or duplicate submission. Current
-   native live acceptance reaches pairing and Task reads, not an editable owner.
+1. Continue live acceptance with actual Desktop and a separate physical phone,
+   service/network interruptions and sustained/slow output. Native UIKit editing,
+   passive reconnect, competing control/geometry and owner exit now pass over
+   actual Tailscale WSS. The proof uses a real owner and a local stand-in program;
+   it does not establish provider-specific IME behavior or manual Desktop UX.
 2. Make setup automatic when host Tailscale is already signed in: discover the
    active installation/state, explain the exact missing step, preserve unrelated
    Serve routes, and persist remote enablement through the existing service
@@ -113,3 +114,33 @@ The earlier design and proof history remain in
 Earlier research/prototype sources are indexed by the other scratch notes.
 Preserve demo-assets and the historical HTML studies; their fixture screenshots do
 not establish that the live path has been demonstrated.
+
+
+### Retained-owner proof — November 4, 00:39
+
+The opt-in `transport_tests::mobile_machine_native_acceptance` test starts the
+actual owner/CLI and remote Machine service in a private registry, seeds one Task,
+and invokes native XCTest through host Tailscale Serve. UIKit opens the recorded
+Session, edits the existing desktop-side draft, disconnects, then reconnects after
+a newer viewer has taken input and 120×40 geometry. The phone remains an observer
+until explicit takeover. The existing child receives exactly
+`desktop draft + phone + desktop` once and exits; its provider launch log has one
+entry. The native screen reports ended rather than reconnecting a finished owner.
+No real provider account, Task data or credentials were used. The temporary route
+was removed; owners, service and registry are fixture-owned and cleaned up.
+
+This found and fixed an initial-readiness race: MobileWorkspace changed to viewing
+before its queued snapshot/geometry were rendered. It now remains loading until
+the ordered initial control event, after the replacement screen. The same native
+proof then passed with canonical geometry, without adding sleeps or tolerating
+wrong dimensions. Result:
+`swift/.build/ios/Logs/Test/Test-LoopflowiOS-2026.11.04_00-39-21--0800.xcresult`.
+The test uses two real protocol viewers, not an operated Desktop app, and mounted
+UITextInput calls, not hardware key presses. Remaining device/demo obligations
+above are unchanged.
+
+Regression check: all 24 ordinary native tests passed at 00:40 (the opt-in test
+skipped without its consumed ticket; its separate live pass is above). Five
+Machine-service transport tests passed; the isolated launchd test remains an
+explicit opt-in. The final diff contains the readiness fix, repeatable acceptance
+fixture and reconciled documentation, not a new Session execution path.

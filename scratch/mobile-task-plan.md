@@ -30,8 +30,9 @@ November 4 reconciliation: Jack Heart authorized sustained native improvement
 beyond the initial fixture. The local backend is merged into this checkout;
 WorkViewPlan and the phone’s owner decoder are implemented. C now has a separate
 authenticated WSS carrier and native Keychain pairing. Simulator acceptance passed
-through actual host Tailscale against an isolated empty registry; editable owner
-handoff and a separate physical phone remain unproven. mobile-ios.md records
+through actual host Tailscale against an isolated registry, including native
+editing of a real retained owner, competing viewers and passive reconnect. Manual
+Desktop handoff and a separate physical phone remain unproven. mobile-ios.md records
 current evidence and remaining work. The same-user Unix socket is never proxied
 for remote admission. Automatic setup and installed remote enablement remain open.
 Terminal activity #1809 is included through main sync at ac8e088f5f; other

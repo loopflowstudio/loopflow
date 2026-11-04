@@ -146,7 +146,8 @@ final class MobileWorkspace {
                 return
             }
             attachment = link
-            state = .viewing
+            // The initial control event follows geometry and the replacement
+            // screen. Do not expose keyboard takeover against the old screen.
             eventTask = Task { [weak self] in
                 for await event in link.events {
                     guard let self, self.generation == opening else { return }

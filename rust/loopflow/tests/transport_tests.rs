@@ -1486,19 +1486,8 @@ fn command_of(pid: i64) -> String {
 fn a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit() {
     let fixture = Fixture::new();
     let path = parented_provider(&fixture);
-    let mut owner = fixture.serve(
-        true,
-        &[
-            env!("CARGO_BIN_EXE_lf"),
-            "--interactive",
-            "--agent",
-            "claude",
-            ":",
-            "stay small",
-        ],
-    );
-    owner.env("PATH", &path);
-    let owner = fixture.owner(owner);
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "stay small"));
     let launched = fixture.launches(1)[0].clone();
     let mut fields = launched.split(':');
     let provider: i64 = fields.next().unwrap().parse().unwrap();
@@ -1740,19 +1729,8 @@ fi
 exit 99
 "#,
     );
-    let mut command = fixture.serve(
-        true,
-        &[
-            env!("CARGO_BIN_EXE_lf"),
-            "-i",
-            "-a",
-            "claude",
-            ":",
-            "exec failure",
-        ],
-    );
-    command.env("PATH", path);
-    let owner = fixture.owner(command);
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "exec failure"));
     let mut viewer = fixture.viewer(&owner, true);
     let frames = viewer.until_event("child_exited");
     assert_eq!(events(&frames, "child_exited").last().unwrap()["code"], 1);
@@ -3392,11 +3370,7 @@ fn opening_takes_over_from_an_owner_that_never_answers() {
 #[test]
 fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
     let fixture = Fixture::new();
-    let bin = fixture.home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let provider = bin.join("claude");
-    std::fs::write(
-        &provider,
+    let path = fixture.provider(
         r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 if mkdir "$HOME/outer" 2>/dev/null; then
@@ -3411,22 +3385,12 @@ else
     printf '%s:%s\n' "$$" "$answer" > "$HOME/nested-answer"
 fi
 "#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let mut owner = fixture.serve(
-        true,
-        &[
-            env!("CARGO_BIN_EXE_lf"),
-            "--interactive",
-            "--agent",
-            "claude",
-            ":",
-            "call the nested CLI",
-        ],
     );
-    owner.env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
-    fixture.owner(owner);
+    fixture.owner(fixture.native(
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &path,
+        "call the nested CLI",
+    ));
     let caller = fixture.wait_file("caller");
     let nested = fixture.wait_file("nested-launches");
     let viewer: i32 = fixture.wait_file("nested-viewer").trim().parse().unwrap();

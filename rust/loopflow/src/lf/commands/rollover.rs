@@ -384,22 +384,21 @@ fn disposition(
     if store.runs_graph(&process.id)? {
         return Ok(graph_runner(binary));
     }
-    owner_disposition(store, process)
+    owner_disposition(store, &process.id)
 }
 
-/// A Session execution owner moves when it is resumable and waits for a person.
+/// A Session execution owner moves when it is resumable and holds no work.
 /// One holding work stays even when its socket does not answer, as `lf resume`
 /// leaves it: ending it would lose what saved history cannot restore.
-fn owner_disposition(store: &SqliteStore, process: &RunningLfProcess) -> Result<Disposition> {
-    let stays = |reason: &str| Ok(Disposition::Stays(reason.into()));
-    let sessions = store.owner_sessions(&process.id)?;
+fn owner_disposition(store: &SqliteStore, owner: &LfProcessId) -> Result<Disposition> {
+    let sessions = store.owner_sessions(owner)?;
     if sessions.is_empty() {
-        return stays("keeps its lf until it exits");
+        return Ok(Disposition::Stays("keeps its lf until it exits".into()));
     }
-    if !store.owner_waits_for_person(&process.id)? {
-        return stays(
-            "a turn, draft, pending request, Graph step or headless Run holds the conversation",
-        );
+    if let Some(reason) = store.owner_retention(owner)? {
+        return Ok(Disposition::Stays(format!(
+            "{reason:?} holds the conversation"
+        )));
     }
     for session in &sessions {
         let key = store
@@ -511,7 +510,7 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
         let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
             == ProcessIdentityEvidence::Live;
         let now = if still_running {
-            owner_disposition(&store.sqlite, &owner.process)?
+            owner_disposition(&store.sqlite, &owner.process.id)?
         } else {
             Disposition::Stays("exited before rollover reached it".into())
         };
@@ -728,7 +727,7 @@ mod tests {
 
     /// Protected work stays with its owner even without a reachable socket.
     #[test]
-    fn an_owner_holding_work_stays_even_when_it_cannot_answer() {
+    fn unanswering_superseded_owners_preserve_work() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
         let owner = process(7);
@@ -779,7 +778,7 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            owner_disposition(&store, &owner).unwrap(),
+            owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Stays(_)
         ));
         store
@@ -789,7 +788,7 @@ mod tests {
             .execute("DELETE FROM session_activity", [])
             .unwrap();
         assert!(matches!(
-            owner_disposition(&store, &owner).unwrap(),
+            owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Moves(ref sessions) if sessions == &[session.id.as_str().to_owned()]
         ));
         store
@@ -806,7 +805,7 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            owner_disposition(&store, &owner).unwrap(),
+            owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Stays(_)
         ));
         store
@@ -815,13 +814,55 @@ mod tests {
             .unwrap()
             .execute("DELETE FROM session_activity", [])
             .unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+                [&session.id],
+            )
+            .unwrap();
+        }
+        let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
+            panic!("rollover must preserve a headless Run");
+        };
+        assert_eq!(reason, "HeadlessRun holds the conversation");
+        let graph = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+                [&session.id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+                rusqlite::params![graph, owner.id],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')", [&graph],
+            ).unwrap();
+        }
+        let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
+            panic!("rollover must preserve a running Graph");
+        };
+        assert_eq!(reason, "RunningGraph holds the conversation");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE processes SET completed_at=2 WHERE id=?1", [&graph])
+            .unwrap();
+        assert!(matches!(
+            owner_disposition(&store, &owner.id).unwrap(),
+            Disposition::Moves(_)
+        ));
         // No active turn is needed to protect either a plain or edited draft.
         for bytes in [b"draft".as_slice(), b"\x7f"] {
             assert!(store.try_record_owner_input(&owner.id, bytes).unwrap());
-            let Disposition::Stays(reason) = owner_disposition(&store, &owner).unwrap() else {
+            let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
                 panic!("rollover must preserve native editor input");
             };
-            assert!(reason.contains("draft"), "{reason}");
+            assert_eq!(reason, "NativeInput holds the conversation");
         }
     }
 }

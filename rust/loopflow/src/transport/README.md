@@ -60,15 +60,20 @@ reopens provider history without starting a turn. Other ended Sessions stay stop
 `lf resume` replaces an idle owner that is superseded or unanswering, continuing
 its saved provider thread without replaying input. A turn, draft or pending request
 keeps the existing provider: resume attaches if possible, otherwise reports
-attachment failure. Try again when its transport answers; saved history cannot
-restore the native editor. An owner with this lifetime policy moves when its work
-settles; an older owner without it needs another resume.
+attachment failure and leaves that work intact. Returning does not resend input.
+Saved conversation history supports continuation after safe replacement; it cannot
+restore an editor or a pending request. A responsive terminal and continued
+completed turns establish recovery. An owner with this lifetime policy moves when
+its work settles; an older owner without it needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
 ends idle owners directly; existing viewers may close and need `lf resume` again.
-Graph runners keep running and launch each
-next step through the entry. Owners and runners whose store has advanced beyond
+Rollover and lifetime diagnostics name what retains an owner: native input, a
+running Graph, missing Session evidence, a headless Run or a live turn. Resume,
+rollover and lifetime policy use the same judgment, independent of reachability.
+Graph runners keep running and launch each next step through the entry.
+Owners and runners whose store has advanced beyond
 their reader floor cannot recover themselves through this policy.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require

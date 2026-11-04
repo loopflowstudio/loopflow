@@ -752,6 +752,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut ownership = Ownership::default();
     let mut size = (24, 80);
     let mut pending_input = PendingInput::default();
+    let mut ending_failure = None;
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -1299,13 +1300,16 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         #[cfg(test)]
         lifetime_tests::before_judgment();
         if let Ok(ending) = ending.try_recv() {
-            let event = ending
-                .confirm(&id, observed, !pending_input.is_empty())
-                .inspect_err(|error| {
-                    tracing::warn!(%error, owner = %id, "cannot confirm Session ending; judging again later");
-                })
-                .ok()
-                .flatten();
+            let event = match ending.confirm(&id, observed, !pending_input.is_empty()) {
+                Ok(event) => {
+                    ending_failure = None;
+                    event
+                }
+                Err(error) => {
+                    lifetime::failure(&mut ending_failure, &id, "confirm Session ending", &error);
+                    None
+                }
+            };
             if let Some(event) = event {
                 end_viewers(&mut viewers, event);
                 snapshot::leave(&id, &output);

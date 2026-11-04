@@ -1,7 +1,7 @@
 # LOO-724 assumptions — 2026-11-04
 
-Jack Heart's acceptance, coordination boundary, unresolved permanent-transport
-choice and evidence limits are kept once in [the plan](loo-724.md).
+Jack Heart's acceptance, coordination boundary, conditional permanent-transport
+scope change and evidence limits are kept once in [the plan](loo-724.md).
 
 Reversible implementation choices:
 
@@ -17,5 +17,7 @@ Reversible implementation choices:
 Preserve a live protected owner even when its socket cannot answer. `Uncertain`
 contains no reconstructable editor text; history and screen snapshots cannot
 recover queued keys or pending requests. Temporary loss of attachment must leave
-those intact. Choosing irreversible loss for a permanently broken transport needs
-Jack Heart's decision; it is not a headless implementation assumption.
+those intact. The concept review treats transport repair as required by that
+accepted contract. Neither incident is established as permanent; a hypothetical
+choice to discard work is not a gate on diagnosis or safe repair. Changing that
+contract would require Jack Heart's decision, not a headless assumption.

@@ -1169,7 +1169,7 @@ fn attaches(
     if !owner_running(store, owner)? {
         return Ok(false);
     }
-    if !store.owner_waits_for_person(owner)? {
+    if store.owner_retention(owner)?.is_some() {
         return Ok(true);
     }
     let superseded = crate::journal::live_process_pid(store, owner)

@@ -12,6 +12,16 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
+/// Why a Session owner cannot retire without losing work or native input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnerRetention {
+    NativeInput,
+    RunningGraph,
+    MissingSession,
+    HeadlessRun,
+    LiveTurn,
+}
+
 /// The Graph whose process recorded, as a step, the Process that captured session
 /// `s`'s current input. Sessions carry no Graph column of their own.
 macro_rules! session_graph {
@@ -591,18 +601,16 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Whether every Session execution owner `owner` holds is a standalone
-    /// interactive conversation waiting for a person. A step of a running
-    /// Graph, a headless Run, or a turn in progress keeps it running; a Graph
-    /// that finished holds nothing.
-    pub(crate) fn owner_waits_for_person(
+    /// What keeps execution owner `owner` running. None means its standalone
+    /// interactive Sessions hold no work or native input; finished Graphs hold nothing.
+    pub(crate) fn owner_retention(
         &self,
         owner: &crate::id::LfProcessId,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<OwnerRetention>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         if super::native_input::pending(&conn, owner)? {
-            return Ok(false);
+            return Ok(Some(OwnerRetention::NativeInput));
         }
         // A running Graph started inside an owner, as from a terminal, holds
         // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
@@ -615,18 +623,36 @@ impl SqliteStore {
                          WHERE p.completed_at IS NULL
                      UNION SELECT p.parent_lf_process_id FROM processes p
                          JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT ?1 NOT IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                 AND EXISTS(SELECT 1 FROM agent_sessions s
+                 SELECT ?1 IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
+                     OR EXISTS(SELECT 1 FROM agent_sessions s
+                         JOIN processes g ON g.id={SESSION_GRAPH}
+                         WHERE s.transport_lf_process_id=?1 AND g.completed_at IS NULL)
+                     AS running_graph,
+                 NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
-                 AND NOT EXISTS(SELECT 1 FROM agent_sessions s
+                     AS missing_session,
+                 EXISTS(SELECT 1 FROM agent_sessions s
+                     WHERE s.transport_lf_process_id=?1 AND s.interactive=0)
+                     AS headless_run,
+                 EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1
-                     AND (s.interactive=0
-                         OR EXISTS(SELECT 1 FROM processes g
-                             WHERE g.id={SESSION_GRAPH} AND g.completed_at IS NULL)
-                         OR (s.completed_at IS NULL AND {TURN_LIVE})))"
+                         AND s.completed_at IS NULL AND {TURN_LIVE})
+                     AS live_turn"
             ),
             [owner.as_str()],
-            |row| row.get(0),
+            |row| {
+                Ok(if row.get("running_graph")? {
+                    Some(OwnerRetention::RunningGraph)
+                } else if row.get("missing_session")? {
+                    Some(OwnerRetention::MissingSession)
+                } else if row.get("headless_run")? {
+                    Some(OwnerRetention::HeadlessRun)
+                } else if row.get("live_turn")? {
+                    Some(OwnerRetention::LiveTurn)
+                } else {
+                    None
+                })
+            },
         )?)
     }
 

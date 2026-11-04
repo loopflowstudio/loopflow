@@ -674,7 +674,6 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
-    crate::transport::report(crate::program_status::State::Working, false, None);
     if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
@@ -724,6 +723,9 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         return result.map(|_| None);
     }
 
+    // Native terminals own their turn status. A separate lf record would remain
+    // Working at their idle prompt until the provider process exits.
+    crate::transport::report(crate::program_status::State::Working, false, None);
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
         return Err(anyhow!(missing_agent_message(&built.harness)));

@@ -106,6 +106,10 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private let pasteButton = UIButton(type: .system)
     private let newlineButton = UIButton(type: .system)
     private let keyboardButton = UIButton(type: .system)
+    private let keysButton = UIButton(type: .system)
+    private let navigationBar = UIStackView()
+    private var navigationButtons: [UIButton] = []
+    private var typingButtons: [UIButton] { [pasteButton, newlineButton, keysButton, keyboardButton] }
     private let latestButton = UIButton(type: .system)
     private var keyboardHidden = false
     private let finder = UIStackView()
@@ -173,6 +177,26 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         keyboardButton.setImage(UIImage(systemName: "keyboard.chevron.compact.down"), for: .normal)
         keyboardButton.accessibilityLabel = "Hide keyboard"
         keyboardButton.addAction(UIAction { [weak self] _ in self?.toggleKeyboard() }, for: .touchUpInside)
+        keysButton.setTitle("Keys", for: .normal)
+        keysButton.accessibilityLabel = "Navigation keys"
+        keysButton.accessibilityIdentifier = "terminal-navigation-keys"
+        keysButton.addAction(UIAction { [weak self] _ in self?.showNavigationKeys(true) }, for: .touchUpInside)
+        navigationBar.axis = .horizontal
+        navigationBar.distribution = .fillEqually
+        navigationBar.isHidden = true
+        for key in NavigationKey.allCases {
+            let button = UIButton(type: .system)
+            button.setImage(UIImage(systemName: key.symbol), for: .normal)
+            button.accessibilityLabel = key.title
+            button.addAction(UIAction { [weak self] _ in self?.sendNavigationKey(key) }, for: .touchUpInside)
+            navigationButtons.append(button)
+        }
+        let typing = UIButton(type: .system)
+        typing.setImage(UIImage(systemName: "keyboard"), for: .normal)
+        typing.accessibilityLabel = "Typing keys"
+        typing.addAction(UIAction { [weak self] _ in self?.showNavigationKeys(false) }, for: .touchUpInside)
+        navigationButtons.append(typing)
+        navigationButtons.forEach { navigationBar.addArrangedSubview($0) }
         var latestStyle = UIButton.Configuration.filled()
         latestStyle.title = "Latest"
         latestStyle.image = UIImage(systemName: "arrow.down")
@@ -185,7 +209,17 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         latestButton.addAction(UIAction { [weak self] _ in self?.showLatest() }, for: .touchUpInside)
         bar.axis = .horizontal
         bar.distribution = .fillEqually
-        for button in [pasteButton, newlineButton, keyboardButton] { bar.addArrangedSubview(button) }
+        for button in typingButtons { bar.addArrangedSubview(button) }
+        // Both modes share the typing row's layout, including wrapped large
+        // labels. Switching keys must not resize the provider or hide the keyboard.
+        navigationBar.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(navigationBar)
+        NSLayoutConstraint.activate([
+            navigationBar.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            navigationBar.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            navigationBar.topAnchor.constraint(equalTo: bar.topAnchor),
+            navigationBar.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+        ])
         configureFind()
         updateAccessoryFonts()
         message.font = .preferredFont(forTextStyle: .caption1)
@@ -255,7 +289,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private func updateAccessoryFonts() {
         let base = UIFont(name: "Lato-Regular", size: 15) ?? .systemFont(ofSize: 15)
         let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traitCollection)
-        for button in [pasteButton, newlineButton, keyboardButton] {
+        for button in typingButtons + navigationButtons {
             var configuration = button.configuration ?? .plain()
             configuration.title = button.currentTitle ?? configuration.title
             configuration.image = button.currentImage ?? configuration.image
@@ -333,7 +367,10 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         if changed, canWrite, finding { endFind(restoreFocus: false) }
         terminal.canWrite = canWrite
         terminal.allowMouseReporting = canWrite && !finding
-        for button in [pasteButton, newlineButton, keyboardButton] { button.isEnabled = canWrite }
+        for button in typingButtons + navigationButtons {
+            button.isEnabled = canWrite
+        }
+        if changed, !canWrite { showNavigationKeys(false) }
         updateBar()
         if changed {
             if canWrite {
@@ -398,6 +435,60 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         view.layoutIfNeeded()
     }
 
+    enum NavigationKey: CaseIterable {
+        case up, down, left, right, tab, escape
+
+        var title: String {
+            switch self {
+            case .up: "Up"
+            case .down: "Down"
+            case .left: "Left"
+            case .right: "Right"
+            case .tab: "Tab"
+            case .escape: "Escape"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .up: "arrow.up"
+            case .down: "arrow.down"
+            case .left: "arrow.left"
+            case .right: "arrow.right"
+            case .tab: "arrow.right.to.line"
+            case .escape: "escape"
+            }
+        }
+
+        func bytes(applicationCursor: Bool) -> [UInt8] {
+            switch self {
+            case .up: applicationCursor ? EscapeSequences.moveUpApp : EscapeSequences.moveUpNormal
+            case .down: applicationCursor ? EscapeSequences.moveDownApp : EscapeSequences.moveDownNormal
+            case .left: applicationCursor ? EscapeSequences.moveLeftApp : EscapeSequences.moveLeftNormal
+            case .right: applicationCursor ? EscapeSequences.moveRightApp : EscapeSequences.moveRightNormal
+            case .tab: EscapeSequences.cmdTab
+            case .escape: EscapeSequences.cmdEsc
+            }
+        }
+    }
+
+    private func showNavigationKeys(_ visible: Bool) {
+        guard !visible || (workspace.state == .controlling && !finding) else { return }
+        for button in typingButtons {
+            // Keep intrinsic sizes in layout while the alternative row is shown.
+            button.alpha = visible ? 0 : 1
+            button.isUserInteractionEnabled = !visible
+            button.accessibilityElementsHidden = visible
+        }
+        navigationBar.isHidden = !visible
+    }
+
+    func sendNavigationKey(_ key: NavigationKey) {
+        // An action can outlive its input grant or the start of local Find.
+        guard workspace.state == .controlling, !finding else { return }
+        terminal.send(key.bytes(applicationCursor: terminal.getTerminal().applicationCursor))
+    }
+
     private func configureFind() {
         finder.axis = .horizontal
         finder.alignment = .center
@@ -443,6 +534,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
 
     private func beginFind() {
         if !finding {
+            showNavigationKeys(false)
             let grid = terminal.getTerminal()
             findGeometry = TerminalGeometry(columns: grid.cols, rows: grid.rows)
             finding = true
@@ -463,20 +555,24 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
 
     private func endFind(restoreFocus: Bool = true) {
         guard finding else { return }
-        finding = false
         terminal.allowsReadingFocus = true
         terminal.allowMouseReporting = workspace.state == .controlling
         findField.resignFirstResponder()
         terminal.clearSearch()
-        findGeometry = nil
         finder.isHidden = true
         findHeight.isActive = true
         bar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         bar.distribution = .fillEqually
-        [pasteButton, newlineButton, keyboardButton].forEach { bar.addArrangedSubview($0) }
-        updateBar()
+        typingButtons.forEach { bar.addArrangedSubview($0) }
+        // Restore the typing bar while Find still freezes remote geometry.
+        // Intermediate intrinsic sizes must not resize the provider's terminal.
         view.setNeedsLayout()
         view.layoutIfNeeded()
+        finding = false
+        findGeometry = nil
+        updateBar()
+        layoutTerminal()
+        updateLatestButton()
         if restoreFocus { _ = terminal.becomeFirstResponder() }
     }
 

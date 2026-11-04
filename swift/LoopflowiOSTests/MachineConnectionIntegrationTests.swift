@@ -383,7 +383,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             // Leave any login/account dialog to the caller instead of operating it.
             if !acceptedFixtureFolder && screen().contains("Yes, I trust this folder") {
                 acceptedFixtureFolder = true
-                controller.terminal.send(txt: "\u{1b}[B")
+                controller.sendNavigationKey(.down)
                 controller.terminal.insertText("\n")
             }
             return screen().contains("MOBILE_READY")

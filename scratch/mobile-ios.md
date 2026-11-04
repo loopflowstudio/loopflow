@@ -10,7 +10,7 @@ LOO-721; no Apple account work has been performed here.
 
 Native Swift, host Tailscale only, no embedded node, public relay or required hub.
 Start with existing open Tasks and their recorded Session terminal. Preserve
-Desktop typography/colors and the compact Paste / New line / keyboard controls.
+Desktop typography/colors and compact Paste / New line / Keys / keyboard controls.
 New-Task flow remains Jack’s selected describe-first sheet, with a visible editable
 destination and explicit Create & start through shared recoverable admission.
 
@@ -1201,13 +1201,11 @@ Failure logs are `/tmp/mobile-real-provider-trust-first-xcode.log` and
 `/tmp/mobile-real-provider-final-xcode.log` preserve the enclosing/native results.
 No deadlines were increased and no automatic retry was added.
 
-Review finding to address next: provider menus can require arrow navigation with
-no numbered choices. The compact phone accessory exposes Paste, New line and
-keyboard visibility only. This proof sends a test arrow; it does not establish a
-discoverable touch path for those menus. Add compact on-demand navigation without
-restoring the generic shell modifier strip Jack Heart removed. Physical-phone
-IME/dictation/VoiceOver, other real providers, usage-accounting parity and installed
-Desktop update survival remain separate acceptance obligations.
+That proof exposed provider menus requiring arrow navigation with no numbered
+choices. It sent a test arrow; the next section adds the discoverable touch path
+without restoring the generic shell modifier strip Jack Heart removed. Physical-
+phone IME/dictation/VoiceOver, other real providers, usage-accounting parity and
+installed Desktop update survival remain separate acceptance obligations.
 
 The unchanged stand-in path also passes after the shared-harness extraction:
 `/tmp/mobile-provider-regression.log` and
@@ -1220,3 +1218,54 @@ deleted; existing Simulators, accounts and active conversations were preserved.
 Final checks: `cargo fmt -- --check`, all-target Clippy with warnings denied
 (`/tmp/mobile-provider-clippy.log`) and `git diff --check` pass. The stand-in
 regression result is `Test-LoopflowiOS-2026.11.04_14-13-45--0800.xcresult`.
+
+## Compact provider navigation — implementation
+
+Jack Heart's compact keyboard direction remains. Keys switches the typing bar to
+arrows, Tab and Escape; the keyboard icon returns to Paste / New line / Keys /
+keyboard visibility. Both modes share the typing row's layout, so large labels,
+rotation and repeated key presses keep one terminal size and the native keyboard.
+Use the pinned renderer's normal/application cursor sequences and the existing
+workspace input claim. Actions recheck control and Find state when tapped.
+No modifier strip, contextual approval API or second input queue is added.
+
+The first system-menu version passed ordinary touch tests but failed at confirmed
+accessibility text size: iOS hid the keyboard to fit its popup, expanding the
+viewport. Replace that popup with the inline alternative row rather than another
+keyboard-lifecycle handler. One earlier nominal large-text run stayed at default
+size because the Simulator was shut down when configuration was attempted; it is
+not large-text evidence. The runner now boots, applies and reads back both text
+size and appearance before testing.
+
+The added typing button also exposed intermediate resizes while closing Find.
+Restore its row while geometry is still frozen, then settle the final layout and
+Latest visibility. Do not relax the existing geometry test. First failures:
+`/tmp/mobile-navigation-tests.log` and
+`/tmp/mobile-navigation-large-confirmed.log`. Current row verification follows.
+
+The inline row passes native and operated Simulator checks. All 43 terminal tests
+pass, including normal/application cursor mode, draft editing, Find isolation and
+late actions after control loss. Closing Find retains its original geometry and
+restores Latest when reading scrollback. Actual touch opens Keys, moves Left,
+edits the draft, returns to typing and finds the edited text without submission.
+Both ordinary light and confirmed accessibility-extra-large dark runs preserve
+keyboard/viewport, provide 44-point targets and pass hit-region/description audits.
+Landscape keyboard/Find interaction also passes at both settings.
+
+- Native/large-text run: `/tmp/mobile-navigation-row-large.log`, `Test-LoopflowiOS-2026.11.04_14-31-32--0800.xcresult`.
+- Final standard touch run: `/tmp/mobile-navigation-row-standard.log`, `Test-LoopflowiOS-2026.11.04_14-33-27--0800.xcresult`.
+- Inspected captures: `demo-assets/session-navigation-keys.png`, `session-navigation-large-text.png`, and `session-navigation-edited-draft.png`.
+
+The actual-Claude proof now uses the production navigation handler to select its
+fresh repository's trust choice. It passes editing, service interruption, passive
+foreground recovery and a context-dependent reply with one unchanged provider.
+Result: `Test-LoopflowiOS-2026.11.04_14-37-17--0800.xcresult` (8.322 seconds native),
+`/tmp/mobile-navigation-real-provider.log` and
+`/tmp/mobile-navigation-real-provider-xcode.log`. Touch operation is established
+separately by the operated fixture tests; this is not a physical-phone demo.
+
+`git diff --check` passes. Swift-only source changes required no new Rust lint
+run; the preceding all-target Clippy pass still covers unchanged Rust. The
+owned Simulator was shut down/deleted. Remaining acceptance includes real Codex,
+physical phone/IME/dictation/VoiceOver, usage-accounting parity and installed
+Desktop update survival.

@@ -11,6 +11,46 @@ import XCTest
 final class MobileTerminalTests: XCTestCase {
     private var window: UIWindow?
 
+    func testNavigationKeysEditTheProviderDraftAndFollowItsCursorMode() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        controller.terminal.insertText("ac")
+        controller.sendNavigationKey(.left)
+        controller.terminal.insertText("b")
+        XCTAssertEqual(client.terminal.draft, "abc")
+        XCTAssertTrue(client.terminal.submissions.isEmpty)
+        controller.terminal.feed(text: "\u{1b}[?1h")
+        controller.sendNavigationKey(.down)
+        XCTAssertEqual(client.transport.sent.last, Data("\u{1b}OB".utf8))
+        controller.terminal.feed(text: "\u{1b}[?1l")
+        controller.sendNavigationKey(.down)
+        XCTAssertEqual(client.transport.sent.last, Data("\u{1b}[B".utf8))
+        controller.sendNavigationKey(.tab)
+        XCTAssertEqual(client.transport.sent.last, Data([9]))
+        controller.sendNavigationKey(.escape)
+        XCTAssertEqual(client.transport.sent.last, Data([27]))
+    }
+
+    func testNavigationActionsCannotSendDuringFindOrAfterControlLoss() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        workspace.findInTerminal?()
+        let sent = client.transport.sent.count
+        for key in SessionTerminalController.NavigationKey.allCases { controller.sendNavigationKey(key) }
+        XCTAssertEqual(client.transport.sent.count, sent, "Search must not send navigation keys to the provider")
+        let done = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }
+            .flatMap(\.arrangedSubviews).first { $0.accessibilityLabel == "Close Find" } as? UIButton)
+        done.sendActions(for: .touchUpInside)
+        client.link.loseControl()
+        await settle()
+        // Deliberately omit controller.update: an already visible key row may still
+        // look enabled when a newer viewer has taken input.
+        let afterHandoff = client.transport.sent.count
+        for key in SessionTerminalController.NavigationKey.allCases { controller.sendNavigationKey(key) }
+        XCTAssertEqual(client.transport.sent.count, afterHandoff)
+        XCTAssertEqual(workspace.state, .viewing)
+    }
+
     func testLargeTextDraftRemainsSearchableAfterNarrowingTheControllingViewport() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }
@@ -173,6 +213,8 @@ final class MobileTerminalTests: XCTestCase {
         let done = try XCTUnwrap(finder.arrangedSubviews.last as? UIButton)
         done.sendActions(for: .touchUpInside)
         XCTAssertTrue(finder.isHidden)
+        let latest = try XCTUnwrap(controller.view.subviews.first { $0.accessibilityIdentifier == "terminal-latest" })
+        XCTAssertFalse(latest.isHidden, "Closing Find while reading scrollback must restore Latest")
         XCTAssertEqual(workspace.state, .controlling)
         XCTAssertTrue(controller.terminal.allowMouseReporting)
         XCTAssertEqual(client.transport.sent.count, sent)
@@ -295,12 +337,12 @@ final class MobileTerminalTests: XCTestCase {
         let sizes = client.link.sizes.count
         workspace.findInTerminal?()
         try await Task.sleep(for: .milliseconds(500))
-        XCTAssertEqual(client.link.sizes.count, sizes)
+        XCTAssertEqual(client.link.sizes.count, sizes, "Geometry during Find: \(client.link.sizes)")
         let done = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UIStackView }
             .flatMap(\.arrangedSubviews).first { $0.accessibilityLabel == "Close Find" } as? UIButton)
         done.sendActions(for: .touchUpInside)
         try await Task.sleep(for: .milliseconds(500))
-        XCTAssertEqual(client.link.sizes.count, sizes)
+        XCTAssertEqual(client.link.sizes.count, sizes, "Geometry during Find: \(client.link.sizes)")
     }
 
     func testReadingHistoryLayouts() async throws {

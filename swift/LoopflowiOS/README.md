@@ -9,6 +9,10 @@ Run **LoopflowiOS** on an iPhone simulator. The development scheme explicitly
 passes `--fixture`: open a Task, choose **Use keyboard**, then type in its existing
 Session. Paste and **New line** preserve multiline input; Return submits. Try
 `permission`, then `y` or `n` and Return. Nothing executes outside the app.
+**Keys** shows arrows, Tab and Escape for provider menus and cursor movement.
+The keyboard icon returns to the typing controls. Switching keys preserves the
+keyboard, terminal size and draft. Keys require input control and send nothing
+while Find is open or after control moves to another viewer.
 The keyboard button hides the software keyboard while retaining hardware input.
 Typing controls disappear while observing, leaving more room to read.
 Text selection and VoiceOver reading belong to the native terminal.

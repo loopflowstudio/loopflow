@@ -4,6 +4,51 @@ import XCTest
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testNavigationKeysEditWithoutSubmittingOrHidingTheKeyboard() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let keyboard = app.buttons["Use keyboard"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        keyboard.tap()
+        app.typeText("ac")
+        let keys = app.buttons["terminal-navigation-keys"]
+        XCTAssertTrue(keys.isHittable)
+        XCTAssertGreaterThanOrEqual(keys.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(keys.frame.height, 44)
+        let viewport = app.descendants(matching: .any).matching(identifier: "terminal-viewport").firstMatch
+        let height = viewport.frame.height
+        keys.tap()
+        let left = app.buttons["Left"]
+        XCTAssertTrue(left.waitForExistence(timeout: 5))
+        capture(app, "session-navigation-keys")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        for title in ["Up", "Down", "Left", "Right", "Tab", "Escape", "Typing keys"] {
+            XCTAssertGreaterThanOrEqual(app.buttons[title].frame.width, 44)
+            XCTAssertGreaterThanOrEqual(app.buttons[title].frame.height, 44)
+        }
+        try app.performAccessibilityAudit(for: [.hitRegion, .sufficientElementDescription])
+        XCTAssertEqual(viewport.frame.height, height, accuracy: 1)
+        left.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        app.typeText("b")
+        app.buttons["Typing keys"].tap()
+        XCTAssertTrue(keys.isHittable)
+        XCTAssertEqual(viewport.frame.height, height, accuracy: 1)
+        app.buttons["Find in Session"].tap()
+        let query = app.textFields["terminal-find-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.typeText("abc")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+        app.buttons["Close Find"].tap()
+        XCTAssertTrue(keys.isHittable, "Closing Find must restore the normal typing bar")
+        capture(app, "session-navigation-edited-draft")
+    }
+
     func testLandscapeKeepsTheTerminalAndFindAboveTheKeyboard() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture"]

@@ -3,6 +3,9 @@
 Your Tasks and conversations live in `lf`, not in a window. Open them wherever
 you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
 
+For Task layouts, Wave defaults, automatic arrivals and native splits, read
+[Open your Loopflow workspace](workspaces.md).
+
 ## Open Work where you are
 
 ```bash

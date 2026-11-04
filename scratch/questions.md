@@ -1,7 +1,13 @@
 # LOO-498 — unresolved restoration and host evidence
 
+**Demo correction, November 3:** [workspace-demo.md](workspace-demo.md) records
+that the configured LF opening failed at database-schema compatibility. The
+raw native-split API probe does not prove the app's Split button omits cwd;
+that UI path remains unverified. Do not require a scope reduction on the raw
+API evidence alone. A separate native split-demo session is available for review.
+
 Jack Heart requested documentation first. The primary conversation drafted
-[the user guide](workspace-guide.md) before further feature implementation or
+[the user guide](../docs/workspaces.md) before further feature implementation or
 publication. It describes the agreed experience and explicitly marks current
 delivery gaps; use it to reconcile the product contract. Do not silently weaken
 native split, restore, agent routing or lifecycle requirements to match the branch.
@@ -37,11 +43,12 @@ REX_SESSION/REX_BLOCK but no REX_SERVER. Current-viewer placement remains the
 right path for recorded viewers; unknown custom endpoints cannot be guessed from
 opaque block IDs. No running-app/socket scan or global host configuration was added.
 
-Reconciliation assumption, November 3: LOO-717's live implementation and revised
+Reconciliation assumption, November 3: LOO-717's published implementation and revised
 coordination comment `30bf4970-3bb1-481f-8200-83a6734cb26e` establish the intended
 integration API, not delivered integration in LOO-498. The inspected source now
 requires native settlement separately from away/closed policy. No new cleanup
 owner fills the gap; materialization observations are not lifetime holds.
+PR #1811 is open at demo; publication does not establish lifecycle acceptance.
 Non-default-server bare open and remote following remain engineering work under
 accepted scope. Arrival activation adds tools once beside the original passive
 pane; follower recovery preserves old native tabs and uses an OS lock for process

@@ -2,9 +2,13 @@
 
 **LOO-498 · accepted build scope · reconciled November 3, 2026.**
 
-Implementation has reached a host capability review boundary: the installed Rex
-API cannot enforce the accepted Task-specific native split defaults. The scope
-remains accepted and unfinished; no narrower contract has been selected.
+Implementation has reached a review boundary. The raw Rex split API does not
+inherit Task cwd when omitted, but the app's Split action has not yet been proved
+to behave the same way. The interactive demo also found the branch executable
+incompatible with the installed LF store. See [workspace-demo.md](workspace-demo.md)
+for the configured-path failure and the prepared native Split test. Do not infer
+a required scope reduction from the raw split probe alone. Scope remains accepted
+and unfinished.
 
 Jack Heart approved implementation after readiness review in comment
 `7088ad9c-c923-4fff-acd7-0a261921b0f0`, superseding the mistaken-launch stop.
@@ -13,11 +17,14 @@ demo are authorized; Auto-Ship, merge and Task completion are not.
 
 Jack's later comment `b97b5f14-864e-45e5-8d56-29476bb1e800` prioritizes user
 documentation before further feature implementation or publication.
-`workspace-guide.md`, drafted in the primary conversation, is the reviewable user
-contract. Preserve its distinction between the agreed experience and delivery gaps.
+[docs/workspaces.md](../docs/workspaces.md), moved into docs at Jack's explicit
+correction, is the reviewable user
+contract, distinguishing the agreed experience from delivery gaps.
 
-The implementation at `af774cada6` provides opening, tools, passive arrivals,
-one-time arrival activation and follower recovery.
+The implementation at `3d61147152` provides opening, tools, passive arrivals,
+one-time arrival activation and follower recovery. Since `af774cada6`, passive
+arrivals also validate and use the Task checkout, and the builtin layout avoids
+duplicating Task & workflow when no conversation exists.
 Full restoration, lifecycle coordination and the complete configured experience
 remain unfinished. Earlier exploration is in [explore.html](explore.html);
 simulations do not establish runtime acceptance. The complete pre-reconciliation
@@ -215,7 +222,9 @@ LOO-717's November 3 coordination comment
 
 `lf task presence TASK --occurrence ID --state retained|away|closed|unknown --revision N --native-settled true|false`
 
-The receipt pins Task/completion/checkout/branch and includes due_at,
+`lf task presence TASK --json` reads the receipt without reporting host use;
+it can return null before a retirement intent exists. The receipt pins
+Task/completion/checkout/branch and includes due_at,
 phase (waiting/closing/retired) and reason. Each occurrence has a stable identity
 and increasing persisted revision, including heartbeat renewals within 30 seconds.
 An identical revision retry is idempotent but does not renew the lease. Expired
@@ -231,13 +240,14 @@ away/closed policy. Destination Session/shell owners settle independently.
 Retained or unknown cancels queued retirement and clears settlement; delayed old
 revisions cannot undo a newer return. Another retained copy cancels cleanup.
 
-The latest November 3 shared status read shows LOO-717 live in compress, with no PR.
-Its checkout at `2abcfc28cc` plus current edits now contains the Task presence command,
-`ops/task/retirement.rs` and `store/sqlite/task_retirement.rs`, including required
-native settlement, revision fencing and the single retirement executor. This
-supersedes the earlier observation that only a specification existed. It is
-branch-source evidence, not delivered or configured integration proof. The
-locally available `origin/main` remains `aef0c0a5cd`.
+The November 3 shared status read now shows LOO-717 published as
+[PR #1811](https://github.com/loopflowstudio/loopflow/pull/1811), open and waiting
+at demo, with its publication Graph finished. Its clean checkout at `f213804378`
+contains the Task presence command, `ops/task/retirement.rs` and
+`store/sqlite/task_retirement.rs`, including required native settlement, revision
+fencing and the single retirement executor. This supersedes the earlier
+compress/no-PR observation. Publication is not integration or configured lifecycle
+proof. The locally available `origin/main` remains `aef0c0a5cd`.
 
 The API remains absent from this checkout. Here `observation="retained"` records
 successful materialization, not a renewed lifetime hold. LOO-498 still owes the
@@ -293,8 +303,8 @@ from tool selection, with one split-axis translation for the Rex renderer.
    replayed and native edits cannot be overwritten. Full restoration remains an
    acceptance requirement until Jack accepts a change.
 2. **Lifecycle integration.** Integrate LOO-717's presence and settlement contract
-   when available in the shared implementation; its active branch is inspectable
-   but has not been delivered here. Persist revisions, renew holds, aggregate copies
+   when available in the shared implementation; PR #1811 is published for demo
+   but has not been integrated here. Persist revisions, renew holds, aggregate copies
    through that owner and implement native scoped closure. Away acknowledgement
    must not become closed merely to satisfy cleanup. Reliable Rex use/away evidence
    remains unresolved; attachment/window inventory alone cannot supply it.
@@ -339,6 +349,11 @@ both opt-in native host tests. Rex passed outside the network sandbox; inside it
 its caller produced no receipt or exit/error file before the deadline. Herdr passed
 inside. That sandbox failure remains unresolved and the real-agent/remote path
 has not been demonstrated. `af774cada6` records the later 17-test work-open pass
-and template check. No live user resources were cleaned up during this pass.
+and template check. At `3d61147152`, the work-open suite passed 15 tests and
+both isolated opt-in Rex/Herdr tests; the Task-view test, formatting and clippy
+also passed. The Task-view link emitted a macOS unwind-size warning. The native
+probe established split HOME fallback and restart command replacement, not
+configured acceptance. This reconciliation changes documentation only and
+reuses those results; it starts no host and cleans up no live user resources.
 
-Checks: `cargo test -p loopflow --test integration work_open_tests::` passed (15, 2 opt-in tests ignored); the same command with `-- --ignored` passed both isolated Rex/Herdr tests; `cargo test -p loopflow --lib lf::commands::task_view::` passed (1, with the macOS linker unwind-size warning). Inherited LF variables were unset. `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context` passed. Earlier `uv run python scratch/rex-host-probe.py` evidence still establishes native split HOME fallback and restart command replacement. Gate owns broader suites; demo/review owns configured acceptance and unresolved native-split, restoration and release-policy judgment. Both isolated servers stopped.
+Check (realign): `git diff --check` and `lf context` passed; unchanged-code results reused from `3d61147152`; broader suites remain with gate and configured acceptance/product judgment with demo/review.

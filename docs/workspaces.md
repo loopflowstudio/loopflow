@@ -1,9 +1,7 @@
 # Open your Loopflow workspace
 
-> Documentation draft for LOO-498, requested by Jack Heart on November 3, 2026.
-> This describes the agreed experience. The implementation is still in progress;
-> the final section names the gaps that must be resolved before publishing it as
-> a released feature guide.
+> In development. This guide describes the intended workspace experience.
+> The final section lists the capabilities still being implemented or verified.
 
 ```bash
 lf open                              # open the Work selected by your current context
@@ -112,8 +110,9 @@ Explicit directory choices remain yours.
 **This requirement is not implemented yet.** In the installed Rex version, the
 isolated native split test starts both new shells in home when no cwd is supplied.
 Correct directories on LF's initial panes do not solve subsequent native splits.
-The inspected public API has no scoped Task/window default. This needs a host
-capability or an agreed interaction change before we can promise this behavior.
+The inspected public API has no scoped Task/window default. The app's normal
+Split action may supply its own directory; that path still needs verification
+before concluding that a host change or different interaction is required.
 
 ## Use your editor and diff tools
 

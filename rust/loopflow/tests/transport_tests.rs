@@ -3962,6 +3962,138 @@ fn machine_service_task_watch_replaces_readings_across_repositories() {
     assert_eq!(plans.as_array().unwrap().len(), 2);
 }
 
+#[test]
+fn task_creation_opens_one_retained_terminal_and_recovers_it_after_exit() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    fixture
+        .repo
+        .create_file(".lf/config.yaml", "agent: claude\n");
+    fixture
+        .repo
+        .create_file(".lf/graphs/mobile.yaml", "- interactive: demo\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Mobile creation fixture");
+    fixture.repo.push();
+    let gh = fixture.home.path().join("bin/gh");
+    std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let args = [
+        "task",
+        "create",
+        "Start from the phone",
+        "--run",
+        "--graph",
+        "mobile",
+        "--json",
+        "--request-id",
+        &id,
+        "--terminal",
+    ];
+    let create = || {
+        let output = fixture
+            .command(&args)
+            .env("PATH", &path)
+            .env("HTTPS_PROXY", "http://127.0.0.1:1")
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["state"], "started", "{result}");
+        result
+    };
+    let created = create();
+    let owner = created["owner"].as_str().unwrap().to_string();
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let session = created["receipt"]["session_id"].as_str().unwrap();
+    assert_eq!(fixture.session_of_owner(&owner), session);
+    fixture.launches(1);
+    let mut observer = fixture.viewer(&owner, false);
+    until_out(&mut observer, "ready for");
+    assert!(observer.token.is_none());
+    assert_eq!(create(), created);
+    let mut controller = fixture.viewer(&owner, true);
+    controller.input("done\n");
+    controller.finish();
+    fixture.ends(&owner);
+    assert_eq!(create(), created);
+    assert_eq!(fixture.launches(1).len(), 1);
+}
+
+#[test]
+fn simultaneous_session_openers_share_one_retained_owner() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap();
+    let open = || {
+        let mut command = fixture.command(&["resume", session]);
+        command.env("PATH", &path);
+        Terminal::spawn(command)
+    };
+    let mut first = open();
+    let mut second = open();
+    let launches = fixture.launches(1);
+    let owner: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    // One opener may replace the other's input before the first screen is
+    // drawn. Both must settle into viewing or a clean control-handoff exit.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    for terminal in [&mut first, &mut second] {
+        loop {
+            if String::from_utf8_lossy(&terminal.screen.lock().unwrap()).contains("ready for") {
+                break;
+            }
+            if let Some(status) = terminal.child.try_wait().unwrap() {
+                assert!(status.success(), "{:?}", terminal.screen.lock().unwrap());
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "concurrent opener did not settle"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    assert_eq!(fixture.launches(1), launches);
+    let owners: i64 = fixture
+        .sql()
+        .query_row(
+            "SELECT count(*) FROM processes WHERE command LIKE '%serve%' AND completed_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owners, 1);
+    let mut viewer = fixture.viewer(&owner, true);
+    viewer.input("done\n");
+    viewer.finish();
+    fixture.ends(&owner);
+}
+
 /// Cross-language acceptance, explicitly opted into an already configured private
 /// Tailscale route and installed Simulator. Ordinary CI never needs either.
 #[cfg(target_os = "macos")]
@@ -3980,6 +4112,15 @@ fn mobile_machine_native_acceptance() {
         .parent()
         .unwrap();
     let fixture = Fixture::new();
+    fixture
+        .repo
+        .create_file(".lf/config.yaml", "agent: claude\ngraph: mobile\n");
+    fixture
+        .repo
+        .create_file(".lf/graphs/mobile.yaml", "- interactive: demo\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Mobile acceptance defaults");
+    fixture.repo.push();
     let path = fixture.provider(
         r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
@@ -3990,6 +4131,20 @@ read -r answer < /dev/tty
 printf '%s\n' "$answer" >> "$HOME/answers"
 printf '\r\naccepted: %s\r\n' "$answer"
 "#,
+    );
+    let gh = fixture.home.path().join("bin/gh");
+    std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mode = fixture.command(&["portfolio", "manual"]).output().unwrap();
+    assert!(mode.status.success());
+    let portfolio = fixture
+        .command(&["portfolio", "add", fixture.repo.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        portfolio.status.success(),
+        "{}",
+        String::from_utf8_lossy(&portfolio.stderr)
     );
     let mut command = fixture.native(
         Path::new(env!("CARGO_BIN_EXE_lf")),
@@ -4026,7 +4181,23 @@ printf '\r\naccepted: %s\r\n' "$answer"
         supervised: false,
         remote_port: Some(port),
     };
-    service.child = Some(service.launch());
+    service.child = Some(
+        fixture
+            .command(&[
+                "machine",
+                "service",
+                "run",
+                "--remote-port",
+                &port.to_string(),
+            ])
+            .env("PATH", &path)
+            .env("HTTPS_PROXY", "http://127.0.0.1:1")
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
     service.ready();
 
     let container = Command::new("xcrun")
@@ -4065,7 +4236,8 @@ printf '\r\naccepted: %s\r\n' "$answer"
     );
     std::fs::write(
         setup_dir.join("session.json"),
-        json!({"session":session}).to_string(),
+        json!({"session":session,"creationRepository":fixture.repo.path().canonicalize().unwrap()})
+            .to_string(),
     )
     .unwrap();
 
@@ -4104,6 +4276,13 @@ printf '\r\naccepted: %s\r\n' "$answer"
     // Failed runs must not leave a one-use grant available to another test.
     let _ = std::fs::remove_file(setup);
     let _ = std::fs::remove_file(setup_dir.join("session.json"));
+    let created_owners: Vec<String> = fixture.sql()
+        .prepare("SELECT DISTINCT transport_lf_process_id FROM agent_sessions WHERE transport_lf_process_id IS NOT NULL")
+        .unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+    let _created_cleanup: Vec<_> = created_owners
+        .iter()
+        .map(|owner| StopOwner(&fixture, owner.clone()))
+        .collect();
     assert!(
         result.success(),
         "Native acceptance failed; inspect {}",
@@ -4111,13 +4290,13 @@ printf '\r\naccepted: %s\r\n' "$answer"
     );
     fixture.ends(&owner);
     assert_eq!(
-        fixture.launches(1),
-        first_launch,
-        "No reconnect may relaunch the provider"
+        fixture.launches(2).len(),
+        first_launch.len() + 1,
+        "Only explicit new Task creation may launch another provider"
     );
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
-        "desktop draft + phone + desktop\n",
+        "desktop draft + phone + desktop\ncreated from phone\n",
         "Input must reach the child exactly once"
     );
 }

@@ -424,6 +424,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         directory: directory.clone(),
         request_id: loopflow::id::TaskCreateRequestId::new(),
         request: "Create through the shared CLI".into(),
+        terminal: false,
         wave: None,
         graph: None,
     };

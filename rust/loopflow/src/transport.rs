@@ -154,9 +154,50 @@ fn delegate(
         // relayed screen; an interactive run keeps the terminal it reads from.
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
         let preview = ViewerTerminal::preview(preview_session)?;
-        let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
+        let cwd = std::env::current_dir()?;
+        let owner = match preview_session {
+            Some(session) => start_session(session, &argv, terminal, &cwd)?,
+            None => start(&argv, terminal, &cwd, &|_| {})?,
+        };
         attach_with_preview(&owner, None, json_session, preview)?;
         Ok(true)
+    }
+}
+
+/// Start or obtain the Session's existing terminal owner without becoming a
+/// viewer. Ordinary Desktop delegation uses this same startup boundary. This
+/// lock differs from the provider launch lock the child must acquire itself.
+pub(crate) fn start_session(
+    session: &str,
+    argv: &[String],
+    terminal: bool,
+    cwd: &Path,
+) -> Result<LfProcessId> {
+    let _startup = crate::ops::human_session::lock_session_process(&format!("owner:{session}"))?;
+    let registry =
+        crate::store::read_existing_registry()?.context("Session registry is unavailable")?;
+    let record = registry
+        .sqlite
+        .session(session)?
+        .context("Session is unavailable")?;
+    if let Some(owner) = registry.sqlite.session_transport(session)? {
+        if crate::ops::human_session::attaches(&registry.sqlite, &record, &owner)? {
+            return Ok(owner);
+        }
+    }
+    let owner = start(argv, terminal, cwd, &|_| {})?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if registry.sqlite.session_transport(session)?.as_ref() == Some(&owner) {
+            return Ok(owner);
+        }
+        anyhow::ensure!(crate::ops::human_session::owner_running(&registry.sqlite, &owner)?,
+            "Session owner exited before opening the provider; inspect the Session before another start");
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "Session startup has not been confirmed; delivery is unknown, do not repeat the launch"
+        );
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

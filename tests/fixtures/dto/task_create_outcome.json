@@ -3,7 +3,8 @@
     "task_id": "task_0123456789ab40008000000000000001",
     "state": "in_progress",
     "receipt": null,
-    "message": null
+    "message": null,
+    "owner": null
   },
   {
     "task_id": "task_0123456789ab40008000000000000001",
@@ -41,7 +42,8 @@
       "graph": "code",
       "session_id": "0123456789abcdef0123456789abcdef"
     },
-    "message": null
+    "message": null,
+    "owner": null
   },
   {
     "task_id": "task_0123456789ab40008000000000000002",
@@ -79,7 +81,8 @@
       "graph": null,
       "session_id": null
     },
-    "message": "Task was created; its start failed."
+    "message": "Task was created; its start failed.",
+    "owner": null
   },
   {
     "task_id": "task_0123456789ab40008000000000000001",
@@ -117,6 +120,7 @@
       "graph": "code",
       "session_id": "0123456789abcdef0123456789abcdef"
     },
-    "message": "Inspect this Task before starting it again."
+    "message": "Inspect this Task before starting it again.",
+    "owner": null
   }
 ]

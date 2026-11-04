@@ -129,6 +129,7 @@ pub struct TaskCreateOutcome {
     pub state: TaskCreateState,
     pub receipt: Option<TaskCreateReceipt>,
     pub message: Option<String>,
+    pub owner: Option<crate::id::LfProcessId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +153,7 @@ struct Intent<'a> {
     graph: Option<&'a str>,
     agent: Option<&'a str>,
     step_args: Vec<String>,
+    terminal: bool,
 }
 
 /// Admit the whole CLI operation before effects. Only the request lock holder
@@ -171,6 +173,7 @@ pub fn recoverable(
                 title,
                 regressed_in,
                 graph,
+                terminal,
                 ..
             },
     }) = &cli.command
@@ -188,6 +191,7 @@ pub fn recoverable(
         graph: graph.as_deref(),
         agent: cli.agent.as_deref(),
         step_args: cli.step_args(),
+        terminal: *terminal,
     })?;
     let store =
         tokio::runtime::Runtime::new()?.block_on(open_store(&storage_config_from_env()?))?;
@@ -210,6 +214,7 @@ pub fn recoverable(
                 state: TaskCreateState::InProgress,
                 receipt: None,
                 message: None,
+                owner: None,
             });
         }
         Err(error) => return Err(error.into()),
@@ -228,6 +233,7 @@ pub fn recoverable(
                 "The start result was interrupted. Inspect this Task before starting it again."
                     .into(),
             ),
+            owner: None,
         });
     }
     if let Some(graph) = graph {
@@ -253,12 +259,13 @@ pub fn recoverable(
         request.as_deref(),
         true,
     );
-    let outcome = match result {
+    let mut outcome = match result {
         Ok(receipt) => TaskCreateOutcome {
             task_id: task.id.clone(),
             state: TaskCreateState::Started,
             receipt: Some(receipt),
             message: None,
+            owner: None,
         },
         Err(error) => TaskCreateOutcome {
             task_id: task.id.clone(),
@@ -268,8 +275,35 @@ pub fn recoverable(
                 "{error:#}; {} was created. Inspect it before trying another start.",
                 task.identifier
             )),
+            owner: None,
         },
     };
+    if *terminal && outcome.state == TaskCreateState::Started {
+        let receipt = outcome
+            .receipt
+            .as_ref()
+            .expect("a started Task has a receipt");
+        let opening = (|| -> Result<_> {
+            let session = receipt
+                .session_id
+                .as_ref()
+                .context("Task has no interactive Session")?;
+            let argv = vec![
+                std::env::current_exe()?.to_string_lossy().into_owned(),
+                "session".into(),
+                "resume".into(),
+                session.to_string(),
+            ];
+            crate::transport::start_session(session.as_str(), &argv, true, &repo)
+        })();
+        match opening {
+            Ok(owner) => outcome.owner = Some(owner),
+            Err(error) => {
+                outcome.state = TaskCreateState::Failed;
+                outcome.message = Some(format!("Task was created, but terminal startup was not confirmed: {error:#}. Inspect its Session before another start."));
+            }
+        }
+    }
     store
         .sqlite
         .finish_task_create(&id, &serde_json::to_string(&outcome)?)?;

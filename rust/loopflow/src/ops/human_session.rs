@@ -1166,7 +1166,7 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 /// reported, never cut silently. The build is judged against the entry, not
 /// this viewer, so a development build opening a conversation in the main
 /// Home relaunches through the installed lf.
-fn attaches(
+pub(crate) fn attaches(
     store: &SqliteStore,
     session: &LfSession,
     owner: &crate::id::LfProcessId,

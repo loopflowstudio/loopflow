@@ -12,7 +12,7 @@ Native Swift, host Tailscale only, no embedded node, public relay or required hu
 Start with existing open Tasks and their recorded Session terminal. Preserve
 Desktop typography/colors and the compact Paste / New line / keyboard controls.
 New-Task flow remains Jack’s selected describe-first sheet, with a visible editable
-destination and explicit Create & start, after shared recoverable admission exists.
+destination and explicit Create & start through shared recoverable admission.
 
 LOO-593’s backend was merged locally at 23ed1ea7dd; neither PR was landed. The
 Machine service shares Rust reads and delegates complete commands to lf. Existing
@@ -41,8 +41,8 @@ pins Machine identity; later mismatches fail explicitly. Credentials never enter
 URLs, logs or rendered UI. Forget Machine removes the local credential; server
 revocation remains a separate Machine operation.
 
-RemoteMobileClient reads the shared roadmap, resolves repository paths, and reads
-WorkViewPlan for actual Task primary Sessions. It rejects unavailable/truncated
+RemoteMobileClient watches shared all-repository WorkViewPlans for actual Task
+primary Sessions. It rejects unavailable/truncated
 readings. A missing Session owner remains unavailable, with no implicit launch or
 provider resume. The adapter bridges the actual owner and consumes its existing
 binary protocol; no mobile CLI or second serialized domain model is introduced.
@@ -80,27 +80,17 @@ grant restores the software keyboard even if the earlier attachment hid it.
 4. Verify real phone ergonomics: horizontal observer panning, software keyboard
    layout, CJK conversion, dictation, physical keys, VoiceOver and sustained-output
    battery use. Programmatic scroll offsets and UIKit text calls do not prove these.
-5. Complete shared recoverable create/start before enabling the selected new-Task
-   sheet. A lost reply must recover the original Task or explicit uncertainty;
-   preserve a created Task when launch fails. No implicit Auto-Ship or input replay.
-   The shared CLI now has durable request admission: reserve Task identity before
-   filing, mark start before dispatch, keep the exact outcome after completion.
-   A request lock permits concurrent recovery without parallel launches. A crash
-   across launch returns unknown and the original Task; no automatic Graph retry.
-   Machine/Swift use the same typed command and fixtures. Carrier-loss/restart
-   proof passes over the local Machine socket. Connect the describe-first sheet
-   next, retaining its exact request ID/payload and original Machine/repository
-   across backgrounding and app restart. Never retarget an uncertain request to
-   a newly paired Machine or silently change its destination/defaults on retry.
-   Creation admits a primary conversation but does not itself start its terminal
-   provider: explicit Create & start needs the shared initial Session-opening path,
-   distinct from passive attachment to existing Sessions.
-   `human_session::open`/`transport::delegate_prepared_session` already select and
-   launch through the existing retained owner, but ordinary `resume --json` is a
-   viewer and prints after its relay returns. Do not use a long-lived Machine
-   command pipe as the phone's terminal or add another PTY owner. Extend the shared
-   explicit creation/opening operation to acknowledge the existing owner's startup;
-   keep it inside admission so a lost reply cannot launch a second provider.
+5. Continue new-Task ergonomics and failure acceptance. The describe-first sheet,
+   saved draft/destination, shared recoverable admission and explicit initial
+   terminal opening are implemented. Creation uses one request UUID/payload saved
+   before sending. App restart and lost replies recover it; changing paired Machines
+   cannot retarget it. Started opens the recorded Task/Session; failed/unknown keeps
+   Open Task without rerunning the Graph. Existing-Task navigation stays passive.
+   Desktop delegation and explicit create/start share Session owner startup exclusion.
+   Verify actual dictation and software-keyboard layout on a physical phone. The
+   phone currently pairs one Machine and holds one pending creation; broader
+   multi-Machine selection and recovery history remain UX work. A permanently
+   unreachable Machine can leave that pending request needing explicit disposition.
 6. Preserve useful telemetry: shared command/Process attribution, identity and
    connection diagnostics without duplicate provider usage or persisted terminal
    contents. Full Desktop Work cutover and installed update survival retain their
@@ -299,3 +289,36 @@ Task, Graph process and primary Session. It uses an isolated local socket and
 fixture repository, not a phone or external planning provider.
 
 Checks: six creation/DTO integration tests, shared Rust wire fixtures, app/CLI write parity, seven Swift MachineProtocolTests, all-target Clippy and signed iOS Simulator build passed; logs `/tmp/mobile-create-tests-final.log`, `/tmp/mobile-create-validation.log`, `/tmp/mobile-create-native-build.log`.
+
+### Native Create & start — November 4, 02:46
+
+Jack Heart's describe-first flow now creates through the shared Machine command,
+opens the admitted primary Session through the retained owner, and navigates to
+that recorded terminal. The phone saves its exact request before sending, keeps
+uncertain payloads immutable, preserves failed starts, and restores drafts across
+app restarts. Original Machine identity and destination remain attached to pending
+requests. Closing a sheet cancels observation without replaying the command or
+letting a late response overwrite a newer recovered draft. Native keyboard
+Dictation supplies editable text; there is no separate speech service.
+
+Actual host-Tailscale acceptance passed in Simulator at
+`Test-LoopflowiOS-2026.11.04_02-46-23--0800.xcresult`: existing Session handoff and
+passive reconnect, then native creation, same-result recovery, recorded Session
+opening and native text submission. The isolated fixture recorded exactly two
+provider launches, one per intended Session, and both exact submissions. It uses
+stand-in providers and direct native model/input calls, not manual button presses
+or real provider accounts. The temporary private Serve route was removed; the
+original empty Serve configuration was verified afterward.
+
+Six native creation tests cover saved drafts, lost replies/app restart, Machine
+changes, failed/unknown starts, local read/write failures and late canceled replies.
+Six shared admission/DTO tests and focused Desktop terminal-opening regressions
+pass. UI captures in both themes and accessibility text size were inspected after
+fixing the test's unmounted-window capture. These do not establish physical-phone
+keyboard or VoiceOver quality. Final six creation tests passed at
+`Test-LoopflowiOS-2026.11.04_02-48-59--0800.xcresult`; the ordinary native suite
+passed before the last cancellation/rendering refinements (34 passed, one opt-in
+skipped). Final all-target Clippy and seven shared Swift protocol tests passed.
+Logs: `/tmp/mobile-creation-native-final.log`, `/tmp/mobile-creation-validation-final.log`,
+`/tmp/mobile-terminal-regressions.log`, `/tmp/mobile-creation-tailscale.log`.
+Rendered captures are `demo-assets/mobile-create-ready-{light,dark,large-text}.png`.

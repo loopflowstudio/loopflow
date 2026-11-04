@@ -1124,6 +1124,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             run,
             graph,
             request_id,
+            terminal: _,
             json,
         } => {
             let report = match request.as_ref().or(notes.as_ref()) {

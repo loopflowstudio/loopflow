@@ -22,6 +22,10 @@ struct MobileTaskList: View {
     @State private var workspace: MobileWorkspace
     @State private var search = ""
     @State private var listVisible = false
+    @State private var creating = false
+    @State private var createdTask: WorkViewPlan.Content?
+    @State private var showCreatedTask = false
+    private let creationClient: (any MobileTaskCreationClient)?
     private let connectionLabel: String
     private let onForget: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
@@ -33,6 +37,7 @@ struct MobileTaskList: View {
 
     init(client: any MobileClient, connectionLabel: String = "Offline fixture", onForget: (() -> Void)? = nil) {
         _workspace = State(initialValue: MobileWorkspace(client: client))
+        creationClient = client as? any MobileTaskCreationClient
         self.connectionLabel = connectionLabel
         self.onForget = onForget
     }
@@ -107,7 +112,25 @@ struct MobileTaskList: View {
             .searchable(text: $search, prompt: "Find a Task")
             .navigationTitle("Tasks")
             .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(isPresented: $showCreatedTask) {
+                if let createdTask {
+                    MobileSessionView(task: createdTask, workspace: workspace, theme: theme, connectionLabel: connectionLabel)
+                }
+            }
+            .sheet(isPresented: $creating, onDismiss: {
+                if createdTask != nil { showCreatedTask = true }
+            }) {
+                if let creationClient {
+                    MobileNewTaskView(model: MobileTaskCreation(client: creationClient), theme: theme) { createdTask = $0 }
+                }
+            }
             .toolbar {
+                if creationClient != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { createdTask = nil; creating = true } label: { Image(systemName: "plus") }
+                            .accessibilityLabel("New Task")
+                    }
+                }
                 if let onForget {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {

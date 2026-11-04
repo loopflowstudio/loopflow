@@ -35,6 +35,7 @@ pub enum Write {
         request: String,
         wave: Option<String>,
         graph: Option<String>,
+        terminal: bool,
     },
     /// `lf task complete <issue>`.
     TaskComplete { directory: PathBuf, issue: String },
@@ -186,6 +187,7 @@ impl Write {
             request,
             wave,
             graph,
+            terminal,
             ..
         } = self
         {
@@ -203,6 +205,9 @@ impl Write {
             }
             if let Some(graph) = graph {
                 argv.extend(["--graph".into(), graph.clone()]);
+            }
+            if *terminal {
+                argv.push("--terminal".into());
             }
             argv.extend(["--".into(), request.clone()]);
             return argv;

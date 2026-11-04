@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 
 @MainActor
-final class RemoteMobileClient: MobileClient {
+final class RemoteMobileClient: MobileClient, MobileTaskCreationClient {
     private(set) var credential: MachineCredential
 
     init(credential: MachineCredential) { self.credential = credential }
@@ -33,7 +33,43 @@ final class RemoteMobileClient: MobileClient {
         } catch { connection.close(); throw error }
     }
 
-    private func verifyMachine() async throws {
+    func creationContext() async throws -> MobileCreationContext {
+        try await verifyMachine(required: ["task_create", "portfolio", "view_plan"])
+        let portfolio = try JSONDecoder().decode(Portfolio.self, from: Data(try await read(.portfolio).utf8))
+        if let error = portfolio.error { throw RegistryQueryError(error) }
+        guard let machineID = credential.machineID else { throw RegistryQueryError("Machine identity is unavailable") }
+        return MobileCreationContext(machineID: machineID, name: credential.endpoint.host ?? "Paired Machine", repositories: portfolio.repos)
+    }
+
+    func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
+        try await verifySubmission(submission)
+        let reply = try await response(.command(.taskCreate(directory: submission.directory,
+            requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)))
+        guard case .command(_, let output, let stderr, let code) = reply.result else {
+            throw RegistryQueryError("The Machine did not return the creation result")
+        }
+        guard code == 0 else { throw RegistryQueryError(stderr.isEmpty ? "Task creation did not finish" : stderr) }
+        return try JSONDecoder().decode(TaskCreateOutcome.self, from: Data(output.utf8))
+    }
+
+    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
+        try await verifySubmission(submission)
+        let output = try await read(.viewPlan(directory: submission.directory, expression: "task:\(taskID)"))
+        let tasks = try mobileTasks(JSONDecoder().decode(WorkViewPlan.self, from: Data(output.utf8)))
+        guard let task = tasks.first(where: { $0.work.id == taskID }) else {
+            throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
+        }
+        return task
+    }
+
+    private func verifySubmission(_ submission: MobileTaskSubmission) async throws {
+        try await verifyMachine(required: ["task_create", "view_plan"])
+        guard submission.machineID == credential.machineID else {
+            throw RegistryQueryError("Reconnect \(submission.machineName) to recover this request. Nothing was sent to this Machine.")
+        }
+    }
+
+    private func verifyMachine(required: [String] = []) async throws {
         let reply = try await response(.bootstrap)
         guard case .bootstrap(let version, _, _, let machine, let capabilities, _, _) = reply.result,
               version == 1, case .object(let fields) = machine,
@@ -49,7 +85,7 @@ final class RemoteMobileClient: MobileClient {
             try MachineKeychain.save(confirmed)
             credential = confirmed
         }
-        guard ["all_view_plans", "session_owner", "owner_bridge"].allSatisfy(capabilities.contains) else {
+        guard (["all_view_plans", "session_owner", "owner_bridge"] + required).allSatisfy(capabilities.contains) else {
             throw RegistryQueryError("Update the Machine service to use Tasks and Sessions from this phone")
         }
     }

@@ -49,10 +49,13 @@ coordination references below do not assert delivery status.
 
 E now has shared CLI request admission and a Machine/Swift command mirror. Isolated
 socket-loss/service-restart proof recovers one Task, Graph and primary Session;
-interrupted launch reports unknown without replay. F still needs the native sheet,
-durable draft/destination and an explicit initial terminal opening through the
-existing owner. Ordinary `resume --json` stays attached until its relay returns;
-the Machine command pipe must not become a second terminal transport.
+interrupted launch reports unknown without replay. F now has the native sheet,
+durable draft/destination and explicit terminal startup through the shared owner.
+Host-Tailscale native acceptance creates, recovers the same receipt, opens the
+recorded Session and submits native text once. Existing navigation remains passive.
+Physical dictation/keyboard use and broader multi-Machine/pending-request UX remain.
+Ordinary `resume --json` stays attached until its relay returns; the explicit
+creation acknowledgement does not make the command pipe a terminal transport.
 
 Current backend design:
 `/Users/jack/src/loopflow.loo-593-decide-the-desktop/scratch/mobile-backend.md`.

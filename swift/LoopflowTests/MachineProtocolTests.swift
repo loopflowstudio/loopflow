@@ -5,7 +5,7 @@ import Testing
 struct MachineProtocolTests {
     @Test func creationRetainsItsIdentityAndOutcomeAcrossCarriers() throws {
         let id = try #require(UUID(uuidString: "00000000-0000-4000-8000-000000000001"))
-        let change = ServedWrite.taskCreate(directory: "/repo", requestID: id, request: "Fix the retry test", wave: nil, graph: nil)
+        let change = ServedWrite.taskCreate(directory: "/repo", requestID: id, request: "Fix the retry test", wave: nil, graph: nil, terminal: false)
         let request = MachineRequest(version: 1, id: "create-1", operation: .command(change))
         #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("task_create")))
         #expect(change.argv == ["task", "create", "--run", "--json", "--request-id", id.uuidString.lowercased(), "--no-wave", "--", "Fix the retry test"])

@@ -82,6 +82,7 @@ fn task_create_survives_a_dropped_carrier_and_machine_service_restart() {
         directory: task.repo.path().into(),
         request_id: id.clone(),
         request: "Create from the phone".into(),
+        terminal: false,
         wave: None,
         graph: Some("feature".into()),
     };

@@ -153,8 +153,8 @@ the existing planning writer keeps external creation on that same Task. It recor
 the launch attempt before invoking ordinary `task run`, then saves the outcome.
 The Machine service delegates this command; it owns no separate receipt cache.
 
-The JSON outcome contains `task_id`, `state`, optional `receipt` and optional
-`message`. `started` means the initial run returned successfully and its conversation was admitted;
+The JSON outcome contains `task_id`, `state`, optional `receipt`, optional
+`message` and optional `owner`. `started` means the initial run returned successfully and its conversation was admitted;
 it does not mean the Graph finished or that its terminal provider is running.
 `in_progress` means another process holds this request. `failed` preserves the
 filed Task after a start/admission error. `unknown` means a process exited across
@@ -163,7 +163,13 @@ Repeating creation never advances an already attempted Graph. All four outcomes
 exit zero; invalid or conflicting requests fail normally. Stored outcomes describe
 the original operation, not the Task's current status.
 
+Add `--terminal` to explicitly open that primary Session and acknowledge its
+retained `owner`, without attaching a viewer. It requires recoverable admission
+and cannot combine with `-b` or `-i`. Desktop delegation and this operation share
+the same Session startup exclusion and existing owner. Repeating a saved creation
+result after its terminal exits does not launch it again.
+
 The typed `task_create` write carries `directory`, `request_id`, `request`, optional
-`wave` and optional `graph`. It requests ordinary interactive creation, never
-headless execution or Auto-Ship. The iOS creation sheet and explicit initial
-terminal opening remain separate client work.
+`wave`, optional `graph` and required `terminal`. It requests ordinary interactive
+creation, never headless execution or Auto-Ship. iOS uses `terminal: true` only for
+the explicit Create & start action; existing-Task attachment never launches.

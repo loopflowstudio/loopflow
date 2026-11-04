@@ -29,7 +29,22 @@ the same [Machine setup commands](../../rust/loopflow/src/machine_service/README
 The app saves
 the device grant in Keychain, pins the Machine identity
 on first bootstrap, reads actual open Tasks and attaches their recorded Session
-owners. It installs no CLI on the phone and never starts a provider.
+owners. It installs no CLI on the phone. Opening an existing Task observes its
+running Session; it never implicitly starts or resumes a provider.
+
+Choose **New Task** (+), describe the work, and select a repository on the paired
+Machine. The sheet saves your draft and remembers that destination. Use the
+keyboard’s microphone to dictate, then edit before choosing **Create & start**.
+The Machine runs the shared creation command and opens its primary Session through
+the existing retained owner. A confirmed start opens that Session as an observer;
+**Use keyboard** explicitly takes input control.
+
+If the reply is lost, **Check status** recovers the same saved request, including
+after restarting the app. It never files another Task or starts a provider again.
+A failed or uncertain start keeps the created Task available through **Open Task**.
+The request retains its original Machine and repository even after re-pairing;
+reconnect that Machine to recover it. A failed local draft save prevents sending.
+Drafts are protected local files excluded from backup; credentials stay in Keychain.
 
 The Task list uses one all-repository view subscription after checking Machine
 identity. Whole readings replace the list; pull-to-refresh confirms the current
@@ -139,8 +154,10 @@ one-use setup ticket directly into the app container, then runs the native XCTes
 It stops its owner/service and deletes its registry afterward. The native test
 opens the Task’s Session in UIKit, edits the existing draft, disconnects, lets a
 second viewer take control, reconnects passively at the owner’s geometry, then
-explicitly takes control and submits. Rust asserts one provider launch and one
-exact submission. The native log is `swift/.build/mobile-acceptance.log`. Remove
+explicitly takes control and submits. It then creates a Task through the native
+creation model, recovers the same receipt, opens its recorded terminal, and types
+into it. Rust asserts exactly two provider launches (one existing, one explicitly
+created) and both exact submissions. The native log is `swift/.build/mobile-acceptance.log`. Remove
 only the temporary Serve route afterward; never reset unrelated host routes.
 
 `MachineConnectionIntegrationTests` skips unless the installed simulator app’s

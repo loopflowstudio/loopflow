@@ -236,6 +236,16 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
+        if matches!(
+            &self.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Create { terminal: true, .. }
+            })
+        ) && (self.batch || self.interactive)
+        {
+            return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                "task create --terminal acknowledges interactive startup without a viewer; omit -b and -i\n"));
+        }
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }
@@ -2086,6 +2096,9 @@ until `lf ship`."
         /// Recover the same create/start request after a lost reply; reuse with identical arguments
         #[arg(long, requires_all = ["run", "json"])]
         request_id: Option<crate::id::TaskCreateRequestId>,
+        /// Start the primary Session's terminal and acknowledge its owner without attaching a viewer
+        #[arg(long, requires = "request_id")]
+        terminal: bool,
         #[arg(long)]
         json: bool,
     },

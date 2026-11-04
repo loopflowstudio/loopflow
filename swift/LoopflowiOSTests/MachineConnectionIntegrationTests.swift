@@ -9,7 +9,7 @@ import XCTest
 /// neither the test nor its assertions print ticket or credential contents.
 @MainActor
 final class MachineConnectionIntegrationTests: XCTestCase {
-    private struct SessionProof: Decodable { let session: String }
+    private struct SessionProof: Decodable { let session: String; let creationRepository: String? }
     private var window: UIWindow?
 
     func testPairAndReadThroughHostTailscale() async throws {
@@ -54,6 +54,48 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(replacement).get().map(\.work), tasks.map(\.work))
         observation.close()
         if let proof { try await exerciseSession(proof, client: reopened, tasks: refreshed) }
+        if let directory = proof?.creationRepository { try await exerciseCreation(client: reopened, directory: directory) }
+    }
+
+    private func exerciseCreation(client: RemoteMobileClient, directory: String) async throws {
+        let store = MobileTaskDraftStore(url: FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString).appending(path: "creation.json"))
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let creation = MobileTaskCreation(client: client, store: store)
+        await creation.prepare()
+        XCTAssertNotNil(creation.context, creation.error ?? "Missing destinations")
+        creation.selectRepository(directory)
+        creation.editText("Create a Task from the native phone")
+        XCTAssertTrue(creation.canCreate)
+        await creation.submit()
+        // A slow build/Graph may outlast one carrier deadline. Recover the same
+        // admission; never create another request just to make the proof pass.
+        if !creation.settled { await creation.submit() }
+        let outcome = try XCTUnwrap(creation.draft.outcome, creation.error ?? "No creation result")
+        XCTAssertEqual(outcome.state, .started, outcome.message ?? "Terminal did not start")
+        let submission = try XCTUnwrap(creation.draft.submission)
+        let recovered = try await client.createTask(submission)
+        XCTAssertEqual(recovered, outcome)
+        let opened = await creation.openTask()
+        let task = try XCTUnwrap(opened, creation.error ?? "Task not available")
+        XCTAssertEqual(task.primarySession, outcome.receipt?.sessionId)
+        let workspace = MobileWorkspace(client: client)
+        let controller = SessionTerminalController(workspace: workspace)
+        controller.loadViewIfNeeded()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 700))
+        window.rootViewController = controller
+        window.isHidden = false
+        self.window = window
+        defer { workspace.leave(); controller.terminal.updateUiClosed(); self.window = nil }
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        await workspace.open(task)
+        try await wait("Created Session did not become viewable") { workspace.state == .viewing }
+        workspace.requestControl()
+        try await wait("Created Session did not accept keyboard control") { workspace.state == .controlling }
+        controller.update(theme: .light)
+        controller.terminal.insertText("created from phone\n")
+        try await wait("Created provider did not receive native input") { workspace.state == .ended }
     }
 
     private func exerciseSession(_ proof: SessionProof, client: RemoteMobileClient,

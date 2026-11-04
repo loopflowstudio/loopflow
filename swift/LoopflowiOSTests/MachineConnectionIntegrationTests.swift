@@ -165,6 +165,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         var longestRender = 0.0
         var feeds = 0
         var acknowledgementSent: Double?
+        var lastOutputAt = ProcessInfo.processInfo.systemUptime
         var inputResponseTimes: [Double] = []
         let render = try XCTUnwrap(workspace.render)
         workspace.render = { bytes, reset in
@@ -181,7 +182,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             feeds += 1
             // The stand-in's reports and markers deliberately contain no "x";
             // only its 32 MiB payload contributes to this byte count.
-            received += bytes.filter { $0 == 120 }.count
+            let payloadCount = bytes.filter { $0 == 120 }.count
+            received += payloadCount
+            if payloadCount > 0 { lastOutputAt = ProcessInfo.processInfo.systemUptime }
             while acknowledged < received / 65536 {
                 // Native editing, not direct transport writes: the remote PTY
                 // checks each resulting line before sending the next chunk.
@@ -218,7 +221,8 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         do {
             try await wait("Sustained output did not complete", seconds: 60) { complete || problem() != nil }
         } catch {
-            print("Mobile output stopped: received=\(received), acknowledged=\(acknowledged), feeds=\(feeds), state=\(workspace.state), problem=\(problem() ?? "none"); \(error.localizedDescription)")
+            let idle = ProcessInfo.processInfo.systemUptime - lastOutputAt
+            print("Mobile output stopped: received=\(received), acknowledged=\(acknowledged), feeds=\(feeds), idle=\(idle)s, rendering=\(renderSeconds)s, longestFeed=\(longestRender)s, longestSchedulingGap=\(schedulingGaps.max() ?? 0)s, state=\(workspace.state), problem=\(problem() ?? "none"); \(error.localizedDescription)")
             throw error
         }
         heartbeat.cancel()
@@ -458,7 +462,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let directory = URL.documentsDirectory.appending(path: "LoopflowIntegration/\(control)")
         // A separate list consumer proves an idle Work watch detects the same
         // outage without requiring a refresh or terminal traffic to expose it.
-        let listing = MobileWorkspace(client: client)
+        let cacheURL = directory.appending(path: "tasks.json")
+        var listing = MobileWorkspace(client: client, machineID: client.savedMachine.machineID,
+                                      taskCache: MobileTaskCache(url: cacheURL))
         defer { listing.stopTaskUpdates() }
         await listing.startTaskUpdates()
         try await wait("Task watch did not become current before interruption") { !listing.isLoadingTasks }
@@ -490,6 +496,15 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         await listing.refresh()
         XCTAssertNotNil(listing.tasksError)
         XCTAssertEqual(listing.tasks.map(\.work), cached)
+        let receivedAt = listing.tasksReceivedAt
+        listing.stopTaskUpdates()
+        listing = MobileWorkspace(client: client, machineID: client.savedMachine.machineID,
+                                  taskCache: MobileTaskCache(url: cacheURL))
+        await listing.startTaskUpdates()
+        XCTAssertEqual(listing.tasks.map(\.work), cached, "Reopening offline must restore the saved Task list")
+        XCTAssertEqual(listing.tasksReceivedAt, receivedAt)
+        XCTAssertFalse(listing.tasksAreCurrent)
+        XCTAssertNotNil(listing.tasksError)
 
         try Data().write(to: directory.appending(path: "start"), options: .atomic)
         try await wait("Host runner did not restart the isolated service", seconds: 25) {
@@ -497,7 +512,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         }
         await listing.refresh()
         try await wait("Task watch did not recover a current reading") {
-            !listing.isLoadingTasks && listing.tasksError == nil
+            !listing.isLoadingTasks && listing.tasksAreCurrent && listing.tasksError == nil
         }
         XCTAssertEqual(listing.tasks.map(\.work), cached)
         await workspace.reconnect()

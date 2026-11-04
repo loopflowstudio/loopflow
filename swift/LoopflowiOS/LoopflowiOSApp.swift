@@ -36,9 +36,9 @@ struct MobileTaskList: View {
         workspace.tasks.filter { $0.matchesMobileSearch(search) }
     }
 
-    init(client: any MobileClient, connectionLabel: String = "Offline fixture", onForget: (() -> Void)? = nil,
+    init(client: any MobileClient, machineID: String? = nil, connectionLabel: String = "Offline fixture", onForget: (() -> Void)? = nil,
          onChangeAddress: (() -> Void)? = nil) {
-        _workspace = State(initialValue: MobileWorkspace(client: client))
+        _workspace = State(initialValue: MobileWorkspace(client: client, machineID: machineID))
         creationClient = client as? any MobileTaskCreationClient
         self.connectionLabel = connectionLabel
         self.onForget = onForget
@@ -49,16 +49,10 @@ struct MobileTaskList: View {
         NavigationStack {
             List {
                 Section {
-                    if let error = workspace.tasksError {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark")
-                                .font(Typography.strong(15))
-                            Text(error).font(Typography.caption(13))
-                            if !workspace.tasks.isEmpty {
-                                Text("Showing the last received Tasks.").font(Typography.caption(13))
-                            }
-                            Button("Try again") { Task { await workspace.refresh() } }
-                                .disabled(workspace.isLoadingTasks)
+                    if workspace.tasksError != nil || (!workspace.tasksAreCurrent && workspace.tasksReceivedAt != nil) {
+                        MobileTaskListStatus(error: workspace.tasksError,
+                            receivedAt: workspace.tasksReceivedAt, isLoading: workspace.isLoadingTasks) {
+                            Task { await workspace.refresh() }
                         }
                         .foregroundStyle(theme.palette.textSecondary)
                         .listRowBackground(theme.palette.surface)
@@ -164,6 +158,34 @@ struct MobileTaskList: View {
         }
         .task(id: scenePhase == .background) {
             if scenePhase != .background { await workspace.restoreForegroundSession() }
+        }
+    }
+}
+
+struct MobileTaskListStatus: View {
+    let error: String?
+    let receivedAt: Date?
+    let isLoading: Bool
+    let refresh: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let error = error {
+                Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark")
+                    .font(Typography.strong(15))
+                Text(error).font(Typography.caption(13))
+            } else {
+                Label(isLoading ? "Updating saved Tasks…" : "Saved Task list", systemImage: "arrow.clockwise")
+                    .font(Typography.strong(15))
+            }
+            if let receivedAt = receivedAt {
+                Text("Last updated \(receivedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(Typography.caption(13))
+            }
+            if error != nil {
+                Button("Try again", action: refresh)
+                    .disabled(isLoading)
+            }
         }
     }
 }

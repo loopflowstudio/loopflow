@@ -1124,3 +1124,52 @@ Captures: `scratch/demo-assets/change-machine-address.png`,
 `change-machine-address-large-text.png`, and `machine-address-validation.png`.
 Physical-phone network transitions, voice/VoiceOver judgment, actual-provider
 interaction and installed Desktop update survival remain acceptance work.
+
+## Reopen with the last Task list — November 4
+
+Jack Heart's return-to-work flow now keeps one bounded Task reading across app
+restarts. The cache is scoped to the verified Machine ID, lives in Caches, requests
+complete file protection and is excluded from backup. Until a current watch
+replaces it, the list shows its original last-updated time. An empty live reading
+replaces old Tasks too. Cache failure never hides a valid live reading or prevents
+connection. Terminal output and input remain uncached.
+
+Review kept disk encoding and I/O off the UI actor and the cache at 2 MiB. The
+existing newest-reading buffer bounds updates while a write finishes. A canceled
+subscription cannot begin a late cache write. Forgetting a Machine removes only
+its matching cache, avoiding delayed cleanup of a newly selected Machine. Cache
+records use the existing Work content types, not a second domain inventory.
+A cached row still goes through live Session attachment and can never start one.
+
+Tests cover reopening offline with a newly constructed workspace, Machine
+isolation, an empty replacement surviving another reopen, corruption/oversize
+removal, backup exclusion, cancellation and write failure. Two initial assertions
+were incorrect: the fake deliberately reports SessionUnavailable, and Simulator
+returns no file-protection attribute. The state expectation now follows that
+contract; file-protection metadata has its own explicitly device-only test.
+Light, dark and large-text status-component captures were inspected. They show
+the error, original update time and recovery action without clipping.
+
+- `xcodebuild test ... -only-testing:LoopflowiOSTests/MobileTaskUpdatesTests`: 7 pass, 1 device-only skip; `/tmp/mobile-task-cache-verified.log`, `Test-LoopflowiOS-2026.11.04_13-47-53--0800.xcresult`.
+
+The live service-interruption proof now constructs a new workspace and cache
+reader while the isolated service is stopped. It confirms the same saved rows and
+original timestamp, then replaces them with a current watch after restart.
+The later output exercise uses a workspace without a cache. Its first run missed
+the existing 60-second completion deadline at 502 of 512 acknowledgements, with
+32,899,072 payload bytes received and no reported disconnect. Host load average
+was above 300 when inspected, but that does not establish the cause. Added failure
+diagnostics report time since payload progress, render time, longest feed and
+longest scheduling gap. A diagnostic run passed the same workload and unchanged
+deadline; no retry or relaxed limit was added. This does not explain the earlier
+miss. Sustained-output timing variability remains unresolved alongside the earlier
+observations recorded above.
+
+- `mobile_machine_native_acceptance --ignored --exact`: cache/reopen and complete retained-owner workload pass on diagnostic run; `/tmp/mobile-task-cache-native.log`, `Test-LoopflowiOS-2026.11.04_13-56-23--0800.xcresult`; first output-deadline miss retained in `/tmp/mobile-task-cache-native-first.log` and `/tmp/mobile-task-cache-native-first-xcode.log`.
+- `git diff --check`: pass; Swift-only changes, no redundant Rust lint run.
+- Dedicated Simulator `Loopflow task cache proof` was shut down and deleted; existing Simulators were preserved.
+
+Status-component captures are `scratch/demo-assets/task-list-offline-status.png`
+and `task-list-offline-status-large-text.png`. Physical file-protection behavior,
+whole-app cold-launch ergonomics and device network/voice/VoiceOver acceptance
+remain unproven; Simulator model tests do not supply those guarantees.

@@ -107,6 +107,14 @@ Check status or open its Task there; your newer draft remains untouched. Recover
 uses the original request identity and Machine. A failed save keeps the active
 request in place, and opening a saved Task removes only its recovery entry.
 
+Reopening the app shows the last received Task list while connecting. When the
+Machine is unavailable, the list retains its **Last updated** time and offers
+**Try again**. These are saved Task rows, not live status; opening a Session still
+requires the Machine. A fresh reading replaces the entire list, including an empty
+one. The phone keeps one protected, backup-excluded cache up to 2 MiB, scoped to
+the verified Machine. It stores no terminal output or input. Cache loss or failure
+never blocks a live connection.
+
 The Task list uses one all-repository view subscription after checking Machine
 identity. Whole readings replace the list; pull-to-refresh confirms the current
 reading on that same connection. Leaving the list or backgrounding closes it.

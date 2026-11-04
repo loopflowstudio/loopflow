@@ -118,6 +118,9 @@ enum MobileConnectionState: Equatable {
 @Observable
 final class MobileWorkspace {
     private let client: any MobileClient
+    private let machineID: String?
+    private let taskCache: MobileTaskCache
+    private var loadedTaskCache = false
     private var attachment: (any MobileAttachment)?
     private var eventTask: Task<Void, Never>?
     private var generation = 0
@@ -131,6 +134,8 @@ final class MobileWorkspace {
     private var sentViewport: TerminalGeometry?
     private var reconnectOnForeground = false
     private(set) var tasks: [WorkViewPlan.Content] = []
+    private(set) var tasksReceivedAt: Date?
+    private(set) var tasksAreCurrent = false
     private(set) var isLoadingTasks = true
     private(set) var tasksError: String?
     private(set) var selected: WorkViewPlan.Content?
@@ -144,7 +149,11 @@ final class MobileWorkspace {
     // Grid dimensions, not pixels. Observers preserve the owner's terminal geometry.
     var setGeometry: ((TerminalGeometry?) -> Void)?
 
-    init(client: any MobileClient) { self.client = client }
+    init(client: any MobileClient, machineID: String? = nil, taskCache: MobileTaskCache = .application) {
+        self.client = client
+        self.machineID = machineID
+        self.taskCache = taskCache
+    }
 
     var canStartSession: Bool {
         (state == .ended || state == .notRunning) && sessionID != nil
@@ -172,6 +181,12 @@ final class MobileWorkspace {
         stopTaskUpdates()
         let opening = taskGeneration
         isLoadingTasks = true
+        if !loadedTaskCache, let machineID {
+            let saved = try? await taskCache.load(machineID: machineID)
+            guard opening == taskGeneration, !Task.isCancelled else { return }
+            loadedTaskCache = true
+            if let saved { tasks = saved.tasks; tasksReceivedAt = saved.receivedAt }
+        }
         do {
             let observation = try await client.observeTasks()
             guard opening == taskGeneration, !Task.isCancelled else { observation.close(); return }
@@ -182,8 +197,21 @@ final class MobileWorkspace {
                         guard let self, opening == self.taskGeneration else { return }
                         self.isLoadingTasks = false
                         switch reading {
-                        case .success(let tasks): self.tasks = tasks; self.tasksError = nil
-                        case .failure(let error): self.tasksError = error.message
+                        case .success(let tasks):
+                            let receivedAt = Date()
+                            self.tasks = tasks
+                            self.tasksError = nil
+                            self.tasksReceivedAt = receivedAt
+                            self.tasksAreCurrent = true
+                            if let machineID = self.machineID {
+                                // Cache I/O runs off the UI actor. A cache failure
+                                // must not hide a successfully received live list.
+                                try? await self.taskCache.save(.init(machineID: machineID,
+                                    receivedAt: receivedAt, tasks: tasks))
+                            }
+                        case .failure(let error):
+                            self.tasksAreCurrent = false
+                            self.tasksError = error.message
                         }
                     }
                     throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
@@ -214,6 +242,7 @@ final class MobileWorkspace {
     }
 
     func stopTaskUpdates() {
+        tasksAreCurrent = false
         taskGeneration += 1
         taskReader?.cancel()
         taskReader = nil

@@ -1,6 +1,6 @@
 // The local macOS registry query: `RegistryQuery` over this Machine. The Work
-// watches, served reads and served writes run in the app through Loopflow's
-// library; other commands, writes `lf` sends to another Machine, and the remote
+// roadmap read/watch and Session rename use the Machine service. Other served
+// operations still use Loopflow's library; commands sent to another Machine and the remote
 // Task file watch run the bundled `lf` off the main actor so a slow one never
 // stalls the UI.
 
@@ -12,8 +12,10 @@ enum RegistryQueryLocal {
     static let shared = RegistryQuery(runWithInput: { args, cwd, input in
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
     }, serve: { query in
-        try await LoopflowLibrary.read(query)
+        if case .roadmap = query { return try await MachineService.read(query) }
+        return try await LoopflowLibrary.read(query)
     }, write: { change in
+        if case .sessionRename = change { return try await MachineService.write(change) }
         if let made = try await LoopflowLibrary.write(change) { return made }
         // `lf` sends this write to another Machine; its command does.
         return try await LocalWaveAgentLauncher.queryLf(change.argv, cwd: change.cwd, input: change.input)
@@ -43,7 +45,10 @@ enum RegistryQueryLocal {
             return LineWatch(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
     }, watchWork: {
-        try WorkWatches.observe(launch: LoopflowLibrary.watch)
+        try WorkWatches.observe { query in
+            if case .roadmap = query { return try MachineService.watch(query) }
+            return try LoopflowLibrary.watch(query)
+        }
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

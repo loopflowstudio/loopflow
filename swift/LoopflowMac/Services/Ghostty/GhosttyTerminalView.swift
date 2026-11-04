@@ -542,7 +542,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         let surfaceCommand: String?
         if case .session = terminal, let command {
-            let script = "export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
+            let script = "export LF_MACHINE_SERVICE=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
             surfaceCommand = ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
         } else {
             surfaceCommand = command

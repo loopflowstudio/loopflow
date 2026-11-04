@@ -350,7 +350,7 @@ impl Write {
         }
     }
 
-    fn directory(&self) -> &Path {
+    pub(crate) fn directory(&self) -> &Path {
         match self {
             Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }

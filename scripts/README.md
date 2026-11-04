@@ -53,6 +53,13 @@ delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
 Fixtures still create their own disposable Homes; a test never alters an
 installed database.
 
+`uv run python scripts/test_machine_service_registration.py` proves macOS bundled
+service registration headlessly. It signs a temporary helper, uses the production
+SMAppService registrar, checks idempotent setup and replacement, then unregisters
+its unique job. It does not open Desktop or an existing Machine database. The
+separate installed owner/Graph proof is documented in
+[Rust tests](../rust/loopflow/tests/README.md#machine-service).
+
 Runner changes also need the command-plan checks in
 `python/tests/test_release_automation.py` during focused verification.
 

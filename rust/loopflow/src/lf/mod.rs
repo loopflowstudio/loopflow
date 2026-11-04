@@ -1301,10 +1301,22 @@ impl WtCommand {
     }
 }
 
+#[derive(Debug, Subcommand)]
+pub enum MachineServiceCommand {
+    /// Serve the private socket in the foreground (for the OS supervisor).
+    Run,
+    /// Register the selected installation's service and wait for local readiness.
+    Ensure,
+    /// Report local readiness without registering or starting anything.
+    Status,
+}
+
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
+            Self::Id { .. } | Self::List { .. } | Self::Status { .. } | Self::Service { .. } => {
+                false
+            }
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
                 MachineCredentialCommand::Receive => true,
@@ -2573,6 +2585,11 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
+    /// Run or obtain this Machine's standalone local service.
+    Service {
+        #[command(subcommand)]
+        cmd: MachineServiceCommand,
+    },
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,

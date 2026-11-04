@@ -93,8 +93,13 @@ pub enum Write {
         id: String,
         agent: Option<String>,
     },
-    /// `lf wave ensure <wave> --json`: the Wave's active Project.
-    WaveEnsure { directory: PathBuf, wave: String },
+    /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
+    /// authored files and first Project; an existing Wave is unchanged.
+    WaveAdd {
+        directory: PathBuf,
+        wave: String,
+        objective: Option<String>,
+    },
     /// `lf wave status <wave> --sync --json`: the planning refresh.
     PlanningRefresh { directory: PathBuf, wave: String },
     /// `lf wave new-chapter --all <name> --plan /dev/stdin --json`, with
@@ -243,7 +248,16 @@ impl Write {
                 words.extend(["session", "new", id, "--prepare", "--json"]);
                 words
             }
-            Self::WaveEnsure { wave, .. } => vec!["wave", "ensure", wave, "--json"],
+            Self::WaveAdd {
+                wave, objective, ..
+            } => {
+                let mut words = vec!["wave", "add", wave.as_str()];
+                if let Some(objective) = objective {
+                    words.extend(["--objective", objective]);
+                }
+                words.push("--json");
+                words
+            }
             Self::PlanningRefresh { wave, .. } => {
                 vec!["wave", "status", wave, "--sync", "--json"]
             }
@@ -350,7 +364,7 @@ impl Write {
             | Self::SessionBind { directory, .. }
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
-            | Self::WaveEnsure { directory, .. }
+            | Self::WaveAdd { directory, .. }
             | Self::PlanningRefresh { directory, .. }
             | Self::NewChapter { directory, .. }
             | Self::GraphCustomize { directory, .. }
@@ -378,7 +392,7 @@ impl Write {
             | Self::ShipStop { issue, .. }
             | Self::TaskMove { issue, .. }
             | Self::TaskSave { issue, .. } => Ok(task_repository(directory, Some(issue))?),
-            Self::WaveEnsure { .. } | Self::NewChapter { .. } => {
+            Self::WaveAdd { .. } | Self::NewChapter { .. } => {
                 crate::repo::require_repo_root(directory, "this command")
             }
             _ => crate::repo::working_directory_in(directory),
@@ -458,10 +472,11 @@ impl Write {
             Self::SessionResume { directory, .. } | Self::SessionNew { directory, .. } => {
                 pretty(&super::session::prepared(cli, directory)?)?
             }
-            Self::WaveEnsure { wave, .. } => pretty(
-                &tokio::runtime::Runtime::new()?
-                    .block_on(crate::ops::project::ensure(repo, wave))?,
-            )?,
+            Self::WaveAdd {
+                wave, objective, ..
+            } => pretty(&tokio::runtime::Runtime::new()?.block_on(
+                crate::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
+            )?)?,
             Self::PlanningRefresh { directory, wave } => {
                 format!(
                     "{}\n",
@@ -646,9 +661,10 @@ mod tests {
                 id: "session_1".into(),
                 task: "FIX-1".into(),
             },
-            Write::WaveEnsure {
+            Write::WaveAdd {
                 directory: directory.clone(),
                 wave: "product".into(),
+                objective: None,
             },
             Write::PlanningRefresh {
                 directory: directory.clone(),

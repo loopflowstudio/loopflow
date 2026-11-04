@@ -151,7 +151,7 @@ or the policy of unrelated Tasks its agent creates.
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
 | Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
-| End agents nobody is viewing | — | `session.end_detached_after: 24h` (or `off`) |
+| End agents nobody is viewing | — | `session.end_detached_after: 2m` (or `off`) |
 
 ## Scratch lifecycle
 
@@ -253,7 +253,7 @@ See [Set it up once](work.md#set-it-up-once).
 agent: claude:opus
 session:
   terminal: Ghostty       # presents review GraphStep sessions on this Machine
-  end_detached_after: 24h # stop an unviewed Session's agent; `lf resume` reopens it
+  end_detached_after: 2m  # ends an unviewed Session once work and unfinished input settle
 
 # .lf/config.yaml (repo)
 agent: codex        # shared default; personal agent wins

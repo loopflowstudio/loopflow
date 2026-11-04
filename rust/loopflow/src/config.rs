@@ -212,7 +212,8 @@ pub struct SessionConfig {
     pub end_detached_after: DetachedLimit,
 }
 
-/// When an unviewed Session's agent ends: `24h`, `90m`, `2d`, or `off`.
+/// How long a Session nobody views and nothing uses stays resident before its
+/// agent ends: `2m`, `30m`, `24h`, or `off`. `lf resume` reopens it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum DetachedLimit {
@@ -222,7 +223,7 @@ pub enum DetachedLimit {
 
 impl Default for DetachedLimit {
     fn default() -> Self {
-        Self::After(std::time::Duration::from_secs(24 * 60 * 60))
+        Self::After(std::time::Duration::from_secs(2 * 60))
     }
 }
 
@@ -1187,13 +1188,13 @@ session:
     }
 
     #[test]
-    fn detached_sessions_end_after_a_day_unless_configured() {
+    fn detached_sessions_end_after_two_minutes_unless_configured() {
         use super::DetachedLimit;
         use std::time::Duration;
         let parse = |yaml: &str| serde_yaml_ng::from_str::<Config>(yaml).map(|c| c.session);
         assert_eq!(
             parse("agent: claude").unwrap().end_detached_after,
-            DetachedLimit::After(Duration::from_secs(86_400))
+            DetachedLimit::After(Duration::from_secs(120))
         );
         assert_eq!(
             parse("session: {end_detached_after: 90m}")

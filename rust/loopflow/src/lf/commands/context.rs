@@ -248,10 +248,74 @@ pub fn emit_block(
         return Ok(());
     }
     let delivery = load_delivery(delivery, &input)?;
+    #[cfg(unix)]
+    if moment == crate::context_block::ContextMoment::TaskUpdates {
+        if input["hook_event_name"] == "PiTaskUpdates" {
+            let adapter =
+                serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
+            let thread = input["session_id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Missing Pi Session"))?;
+            return crate::harness::task_updates::watch(
+                &delivery.home,
+                &input,
+                adapter,
+                thread,
+                |store, adapter, thread, update| {
+                    store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+                        if !store.record_task_update(
+                            &adapter.session,
+                            &update.key,
+                            "dispatched",
+                            &update.observation,
+                        )? {
+                            return Ok(());
+                        }
+                        let frame = serde_json::json!({"session":thread,"text":update.text});
+                        write_output(format!("{frame}\n").as_bytes()).map_err(|error| {
+                            crate::store::StoreError::InvalidData(error.to_string())
+                        })
+                    })
+                },
+            );
+        }
+        return crate::harness::claude_updates::watch(&delivery.home, &input);
+    }
+    let adapter = std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<crate::steer::SteerAdapter>(&value))
+        .transpose()?;
+    let yielded = match (moment, input["hook_event_name"].as_str()) {
+        (crate::context_block::ContextMoment::Stop, Some("Stop")) => Some(true),
+        (crate::context_block::ContextMoment::Tool, Some("UserPromptSubmit")) => Some(false),
+        _ => None,
+    };
+    // Turn evidence is independent of steering and planning delivery: even a
+    // failed context refresh must preserve work the provider has started.
+    if let (Some(adapter), Some(yielded)) = (&adapter, yielded) {
+        let thread = input["session_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Provider turn callback has no native conversation"))?;
+        let store = crate::store::sqlite::SqliteStore::new(&delivery.home.join("loopflow.db"))?;
+        // Claude's Stop snapshot includes work that will wake the conversation
+        // again. A yielded reply cannot settle a watch or a scheduled wakeup.
+        let open_tools = input["background_tasks"]
+            .as_array()
+            .zip(input["session_crons"].as_array())
+            .map(|(tasks, crons)| tasks.len() + crons.len());
+        store.record_native_turn(adapter, thread, yielded, open_tools)?;
+        if let Some(prompt_id) = input["prompt_id"].as_str().filter(|id| !id.is_empty()) {
+            if yielded {
+                store.acknowledge_native_input(adapter, thread, prompt_id, None)?;
+            } else if let Some(prompt) = input["prompt"].as_str() {
+                store.acknowledge_native_input(adapter, thread, prompt_id, Some(prompt))?;
+            }
+        }
+    }
     if moment == crate::context_block::ContextMoment::Stop {
         return acquire_planning(&delivery);
     }
-    emit_context(delivery, input, moment)
+    emit_context(delivery, input, moment, adapter.as_ref())
 }
 
 fn read_callback() -> Result<serde_json::Value> {
@@ -303,6 +367,7 @@ fn emit_context(
     delivery: crate::context_block::ContextDelivery,
     input: serde_json::Value,
     moment: crate::context_block::ContextMoment,
+    adapter: Option<&crate::steer::SteerAdapter>,
 ) -> Result<()> {
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let render = |prefix: &str| -> crate::store::StoreResult<String> {
@@ -317,10 +382,6 @@ fn emit_context(
         write_output(format!("{output}\n").as_bytes())
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
     };
-    let adapter = std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)
-        .ok()
-        .map(|value| serde_json::from_str::<crate::steer::SteerAdapter>(&value))
-        .transpose()?;
     // Mark the check before reading pending steers, so one saved during it is
     // newer and the next tool boundary checks again.
     let seen = std::env::var_os(crate::steer::STEER_SEEN_ENV)
@@ -330,15 +391,7 @@ fn emit_context(
         crate::steer::touch(seen)?;
     }
     let more = std::cell::Cell::new(false);
-    let result = deliver_steers(
-        &delivery,
-        &input,
-        event,
-        adapter.as_ref(),
-        &render,
-        &write,
-        &more,
-    );
+    let result = deliver_steers(&delivery, &input, event, adapter, &render, &write, &more);
     // Steers left beyond this batch, or a failed delivery, need the next boundary.
     if let Some(seen) = seen.filter(|_| result.is_err() || more.get()) {
         let _ = std::fs::remove_file(seen);

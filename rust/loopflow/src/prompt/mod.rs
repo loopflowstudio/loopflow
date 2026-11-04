@@ -2033,10 +2033,13 @@ mod tests {
             let session = crate::builtins::get_builtin_skill(&format!("{scope}/session"))
                 .expect("session skill");
             assert_eq!(session.matches(procedure).count(), 1, "{scope}");
-            assert!(
-                session.contains("nothing schedules your next one"),
-                "{scope}"
-            );
+            let between_turns = match scope {
+                "task" => {
+                    "Do not apply the operating procedure merely because a progress post arrived."
+                }
+                _ => "nothing schedules your next one",
+            };
+            assert!(session.contains(between_turns), "{scope}");
         }
     }
 

@@ -1924,7 +1924,7 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
     task.publish(false);
     let placement = task.status();
     assert!(placement["pr"]["id"].is_string());
-    task.ok(&["wave", "ensure", "other", "--json"]);
+    task.ok(&["wave", "add", "other", "--json"]);
     task.ok(&["task", "move", "INF-123", "--wave", "other"]);
     let moved = task.status();
     assert_eq!(moved["wave"], "other");

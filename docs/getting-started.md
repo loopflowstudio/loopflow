@@ -101,8 +101,7 @@ lf resume --task <ID>            # from any terminal, on whatever agent it ran
 ```
 
 Ask for changes there. Close the window; the conversation is still there next
-week. After a crash or reboot, `lf resume --all` brings back every conversation
-it interrupted.
+week. After a crash or reboot, use the same command to reopen its saved history.
 
 ## 5. Land it
 

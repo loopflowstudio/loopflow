@@ -571,7 +571,7 @@ fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
 }
 
 #[test]
-fn current_wave_reads_exclude_abandoned_registrations_without_deleting_history() {
+fn wave_list_keeps_abandoned_registrations_until_they_are_removed() {
     let home = tempfile::tempdir().unwrap();
     let current = seed(home.path(), "current");
     let abandoned = seed(home.path(), "accidental");
@@ -588,17 +588,27 @@ fn current_wave_reads_exclude_abandoned_registrations_without_deleting_history()
             .output()
             .unwrap()
     };
-    let listing = run(&["wave", "list", "--all", "--current", "--json"]);
+    let listing = run(&["wave", "list", "--all", "--json"]);
     assert!(
         listing.status.success(),
         "{}",
         String::from_utf8_lossy(&listing.stderr)
     );
     let rows: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
-    assert_eq!(rows.as_array().unwrap().len(), 1);
-    assert_eq!(rows[0]["id"], current.id().as_str());
+    let mut ids: Vec<&str> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    ids.sort();
+    let mut expected = vec![current.id().as_str(), abandoned.id().as_str()];
+    expected.sort();
+    assert_eq!(
+        ids, expected,
+        "a stray abandoned Wave stays listed for Remove Wave"
+    );
     assert!(store.get_wave(abandoned.id()).unwrap().is_some());
-    assert!(store.get_wave(current.id()).unwrap().is_some());
 }
 
 #[test]

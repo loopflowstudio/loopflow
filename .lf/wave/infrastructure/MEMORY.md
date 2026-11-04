@@ -967,26 +967,28 @@ proof and limits: `38dd8abd09:.lf/wave/infrastructure/MEMORY.md`, this heading;
 design: `4ca3bbe3d7b30b8a4bb05d466ad55f5eeb368201:scratch/loo-502.md`.
 MTG-117's unknown exit is not proven upgrade-caused.
 
-## Moving onto the installed lf (LOO-705, 2026-11-02)
+## Moving onto the installed lf (LOO-705/724/725, reconciled 2026-11-04)
 
-Jack Heart requested one rollover mechanism after 0.15.0 refused 0.15.1 attaches
-and rollover moved none. Replacement from durable state, without negotiation,
-remains the headless choice pending Jack. `installation::superseded` compares
-the owner's build with its launch entry (`resolve_lf_binary`), shared by owner,
-resume and inventory. Removed/replaced/superseded owners end when waiting and
-send `<entry> session resume <id>`; viewers execute it without replaying argv
-(LOO-708 execs viewers before Clap). Resume watches an answering busy owner;
-an unanswering one ends with a cut-turn report. Rollover sweeps all superseded
-owners; viewed/artifact-set filters are deleted. Graph runners stay; steps use
-the entry. Jack calls LOO-709's 2m grace sufficient for "move always."
+Jack Heart requested one rollover mechanism and called LOO-709's 2m grace
+sufficient for "move always." His draft/request preservation requirement still
+applies. `installation::superseded` compares the owner with its launch entry,
+not the viewer. Eligible owners end; viewers execute `<entry> session resume <id>`
+without replaying argv. Graph runners stay; steps use the entry.
+
+LOO-724's repair, integrated in LOO-725, removes socket-dependent forced cutoff.
+Shared `owner_retention` protects drafts, requests, turns, Graphs and Runs before
+reachability or replacement. Socket silence proves no disposability; saved history
+cannot recreate editors. Attachment may fail while preserving its owner. Rollover
+retains named reasons and rechecks protection before ending; settled/dead owners
+still permit continuation. Paused-owner fixtures prove preservation, not usable
+attachment or installed recovery. LOO-723's activated build needs this repair
+before reopening acceptance.
 
 Cross-build transport adds optional fields to existing Response variants, never
-variants (`moved` broke 0.15.0). Compare against the relaunch entry, not the
-viewer binary. LOO-724 identified on November 4 that resume/rollover still cut
-protected unresponsive owners; its repair must precede LOO-723 reopening acceptance.
-Unreadable stores retry; mismatched app/CLI builds restart each other's owners.
-Fixtures prove neither Mac `lf resume LOO-618`
-nor a Graph's next step on a newer build.
+variants (`moved` broke 0.15.0). Unreadable stores retry; mismatched app/CLI builds
+restart eligible owners. Mac Session return and a Graph's next step on a newer
+build remain unproved. Prior evidence:
+`89030710c9:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Shipped history
 

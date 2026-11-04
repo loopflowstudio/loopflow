@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-725 — When is a demo finished?</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.6; }
+  body { margin: 0 auto; max-width: 48rem; padding: 2rem 1.25rem 4rem; }
+  header, small { color: light-dark(#505050, #b9b9b9); }
+  h1 { line-height: 1.15; font-size: clamp(1.9rem, 5vw, 2.6rem); }
+  h2 { margin-top: 2.5rem; font-size: 1.3rem; }
+  p, li { max-width: 70ch; }
+  li { margin-block: .65rem; }
+  code, pre { font-family: ui-monospace, monospace; font-size: .9em; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: light-dark(#f1f3f5, #25282b); }
+  .decision { border-left: .2rem solid light-dark(#8c5200, #e8b568); padding-left: 1rem; }
+  .flow { padding-block: .7rem; border-bottom: 1px solid light-dark(#ddd, #444); }
+  a { color: light-dark(#195a9b, #9bc9ff); }
+</style>
+<body>
+<header>LOO-725 · concept-review · 2026-11-04<br>
+Built from <a href="loo-725.md">scratch/loo-725.md</a>, <code>builtins/task/skill/demo.md</code>,
+<code>transport/README.md</code>, <code>transport/input.rs</code>,
+<code>store/sqlite/sessions.rs</code>, <code>ops/human_session.rs</code>,
+<code>lf/commands/rollover.rs</code>, and LOO-722’s <code>scripts/disk_cleanup.py</code>
+and recorded cleanup decisions. Rust source paths are beneath <code>rust/loopflow/src/</code>.</header>
+
+<h1>When is a demo finished?</h1>
+<p class="decision"><strong>Open product choice.</strong> Decide how demo completion makes runtime
+files eligible for cleanup while preserving conversation history and settling editable input.
+The current root contains history; marking that whole root disposable contradicts its contents.</p>
+<p>Jack Heart selected stopping verified owners before reclaiming eligible output.
+He also requires durable history, editable drafts and pending requests to survive.
+Eligibility must settle that boundary before owner termination.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<div class="flow"><strong>Type while storage is busy</strong><br>
+Queued bytes → <code>PendingInput</code> → <code>try_record_owner_input</code> → native editor.<br>
+<small>Implemented: retry after 100 ms; retain before delivery; keep control responsive.</small></div>
+<div class="flow"><strong>Detach, rebuild, return</strong><br>
+Same Session and live editor owner → <code>lf resume SESSION</code> → <code>owner_retention</code>.<br>
+<small>Before: a superseded unanswering owner could be cut off. Now: protected work keeps its owner,
+even if attachment fails. Source preservation is verified; usable installed recovery remains unproved.</small></div>
+<div class="flow"><strong>Finish the demo</strong><br>
+Input disposition + eligible output → verified owner stop → final death recheck → LOO-722 cleanup.<br>
+<small>Proposed completion contract: specify when drafts/requests are settled or explicitly disposable.
+Closing a viewer supplies neither fact.</small></div>
+<div class="flow"><strong>Return after teardown</strong><br>
+Durable Session and provider history → <code>lf resume SESSION</code> in its private Machine.<br>
+<small>Required: no replay. Saved history cannot reconstruct a dead editor.</small></div>
+
+<h2>The directory boundary</h2>
+<p><strong>Existing demo instruction:</strong> keep the complete fixture intact and unmarked.</p>
+<pre>private fixture/
+  copied runtime
+  private Machine + provider history
+  repository
+
+No automatic-cleanup marker while this root contains history.</pre>
+<p><strong>Proposed alternative, not accepted:</strong> choose stable history paths before launch,
+then make only the separate runtime eligible after recording completion.</p>
+<pre>durable private fixture/     disposable runtime/
+  Machine                     copied app or CLI
+  provider history            marker only after eligibility
+  repository
+
+LOO-722 stops verified owners before deleting eligible runtime.</pre>
+<p>The cleaner’s marker says <code>disposable runtime; evidence stored elsewhere</code>.
+Screenshots elsewhere are insufficient: the same Session must still reopen from durable history.
+Moving an existing Machine or provider directory may invalidate recorded absolute paths.</p>
+
+<h2>Normal path, failure, recovery</h2>
+<p>Type a draft, detach, rebuild, and resume the same editor. Complete the demo under the chosen
+disposition, stop verified owners, reclaim eligible runtime, then reopen the same saved conversation.</p>
+<p>If storage fails, keep queued input and retry without spinning. When access recovers, deliver
+it once. If cleanup is interrupted, surviving owners keep their files until teardown succeeds.</p>
+<p><strong>Counterexample:</strong> copy the transcript and kill the owner while a native request
+is pending. History survives; the original request does not. Directory separation alone cannot
+meet the accepted experience.</p>
+<p>No new Session state, schema, scheduler or cleaner is needed. Configured cleanup, rebuild
+and installed acceptance remain outstanding. This review changed no implementation or execution.</p>
+
+<h2>Unresolved decisions for review</h2>
+<p>This headless run requests no reply. These choices remain recorded for the next product review.</p>
+<ol>
+  <li><strong>Where does completed demo history live?</strong><br>
+  <strong>1a.</strong> Stable durable paths outside separately disposable runtime.<br>
+  <strong>1b.</strong> The complete unmarked fixture, retained until explicit teardown.</li>
+  <li><strong>What completes a demo with an editable draft or pending request?</strong><br>
+  <strong>2a.</strong> Settle it before completion.<br>
+  <strong>2b.</strong> Permit an explicit completion action declaring that input disposable.<br>
+  Both retain unresolved input and its owner until disposition; neither deletes durable history.</li>
+</ol>
+</body>
+</html>

@@ -213,53 +213,41 @@ fn watch(
         }
         next_poll = Instant::now() + POLL;
         if store.is_none() {
-            match crate::journal::process_ledger() {
-                Ok(opened) => {
-                    store = Some(opened);
-                    store_failure = None;
-                }
-                Err(error) => {
-                    failure(&mut store_failure, owner, "open Session store", &error);
-                }
-            }
+            store = report_result(
+                &mut store_failure,
+                owner,
+                "open Session store",
+                crate::journal::process_ledger(),
+            );
         }
         let Some(store) = store.as_ref() else {
             continue;
         };
         let viewed = grace.activity.viewed;
-        if recorded_viewed != Some(viewed) {
-            match store.record_owner_viewers(owner, viewed) {
-                Ok(()) => {
-                    recorded_viewed = Some(viewed);
-                    viewer_failure = None;
-                }
-                Err(error) => {
-                    failure(&mut viewer_failure, owner, "record Session viewers", &error);
-                }
-            }
+        if recorded_viewed != Some(viewed)
+            && report_result(
+                &mut viewer_failure,
+                owner,
+                "record Session viewers",
+                store.record_owner_viewers(owner, viewed),
+            )
+            .is_some()
+        {
+            recorded_viewed = Some(viewed);
         }
         if terminal && grace.limit.is_none() {
-            match store.process(owner) {
-                Ok(process) => {
-                    grace.limit = process.map(|process| limit(process.repo.as_deref()));
-                    repository_failure = None;
-                }
-                Err(error) => {
-                    failure(
-                        &mut repository_failure,
-                        owner,
-                        "load Session repository",
-                        &error,
-                    );
-                }
-            }
+            grace.limit = report_result(
+                &mut repository_failure,
+                owner,
+                "load Session repository",
+                store.process(owner),
+            )
+            .flatten()
+            .map(|process| limit(process.repo.as_deref()));
         }
         let now = SystemTime::now();
-        let change = executable.and_then(|executable| {
-            executable
-                .change()
-                .map(|change| (change, executable.path.clone()))
-        });
+        let change = executable
+            .and_then(|executable| executable.change().map(|change| (change, &executable.path)));
         // Native turns may leave only terminal output. Viewers never prolong a
         // vanished build, so their activity cannot reset this quiet interval.
         let quiet = match change {
@@ -268,7 +256,7 @@ fn watch(
         };
         if !quiet {
             if let Some((change, path)) = &change {
-                retention(&mut decision, owner, *change, path, "command output".into());
+                retention(&mut decision, owner, *change, path, "command output");
             } else {
                 decision = None;
             }
@@ -280,7 +268,13 @@ fn watch(
             // runs again from here.
             Ok(Some(reason)) => {
                 if let Some((change, path)) = &change {
-                    retention(&mut decision, owner, *change, path, format!("{reason:?}"));
+                    retention(
+                        &mut decision,
+                        owner,
+                        *change,
+                        path,
+                        format_args!("{reason:?}"),
+                    );
                 }
                 grace.quiet_since = now;
                 continue;
@@ -292,7 +286,7 @@ fn watch(
         }
         if end
             .send(Ending {
-                change,
+                change: change.map(|(change, path)| (change, path.clone())),
                 activity: grace.activity,
             })
             .is_err()
@@ -305,7 +299,21 @@ fn watch(
     }
 }
 
-pub(super) fn failure(
+/// Keep each operation's warning until that operation succeeds. Other policy
+/// work can succeed during an outage without making the same error log again.
+pub(super) fn report_result<T>(
+    previous: &mut Option<String>,
+    owner: &LfProcessId,
+    operation: &str,
+    result: Result<T, impl std::fmt::Display>,
+) -> Option<T> {
+    result
+        .inspect(|_| *previous = None)
+        .inspect_err(|error| failure(previous, owner, operation, error))
+        .ok()
+}
+
+fn failure(
     previous: &mut Option<String>,
     owner: &LfProcessId,
     operation: &str,
@@ -323,7 +331,7 @@ fn retention(
     owner: &LfProcessId,
     change: Change,
     path: &Path,
-    reason: String,
+    reason: impl std::fmt::Display,
 ) {
     let message = format!("{change}: {reason}");
     if previous.as_ref() != Some(&message) {

@@ -32,9 +32,15 @@ source: `da41d2031f3526df7fab53292b936dcccc699d9b:scratch/questions.md`.
 at `df3b5e810d3841a19bc5911c332fb42f23193d46`: Rex owns restoration and shells;
 LF observes retention without native closure. Native Split UI, retention
 integration, non-default-server routing and remote following remain unresolved.
-`workspace-demo.md` preserves earlier evidence. The newer parent remains
-unintegrated; its changed migration requires a fresh build after synchronization.
+`workspace-demo.md` preserves earlier evidence. The newer parent is integrated through `lf sync --manual`; its changed migration
+requires a fresh build and focused checks.
 Raw API counterevidence authorizes no further scope reduction.
 
 Pre-compression assumptions, including unpublished additions, are preserved as
 Git blob `5cee180d07981538431365ded5d7f4600d6abf05` (`git show <blob>`).
+
+November 4 parent sync preserves this Task's concept review and compressed
+dependency notes. Full parent notes and concept review remain at
+`df3b5e810d3841a19bc5911c332fb42f23193d46:scratch/`. The surfaces conflict
+keeps `docs/workspaces.md` as the sole workspace guide and retains LOO-728's
+original-file presentation section. The recovery swap remains ignored locally.

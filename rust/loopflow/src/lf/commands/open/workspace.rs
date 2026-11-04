@@ -1,4 +1,4 @@
-//! Native Rex workspaces. The registry remembers occurrences and selection, while
+//! Native Rex workspaces. The registry keeps locators and creation receipts;
 //! Rex alone owns geometry and ordinary processes. Reads never execute resume argv.
 mod herdr;
 mod layout;
@@ -431,7 +431,7 @@ fn workspace(
         selection: selected,
         copy_name: copy.map(str::to_owned),
         container_id: None,
-        observation: "new".into(),
+        creation_pending: false,
         updated_at: now(),
     }))
 }
@@ -455,9 +455,6 @@ fn ensure_container(
             .as_ref()
             .is_some_and(|id| item["session_id"] == *id)
     });
-    if retained.is_none() && workspace.container_id.is_some() {
-        workspace.observation = "closed".into();
-    }
     let marker = format!("[lf:{}]", workspace.id);
     // Native labels may have changed; the recorded identity wins over a marker.
     if let Some(item) = retained.or_else(|| {
@@ -475,10 +472,11 @@ fn ensure_container(
         );
     } else {
         anyhow::ensure!(
-            workspace.observation != "unknown",
+            !workspace.creation_pending || workspace.container_id.is_some(),
             "Workspace creation outcome is unknown; inspect Rex before retrying this occurrence"
         );
-        workspace.observation = "unknown".into();
+        workspace.container_id = None;
+        workspace.creation_pending = true;
         workspace.updated_at = now();
         store.save_host_workspace(workspace)?;
         let label = match &workspace.copy_name {
@@ -506,7 +504,7 @@ fn ensure_container(
         );
     }
     if retained.is_none() {
-        workspace.observation = "retained".into();
+        workspace.creation_pending = false;
         workspace.updated_at = now();
         store.save_host_workspace(workspace)?;
     }
@@ -530,13 +528,13 @@ fn open(
         .context("Repository has no Work identity")?;
     let mut root = workspace(store, rex, repo, selected.clone(), args.copy.as_deref())?;
     let explicit = target.task.is_some();
-    if explicit && root.observation == "new" {
+    if let Some(task) = target
+        .task
+        .as_ref()
+        .filter(|_| root.container_id.is_none() && !root.creation_pending)
+    {
         let inventory = rex.sessions()?;
-        let work = &local_tasks
-            .first()
-            .context("Task workspace is unavailable")?
-            .work;
-        for existing in store.work_host_workspaces(work, "rex", &rex.server)? {
+        for existing in store.task_host_workspaces(&task.id, "rex", &rex.server)? {
             if existing.copy_name != args.copy {
                 continue;
             }
@@ -550,12 +548,11 @@ fn open(
                 }
             }
         }
-    }
-    if explicit && root.observation == "new" && args.copy.is_none() {
-        if let Some(caller) = &rex.caller {
-            root.container_id = Some(caller.session.clone());
-            root.observation = "retained".into();
-            store.save_host_workspace(&root)?;
+        if root.container_id.is_none() && args.copy.is_none() {
+            if let Some(caller) = &rex.caller {
+                root.container_id = Some(caller.session.clone());
+                store.save_host_workspace(&root)?;
+            }
         }
     }
     ensure_container(
@@ -720,22 +717,16 @@ fn materialize(
     let mut occurrence = store.host_occurrence(&id)?.unwrap_or(HostOccurrence {
         id,
         workspace_id: workspace.id.clone(),
-        work: content.work.clone(),
+        task_id: TaskId::parse(&content.work.id)?,
         destination_id: None,
-        observation: "new".into(),
-        updated_at: now(),
+        creation: "complete".into(),
     });
     let inventory = rex.windows(container)?;
     let retained = occurrence
         .destination_id
         .as_ref()
         .and_then(|id| inventory.iter().find(|window| window["window_id"] == *id));
-    if retained.is_none() && occurrence.destination_id.is_some() {
-        occurrence.observation = "closed".into();
-        occurrence.updated_at = now();
-        store.save_host_occurrence(&occurrence)?;
-    }
-    if retained.is_none() && presentation.passive && occurrence.observation == "closed" {
+    if retained.is_none() && presentation.passive && occurrence.destination_id.is_some() {
         bail!("Task view was explicitly closed; following leaves it closed");
     }
     let marker = format!("[lf:{}]", occurrence.id);
@@ -767,12 +758,12 @@ fn materialize(
         );
     }
     anyhow::ensure!(
-        occurrence.observation != "unknown",
+        occurrence.creation != "pending" || occurrence.destination_id.is_some(),
         "Task window creation outcome is unknown; no duplicate was attempted"
     );
     let (layout, shells) = layout(store, content, repo, presentation)?;
-    occurrence.observation = "unknown".into();
-    occurrence.updated_at = now();
+    occurrence.destination_id = None;
+    occurrence.creation = "pending".into();
     store.save_host_occurrence(&occurrence)?;
     let label: String = content
         .title
@@ -786,10 +777,10 @@ fn materialize(
         .context("Rex create reply omitted window identity; outcome is unknown")?
         .to_string();
     occurrence.destination_id = Some(id.clone());
-    occurrence.observation = if presentation.passive || content.location.is_none() {
+    occurrence.creation = if presentation.passive || content.location.is_none() {
         "passive"
     } else {
-        "retained"
+        "complete"
     }
     .into();
     store.save_host_occurrence(&occurrence)?;
@@ -812,17 +803,17 @@ fn activate(
         .clone()
         .context("Task window is unavailable")?;
     anyhow::ensure!(
-        occurrence.observation != "activating",
+        occurrence.creation != "tools_pending",
         "Tool activation outcome is unknown; no duplicate was attempted"
     );
-    if presentation.passive || occurrence.observation != "passive" || content.location.is_none() {
+    if presentation.passive || occurrence.creation != "passive" || content.location.is_none() {
         return Ok((id, false, 0));
     }
     let (layout, shells) = layout(store, content, repo, presentation)?;
-    occurrence.observation = "activating".into();
+    occurrence.creation = "tools_pending".into();
     store.save_host_occurrence(occurrence)?;
     rex.call("session.new_split", json!({"session_id":container,"window_id":id,"direction":"horizontal","side":"after","focus":false,"layout":layout}))?;
-    occurrence.observation = "retained".into();
+    occurrence.creation = "complete".into();
     store.save_host_occurrence(occurrence)?;
     Ok((id, true, shells))
 }
@@ -955,6 +946,7 @@ fn follow(id: &str) -> Result<()> {
         super::super::watch::Transport::Pull(Box::new(|| {})),
     )?
     .context("Workspace watch did not start")?;
+    let mut arrived = BTreeSet::new();
     loop {
         workspace = store
             .host_workspace(id)?
@@ -981,6 +973,9 @@ fn follow(id: &str) -> Result<()> {
                     .iter()
                     .filter(|content| eligible(content, false))
                 {
+                    if arrived.contains(&content.work.id) {
+                        continue;
+                    }
                     let route = store.task_execution_route(&TaskId::parse(&content.work.id)?)?;
                     if route.machine_id != local {
                         continue;
@@ -1008,8 +1003,12 @@ fn follow(id: &str) -> Result<()> {
                             ..Presentation::default()
                         },
                     ) {
-                        Ok((_, true, _)) => println!("Added {}", content.title),
-                        Ok(_) => {}
+                        Ok((_, created, _)) => {
+                            arrived.insert(content.work.id.clone());
+                            if created {
+                                println!("Added {}", content.title);
+                            }
+                        }
                         Err(error) => eprintln!("{}: {error:#}", content.title),
                     }
                 }

@@ -4,7 +4,7 @@ This is inherited context, not LOO-728 work. The revised accepted plan and
 remaining obligations are preserved at
 `df3b5e810d3841a19bc5911c332fb42f23193d46:scratch/rex-workspace.md`.
 November 4 reconciliation observed PR #1814 OPEN at that revision; this checkout
-still contains parent `b8aac2ef13`. The newer contract is at that revision's
+now integrates that published parent through Loopflow. The newer contract is at that revision's
 `docs/workspaces.md`; LOO-728's active plan is
 `write-docs-first.md`. Jack Heart authorized integration on this stack without
 landing LOO-498 or waiving its acceptance requirements.
@@ -47,8 +47,7 @@ The parent retains these unresolved obligations:
 
 The newer parent reduces host storage to locators and creation receipts, revises
 the draft migration, and keeps following append-only during its subscription.
-It includes LOO-723's coherent installer. These changes are not yet integrated
-here. Dropping named-copy reuse or coordinated handoff remains an unaccepted
+It includes LOO-723's coherent installer. These changes are integrated here; fresh focused verification is pending. Dropping named-copy reuse or coordinated handoff remains an unaccepted
 proposal; the ownership simplification did not remove those obligations.
 
 The failed configured demo and prepared native split Session are retained in

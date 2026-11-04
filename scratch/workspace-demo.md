@@ -52,3 +52,10 @@ replacement failed because executable identity could not be proved for a helper;
 no helpers were manually stopped. CLI success does not establish Desktop update
 success or acceptance of LOO-498. These are dated parent observations, not new
 installation or delivery instructions for LOO-728.
+
+Later real-data snapshot evidence is preserved at
+`df3b5e810d3841a19bc5911c332fb42f23193d46:scratch/workspace-demo.md`.
+The parent opened and reused a real Task from a private SQLite snapshot, with
+manual owner-socket wiring for its passive observer. Jack Heart then selected
+the one-way template boundary. That snapshot establishes neither configured
+installation nor native Split acceptance; no new provider or Graph was launched.

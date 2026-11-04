@@ -1,0 +1,8 @@
+The following is a diff from the previous accessibility tree for Window: "repo" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+~		18 container Description: baf01f Disposable terminal status, active, ID: sessions-surface
+~			19 menu button Shell, ID: pane-strip-shell, Help: Choose this Session's agent or open a companion pane
+baf01f Disposable terminal status
+/private/tmp/lf720d/repo.baf01f-status-acceptance-fixture
++				47 button Shell 3
++			48 text Value: Blocked · Question · answer: Which color do you want, Amber or Blue? (Amber · Blue), ID: pane-strip-shell, Help: Program (claude-code): Blocked · Question · answer: Which color do you want, Amber or Blue? (Amber · Blue)
+The focused UI element is 18 container Description: baf01f Disposable terminal status, active, ID: sessions-surface

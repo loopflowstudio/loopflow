@@ -1,0 +1,5 @@
+The following is a diff from the previous accessibility tree for Window: "repo" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 67
++				71 button Shell 6
++			72 text Help: Program (claude-code): Blocked · Question · answer: Which color: Amber or Blue? (Amber · Blue), Value: Blocked · Question · answer: Which color: Amber or Blue? (Amber · Blue), ID: pane-strip-shell
+The focused UI element is 52 container Description: baf01f Disposable status acceptance, active, ID: sessions-surface

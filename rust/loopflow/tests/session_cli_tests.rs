@@ -1068,7 +1068,7 @@ exit 2
                 assert!(args.contains(&format!("--name\n{expected}\n")), "{args}");
                 assert_eq!(
                     fs::read_to_string(home.path().join("title-disabled")).unwrap(),
-                    "1"
+                    ""
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");

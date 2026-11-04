@@ -224,6 +224,45 @@ struct ProgramStatusTests {
         try await eventually { FileManager.default.fileExists(atPath: directory.appendingPathComponent("closed").path) }
     }
 
+    @Test("A restored question reaches the first Session reading without leaking to its replacement")
+    @MainActor func restoredStatusSurvivesLateAssociation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bin = directory.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let helper = bin.appendingPathComponent("lf")
+        try Data("""
+        #!/bin/sh
+        while IFS= read -r frame; do
+            printf '%s' "$frame" > "$LF_HOME/received.tmp"
+            mv "$LF_HOME/received.tmp" "$LF_HOME/received"
+        done
+        """.utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let environment = ProcessInfo.processInfo.environment
+        setenv("LF_HOME", directory.path, 1)
+        setenv("LF_BIN", helper.path, 1)
+        let surface = ProgramStatusSurface()
+        defer {
+            surface.close()
+            for key in ["LF_HOME", "LF_BIN"] {
+                if let value = environment[key] { setenv(key, value, 1) } else { unsetenv(key) }
+            }
+            try? FileManager.default.removeItem(at: directory)
+        }
+        func received() -> ProgramStatusRecords? {
+            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")) else { return nil }
+            return try? JSONDecoder().decode(ProgramStatusRecords.self, from: data)
+        }
+        surface.receive(.report(report(.blocked, msg: "Original question")), incarnation: surface.incarnation)
+        try await eventually { surface.snapshot.summary?.state == .blocked }
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: "first"))
+        try await eventually { received()?.summary?.msg == "Original question" }
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: "replacement"))
+        surface.receive(.report(report(.idle, id: "new")), incarnation: surface.incarnation)
+        try await eventually { received()?.summary?.state == .idle }
+        #expect(received()?.records.count == 1)
+    }
+
     @MainActor private func eventually(_ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(5)
         while !condition() {

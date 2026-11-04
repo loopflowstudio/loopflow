@@ -9,7 +9,7 @@ mod support;
 mod ghostty_vt;
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -1162,6 +1162,27 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
 }
 
 #[test]
+fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
+    for valid in [true, false] {
+        let fixture = Fixture::new();
+        let path = fixture.waiting_provider();
+        let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
+        command.env("PATH", path);
+        let terminal = Terminal::spawn_with_placement(command, Some(valid));
+        let launch = fixture.launches(1).pop().unwrap();
+        let session = session_of(&fixture.sql(), &launch);
+        let placement: Option<String> = fixture.sql().query_row(
+            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
+            [&session], |row| row.get(0),
+        ).unwrap();
+        let owner = fixture.owner_of(&session);
+        terminal.stop();
+        fixture.stop(&owner);
+        assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
+    }
+}
+
+#[test]
 fn native_program_status_has_no_stale_launcher_working_record() {
     let fixture = Fixture::new();
     let path = fixture.provider(
@@ -1171,7 +1192,10 @@ stty -echo < /dev/tty
 printf 'native ready\n'
 while read -r state < /dev/tty; do
     [ "$state" = exit ] && exit 0
-    printf '\033]7501;state=%s:app=claude-code\033\\' "$state"
+    # Claude's title-disable flag also disables its Program Status reports.
+    if [ -z "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" ]; then
+        printf '\033]7501;state=%s:app=claude-code\033\\' "$state"
+    fi
     printf 'reported %s\n' "$state"
 done
 "#,
@@ -2686,7 +2710,11 @@ struct Terminal {
     screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 impl Terminal {
-    fn spawn(mut command: Command) -> Self {
+    fn spawn(command: Command) -> Self {
+        Self::spawn_with_placement(command, None)
+    }
+
+    fn spawn_with_placement(mut command: Command, placement: Option<bool>) -> Self {
         let mut master = -1;
         let mut slave = -1;
         // SAFETY: valid output pointers; null selects default PTY settings.
@@ -2706,8 +2734,20 @@ impl Terminal {
         let mut master = unsafe { std::fs::File::from_raw_fd(master) };
         // SAFETY: the fresh slave descriptor is owned only by this File.
         let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        if let Some(valid) = placement {
+            // SAFETY: slave is a live PTY; ttyname returns a terminated name.
+            let tty = unsafe { std::ffi::CStr::from_ptr(libc::ttyname(slave.as_raw_fd())) }
+                .to_str()
+                .unwrap()
+                .to_owned();
+            command
+                .env("LF_TERMINAL_ID", "desktop-shell")
+                .env("LF_TERMINAL_TTY", if valid { &tty } else { "/dev/stale" })
+                .stdin(slave.try_clone().unwrap());
+        } else {
+            command.stdin(Stdio::piped());
+        }
         command
-            .stdin(Stdio::piped())
             .stdout(Stdio::from(slave.try_clone().unwrap()))
             .stderr(Stdio::from(slave));
         let child = command.spawn().unwrap();

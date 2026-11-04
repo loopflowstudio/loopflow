@@ -1,0 +1,3 @@
+The following is a diff from the previous accessibility tree for Window: "repo" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+~			137 text Help: Program: Error · Test failure, Value: Error · Test failure, ID: pane-strip-shell
+The focused UI element is 132 container ID: sessions-surface, Description: /Users/jack/src/loopflow.loo-720-rex-shows-the/.venv/bin/python /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo720-demo-hq6o0cg6/emitter.py /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo720-demo-hq6o0cg6/desktop-controlled, active

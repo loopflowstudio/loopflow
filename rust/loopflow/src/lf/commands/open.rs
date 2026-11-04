@@ -1,10 +1,12 @@
 //! `lf open`: resolve Work through its shared owners, choose one presentation
-//! destination, and ask that destination to open the Work's conversation.
+//! destination, and open the Work there.
 //!
 //! Hosts translate only documented caller context and open/focus operations.
-//! They never select a conversation: every terminal destination runs
-//! `lf session resume` for the resolved Work, whose admission and attachment
-//! fences own reuse. Desktop resolves the same address through `--link --json`.
+//! Rex and Herdr materialize native tools with passive conversation viewers;
+//! other terminal routes use `lf session resume`, whose attachment fences own
+//! reuse. Desktop resolves the same address through `--link --json`.
+
+mod workspace;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -296,7 +298,7 @@ pub(crate) fn selected_context(
     cli: &crate::lf::Cli,
     session: Option<&str>,
 ) -> Result<ContextExplanation> {
-    let resolution = work_context(
+    let mut resolution = work_context(
         &std::env::current_dir()?,
         cli.task.as_deref(),
         cli.wave.as_deref(),
@@ -311,6 +313,10 @@ pub(crate) fn selected_context(
                     ))?),
                 "Work does not belong to the selected repository. Nothing was opened."
             );
+        }
+        if cli.task.is_none() && cli.wave.is_none() && session.is_none() {
+            resolution.task = ContextFact::Unbound;
+            resolution.wave = ContextFact::Unbound;
         }
     }
     Ok(resolution)
@@ -775,11 +781,25 @@ fn route(requested: OpenHost) -> OpenRoute {
     let mut hosts = Vec::new();
     let mut reasons = Vec::new();
     if let Some((host, _)) = viewed_placement() {
+        if host == OpenHost::Rex {
+            return OpenRoute {
+                hosts: vec![host],
+                reason: "where this conversation is viewed in Rex".into(),
+            };
+        }
         hosts.push(host);
         reasons.push("where this conversation is viewed");
     } else {
         // Open where the caller is. A Herdr pane or tmux session inside a cmux
         // or Desktop terminal is the innermost, current host.
+        if in_rex() {
+            return OpenRoute {
+                hosts: vec![OpenHost::Rex],
+                reason:
+                    "this Rex terminal; unavailable Rex context never falls through to another host"
+                        .into(),
+            };
+        }
         if in_herdr() {
             hosts.push(OpenHost::Herdr);
             reasons.push("this Herdr pane");
@@ -828,6 +848,9 @@ const DESKTOP: &str = "LF_DESKTOP";
 /// Terminal-host context a direct caller carries. The link receiver removes
 /// it: an OS receiver's environment belongs to its first launch, not the click.
 pub(crate) const HOST_CONTEXT: &[&str] = &[
+    "REX_SERVER",
+    "REX_SESSION",
+    "REX_BLOCK",
     CMUX_WORKSPACE,
     CMUX_SOCKET,
     HERDR_ENV,
@@ -897,6 +920,10 @@ impl DesktopApp {
     }
 }
 
+fn in_rex() -> bool {
+    set("REX_SESSION") || set("REX_BLOCK")
+}
+
 fn in_herdr() -> bool {
     std::env::var(HERDR_ENV).as_deref() == Ok("1") && set(HERDR_SOCKET) && set(HERDR_PANE)
 }
@@ -909,6 +936,10 @@ fn in_tmux() -> bool {
 /// terminal placement (`herdr:<workspace>`, `tmux:<pane>` or `cmux:<workspace>`)
 /// so a later opening can focus that conversation instead of starting another client.
 pub(crate) fn host_placement() -> Option<String> {
+    if in_rex() {
+        let location = workspace::RexLocation::current().ok()?;
+        return Some(format!("rex:{}", serde_json::to_string(&location).ok()?));
+    }
     let (host, name) = if in_herdr() {
         (OpenHost::Herdr, HERDR_WORKSPACE)
     } else if in_tmux() {
@@ -945,6 +976,7 @@ fn placement(host: OpenHost, destination: &str) -> Option<String> {
         OpenHost::Cmux => Some(format!("cmux:{destination}")),
         OpenHost::Herdr => Some(format!("herdr:{destination}")),
         OpenHost::Tmux => Some(format!("tmux:{destination}")),
+        OpenHost::Rex => Some(format!("rex:{destination}")),
         _ => None,
     }
 }
@@ -955,6 +987,7 @@ fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
         "cmux" => OpenHost::Cmux,
         "herdr" => OpenHost::Herdr,
         "tmux" => OpenHost::Tmux,
+        "rex" => OpenHost::Rex,
         _ => return None,
     };
     Some((host, id))
@@ -1102,7 +1135,10 @@ fn open_one(
     let elsewhere = elsewhere(target);
     let mut skipped = Vec::new();
     for &host in &route.hosts {
-        if let Some(live) = elsewhere.as_ref().filter(|_| host != OpenHost::Desktop) {
+        if let Some(live) = elsewhere
+            .as_ref()
+            .filter(|_| !matches!(host, OpenHost::Desktop | OpenHost::Herdr))
+        {
             // Its own workspace in this host shows the conversation, draft intact.
             // Focusing is the revalidation, so only the batch's one focus may use it.
             if let Some(workspace) = live
@@ -1136,12 +1172,10 @@ fn open_one(
         let attempt = match host {
             OpenHost::Desktop => open_desktop(target, focus, desktop),
             OpenHost::Cmux => open_cmux(target, focus, lf),
-            OpenHost::Herdr => open_herdr(target, focus, lf),
+            OpenHost::Herdr => workspace::open_herdr(target, focus),
             OpenHost::Tmux => open_tmux(target, focus, lf),
             OpenHost::Terminal => open_terminal(target, focus, in_place, lf),
-            OpenHost::Rex => Err(RouteError::Definite(
-                "Rex opening is not supported yet; use --host terminal".into(),
-            )),
+            OpenHost::Rex => unreachable!("Rex uses native workspace opening"),
             OpenHost::Auto => unreachable!("routes contain concrete hosts"),
         };
         match attempt {
@@ -1177,14 +1211,17 @@ struct Opening(std::fs::File);
 
 impl Opening {
     fn lock(target: &Resolved) -> Result<Self> {
-        use fs2::FileExt;
-        let directory = crate::store::lf_home_dir().join("open");
-        std::fs::create_dir_all(&directory).context("create the opening directory")?;
-        let key = format!(
+        Self::lock_key(&format!(
             "{}\n{}",
             target.url,
             target.session.as_deref().unwrap_or("")
-        );
+        ))
+    }
+
+    fn lock_key(key: &str) -> Result<Self> {
+        use fs2::FileExt;
+        let directory = crate::store::lf_home_dir().join("open");
+        std::fs::create_dir_all(&directory).context("create the opening directory")?;
         let name = hex::encode(&sha2::Sha256::digest(key.as_bytes())[..16]);
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -1312,39 +1349,6 @@ fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteEr
         .find(|word| word.starts_with("workspace:"))
         .map(str::to_owned);
     Ok(Opened::opening(destination))
-}
-
-fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.resume_shell(lf)?;
-    let mut create = Command::new("herdr");
-    create
-        .args(["workspace", "create", "--cwd"])
-        .arg(target.cwd())
-        .args([
-            "--label",
-            &target.destination_name(),
-            if focus { "--focus" } else { "--no-focus" },
-        ]);
-    let output = run_host(create, "Herdr")?;
-    let created: serde_json::Value = serde_json::from_str(&output)
-        .map_err(|error| RouteError::Unknown(format!("unreadable Herdr reply: {error}")))?;
-    let workspace = created["result"]["workspace"]["workspace_id"]
-        .as_str()
-        .map(str::to_owned);
-    let pane = created["result"]["root_pane"]["pane_id"]
-        .as_str()
-        .ok_or_else(|| RouteError::Unknown("Herdr reply named no pane".into()))?;
-    // Herdr types the command into the newly allocated shell, never an existing one.
-    let mut run = Command::new("herdr");
-    run.args(["pane", "run", pane, &shell]);
-    run_host(run, "Herdr").map_err(|error| {
-        RouteError::Unknown(format!(
-            "created workspace {} but could not start its conversation: {}",
-            workspace.as_deref().unwrap_or(pane),
-            error.reason()
-        ))
-    })?;
-    Ok(Opened::opening(workspace))
 }
 
 /// A new window right after the caller's, named for the Work. Its pane is the
@@ -1512,10 +1516,21 @@ fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError
 
 /// Run one host request with a finite timeout and return its stdout.
 fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
+    // Native inventories can exceed a pipe buffer. Spool while the child runs
+    // so waiting for exit cannot deadlock behind an unread stdout/stderr pipe.
+    let capture = || tempfile::tempfile().map_err(|error| RouteError::Definite(error.to_string()));
+    let mut stdout = capture()?;
+    let mut stderr = capture()?;
+    let output = stdout
+        .try_clone()
+        .map_err(|error| RouteError::Definite(error.to_string()))?;
+    let errors = stderr
+        .try_clone()
+        .map_err(|error| RouteError::Definite(error.to_string()))?;
     let mut child = command
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(output)
+        .stderr(errors)
         .spawn()
         .map_err(|error| RouteError::Definite(format!("cannot run {host}: {error}")))?;
     let (status, timed_out) =
@@ -1523,13 +1538,23 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
             .map_err(|error| RouteError::Unknown(error.to_string()))?;
     if timed_out {
         let _ = child.kill();
+        let _ = child.wait();
         return Err(RouteError::Unknown(format!(
             "{host} did not answer within {}s",
             HOST_TIMEOUT.as_secs()
         )));
     }
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
+    use std::io::Seek;
+    stdout
+        .rewind()
+        .map_err(|error| RouteError::Unknown(error.to_string()))?;
+    stderr
+        .rewind()
+        .map_err(|error| RouteError::Unknown(error.to_string()))?;
+    let stdout =
+        std::io::read_to_string(stdout).map_err(|error| RouteError::Unknown(error.to_string()))?;
+    let stderr =
+        std::io::read_to_string(stderr).map_err(|error| RouteError::Unknown(error.to_string()))?;
     if status.success() {
         Ok(stdout)
     } else {
@@ -1542,11 +1567,6 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
     }
 }
 
-fn drain(pipe: Option<impl std::io::Read>) -> String {
-    pipe.and_then(|pipe| std::io::read_to_string(pipe).ok())
-        .unwrap_or_default()
-}
-
 // ---------------------------------------------------------------------------
 // Command
 // ---------------------------------------------------------------------------
@@ -1555,7 +1575,7 @@ fn drain(pipe: Option<impl std::io::Read>) -> String {
 pub struct OpenArgs {
     /// Work address, such as loopflow://loopflow/task/LOO-507
     pub url: Option<String>,
-    /// Presentation destination; auto opens in this Herdr/tmux/cmux host, then Desktop, then a terminal
+    /// Presentation destination; auto follows the current Rex/Herdr/tmux/cmux viewer
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
     /// Open every conversation available for you to work with
@@ -1575,6 +1595,24 @@ pub struct OpenArgs {
     pub format: Option<LinkFormat>,
     #[arg(long)]
     pub json: bool,
+    /// Rex server address; otherwise use the current viewer or configured local server
+    #[arg(long)]
+    pub server: Option<String>,
+    /// Create or reopen a named observing copy of the selected Rex workspace
+    #[arg(long, conflicts_with = "link")]
+    pub copy: Option<String>,
+    /// Include fresh native shells when first creating a named copy
+    #[arg(long, requires = "copy")]
+    pub new_shells: bool,
+    /// Follow the selection of a recorded native workspace from its host-owned terminal
+    #[arg(long, hide = true)]
+    pub watch_workspace: Option<String>,
+    /// Materialize without changing the host's selected window
+    #[arg(long)]
+    pub no_focus: bool,
+    /// Resolve only this Machine's part of a routed native workspace
+    #[arg(long, hide = true)]
+    pub local_workspace: bool,
 }
 
 /// The Work an invocation names: every available conversation, an address,
@@ -1619,7 +1657,12 @@ fn url_target(
         WorkTarget::Wave(name) => (None, Some(name.as_str())),
         WorkTarget::Repository => (None, None),
     };
-    let context = work_context(&repository, task, wave, session.as_deref())?;
+    let mut context = work_context(&repository, task, wave, session.as_deref())?;
+    // An explicit repository address does not inherit the checkout's Task.
+    if matches!(url.target, WorkTarget::Repository) && session.is_none() {
+        context.task = ContextFact::Unbound;
+        context.wave = ContextFact::Unbound;
+    }
     describe(store, &context, session, diff, None)
 }
 
@@ -1689,8 +1732,15 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         print_unknown(&unknown);
         return Ok(());
     }
-    let (targets, unknown) = targets(cli, args)?;
     let route = route(args.host);
+    if route.hosts.first() == Some(&OpenHost::Rex) || args.watch_workspace.is_some() {
+        return workspace::run(cli, args);
+    }
+    anyhow::ensure!(
+        args.copy.is_none() && args.server.is_none() && !args.no_focus && !args.local_workspace,
+        "--copy, --server and --no-focus are available for Rex workspaces"
+    );
+    let (targets, unknown) = targets(cli, args)?;
     // A person typing in a terminal continues the conversation right here.
     let in_place = targets.len() == 1
         && route.hosts.last() == Some(&OpenHost::Terminal)
@@ -1766,6 +1816,21 @@ fn print_unknown(unknown: &[String]) {
 mod tests {
     use super::{named_bundle, DesktopApp, DESKTOP_BUNDLE};
     use std::path::PathBuf;
+
+    #[test]
+    fn host_inventory_can_exceed_pipe_capacity() {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "head -c 131072 /dev/zero; head -c 131072 /dev/zero >&2",
+        ]);
+        assert_eq!(
+            super::run_host(command, "fixture")
+                .unwrap_or_else(|error| panic!("{}", error.reason()))
+                .len(),
+            131072
+        );
+    }
 
     #[test]
     fn desktop_bundle_defaults_to_the_release_id() {

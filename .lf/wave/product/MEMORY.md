@@ -581,6 +581,33 @@ Home, preserving historical authors and review authority.
 LOO-297's read failed without Linear credentials; local absence is not remote
 absence, so repairs need a fresh authorized read. These records changed no Task.
 
+## Native host workspaces (LOO-498/717, accepted 2026-11-03)
+
+Jack Heart selected Rex first, bounded Herdr second, shared Work/conversation
+identity and tools/defaults. Hosts own shells/layouts; no Rex relay or Desktop
+split-tree mirror. Existing occurrence → Task intent → Wave default → builtin;
+started Tasks arrive passively, backlog is explicit. Bare open uses current viewer
+placement through agent calls/resume/move. Jack's November 3 clarification requires
+native new splits at the source Task's recorded worktree root/Machine, respecting
+explicit directories; initial pane cwd or a Wave-wide default is insufficient.
+
+Jack accepted equal-host retention: hosts release, LF honors holds. Eligible idle
+agents end at two minutes; completed-and-away shells/checkout at fifteen total.
+Return cancels; requested work finishes first. Dirty/untracked files do not veto
+eligible cleanup; unfinished checkouts/branches survive Close. Deleted-checkout
+reconstruction is excluded; moved/unmerged refs remain unresolved. This supersedes
+older blanket retention. LOO-717 owns lifetime; LOO-498 integrates native occurrences.
+Its November 3 branch contract separates away/explicit-Close policy from native
+settlement: away+settled preserves grace and never
+means Close. Retained/unknown revokes settlement; persisted revisions fence returns.
+Integration remains unproved.
+
+Isolated Rex restart retained block IDs but replaced cat with a login shell:
+identity authorizes no replay. Client attachment/active-window snapshots prove no
+use/away event; unknown cannot authorize cleanup. Direct-shell fixtures prove no
+agent handoff, split inheritance, full restore or remote/provider/lifecycle acceptance.
+
+
 ## Workspace redesign decisions
 
 Jack Heart approved LOO-489's Console hybrid and Swift demo on October 17,
@@ -809,42 +836,13 @@ caps, and keep missing ownership evidence explicit.
   an unavailable desktop. Resolve appearance at the window so native controls and
   custom foreground/background colors agree.
 
-### Measurements and acceptance (reconciled 2026-10-07)
+### Measurements and acceptance (reconciled 2026-11-03)
 
-Jack Heart retired arbitrary numeric performance targets, soak requirements and
-further optimization while the product surface changes (LOO-408, comment
-`1e58addc-7bac-4fb8-bb38-1f8e36c7f45b`). LOO-304 closed; LOO-371/376/375 retain
-only supported settlement after installation, with their historical uncertain
-Session/Process evidence preserved. LOO-378 is explicitly paused, its substantial
-unpublished work retained. Earlier p95, twenty-trial and soak obligations below
-are historical evidence, not instructions to restart that work. This does not
-rewrite the chapter's authored KRs or claim native/provider acceptance.
-October 13 renewed targeted input profiling/optimization above, without numeric
-or soak acceptance.
-
-Keep hierarchy navigation and Task-workspace interaction as separate observations,
-with exact identities, source/build/population, rendered endpoint, retained input
-and failed attempts. The opt-in desktop-performance runner remains a useful
-instrument: synthetic Work, three owned cat PTYs, forced bitmap/text
-capture and PTY replies. They establish neither compositor hitches nor provider
-continuation. Its Monitor scenarios no longer compare because that pane was deleted.
-
-Jack rejected the accumulated composition; earlier captures are not acceptance of
-its replacement. Configured provider continuation, retained draft/focus and combined
-pane behavior remain separate proof. AX role, input focus, lock and permissions
-are different facts. LOO-291's original trial ledger, D2 obligations, LOO-300
-performance allocation, observer corrections and failed attempts are preserved at
-`35e759aaf:wave/product/MEMORY.md`, this heading; do not silently revive retired
-performance acceptance from that ledger. Ask completion proof was superseded by
-Jack's October 1 removal; Task conversations retain ordinary review judgment.
-
-LOO-185 remains parked without human-selected Discord friction. LOO-284's shared
-contract and LOO-293's passive output/history/provider continuity were not completed
-merely by integrating primitives. Their dated allocation and evidence are in the
-same archive; adapt remaining views to current Task panes, never restore Monitor
-or the retired Watch route. Historical inventory does not belong in current
-navigation and must not be deleted. Earlier authorized removal of `engbot` grants
-no new store-cleanup or installation authority.
+Jack Heart retired numeric/soak acceptance October 7; October 13 renewed targeted
+input profiling only. LOO-378 remains paused. Earlier obligations and failures:
+`cc607dc3e1:.lf/wave/product/MEMORY.md`, this heading; no new authority or closure.
+Synthetic PTYs, screenshots, AX focus and fixtures do not prove configured
+provider continuation, retained input or composed native interaction.
 
 ## Chapter decisions and review lessons (2026-09-23)
 

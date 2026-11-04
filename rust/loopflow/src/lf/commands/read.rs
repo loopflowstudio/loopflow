@@ -60,7 +60,11 @@ pub enum Read {
     /// `lf --cwd <directory> desktop task <issue>`: the Task pane.
     DesktopTask { directory: PathBuf, issue: String },
     /// `lf task diff <issue> --files --base <base>`: a Task's changed files.
-    TaskChanges { issue: String, base: String },
+    TaskChanges {
+        issue: String,
+        base: String,
+        head: Option<String>,
+    },
     /// `lf task diff <issue> [path] --base <base>`, or with `--draft` and the
     /// draft on stdin: one Task's patch.
     TaskDiff {
@@ -68,6 +72,7 @@ pub enum Read {
         path: Option<String>,
         base: String,
         draft: Option<String>,
+        head: Option<String>,
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
     TaskFile { issue: String, path: String },
@@ -186,18 +191,22 @@ impl Read {
             Self::DesktopTask { directory, issue } => {
                 at(directory, &["desktop", "task", issue, "--json"])
             }
-            Self::TaskChanges { issue, base } => {
-                words(&["task", "diff", issue, "--files", "--base", base, "--json"])
+            Self::TaskChanges { issue, base, head } => {
+                let mut argv = words(&["task", "diff", issue, "--files", "--base", base, "--json"]);
+                argv.extend(optional("--head", head.as_ref()));
+                argv
             }
             Self::TaskDiff {
                 issue,
                 path,
                 base,
+                head,
                 draft,
             } => {
                 let mut argv: Vec<String> = words(&["task", "diff", issue]);
                 argv.extend(path.clone());
                 argv.extend(["--base".into(), base.clone(), "--json".into()]);
+                argv.extend(optional("--head", head.as_ref()));
                 if draft.is_some() {
                     argv.push("--draft".into());
                 }
@@ -361,13 +370,22 @@ impl Read {
             Self::DesktopTask { directory, issue } => {
                 pretty(&super::desktop::read_task_pane(directory, issue)?)
             }
-            Self::TaskChanges { issue, base } => pretty(&task_changes(issue, base)?),
+            Self::TaskChanges { issue, base, head } => {
+                pretty(&task_changes(issue, base, head.as_deref())?)
+            }
             Self::TaskDiff {
                 issue,
                 path,
                 base,
+                head,
                 draft,
-            } => pretty(&task_diff(issue, path.as_deref(), base, draft.as_deref())?),
+            } => pretty(&task_diff(
+                issue,
+                path.as_deref(),
+                base,
+                head.as_deref(),
+                draft.as_deref(),
+            )?),
             Self::TaskFile { issue, path } => pretty(&task_file(issue, path, false)?),
             Self::Waves => {
                 let waves = block_on(list_waves(true))??;

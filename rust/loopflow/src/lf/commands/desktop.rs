@@ -286,6 +286,8 @@ pub struct DesktopCommandStatus {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopTabKind {
+    Task,
+    Changes,
     Shell,
     Files,
     GraphLog,
@@ -527,6 +529,7 @@ enum DesktopViewResult<'a> {
 #[serde(untagged)]
 enum DesktopLayoutRecord<'a> {
     Work(&'a Option<crate::work::selection::WorkPaneLayout>),
+    Template(&'a Option<crate::work::selection::TaskLayoutTemplate>),
     /// Its `slots`; null is the default layout.
     Dashboard(&'a crate::work::selection::Dashboard),
 }
@@ -790,6 +793,12 @@ fn view_plan(
             return super::open::run(
                 cli,
                 &super::open::OpenArgs {
+                    copy: None,
+                    new_shells: false,
+                    server: None,
+                    watch_workspace: None,
+                    no_focus: false,
+                    local_workspace: false,
                     url: None,
                     host: super::open::OpenHost::Desktop,
                     available: false,
@@ -844,6 +853,13 @@ pub fn saved_layout(
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
+    if let Some(wave) = work.strip_prefix("wave-default:") {
+        return Ok(serde_json::to_string(&DesktopLayoutRecord::Template(
+            &reader
+                .sqlite
+                .wave_task_layout(&work_key(&repository, &format!("wave:{wave}"))?)?,
+        ))?);
+    }
     Ok(match work.strip_prefix("query:") {
         Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
             &reader
@@ -989,6 +1005,13 @@ fn saved_intent(
         DesktopCommand::Layout {
             work, save: true, ..
         } => {
+            if let Some(wave) = work.strip_prefix("wave-default:") {
+                let template = serde_json::from_reader(&mut *input)?;
+                return Ok(serde_json::to_string(&store.save_wave_task_layout(
+                    &work_key(&repository, &format!("wave:{wave}"))?,
+                    &template,
+                )?)?);
+            }
             let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
             if layout.work != work_key(&repository, work)? {
                 bail!("layout belongs to different Work");

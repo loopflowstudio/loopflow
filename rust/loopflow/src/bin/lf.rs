@@ -1168,6 +1168,26 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
+        TaskCommand::Tool {
+            issue,
+            tool,
+            checkout,
+            path,
+            base,
+            head,
+            difftool,
+        } => loopflow::lf::commands::task_tool::run(
+            issue,
+            *tool,
+            checkout,
+            path.as_deref(),
+            base,
+            head.as_deref(),
+            *difftool,
+        ),
+        TaskCommand::View { issue, once } => {
+            loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
+        }
         TaskCommand::Status { issue, json, watch } => {
             let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
             if *watch {
@@ -1244,11 +1264,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Diff {
             issue,
             base,
+            head,
             json,
             files: true,
             ..
         } => {
-            let snapshot = loopflow::ops::task::task_changes(issue, base)?;
+            let snapshot = loopflow::ops::task::task_changes(issue, base, head.as_deref())?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.files.is_empty() {
@@ -1277,13 +1298,19 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             issue,
             path,
             base,
+            head,
             draft,
             json,
             files: false,
         } => {
             let content = draft.then(read_task_draft).transpose()?;
-            let snapshot =
-                loopflow::ops::task::task_diff(issue, path.as_deref(), base, content.as_deref())?;
+            let snapshot = loopflow::ops::task::task_diff(
+                issue,
+                path.as_deref(),
+                base,
+                head.as_deref(),
+                content.as_deref(),
+            )?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else {

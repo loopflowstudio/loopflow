@@ -380,3 +380,41 @@ boundaries above. The review page now distinguishes the historical counterexampl
 from the implemented repair; no code changed and no tests were rerun for this
 documentation-only review. This is evidence for loop-or-next, not publication or
 whole-Task completion.
+
+### Publication check — November 3
+
+At `3e8cc13cda`, `lf sync` checkpointed the existing reconciliation and merged
+without conflicts; `git diff --check origin/main...HEAD` passed. PR #1805 still
+has auto-merge disabled. Its copy describes the superseded DB preference tier
+and must be regenerated when publication is ready.
+
+Attempted the changed-aware runner with `--reuse-passing --rust-filter
+'test(config::) | test(config_tests::) | test(graph::tests::) |
+test(prompt::process::) | test(skills::catalog::) | test(skills::invocation::) |
+test(definition::) | test(settings_launch_tests::) | binary(lf)'`, inherited
+`LF_*` unset and stdin closed. Resource preflight failed: 14.2 GiB free versus
+the 32 GiB emergency reserve. Automatic recovery reclaimed nothing; the uv
+cache was locked, and retained builds belonged to active/unfinished work or
+lacked positive cleanup evidence. No product suites or lint ran. The runner
+recorded `resource_blocked` evidence for run-46801. Do not count this as a code
+failure or reuse earlier test results as current acceptance.
+
+`lf pr publish` was not run: restore the verification reserve, finish the
+affected checks and remaining acceptance above, then publish revised copy for
+Jack Heart's review. Limit recovery remains PR2; no merge or Task completion.
+
+### Verification capacity restored — November 4
+
+Jack Heart authorized old-worktree and target-directory cleanup. The compatible
+`/Users/jack/.local/bin/lf wt prune` removed seven finished checkouts, retaining
+recovery refs where needed. Cargo cleaned only unused target output for completed
+LOO-500, LOO-708, LOO-710 and LOO-711 after open-file checks. Their sources remain;
+active builds and LOO-714 output were preserved. Free space rose from 2.5 to 77 GiB.
+The prior resource blocker is cleared; current acceptance still needs to run.
+
+Use `/Users/jack/.local/bin/lf`: this Session's PATH selects the older app-bundled
+CLI, which cannot read the registry's wave_removal frontier. No installation or
+registry repair was performed. Auto-Ship was explicitly confirmed stopped. Resume
+at pr-publish to finish affected checks, investigate the recorded leak diagnostic,
+and regenerate PR copy for review only. Do not merge or complete the Task; PR2
+limit recovery remains separate.

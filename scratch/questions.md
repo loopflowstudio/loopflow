@@ -24,22 +24,14 @@ restore and two concurrent preparations. Memory and usable-input measurements
 remain outstanding. Native readiness uses the live relay event separately from
 saved frames and program status; configured-provider readiness remains unproven.
 
-No unresolved product choice precedes implementation. The existing plan,
-`loo-672-ready-conversations.md`, records the completed entry/restore cut and
-integration of 717's owner-evidence refinement; focused verification passed.
-Accepted behavior is unchanged.
-
-November 4 concept review: no new question for Jack Heart. The working implementation now keeps missing-history recovery an explicit
-**Start conversation** action across ordinary Session refreshes, with current
-holder and history evidence supplied by Rust. Fresh repository load also
-prefetches working Tasks without saved visits, using the accepted bounds and
-Close behavior. Focused headless checks pass. Native input and memory proof remain with demo.
-
 Historical pre-infrastructure proposals (detached quota, old budget, Claude-only
 Fork and snapshot construction) are superseded. Their full source is preserved at
 `a32c385044:scratch/research/loo-672-pre-infrastructure-plan.md`.
 
-Sync reconciliation — November 4: retain LOO-672’s accepted warm-conversation
-policy and review page. Parent LOO-717’s latest design and Rex coordination remain
-available through the historical pointers at `b81df60579`; its release/settlement
-contract remains integrated. This documentation-only sync changes no runtime policy.
+November 4 correction: no new product decision. The existing resume explanation
+supplies the absent-Session action; Start now uses the shared non-replacing opening
+path through execution and transport claim. Only explicit Take back authorizes
+replacement, including when ownership changes after preparation.
+The candidate uses disposable planning/checkout data and prepared native-provider
+metadata. No real provider has launched in this headless pass; native input,
+drafts and footprint remain demo evidence, not assumptions of success.

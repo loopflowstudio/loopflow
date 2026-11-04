@@ -50,6 +50,17 @@ impl Fixture {
     fn command(&self, args: &[&str]) -> Command {
         self.command_from(Path::new(env!("CARGO_BIN_EXE_lf")), args)
     }
+    /// Execute the returned program too: preparation may wrap lf in `env`.
+    fn prepared_command(&self, record: &Value) -> Command {
+        let argv: Vec<&str> = record["open_argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        let (program, args) = argv.split_first().expect("preparation returns a command");
+        self.command_from(Path::new(program), args)
+    }
     /// `command` run from another lf executable, such as a removable copy.
     fn command_from(&self, program: &Path, args: &[&str]) -> Command {
         let mut command = Command::new(program);
@@ -626,6 +637,20 @@ fn automatic_attachment_preserves_an_existing_viewers_control() {
 
 #[test]
 fn prepared_reveal_preserves_a_later_controlling_viewer() {
+    prepared_open_preserves_controller("--reveal-existing", false);
+}
+
+#[test]
+fn prepared_start_preserves_a_later_controlling_viewer() {
+    prepared_open_preserves_controller("--start-if-free", false);
+}
+
+#[test]
+fn prepared_start_preserves_a_claim_time_winner() {
+    prepared_open_preserves_controller("--start-if-free", true);
+}
+
+fn prepared_open_preserves_controller(intent: &str, claim_race: bool) {
     let fixture = Fixture::new();
     let path = fixture.provider(
         r#"#!/bin/sh
@@ -653,30 +678,67 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     let launched = fixture.wait_file("launches");
     let session = session_of(&fixture.sql(), launched.trim());
     let prepared = fixture
-        .command(&[
-            "session",
-            "resume",
-            &session,
-            "--reveal-existing",
-            "--prepare",
-            "--json",
-        ])
+        .command(&["session", "resume", &session, intent, "--prepare", "--json"])
         .output()
         .unwrap();
     assert!(prepared.status.success(), "{prepared:?}");
     let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    let argv: Vec<&str> = prepared["open_argv"]
+    assert!(prepared["open_argv"]
         .as_array()
         .unwrap()
-        .iter()
-        .map(|arg| arg.as_str().unwrap())
-        .collect();
-    assert!(argv.contains(&"--reveal-existing"));
-    let mut controller = fixture.viewer(&owner, true);
-    let reveal = fixture.command(&argv[1..]).output().unwrap();
-    assert!(!reveal.status.success(), "reveal stole a competing claim");
+        .contains(&json!(intent)));
+    let mut controller = Some(fixture.viewer(&owner, !claim_race));
+    let endpoint = fixture.endpoint(&owner);
+    let retained = endpoint.with_extension("retained");
+    let race = if claim_race {
+        // Interpose only at the socket boundary: all ownership reads see the
+        // free real owner, then the competing viewer claims before Attach arrives.
+        std::fs::rename(&endpoint, &retained).unwrap();
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let backend = retained.clone();
+        let mut winner = controller.take().unwrap();
+        Some(std::thread::spawn(move || loop {
+            let (mut socket, _) = listener.accept().unwrap();
+            let (tag, payload) = read_frame(&mut socket).unwrap();
+            assert_eq!(tag, REQUEST);
+            let request: Value = serde_json::from_slice(&payload).unwrap();
+            let attaching = request["kind"] == "attach";
+            if attaching {
+                winner.request(json!({"kind":"attach","control":true,"replace":true,
+                        "own":"take","rows":24,"cols":80}));
+                let attached = winner.until_reply();
+                winner.accept(&attached);
+            } else {
+                assert_eq!(request["kind"], "controlled");
+            }
+            let mut real = UnixStream::connect(&backend).unwrap();
+            real.write_all(&frame(tag, &payload)).unwrap();
+            let (reply_tag, reply) = read_frame(&mut real).unwrap();
+            socket.write_all(&frame(reply_tag, &reply)).unwrap();
+            if attaching {
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&reply).unwrap()["kind"],
+                    "busy"
+                );
+                return winner;
+            }
+        }))
+    } else {
+        None
+    };
+    let opened = fixture.prepared_command(&prepared).output().unwrap();
+    assert!(
+        !opened.status.success(),
+        "opening stole a competing claim: {opened:?}"
+    );
+    if let Some(race) = race {
+        controller = Some(race.join().unwrap());
+        std::fs::remove_file(&endpoint).unwrap();
+        std::fs::rename(retained, endpoint).unwrap();
+    }
     assert_eq!(fixture.wait_file("launches"), launched);
     assert!(!fixture.home.path().join("answer").exists());
+    let mut controller = controller.unwrap();
     controller.input("original-controller\n");
     controller.finish();
     let pid = launched.trim().split(':').next().unwrap();
@@ -1798,6 +1860,121 @@ fn returned_session(output: &Output) -> Value {
         .find("{\n")
         .unwrap_or_else(|| panic!("Session JSON missing: {output:?}"));
     serde_json::from_str(text[start..].trim()).unwrap()
+}
+
+#[test]
+fn prepared_start_and_take_back_keep_one_thread_with_or_without_a_session() {
+    for existing in [false, true] {
+        let fixture = Fixture::new();
+        let path = fixture.provider(
+            r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+read -r answer < /dev/tty
+printf '%s' "$answer" > "$HOME/answer"
+"#,
+        );
+        let prepare = |args: &[&str]| -> Value {
+            let result = fixture.command(args).env("PATH", &path).output().unwrap();
+            assert!(result.status.success(), "{result:?}");
+            serde_json::from_slice(&result.stdout).unwrap()
+        };
+        let before = existing.then(|| prepare(&["-a", "claude", "resume", "--prepare", "--json"]));
+        let mut args = vec![
+            "-a",
+            "claude",
+            "resume",
+            "--start-if-free",
+            "--prepare",
+            "--json",
+        ];
+        if let Some(before) = &before {
+            args.push(before["id"].as_str().unwrap());
+        }
+        let prepared = prepare(&args);
+        let session = prepared["id"].as_str().unwrap();
+        if let Some(before) = &before {
+            assert_eq!(before["id"], session);
+        }
+        assert!(!fixture.home.path().join("launches").exists());
+        assert!(prepared["open_argv"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("--start-if-free")));
+
+        // Execute exactly what preparation returned, through delegation and relay.
+        let mut command = fixture.prepared_command(&prepared);
+        command.env("PATH", &path);
+        let first = Terminal::spawn(command);
+        let launched = fixture.wait_file("launches");
+        let owner = fixture.owner_of(session);
+        fixture.wait_controlled(&owner);
+        let capture: i64 = fixture
+            .sql()
+            .query_row(
+                "SELECT current_capture FROM agent_sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        // This prepared Start predates the holder. It may not replay or replace it.
+        let refused = fixture
+            .prepared_command(&prepared)
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(!refused.status.success(), "{refused:?}");
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("Take back"));
+        assert_eq!(fixture.wait_file("launches"), launched);
+        assert!(!fixture.home.path().join("answer").exists());
+
+        // Explicit Take back alone carries ordinary CLI resume authority.
+        let takeover = prepare(&["session", "resume", session, "--prepare", "--json"]);
+        assert!(!takeover["open_argv"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("--start-if-free")));
+        let mut next = fixture
+            .prepared_command(&takeover)
+            .env("PATH", &path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let departed = wait_for_viewer(first.child, Duration::from_secs(30));
+        assert!(departed.status.success(), "{departed:?}");
+        next.stdin
+            .take()
+            .unwrap()
+            .write_all(b"taken-back\n")
+            .unwrap();
+        let result = wait_for_viewer(next, Duration::from_secs(30));
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(fixture.wait_file("answer"), "taken-back");
+        assert_eq!(fixture.wait_file("launches"), launched);
+        assert_eq!(
+            fixture
+                .sql()
+                .query_row(
+                    "SELECT current_capture FROM agent_sessions WHERE id=?1",
+                    [session],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap(),
+            capture
+        );
+        assert_eq!(
+            fixture
+                .sql()
+                .query_row("SELECT count(*) FROM agent_sessions", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        fixture.ends(&owner);
+    }
 }
 
 #[test]
@@ -2949,7 +3126,7 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
             [&session],
         )
         .unwrap();
-    let viewed = || -> bool {
+    let viewed = || -> Option<bool> {
         fixture
             .sql()
             .query_row("SELECT viewed FROM processes WHERE id=?1", [&owner], |r| {
@@ -2959,7 +3136,7 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     };
     let desktop = fixture.viewer(&owner, true);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !viewed() {
+    while viewed() != Some(true) {
         assert!(Instant::now() < deadline, "owner never recorded its viewer");
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -2967,7 +3144,7 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     desktop.socket.shutdown(std::net::Shutdown::Both).unwrap();
     drop(desktop);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while viewed() {
+    while viewed() != Some(false) {
         assert!(Instant::now() < deadline, "the viewer never left");
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -2987,7 +3164,10 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     assert_eq!(prepared["state"], "detached");
     assert_eq!(
         prepared["actions"],
-        json!([{"kind":"open","label":"Reconnect","help":"Show the running Session in this terminal","unavailable_reason":null}])
+        json!([
+            {"kind":"open","label":"Reconnect","help":"Show the running Session in this terminal","unavailable_reason":null},
+            {"kind":"reveal","label":"Show conversation","help":"Continue existing history without taking another terminal's input","unavailable_reason":null}
+        ])
     );
     assert_eq!(prepared["terminal_ids"], json!([]));
 

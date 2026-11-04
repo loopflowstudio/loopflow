@@ -106,10 +106,11 @@ recent working Tasks within the same eight-conversation and two-preparation boun
 Saved Close remains closed; initial rendering does not wait for preparation.
 
 Task navigation reveals existing history without starting a first turn or taking
-another client's input. With no saved history, the pane explains why and offers
-**Start conversation**. Refresh keeps that action accurate; only selecting Start
+another client's input. A started Task with no conversation, or a Session with
+no saved history, offers **Start conversation**. Refresh keeps that action accurate; only selecting Start
 creates a first provider thread. **Retry** continues to reveal existing history.
-External ownership offers **Take back**. Close and eviction discard late opening
+If another client takes input while Start is opening, the pane offers **Take back**;
+Start leaves that client in control. Close and eviction discard late opening
 results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
@@ -522,17 +523,14 @@ text; an accepted write with unavailable readback retains the draft and explains
 what happened. Wave details expose Work outside the current plan. Failed and
 partial reads remain visible in the outline.
 
-Each terminal pane owns one native libghostty surface. A Session without a local
-terminal resumes existing history or shows its shared Start or Take back action; opening and failure states
-remain in that pane. Sessions
-include interactive provider Sessions and Task human GraphSteps.
+Each terminal pane owns one native libghostty surface. Opening, failure and
+recovery actions stay in that pane. Sessions include interactive provider
+Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
-Opening a Task or selecting a Session active in another client shows its conversation
-pane with its last available screen and **Take back**. Clicking transfers input
-to this pane; the previous terminal reports the move. When external control is
-already reported, opening the pane leaves the other client in control.
+**Take back** transfers input to this pane; the previous terminal reports the move.
+Opening the pane leaves the other client in control.
 
 Discuss review feedback in the ongoing conversation. Closing a pane only hides
 the view and releases its Desktop hold. Shared lifecycle protections determine

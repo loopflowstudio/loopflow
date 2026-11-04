@@ -694,7 +694,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             .await
             .unwrap();
         let before = store.session(&record.id).await.unwrap().unwrap();
-        let prepared = super::reveal(&store, &record.id, false, false)
+        let prepared = super::open_without_replacing(&store, &record.id, false, false, false)
             .await
             .unwrap();
         assert!(prepared.open_argv.ends_with(&["--reveal-existing".into()]));
@@ -727,7 +727,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             assert_eq!(start.label, "Start conversation");
             assert!(start.unavailable_reason.is_none());
         }
-        let error = super::reveal(&store, &record.id, true, false)
+        let error = super::open_without_replacing(&store, &record.id, false, true, false)
             .await
             .unwrap_err();
         assert!(error
@@ -755,7 +755,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let prepared = super::reveal(&store, &record.id, false, false)
+        let prepared = super::open_without_replacing(&store, &record.id, false, false, false)
             .await
             .unwrap();
         assert!(!prepared
@@ -785,7 +785,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             .find(|a| a.kind == super::SessionActionKind::MoveHere)
             .unwrap();
         assert_eq!(takeover.label, "Take back");
-        let reveal = super::reveal(&store, &record.id, false, false)
+        let reveal = super::open_without_replacing(&store, &record.id, false, false, false)
             .await
             .unwrap();
         assert_eq!(reveal.actions, refreshed.actions);
@@ -858,7 +858,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 .sqlite
                 .retain_session_observation(&session, &observation)
                 .unwrap();
-            let prepared = super::reveal(&store, &record.id, false, false)
+            let prepared = super::open_without_replacing(&store, &record.id, false, false, false)
                 .await
                 .unwrap();
             let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
@@ -886,7 +886,9 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 .is_none());
             // A new captured input cannot borrow the older input's resume reference.
             let next = super::append_input(&store, session).await.unwrap();
-            let prepared = super::reveal(&store, &next.id, false, false).await.unwrap();
+            let prepared = super::open_without_replacing(&store, &next.id, false, false, false)
+                .await
+                .unwrap();
             let refreshed = super::listed(&store, &next.id).unwrap().unwrap();
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(

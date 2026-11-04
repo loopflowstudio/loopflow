@@ -11,7 +11,25 @@
 
 import Foundation
 
-public enum SessionOpenIntent: String, Codable, Sendable { case resume, reveal }
+public enum SessionOpenIntent: String, Codable, Sendable {
+    case resume, start, reveal
+
+    var arguments: [String] {
+        switch self {
+        case .resume: []
+        case .start: ["--start-if-free"]
+        case .reveal: ["--reveal-existing"]
+        }
+    }
+
+    public var action: SessionActionKind {
+        switch self {
+        case .resume: .moveHere
+        case .start: .open
+        case .reveal: .reveal
+        }
+    }
+}
 
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.
 /// `stdout` is what a failed command printed before it exited, such as the
@@ -269,7 +287,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
-            Self.prepared(agent, ["session", "resume"] + (intent == .reveal ? ["--reveal-existing"] : []) + [id].compactMap { $0 }
+            Self.prepared(agent, ["session", "resume"] + intent.arguments + [id].compactMap { $0 }
                 + Self.option("--task", task) + Self.option("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let id, let agent):
@@ -937,23 +955,32 @@ public struct RegistryQuery: Sendable {
     /// The repository or Wave's retained conversation; explicit opening only.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil, intent: .resume)))
+            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil, intent: .start)))
     }
 
-    /// Select the Task's ongoing conversation. Resume may create it; reveal
+    /// Select the Task's ongoing conversation. Start may create it; reveal
     /// requires existing history. External ownership offers Take back.
-    public func prepareTaskSession(issue: String, cwd: String?, intent: SessionOpenIntent = .resume) async throws -> SessionRecord {
+    public func prepareTaskSession(issue: String, cwd: String?, intent: SessionOpenIntent = .start) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
             .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil, intent: intent)))
     }
 
-    /// Prepare one Session’s terminal command without starting its provider. The
-    /// Resume transfers control; reveal only attaches a free owner or resumes saved history.
+    /// Only an authoritative absence offers creation; failed reads stay unknown.
+    public func taskConversationStart(issue: String, cwd: String) async throws -> SessionAction? {
+        let report = try Self.decode(SessionResumeExplanation.self, from: await run(
+            ["session", "resume", "--task", issue, "--explain", "--json"], cwd))
+        guard report.state == nil, report.action?.intent == .start,
+              report.impediments.isEmpty, report.unavailable.isEmpty else { return nil }
+        return report.actions.first { $0.kind == .open && $0.unavailableReason == nil }
+    }
+
+    /// Prepare without launching. Resume transfers control; Start and reveal never
+    /// replace input. Only Start may create the first provider thread.
     public func prepareSession(
         id: String,
         agent: String? = nil,
         cwd: String? = nil,
-        intent: SessionOpenIntent = .resume
+        intent: SessionOpenIntent = .start
     ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
             .sessionResume(directory: cwd ?? "/", id: id, task: nil, wave: nil, agent: agent, intent: intent)))

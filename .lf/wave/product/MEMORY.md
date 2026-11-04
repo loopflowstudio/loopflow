@@ -964,29 +964,32 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 
 ## Sessions projection and native resume (reconciled 2026-11-04)
 
-October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
-`16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`, this heading.
+Retired Ask/Ready/Complete and LOO-491 evidence:
+`a32c385044:.lf/wave/product/MEMORY.md`, this heading.
 
-Jack Heart's November 4 LOO-672 approval selects existing-history reveal, warm
-unfinished Tasks, bottom-on-return and explicit **Take back** over the last screen.
-No Fork button or shared input; CLI fork remains. Jack also requested load-prefetch
-of fresh idle/active/moving Tasks without saved visits. Selected-first admission
-shares the bounded warm set and Close policy; saved display grants no retention.
-Eight conversations/two preparations are provisional, not measured limits.
-Visible/protected work survives; completed departure releases through 717.
+Jack Heart's November 4 LOO-672 approval selects warm unfinished Tasks,
+bottom-on-return, existing-history reveal and explicit **Take back** over the last
+screen. No Fork button/shared input; CLI fork remains. Jack added fresh
+idle/active/moving load-prefetch without saved visits. Selected-first admission
+honors Close; saved display grants no retention. Eight conversations/two
+preparations remain provisional. Visible/protected work survives; completed
+departure releases through 717.
 
-Rust projects recovery from current-input history and ownership on every read.
-Preparation-only labels were lost on refresh: missing history must retain explicit
-Start, and a new holder supplies Take back. Desktop renders actions without label
-tests; unavailable opening differs from terminal completion. Retry remains reveal.
-Navigation creates no thread, turn or Graph; launch/claim rechecks non-replacement.
-Close/eviction fence pending preparation before Session identity arrives and settle
-discarded opening receipts.
+Jack authorized corrections through re-demo, not landing/installation. Absent
+Sessions use resume explanation's Start offer; missing history uses Session actions.
+Start retains non-replacing intent through argv, execution and claim:
+fresh ownership reads cannot protect a takeover command.
+Only Take back replaces input; navigation/Retry reveal. Close fences late
+results even before Session identity exists. Prepared-command tests execute the
+returned program and wrappers, and prove holder continuity;
+nonzero exit can conceal parsing failure. Claim-time contention is covered.
 
-Focused checks do not prove usable provider input.
-Native Claude/Codex/Rex, reboot and twenty-Task footprint remain
-with demo. Jack approved review publication, not landing/installation. Earlier
-LOO-491 evidence: `a32c385044:.lf/wave/product/MEMORY.md`, this heading.
+Local retention uses the local query/Task; remote presence uses observed remote
+identity. Routing the local Machine through peer lookup failed “is not added”.
+CLI Start/retain/departure/return and contention fixtures prove no native usability.
+Stand-ins and mismatched checkouts prove no recovery. Disposable paired app/CLI
+data preserves the main registry; candidates must include later repairs. Claude/Codex/Rex, reboot and
+twenty-Task footprint remain with demo.
 
 ### Task observation and retired Watch
 
@@ -1047,8 +1050,8 @@ LOO-293's unproved native scope and retired Watch/FlowPosition history:
 - The 2026-09-22 interactive demo confirmed retained Session switching, copy/image
   input, and explicit Warp handoff. A later demo exposed split paste misrouting;
   the automated real-PTY correction passes but its final reviewer confirmation is
-  still pending. No all-provider matrix exists. JSON prepare-without-kill
-  has source/Swift contract coverage but no focused Rust behavioral proof yet.
+  still pending. LOO-672 adds prepared-command contention proof; native
+  all-provider coverage remains open.
 
 ### Shell command blocks and build fidelity (2026-09-22, revised 2026-10-05)
 

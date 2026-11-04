@@ -203,6 +203,12 @@ pub(crate) async fn explain_resume(
             fork: false,
             prepare_only,
         });
+        report.actions = vec![SessionAction {
+            kind: super::SessionActionKind::Open,
+            label: "Start conversation".into(),
+            help: "No existing conversation; start one explicitly".into(),
+            unavailable_reason: None,
+        }];
     }
     report
 }

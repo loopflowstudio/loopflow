@@ -111,6 +111,7 @@ final class SessionsWorkspace {
     var conversationRequest: UUID?
     var openingConversation: Bool { conversationRequest != nil }
     var conversationError: String?
+    var conversationStart: SessionAction?
     private var didPrepareTaskPanes = false
     var lastVisit = Date.distantPast
     var conversationClosed = false
@@ -384,14 +385,20 @@ final class SessionsWorkspace {
         let observedUse = hostUse
         let observedSettlement = nativeSettled
         do {
-            let remote = query.onMachine(location.machineId, repository: key.repository)
+            let destination: RegistryQuery
             let task: String
-            if location.machineId == localMachineId { task = key.id }
-            else if let observed = multiplexer.layout.allPanes.first(where: { $0.content.location == location })?.executionLocation,
-                    case .recorded(let recorded, let checkout) = observed.location, checkout == location.worktree {
+            if location.machineId == localMachineId {
+                destination = query
+                task = key.id
+            } else {
+                guard let observed = multiplexer.layout.allPanes.first(where: { $0.content.location == location })?.executionLocation,
+                      case .recorded(let recorded, let checkout) = observed.location, checkout == location.worktree else {
+                    throw RegistryQueryError("Task retention is unknown until its remote location is observed.")
+                }
+                destination = query.onMachine(location.machineId, repository: key.repository)
                 task = recorded
-            } else { throw RegistryQueryError("Task retention is unknown until its remote location is observed.") }
-            let result = try await remote.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision, nativeSettled: observedSettlement, owner: owner)
+            }
+            let result = try await destination.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision, nativeSettled: observedSettlement, owner: owner)
             guard !Task.isCancelled, presenceRevision == revision, hostUse == observedUse,
                   nativeSettled == observedSettlement else { return }
             retirement = result
@@ -693,13 +700,22 @@ final class SessionsWorkspaceRegistry {
             else if let id = workspace.multiplexer.sessionPane?.sessionId {
                 record = try await query.prepareSession(id: id, cwd: store.repoPath, intent: .reveal)
             } else {
-                record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath, intent: .reveal)
+                do {
+                    record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath, intent: .reveal)
+                } catch {
+                    let action = try? await query.taskConversationStart(issue: task, cwd: store.repoPath)
+                    if !Task.isCancelled, !workspace.conversationClosed, workspace.location == location {
+                        workspace.conversationStart = action
+                    }
+                    throw error
+                }
             }
             try Task.checkCancellation()
             guard !workspace.conversationClosed, workspace.location == location else { return }
             guard record.workspace?.identity == location else {
                 throw RegistryQueryError("The conversation belongs to a different Machine or checkout; nothing was opened.")
             }
+            workspace.conversationStart = nil
             if location.machineId != localMachineId, let observation { store.retainLocation(observation, for: record) }
             confirmLocation(in: workspace)
             try Task.checkCancellation()
@@ -1015,7 +1031,7 @@ struct SessionItem: Identifiable, Equatable {
         return message
     }
 
-    mutating func adoptPreparation(_ record: SessionRecord, intent: SessionActionKind) {
+    mutating func adoptPreparation(_ record: SessionRecord, intent: SessionOpenIntent) {
         self.record = record
         if intent == .reveal {
             if record.action(.moveHere) != nil { state = .elsewhere }
@@ -1025,10 +1041,10 @@ struct SessionItem: Identifiable, Equatable {
         } else if record.openArgv.isEmpty {
             // Nothing to start: retained work attaches when shown.
             state = record.action(.open)?.unavailableReason.map(State.failed) ?? .pending
-        } else if intent != .moveHere, record.action(.moveHere) != nil {
+        } else if intent != .resume, record.action(.moveHere) != nil {
             state = .elsewhere
         } else {
-            state = record.action(intent)?
+            state = record.action(intent.action)?
                 .unavailableReason.map(State.failed) ?? .prepared
         }
     }
@@ -1135,14 +1151,13 @@ final class SessionsStore {
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
-    private func prepare(_ id: String, intent: SessionActionKind) async {
+    private func prepare(_ id: String, intent: SessionOpenIntent) async {
         guard let index = _index(id) else { return }
-        let replacing = intent == .moveHere
-        if replacing, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
+        if intent == .resume, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
         switch sessions[index].state {
         case .pending, .failed, .unavailable, .ended:
             sessions[index].state = .opening
-        case .elsewhere where intent != .open:
+        case .elsewhere where intent != .start:
             sessions[index].state = .opening
         case .elsewhere, .opening, .prepared, .live:
             return
@@ -1160,7 +1175,7 @@ final class SessionsStore {
             }
             let stage = intent == .reveal ? "attach_prepare" : "connect_prepare"
             Perf.agentInput("\(stage)_begin", session: id)
-            let surface = try await executionQuery.prepareSession(id: id, cwd: repoPath, intent: intent == .reveal ? .reveal : .resume)
+            let surface = try await executionQuery.prepareSession(id: id, cwd: repoPath, intent: intent)
             try Task.checkCancellation()
             Perf.agentInput("\(stage)_returned", session: id)
             guard let latest = _index(id), sessions[latest].launchId == generation else { return }
@@ -1173,7 +1188,7 @@ final class SessionsStore {
         }
     }
 
-    func adoptPreparation(_ record: SessionRecord, intent: SessionActionKind = .open) {
+    func adoptPreparation(_ record: SessionRecord, intent: SessionOpenIntent = .start) {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
         case .pending, .failed, .unavailable, .ended, .elsewhere:
@@ -1197,12 +1212,12 @@ final class SessionsStore {
         await prepare(id, intent: .reveal)
     }
 
-    func resume(_ id: String) async {
-        await prepare(id, intent: .open)
+    func start(_ id: String) async {
+        await prepare(id, intent: .start)
     }
 
     func moveHere(_ id: String) async {
-        await prepare(id, intent: .moveHere)
+        await prepare(id, intent: .resume)
     }
 
     @discardableResult
@@ -1212,7 +1227,7 @@ final class SessionsStore {
         // Preparation checks the requested provider's continuation before releasing
         // the retained terminal. Failed reads leave current drafts and updates intact.
         let prepared = try await query(for: previous.record).prepareSession(
-            id: id, agent: agent, cwd: repoPath)
+            id: id, agent: agent, cwd: repoPath, intent: .resume)
         if let reason = prepared.action(.moveHere)?.unavailableReason {
             throw RegistryQueryError(reason)
         }

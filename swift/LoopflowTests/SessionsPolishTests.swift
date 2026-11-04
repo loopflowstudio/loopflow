@@ -42,7 +42,7 @@ struct SessionsPolishTests {
         #expect(local.multiplexer.focusedPane == shell)
     }
 
-    @Test("A shell exit closes its retained pane while SessionsView is absent")
+    @Test("A shell exit preserves its disconnected pane while SessionsView is absent")
     func shellExitSurvivesNavigation() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace("/tmp/repo"))
@@ -51,7 +51,6 @@ struct SessionsPolishTests {
         let tab = try #require(shell.content.selectedShell)
         let other = fixtureWork(registry, fixtureWorkspace("/tmp/other"))
         other.multiplexer.newShell(location: other.location)
-        let otherShell = other.multiplexer.focusedPane
 
         NotificationCenter.default.post(
             name: .ghosttySurfaceClosed, object: TerminalIdentity.session(tab.id, machineId: fixtureMachineId)
@@ -61,7 +60,8 @@ struct SessionsPolishTests {
             name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(tab.id, machineId: fixtureMachineId)
         )
 
-        #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.kind == .session)
+        #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane == shell)
+        #expect(workspace.disconnectedShells.contains(tab.id))
         #expect(other.multiplexer.focusedPane.content.selectedShell?.location == other.location)
     }
 }

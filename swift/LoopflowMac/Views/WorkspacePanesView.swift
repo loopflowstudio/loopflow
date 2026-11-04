@@ -26,10 +26,7 @@ struct WorkspacePanesView: View {
                                description: "Your panes are retained. Show a pane to continue.") {
                     if workspace.key.kind == .task,
                        !workspace.showsConversation(held: Set(sessions.sessions.map(\.id))) {
-                        Button("Open conversation") {
-                            Task { await model.openTaskConversation(workspace.key.id) }
-                        }
-                        .accessibilityIdentifier("task-open-conversation")
+                        TaskConversationButton(workspace: workspace, model: model)
                     }
                     Button("Show pane") {
                         let pane = store.focusedPane
@@ -55,6 +52,22 @@ struct WorkspacePanesView: View {
 
     private func endWorkspaceAction() {
         Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
+    }
+}
+
+struct TaskConversationButton: View {
+    let workspace: SessionsWorkspace
+    let model: WorkModel
+
+    var body: some View {
+        Button(workspace.conversationStart?.label ?? "Open conversation") {
+            Task {
+                if workspace.conversationStart != nil { await model.startTaskConversation(in: workspace) }
+                else { await model.openTaskConversation(workspace.key.id) }
+            }
+        }
+        .help(workspace.conversationStart?.help ?? "Show the recorded conversation")
+        .accessibilityIdentifier("task-open-conversation")
     }
 }
 
@@ -759,16 +772,15 @@ struct SessionPaneView: View {
     }
 
     @ViewBuilder
-    private var emptyWorkspace: some View {
+    var emptyWorkspace: some View {
         if workspace.openingConversation {
             ProgressView("Opening conversation…")
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task {
             PaneEmptyState(title: "No Task conversation open", systemImage: "bubble.left",
-                description: workspace.conversationError ?? "Open this Task’s recorded conversation.") {
-                Button("Open conversation") { Task { await model.openTaskConversation(workspace.key.id) } }
-                    .accessibilityIdentifier("task-open-conversation")
+                description: workspace.conversationStart?.help ?? workspace.conversationError ?? "Open this Task’s recorded conversation.") {
+                TaskConversationButton(workspace: workspace, model: model)
             }
         } else {
             PaneEmptyState(title: "No session open", systemImage: "terminal",
@@ -834,7 +846,7 @@ struct SessionPaneView: View {
                 Task { @MainActor in
                     if retry { await sessions.select(item.id) }
                     else if action.kind == .moveHere { await sessions.moveHere(item.id) }
-                    else { await sessions.resume(item.id) }
+                    else { await sessions.start(item.id) }
                 }
             }
             .buttonStyle(.bordered)
@@ -872,7 +884,9 @@ struct SessionPaneView: View {
                 }
             ) {
                 Text(item.record.action(.open)?.unavailableReason ?? "This conversation is controlled by another client.")
-                Text(item.record.openArgv.map(shellEscape).joined(separator: " "))
+                // Document explicit Take back; the prepared launcher keeps its own intent.
+                Text(item.record.openArgv.filter { $0 != "--reveal-existing" && $0 != "--start-if-free" }
+                    .map(shellEscape).joined(separator: " "))
                     .font(.caption.monospaced()).textSelection(.enabled)
             }
         }

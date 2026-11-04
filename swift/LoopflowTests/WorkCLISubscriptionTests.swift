@@ -10,6 +10,88 @@ import ViewInspector
 @Suite("CLI to retained Work sidebar", .serialized)
 @MainActor
 struct WorkCLISubscriptionTests {
+    @Test("A started Task without a Session offers Start through the visible recovery button")
+    func missingTaskConversationStartsExplicitly() async throws {
+        let fixture = try WorkCLIFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try await fixture.prepare()
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Conversation recovery", "--json"])
+        let id = try #require(created["id"] as? String)
+        _ = try await fixture.run(["checkout", id, "--json"])
+        let query = fixture.lf.query
+        let snapshot = try await query.taskDestination(issue: id, repo: fixture.repo.path)
+        let task = try #require(snapshot.tasks.items.first)
+        let location = try #require(task.reference.workspace?.identity)
+        let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
+        defer { registry.prepareForQuit() }
+        let model = WorkModel(query: query, repoPath: fixture.repo.path)
+        model.bindWorkspaces(registry, repository: repository.id)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        await model.refreshSessions()
+        model.select(.task(id: id))
+        let workspace = try #require(registry.retained(model.workspaceKey(for: .task(id: id), repository: repository.id)))
+        let store = registry.sessionStore(repository: repository.id, repoPath: fixture.repo.path, query: query)
+        try await eventually { workspace.conversationStart != nil }
+        #expect(try await query.sessionPage(cwd: fixture.repo.path).entries.isEmpty)
+
+        // An ordinary inventory refresh must preserve the legal action without admitting a Session.
+        await model.refreshSessions()
+        model.revealPrimaryConversation()
+        let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
+            sessions: store, workspace: workspace, model: model, onFocus: { _, _ in }).emptyWorkspace
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
+        #expect(try button.labelView().text().string() == "Start conversation")
+        try button.tap()
+        try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil && !workspace.openingConversation }
+        let session = try #require(store.sessions.first)
+        #expect(session.state == .prepared)
+        #expect(session.record.workspace?.identity == location)
+        #expect(session.launchArguments.contains("--start-if-free"))
+        #expect(workspace.conversationStart == nil)
+        #expect(try await query.taskConversationStart(issue: id, cwd: fixture.repo.path) == nil)
+        let recorded = try await query.sessionPage(cwd: fixture.repo.path).entries
+        #expect(recorded.count == 1)
+        #expect(recorded.first?.id == session.id)
+        #expect(recorded.first?.agentProcessId == nil)
+        registry.prepareForQuit()
+        await registry.releaseForQuit()
+    }
+
+    @Test("Local Desktop retention reaches the CLI lifecycle owner through departure and return")
+    func localRetentionDepartureAndReturn() async throws {
+        let fixture = try WorkCLIFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try await fixture.prepare()
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Retention recovery", "--json"])
+        let id = try #require(created["id"] as? String)
+        _ = try await fixture.run(["checkout", id, "--json"])
+        _ = try await fixture.run(["task", "complete", id])
+        let query = fixture.lf.query
+        let snapshot = try await query.taskDestination(issue: id, repo: fixture.repo.path)
+        let task = try #require(snapshot.tasks.items.first)
+        let location = try #require(task.reference.workspace?.identity)
+        let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
+        defer { registry.prepareForQuit() }
+        let key = WorkWorkspaceKey(repository: repository.id, kind: .task, id: id)
+        let workspace = registry.open(key, title: task.task.name, location: location)
+        workspace.startPersistence(query: query, repoPath: fixture.repo.path)
+        try await eventually { workspace.retirement != nil || workspace.retentionError != nil }
+        #expect(workspace.retentionError == nil)
+        #expect(workspace.retirement?.dueAt == nil)
+        workspace.retain(false)
+        try await eventually { workspace.retirement?.dueAt != nil || workspace.retentionError != nil }
+        #expect(workspace.retentionError == nil)
+        #expect(try #require(workspace.retirement?.dueAt) > Int64(Date().timeIntervalSince1970))
+        workspace.retain(true)
+        try await eventually { workspace.retirement?.dueAt == nil || workspace.retentionError != nil }
+        #expect(workspace.retentionError == nil)
+        #expect(FileManager.default.fileExists(atPath: location.worktree))
+        registry.prepareForQuit()
+        await registry.releaseForQuit()
+    }
+
     @Test(arguments: ["complete", "abandon"])
     func taskLifecycleUpdatesOpenSidebar(action: String) async throws {
         let fixture = try WorkCLIFixture()
@@ -130,7 +212,8 @@ struct WorkCLISubscriptionTests {
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)
         #if canImport(GhosttyKit)
-        #expect(registry.surfaces.view(for: surfaceID) === surface)
+        // Completed departure releases the native viewer; returning keeps panes and drafts.
+        #expect(registry.surfaces.view(for: surfaceID) !== surface)
         #endif
         #expect(files.document("notes.txt") === draft)
         #expect(draft.editor.string == "unsaved Task draft")

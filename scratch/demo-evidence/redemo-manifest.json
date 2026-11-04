@@ -1,0 +1,55 @@
+{
+  "source_head": "df07fd9b5fb81a3dd40a148b35c5e97ce2f34430",
+  "source_diff_sha256": "fc07054eb81b67c97460569b74134182125bb279ec1a5f7c72313c7d980b2f27",
+  "candidate": "/private/tmp/loo-672-redemo-qevxy417/Loopflow LOO-672 Redemo.app",
+  "repository": "/private/tmp/loo-672-redemo-qevxy417/repo",
+  "machine": "/private/tmp/loo-672-redemo-qevxy417/machine",
+  "tasks": [
+    {
+      "id": "task_0cf8116a92e84c4297da0325c7e46da8",
+      "title": "Start a conversation",
+      "workspace": {
+        "base_commit": "d2784c93cf8ec02dc88a9d3791ffb67a2769841d",
+        "branch": "jack-heart/0cf811-start-a-conversation",
+        "local_exists": true,
+        "machine_id": "home_215b6fe09950ef1e3ceb6e4745159bc9",
+        "machine_label": null,
+        "slug": "0cf811-start-a-conversation",
+        "worktree": "/private/tmp/loo-672-redemo-qevxy417/repo.0cf811-start-a-conversation"
+      },
+      "session": null,
+      "provider": null
+    },
+    {
+      "id": "task_f01ea851c2a84d01a0b0c5b32176390c",
+      "title": "Claude continuity",
+      "workspace": {
+        "base_commit": "d2784c93cf8ec02dc88a9d3791ffb67a2769841d",
+        "branch": "jack-heart/f01ea8-claude-continuity",
+        "local_exists": true,
+        "machine_id": "home_215b6fe09950ef1e3ceb6e4745159bc9",
+        "machine_label": null,
+        "slug": "f01ea8-claude-continuity",
+        "worktree": "/private/tmp/loo-672-redemo-qevxy417/repo.f01ea8-claude-continuity"
+      },
+      "session": "07172c74b19442328de02bfecf85ae73",
+      "provider": "claude"
+    },
+    {
+      "id": "task_014b5b8b11c245f8941d4bfa2bfd6f83",
+      "title": "Codex continuity",
+      "workspace": {
+        "base_commit": "d2784c93cf8ec02dc88a9d3791ffb67a2769841d",
+        "branch": "jack-heart/014b5b-codex-continuity",
+        "local_exists": true,
+        "machine_id": "home_215b6fe09950ef1e3ceb6e4745159bc9",
+        "machine_label": null,
+        "slug": "014b5b-codex-continuity",
+        "worktree": "/private/tmp/loo-672-redemo-qevxy417/repo.014b5b-codex-continuity"
+      },
+      "session": "42cce8e77c3a48b5baf00909e8cfe4c9",
+      "provider": "codex"
+    }
+  ],
+  "exercised": "CLI preparation only; no provider launched and no native acceptance claimed"
+}

@@ -294,7 +294,9 @@ checkouts and changed committed refs. Failures retain a pending reason and retry
 on the next host report. Task and conversation history survive; reopening a
 retired Task never silently recreates a checkout.
 
-Desktop's automatic reveal uses a non-replacing input claim. If another viewer
+Desktop's automatic reveal and explicit Start use a non-replacing input claim.
+Start permits first-thread creation; reveal requires existing history. Their
+prepared commands retain that distinction through launch. If another viewer
 wins before attachment, the owner returns Busy and keeps that viewer's input.
 Only explicit Take back uses ordinary replacing resume. The live relay announces
 native input readiness to Desktop after its owner acknowledges the native client;

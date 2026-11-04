@@ -165,14 +165,13 @@ struct SessionsStoreTests {
         #expect(item(store, "a")?.state == .pending)
     }
 
-    @Test("Explicit resume opens only the requested terminal")
-    func resumesOnlyTheSelectedSession() async throws {
+    @Test("Explicit Start opens only the requested terminal")
+    func startsOnlyTheSelectedSession() async throws {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
-                #expect(args.first == "session")
-                #expect(args.dropFirst().first == "resume")
-                return session(id: args[2], state: "available")
+                #expect(args == ["session", "resume", "--start-if-free", "second", "--prepare", "--json"])
+                return session(id: "second", state: "available")
             }
         )
         store.reconcile(try records([
@@ -180,7 +179,7 @@ struct SessionsStoreTests {
             session(id: "second", state: "available"),
         ]))
 
-        await store.resume("second")
+        await store.start("second")
 
         #expect(item(store, "first")?.state == .pending)
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "resume", "second"])
@@ -201,7 +200,7 @@ struct SessionsStoreTests {
         }
         store.adoptPreparation(prepared)
 
-        await store.resume(prepared.id)
+        await store.start(prepared.id)
 
         #expect(item(store, prepared.id)?.state == .prepared)
         #expect(item(store, prepared.id)?.surface?.openArgv == prepared.openArgv)
@@ -216,7 +215,7 @@ struct SessionsStoreTests {
         )
         store.reconcile(try records([session(id: "native", state: "available")]))
 
-        await store.resume("native")
+        await store.start("native")
 
         #expect(item(store, "native")?.surface == nil)
         #expect(item(store, "native")?.state == .elsewhere)
@@ -236,7 +235,7 @@ struct SessionsStoreTests {
             session(id: "native", state: "active"),
         ]))
 
-        await store.resume("native")
+        await store.start("native")
         #expect(item(store, "native")?.surface == nil)
         #expect(item(store, "native")?.state == .elsewhere)
 
@@ -258,7 +257,7 @@ struct SessionsStoreTests {
         store.reconcile(try records([blocked]))
         #expect(item(store, "native")?.record.action(.open)?.unavailableReason == reason)
 
-        await store.resume("native")
+        await store.start("native")
 
         if result == "available" {
             #expect(item(store, "native")?.state == .prepared)
@@ -284,7 +283,7 @@ struct SessionsStoreTests {
         if replacing {
             await store.moveHere("native")
         } else {
-            await store.resume("native")
+            await store.start("native")
         }
         let prepared = try #require(item(store, "native")?.surface)
         #expect(prepared.openArgv == ["lf", "session", "resume", "native"])
@@ -331,14 +330,14 @@ struct SessionsStoreTests {
         let record = session(id: "native", state: "closed")
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in record })
         store.reconcile(try records([record]))
-        await store.resume("native")
+        await store.start("native")
         store.recordPaneLive("native")
         store.noteSurfaceClosed(.session("native", machineId: fixtureMachineId),
             output: "Error: Previous AgentProcess has no observed exit")
         store.reconcile(try records([record]))
         #expect(item(store, "native")?.state == .ended("Error: Previous AgentProcess has no observed exit"))
         #expect(item(store, "native")?.surface == nil)
-        await store.resume("native")
+        await store.start("native")
         #expect(item(store, "native")?.state == .prepared)
     }
 
@@ -355,7 +354,7 @@ struct SessionsStoreTests {
             session(id: "native", state: "closed"),
         ]))
 
-        await store.resume("native")
+        await store.start("native")
         #expect(item(store, "native")?.error != nil)
 
         store.reconcile(try records([
@@ -484,7 +483,11 @@ struct WorkspaceSessionLifecycleTests {
         let missing = try missingHistorySession()
         let wire = String(decoding: try JSONEncoder().encode(missing), as: UTF8.self)
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
-            args.contains("--reveal-existing") ? wire : session(id: missing.id, state: "closed")
+            if args.contains("--reveal-existing") { return wire }
+            #expect(args.contains("--start-if-free"))
+            var started = missing
+            started.openArgv.append("--start-if-free")
+            return String(decoding: try JSONEncoder().encode(started), as: UTF8.self)
         })
         store.reconcile([missing])
         await store.select(missing.id)
@@ -501,7 +504,7 @@ struct WorkspaceSessionLifecycleTests {
         let deadline = ContinuousClock.now + .seconds(3)
         while store.sessions.first?.surface == nil, ContinuousClock.now < deadline { await Task.yield() }
         #expect(store.sessions.first?.state == .prepared)
-        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", missing.id])
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", missing.id, "--start-if-free"])
     }
 
     @Test("Fresh ownership replaces unavailable opening with Take back")
@@ -521,6 +524,29 @@ struct WorkspaceSessionLifecycleTests {
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "session-open-here-\(missing.id)")
         }
+    }
+
+    @Test("A prepared Start stays non-replacing through refresh; only Take back transfers input")
+    func startThenCompetingHolder() async throws {
+        let missing = try missingHistorySession()
+        let active = try #require(records([session(id: missing.id, state: "active")]).first)
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            var record = args.contains("--start-if-free") ? missing : active
+            if args.contains("--start-if-free") { record.openArgv.append("--start-if-free") }
+            return String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        })
+        store.reconcile([missing])
+        await store.start(missing.id)
+        #expect(store.sessions.first?.state == .prepared)
+        store.reconcile([active])
+        #expect(store.sessions.first?.launchArguments.contains("--start-if-free") == true)
+        store.recordPaneFailure(missing.id, reason: "Input was acquired elsewhere")
+        store.reconcile([active])
+        #expect(store.sessions.first?.state == .elsewhere)
+        await store.moveHere(missing.id)
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(store.sessions.first?.launchArguments == active.openArgv)
+        #expect(store.sessions.count == 1)
     }
 
     @Test("Fresh saved history clears an unavailable opening without starting it")

@@ -1335,7 +1335,11 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
     let intents: Vec<SessionOpenIntent> = serde_json::from_value(wire.clone()).unwrap();
     assert_eq!(
         intents,
-        vec![SessionOpenIntent::Resume, SessionOpenIntent::Reveal]
+        vec![
+            SessionOpenIntent::Resume,
+            SessionOpenIntent::Start,
+            SessionOpenIntent::Reveal
+        ]
     );
     assert_eq!(serde_json::to_value(intents).unwrap(), wire);
 }

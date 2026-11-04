@@ -984,12 +984,13 @@ pub(crate) async fn open(
     Ok(result)
 }
 
-/// Observe or continue an existing conversation without replacing a client or
-/// submitting captured input. The launch lock and transport handshake recheck
-/// the facts after preparation; a prepared command carries no takeover authority.
-pub(crate) async fn reveal(
+/// Open without replacing a client. Only explicit Start may create a first
+/// thread; reveal requires history. The launch lock and transport handshake
+/// recheck the facts after preparation, which carries no takeover authority.
+pub(crate) async fn open_without_replacing(
     store: &SharedStore,
     id: &str,
+    start: bool,
     launch: bool,
     json: bool,
 ) -> Result<SessionRecord> {
@@ -1024,27 +1025,31 @@ pub(crate) async fn reveal(
         )
     } else if !session.cwd.is_dir() {
         Some("The recorded checkout is unavailable; it has not been recreated".to_string())
-    } else if attachable.is_none() && native.is_none() {
+    } else if !start && attachable.is_none() && native.is_none() {
         Some("No saved provider history; start this conversation explicitly".to_string())
     } else if handoff_agent(&session).is_some() {
         Some("Changing provider requires an explicit open".to_string())
     } else {
         None
     };
-    if let Some(action) = record
-        .actions
-        .iter_mut()
-        .find(|action| action.kind == SessionActionKind::Reveal)
-    {
+    if let Some(action) = record.actions.iter_mut().find(|action| {
+        action.kind
+            == if start {
+                SessionActionKind::Open
+            } else {
+                SessionActionKind::Reveal
+            }
+    }) {
         action.unavailable_reason = reason.clone();
     }
-    if !record
-        .actions
-        .iter()
-        .any(|action| action.kind == SessionActionKind::MoveHere)
-    {
-        record.open_argv.push("--reveal-existing".to_string());
-    }
+    record.open_argv.push(
+        if start {
+            "--start-if-free"
+        } else {
+            "--reveal-existing"
+        }
+        .to_string(),
+    );
     if !launch {
         return Ok(record);
     }
@@ -1064,7 +1069,12 @@ pub(crate) async fn reveal(
         }
         bail!("Conversation transport could not be started");
     }
-    let native = native.context("No saved provider history")?;
+    let Some(native) = native else {
+        // Keep the ownership read and first-thread admission under one lock.
+        return open_waiting_locked(store, session, lock)
+            .await
+            .map(|()| record);
+    };
     if let Some(provider) = session.provider.as_deref() {
         if crate::provider_account::names_another_account(
             store,
@@ -1206,6 +1216,15 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
+    open_waiting_locked(store, session, launch_lock).await
+}
+
+async fn open_waiting_locked(
+    store: &SharedStore,
+    session: LfSession,
+    launch_lock: File,
+) -> Result<()> {
+    let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
     let session = if session.captured.is_none() {
@@ -1217,7 +1236,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     if resume_native_session(store, session.input_key()?, &token, &mut launch_lock)? {
         return Ok(());
     }
-    crate::agent_input_timing::record("fresh_launch_selected", id);
+    crate::agent_input_timing::record("fresh_launch_selected", &id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
     let session = if capture_is_prepared(session.input_key()?)? {

@@ -18,7 +18,7 @@ struct DTOFixtureTests {
     @Test func sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() throws {
         let data = try loadFixtureData("session_open_intents.json")
         let intents = try JSONDecoder().decode([SessionOpenIntent].self, from: data)
-        #expect(intents == [.resume, .reveal])
+        #expect(intents == [.resume, .start, .reveal])
         #expect(try JSONDecoder().decode([SessionOpenIntent].self, from: JSONEncoder().encode(intents)) == intents)
     }
 

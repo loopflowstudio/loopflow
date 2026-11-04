@@ -22,11 +22,12 @@ use crate::ops::task::{
 };
 use crate::work::task::TaskUpdate;
 
-/// Whether opening may take control or only reveal existing history.
+/// Whether opening may take control, start a thread, or only reveal history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionOpenIntent {
     Resume,
+    Start,
     Reveal,
 }
 
@@ -240,8 +241,10 @@ impl Write {
                     words.extend(["--agent", agent]);
                 }
                 words.extend(["session", "resume"]);
-                if *intent == SessionOpenIntent::Reveal {
-                    words.push("--reveal-existing");
+                match intent {
+                    SessionOpenIntent::Resume => {}
+                    SessionOpenIntent::Start => words.push("--start-if-free"),
+                    SessionOpenIntent::Reveal => words.push("--reveal-existing"),
                 }
                 words.extend(id.as_deref());
                 if let Some(task) = task {

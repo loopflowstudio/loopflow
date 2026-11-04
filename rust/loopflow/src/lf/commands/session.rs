@@ -676,12 +676,23 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
-    if connection.reveal_existing {
-        anyhow::ensure!(!fork, "revealing cannot fork a conversation");
-        let selected =
-            crate::ops::human_session::select_connection(store, directory, target, true).await?;
-        return crate::ops::human_session::reveal(store, &selected.id, !connection.prepare, json)
-            .await;
+    if connection.reveal_existing || connection.start_if_free {
+        anyhow::ensure!(!fork, "non-replacing opening cannot fork a conversation");
+        let selected = crate::ops::human_session::select_connection(
+            store,
+            directory,
+            target,
+            connection.reveal_existing,
+        )
+        .await?;
+        return crate::ops::human_session::open_without_replacing(
+            store,
+            &selected.id,
+            connection.start_if_free,
+            !connection.prepare,
+            json,
+        )
+        .await;
     }
     let id = select(store, directory, target).await?;
     crate::ops::human_session::open(store, &id, fork, !connection.prepare, json).await

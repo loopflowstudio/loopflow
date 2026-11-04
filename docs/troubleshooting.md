@@ -8,12 +8,12 @@ what to run next. Every command here is complete and runnable as written.
 A crash, a reboot or a closed terminal loses less than it looks like.
 
 ```bash
-lf resume --all                  # every conversation a crash or restart interrupted; never one you left
+lf resume                       # return to this scope’s conversation
 ```
 
 | Survives | Where it lives | Pick it up with |
 |---|---|---|
-| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume --all`, `lf resume --task <ID>` |
+| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and comments | Beside your repository, on the code host | `lf task run <ID>` |
 | A stopped Graph | Its step Processes, as history | `lf graph list --processes --for-task <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |

@@ -28,8 +28,15 @@ is the whole method; this section only says when to apply it.
 
 ## What happens between turns
 
-You act only during a turn; nothing schedules your next one. Do not promise to
-watch, check back or follow up later.
+Native Task Sessions receive settled Graph progress through their provider while
+open. Their native owner schedules reports around active turns; reconnect does
+not replay an uncertain delivery. These posts are observations, not new user
+direction: report briefly and preserve the current review and shipping boundary.
+Report each changed run by its recorded identity; keep its result separate from
+the Task's workflow position.
+Do not apply the operating procedure merely because a progress post arrived.
+Worker Runs never receive these posts. Do not promise timed follow-ups or delivery
+while the native provider is closed.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
   `--timeout`) waits for a state change without polling.

@@ -456,6 +456,21 @@ impl CodexConnection {
         let mut initial_request = None;
         let mut client_open = true;
         let mut subscribed = false;
+        let mut busy = true;
+        let mut client_turn_request = None;
+        let mut updates = super::task_updates::TaskUpdates::default();
+        let mut update_request: Option<(Value, super::task_updates::TaskUpdate)> = None;
+        let mut update_clock = tokio::time::interval(Duration::from_secs(1));
+        if let Some(attachment) = &self.attachment {
+            match self
+                .store
+                .with_session_attachment(&self.session_id, attachment, || {
+                    updates.pending(&self.store, &self.session_id)
+                }) {
+                Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         let disconnected_deadline = tokio::time::sleep(Duration::from_secs(15));
         tokio::pin!(disconnected_deadline);
         let mut thread = self
@@ -465,10 +480,43 @@ impl CodexConnection {
         loop {
             // A disconnected renderer cannot cancel work already dispatched.
             // Drain only outstanding startup replies, saving their native identity.
-            if !client_open && startup_request.is_none() && initial_request.is_none() {
+            if !client_open
+                && startup_request.is_none()
+                && initial_request.is_none()
+                && update_request.is_none()
+            {
                 break;
             }
             tokio::select! {
+                _ = update_clock.tick(), if subscribed && client_open && !busy && initial_request.is_none() && update_request.is_none() => {
+                    let pending = match &self.attachment {
+                        Some(attachment) => self.store.with_session_attachment(&self.session_id, attachment,
+                            || updates.pending(&self.store, &self.session_id)),
+                        None => Ok(None),
+                    };
+                    let pending = match pending {
+                        Ok(pending) => pending,
+                        Err(StoreError::InvalidAuthority(_)) => None,
+                        Err(error) => return Err(error.into()),
+                    };
+                    if let Some(update) = pending {
+                        let id = json!(format!("lf-task-update-{}", uuid::Uuid::new_v4()));
+                        let request = json!({"id":id,"method":"turn/start","params":{
+                            "threadId":thread,"input":[],
+                            "toolOutput":{"name":"loopflow_task_update","output":&update.text,"retain":true}
+                        }});
+                        if let Err(error) = history.outbound(&request).await {
+                            if matches!(error.downcast_ref::<StoreError>(), Some(StoreError::InvalidAuthority(_))) { continue; }
+                            return Err(error);
+                        }
+                        let sent;
+                        (upstream, sent) = self.send_task_update(upstream, &request, &update).await?;
+                        if sent {
+                            busy = true;
+                            update_request = Some((id, update));
+                        }
+                    }
+                }
                 _ = &mut disconnected_deadline, if !client_open => {
                     return Err(anyhow!("Codex startup response was lost; submission outcome is unknown; reconnect to inspect the saved conversation").context(RelayOperation::new("startup_reply_timeout", "provider_to_relay")));
                 }
@@ -535,6 +583,7 @@ impl CodexConnection {
                             _ => return Err(error),
                         }
                     }
+                    if rpc["method"] == "turn/start" { busy = true; client_turn_request = rpc.get("id").cloned(); }
                     let message = Message::Text(serde_json::to_string(&rpc)?.into());
                     if passive {
                         upstream.send(message).await.context(RelayOperation::new("write", "relay_to_provider"))?;
@@ -614,7 +663,23 @@ impl CodexConnection {
                                         &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_route.as_ref().map(|route| route.account_id().clone()))?;
                                 }
                             }
+                            if client_turn_request.as_ref().is_some_and(|id| rpc.get("id") == Some(id)) {
+                                client_turn_request = None;
+                                if rpc.get("error").is_some() { busy = false; }
+                            }
+                            if rpc["method"] == "turn/started" { busy = true; }
+                            if rpc["method"] == "turn/completed" { busy = false; }
+                            if resumed {
+                                busy = rpc.pointer("/result/thread/turns").and_then(Value::as_array)
+                                    .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"));
+                            }
                             history.inbound(&rpc, thread.as_ref()).await.1?;
+                            if update_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
+                                let (_, update) = update_request.take().expect("matched update request");
+                                let state = if rpc.get("error").is_some() { busy = false; "rejected" } else { "accepted" };
+                                self.store.record_task_update(&self.session_id, &update.key, state, &update.observation)?;
+                                continue;
+                            }
                             if initial_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, text) = initial_request.take().expect("matched initial request");
                                 if let Some(error) = rpc.get("error") {
@@ -664,6 +729,46 @@ impl CodexConnection {
             }
         }
         Ok(())
+    }
+
+    /// One admitted socket write and its uncertainty receipt share the Session
+    /// fence, including overlapping reconnects using the same attachment.
+    async fn send_task_update(
+        &self,
+        mut upstream: WebSocketStream<UnixStream>,
+        request: &Value,
+        update: &super::task_updates::TaskUpdate,
+    ) -> Result<(WebSocketStream<UnixStream>, bool)> {
+        let Some(attachment) = self.attachment.clone() else {
+            return Ok((upstream, false));
+        };
+        let connection = self.clone();
+        let update = update.clone();
+        let message = Message::Text(request.to_string().into());
+        let (upstream, result) = tokio::task::spawn_blocking(move || {
+            let result =
+                connection
+                    .store
+                    .with_session_dispatch(&connection.session_id, &attachment, || {
+                        if !connection.store.record_task_update(
+                            &connection.session_id,
+                            &update.key,
+                            "dispatched",
+                            &update.observation,
+                        )? {
+                            return Ok(false);
+                        }
+                        super::dispatch::send_fenced(&mut upstream, message)?;
+                        Ok(true)
+                    });
+            (upstream, result)
+        })
+        .await?;
+        match result {
+            Ok(sent) => Ok((upstream, sent)),
+            Err(StoreError::InvalidAuthority(_)) => Ok((upstream, false)),
+            Err(error) => Err(error.into()),
+        }
     }
 
     async fn send(
@@ -815,6 +920,167 @@ mod tests {
             attachment: Some(attachment),
             account_route: None,
         }
+    }
+
+    #[tokio::test]
+    async fn task_update_wakes_idle_native_client_on_its_existing_thread() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let mut connection = attached_connection(home.path());
+        connection.thread_id = Some("native-thread".into());
+        let store = connection.store.clone();
+        let task = crate::durable::TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/task-updates").unwrap(),
+                id: task.clone(),
+                project_id: None,
+                title: "Updates".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/task-updates',checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1", [task.as_str()]).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=1 WHERE id='conversation'",
+                [],
+            )
+            .unwrap();
+        let captured = store.session("conversation").unwrap().unwrap().captured;
+        store.bind_session("conversation", captured, &task).unwrap();
+        let endpoint = home.path().join("provider.sock");
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let resume = fixture_rpc(&mut socket).await;
+            fixture_send(
+                &mut socket,
+                json!({"id":resume["id"],"result":{"thread":{"id":"native-thread","turns":[]}}}),
+            )
+            .await;
+            let request =
+                tokio::time::timeout(std::time::Duration::from_secs(8), fixture_rpc(&mut socket))
+                    .await
+                    .unwrap();
+            assert_eq!(request["method"], "turn/start");
+            assert_eq!(request["params"]["threadId"], "native-thread");
+            assert_eq!(request["params"]["input"], json!([]));
+            assert_eq!(
+                request["params"]["toolOutput"]["name"],
+                "loopflow_task_update"
+            );
+            assert_eq!(request["params"]["toolOutput"]["retain"], true);
+            let progress = request["params"]["toolOutput"]["output"].as_str().unwrap();
+            assert!(progress.contains("gate ("));
+            assert!(progress.contains("): failed"));
+            fixture_send(&mut socket, json!({"id":request["id"],"result":{"turn":{"id":"report","status":"inProgress","items":[]}}})).await;
+            fixture_send(&mut socket, json!({"method":"turn/started","params":{"threadId":"native-thread","turn":{"id":"report","status":"inProgress","items":[]}}})).await;
+            let _ = socket.next().await;
+        });
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        let relay = tokio::spawn(async move { connection.serve(relay, &endpoint).await });
+        let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+        fixture_send(
+            &mut terminal,
+            json!({"id":1,"method":"thread/resume","params":{"threadId":"native-thread"}}),
+        )
+        .await;
+        let resumed = fixture_rpc(&mut terminal).await;
+        assert_eq!(resumed["result"]["thread"]["id"], "native-thread");
+        store.test_graph(
+            "feature",
+            "/task-updates",
+            &[("gate", Some("failed"))],
+            Some("failed"),
+        );
+        let notification = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            fixture_rpc(&mut terminal),
+        )
+        .await
+        .unwrap();
+        assert_eq!(notification["method"], "turn/started");
+        assert_eq!(notification["params"]["threadId"], "native-thread");
+        assert!(store
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.payload["source"] == "task_update"
+                && event.payload["state"] == "accepted"));
+        terminal.close(None).await.unwrap();
+        drop(terminal);
+        relay.await.unwrap().unwrap();
+        provider.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn task_update_dispatch_survives_reconnect_and_fences_takeover() {
+        let home = tempfile::tempdir().unwrap();
+        let connection = attached_connection(home.path());
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        let (sender, receiver) =
+            tokio::join!(super::connect_upstream(sender), accept_async(receiver));
+        let sender = sender.unwrap();
+        let mut receiver = receiver.unwrap();
+        let update = crate::harness::task_updates::TaskUpdate {
+            key: "transition".into(),
+            observation: serde_json::json!({}),
+            text: "At demo".into(),
+        };
+        let request = json!({"id":"update","method":"turn/start","params":{"threadId":"saved", "input":[{"type":"text","text":update.text}]}});
+        let (sender, sent) = connection
+            .send_task_update(sender, &request, &update)
+            .await
+            .unwrap();
+        assert!(sent);
+        assert_eq!(fixture_rpc(&mut receiver).await, request);
+        // No reply: reconnect must retain uncertainty instead of replaying.
+        let (sender, sent) = connection
+            .clone()
+            .send_task_update(sender, &request, &update)
+            .await
+            .unwrap();
+        assert!(!sent);
+        let process = LfProcessId::new();
+        connection
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'replacement',2)",
+                [process.as_str()],
+            )
+            .unwrap();
+        connection
+            .store
+            .claim_session_attachment(
+                "conversation",
+                connection.attachment.as_ref(),
+                &process,
+                true,
+            )
+            .unwrap();
+        let newer = crate::harness::task_updates::TaskUpdate {
+            key: "next-transition".into(),
+            observation: serde_json::json!({}),
+            text: "Stopped".into(),
+        };
+        let (_, sent) = connection
+            .send_task_update(sender, &request, &newer)
+            .await
+            .unwrap();
+        assert!(!sent);
+        assert!(!connection
+            .store
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.payload["key"] == "next-transition"));
     }
 
     #[tokio::test]

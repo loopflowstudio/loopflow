@@ -413,7 +413,7 @@ async fn owner_disposition(
     }
     let turn_cut_off = !store.owner_waits_for_person(&process.id)?;
     if turn_cut_off && answering(&process.id) {
-        return stays("a turn, Graph step or headless Run is in progress");
+        return stays("a turn, pending request, Graph step or headless Run holds the conversation");
     }
     for session in &sessions {
         let key = shared
@@ -505,8 +505,10 @@ pub fn run(dry_run: bool, json: bool) -> Result<()> {
 }
 
 async fn rollover(dry_run: bool) -> Result<RolloverReport> {
-    // Concurrent `lf resume --all` would start a second owner for a Session we stop.
-    let _resuming = restore::lock_resume_all().await?;
+    // Concurrent sweeps must not start two owners for the same stopped Session.
+    let _resuming =
+        tokio::task::spawn_blocking(|| crate::ops::human_session::lock_session_process("rollover"))
+            .await??;
     let inventory = inventory()?;
     let store: SharedStore = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
     let mut report = RolloverReport {
@@ -814,18 +816,29 @@ mod tests {
                 rusqlite::params![owner.id, session.id],
             )
             .unwrap();
-            conn.execute(
-                r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
-                   VALUES(?1,0,1,0,0,NULL,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}')"#,
-                [session.id.as_str()],
+        }
+        let attachment = store
+            .sqlite
+            .claim_session_attachment(&session.id, None, &owner.id, false)
+            .unwrap();
+        store
+            .sqlite
+            .record_session_activity(
+                &session.id,
+                &attachment,
+                &crate::session::SessionActivity {
+                    preview: None,
+                    observed_at: 1,
+                    open_tools: 1,
+                    pending_input: 0,
+                    yielded: false,
+                },
             )
             .unwrap();
-        }
-        let Disposition::Stays(reason) = owner_disposition(&store, &owner, |_| true).await.unwrap()
-        else {
-            panic!("a busy owner that answers stays");
-        };
-        assert!(reason.contains("in progress"), "{reason}");
+        assert!(matches!(
+            owner_disposition(&store, &owner, |_| true).await.unwrap(),
+            Disposition::Stays(_)
+        ));
         assert!(matches!(
             owner_disposition(&store, &owner, |_| false).await.unwrap(),
             Disposition::Moves { ref sessions, turn_cut_off: true } if sessions == &[session.id.as_str().to_owned()]

@@ -453,6 +453,12 @@ const UPDATE_INITIATIVE_MUTATION: &str = r#"mutation UpdateInitiative($id: Strin
   }
 }"#;
 
+const ARCHIVE_INITIATIVE_MUTATION: &str = r#"mutation ArchiveInitiative($id: String!) {
+  initiativeArchive(id: $id) {
+    success
+  }
+}"#;
+
 const LIST_INITIATIVES_QUERY: &str = r#"query ListInitiatives($after: String, $first: Int!) {
   initiatives(after: $after, first: $first) {
     nodes {
@@ -1078,6 +1084,19 @@ impl LinearClient {
 
     pub async fn rename_wave(&self, initiative_id: &str, name: &str) -> LinearResult<()> {
         self.update_wave(initiative_id, Some(name), None).await
+    }
+
+    /// Archive a removed Wave's Initiative; Linear keeps it readable.
+    pub async fn archive_wave(&self, initiative_id: &str) -> LinearResult<()> {
+        let response: Value = self
+            .graphql(ARCHIVE_INITIATIVE_MUTATION, json!({"id": initiative_id}))
+            .await?;
+        if response["initiativeArchive"]["success"] != true {
+            return Err(LinearError::Message(format!(
+                "Linear did not confirm archive of Initiative {initiative_id}"
+            )));
+        }
+        Ok(())
     }
 
     pub async fn update_wave(

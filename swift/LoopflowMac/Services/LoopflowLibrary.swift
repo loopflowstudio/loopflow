@@ -36,12 +36,24 @@ enum LoopflowLibrary {
         _ request: Data
     ) async throws -> String? {
         let json = String(decoding: request, as: UTF8.self)
-        return try await Task.detached(priority: .userInitiated) {
-            var error: UnsafeMutablePointer<CChar>?
-            let result = entry(json, &error)
-            if let error = take(error) { throw RegistryQueryError(error) }
-            return result.flatMap(take)
-        }.value
+        return try await withCheckedThrowingContinuation { continuation in
+            // Rust's synchronous command parsing can exceed a cooperative
+            // executor thread's stack in debug builds. Give these blocking
+            // calls a native thread with the same stack budget as the CLI.
+            let thread = Thread {
+                var error: UnsafeMutablePointer<CChar>?
+                let result = entry(json, &error)
+                if let error = take(error) {
+                    continuation.resume(throwing: RegistryQueryError(error))
+                } else {
+                    continuation.resume(returning: result.flatMap(take))
+                }
+            }
+            thread.name = "Loopflow library call"
+            thread.qualityOfService = .userInitiated
+            thread.stackSize = 8 * 1024 * 1024
+            thread.start()
+        }
     }
 }
 

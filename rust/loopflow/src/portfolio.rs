@@ -177,7 +177,36 @@ pub fn read() -> Result<Portfolio> {
 }
 
 pub fn change(command: &PortfolioCommand) -> Result<Portfolio> {
-    change_at(&crate::store::lf_home_dir(), command)
+    let portfolio = change_at(&crate::store::lf_home_dir(), command)?;
+    if !matches!(command, PortfolioCommand::Remove { .. }) {
+        register_authored_waves(&portfolio, command)?;
+    }
+    Ok(portfolio)
+}
+
+/// Desktop lists the Waves the planning store knows, so a repository joining
+/// the portfolio brings its authored `.lf/wave/` directories into the store. A
+/// removed Wave's kept directory stays removed. Registration never undoes the
+/// membership change; a repository that cannot register is logged.
+fn register_authored_waves(portfolio: &Portfolio, command: &PortfolioCommand) -> Result<()> {
+    let mut repos: BTreeSet<PathBuf> = portfolio
+        .repos
+        .iter()
+        .filter(|repo| repo.error.is_none())
+        .map(|repo| PathBuf::from(&repo.path))
+        .collect();
+    // A manual selection saved while the folder mode shows keeps its added
+    // repositories out of the reading; they still join.
+    if let PortfolioCommand::Add { paths } | PortfolioCommand::Import { paths } = command {
+        repos.extend(paths.iter().filter_map(|path| main_repository(path).ok()));
+    }
+    let runtime = tokio::runtime::Runtime::new()?;
+    for repo in repos {
+        if let Err(error) = runtime.block_on(crate::ops::wave_lifecycle::register_authored(&repo)) {
+            tracing::warn!(repo = %repo.display(), %error, "authored Waves were not registered");
+        }
+    }
+    Ok(())
 }
 
 fn change_at(home: &Path, command: &PortfolioCommand) -> Result<Portfolio> {

@@ -2,6 +2,8 @@
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
 mod lifetime;
+#[cfg(test)]
+mod lifetime_tests;
 mod native;
 mod output;
 mod snapshot;
@@ -33,8 +35,12 @@ use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scan
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
+const TERMINAL_ENV: &str = "LF_TRANSPORT_TERMINAL";
 const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Continuous output tells the lifetime policy once per pause, not per read.
+const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
+
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
 /// Stream bytes retained per viewer for resume.
@@ -181,6 +187,12 @@ pub(crate) fn start(
         .stdout(Stdio::piped())
         .stderr(log);
     inherit(&mut command);
+    // Validate placement on the viewer's PTY before handing it to the owner,
+    // whose stdin is deliberately detached.
+    command.env_remove(TERMINAL_ENV);
+    if let Some(terminal) = crate::session_record::current_terminal_id() {
+        command.env(TERMINAL_ENV, terminal);
+    }
     // SAFETY: only an async-signal-safe syscall is used between fork and exec.
     unsafe {
         command.pre_exec(|| {
@@ -640,6 +652,8 @@ impl Ownership {
 
 /// Own a command's transport until it exits; only `start` launches this.
 pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
+    let placement = std::env::var(TERMINAL_ENV).ok();
+    std::env::remove_var(TERMINAL_ENV);
     let id =
         crate::journal::current_lf_process_id().context("Transport needs an admitted Process")?;
     let path = endpoint(&id).context("Prepare transport socket")?;
@@ -658,6 +672,18 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         .env(OWNER_ENV, id.as_str())
         .env(PARENT_ENV, std::process::id().to_string());
     let pair = terminal.then(terminal_pair).transpose()?;
+    command
+        .env_remove("LF_TERMINAL_ID")
+        .env_remove("LF_TERMINAL_TTY");
+    if let (Some(placement), Some((_, slave))) = (placement, &pair) {
+        if let Some(tty) = tty_name(slave.as_raw_fd()) {
+            // This owned PTY continues the validated viewer placement. Native
+            // admission can now associate its first Session with Desktop.
+            command
+                .env("LF_TERMINAL_ID", placement)
+                .env("LF_TERMINAL_TTY", tty);
+        }
+    }
     // A native client that dies raw is returned to these modes.
     let cooked = pair.as_ref().and_then(|(master, _)| {
         // SAFETY: tcgetattr writes into a live termios; the descriptor is borrowed.
@@ -724,6 +750,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut ownership = Ownership::default();
     let mut size = (24, 80);
     let mut pending_input = VecDeque::new();
+    let mut recorded_input = 0;
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -737,17 +764,20 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let (wake, waker) = UnixStream::pair()?;
     wake.set_nonblocking(true)?;
     waker.set_nonblocking(true)?;
-    let (viewing, ending) = lifetime::spawn(id.clone(), waker.try_clone()?);
+    let (activity, ending) = lifetime::spawn(id.clone(), terminal, waker.try_clone()?);
     let child_pid = child.id();
     let (finished, child_exit) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = finished.send(child.wait());
         let _ = (&waker).write_all(&[1]);
     });
-    let mut viewed = None;
+    let mut observed = lifetime::Activity::default();
+    let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut planning = None;
     loop {
+        #[cfg(test)]
+        lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
         let mut replaced = Vec::new();
         let mut owner_change = false;
         let mut size_change = false;
@@ -1073,16 +1103,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         drain(&wake);
-        if let Ok(event) = ending.try_recv() {
-            end_viewers(&mut viewers, event);
-            snapshot::leave(&id, &output);
-            crate::platform::kill_process(std::process::id());
-        }
-        let now_viewed = viewers.iter().any(|v| v.live());
-        if viewed != Some(now_viewed) {
-            viewed = Some(now_viewed);
-            let _ = viewing.send(now_viewed);
-        }
         let detached = !viewers
             .iter()
             .any(|v| v.token.is_some() && v.token == control);
@@ -1099,12 +1119,28 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         place_events(&output, &mut viewers, announced);
         if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
-            match input.write(pending_input.as_slices().0) {
-                Ok(n) => {
-                    pending_input.drain(..n);
+            let recorded = if terminal && recorded_input < pending_input.len() {
+                let bytes = &pending_input.make_contiguous()[recorded_input..];
+                crate::journal::process_ledger()
+                    .and_then(|store| store.record_owner_input(&id, bytes))
+                    .map(|()| recorded_input = pending_input.len())
+                    .inspect_err(|error| tracing::warn!(%error, "cannot retain terminal input; retrying before delivery"))
+                    .is_ok()
+            } else {
+                true
+            };
+            if recorded {
+                match input.write(pending_input.as_slices().0) {
+                    Ok(n) => {
+                        pending_input.drain(..n);
+                        recorded_input = recorded_input.saturating_sub(n);
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(_) => {
+                        pending_input.clear();
+                        recorded_input = 0;
+                    }
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(_) => pending_input.clear(),
             }
         }
         if end_input && pending_input.is_empty() {
@@ -1128,6 +1164,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(e) => return Err(e.into()),
                 };
+                observed.output += 1;
                 let ready = match client.as_mut().filter(|_| terminal) {
                     Some(client) => client.accept(reader.as_raw_fd(), &bytes[..n]),
                     None => bytes[..n].to_vec(),
@@ -1140,6 +1177,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     &ready,
                     detached,
                 );
+                if output_told.is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE) {
+                    output_told = Some(Instant::now());
+                    let _ = activity.send(observed);
+                }
             }
         }
         readers.retain(|(stream, _)| !drained.contains(stream));
@@ -1167,6 +1208,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && exit_record.is_some())
         {
+            if let Err(error) =
+                crate::journal::process_ledger().and_then(|store| store.clear_owner_input(&id))
+            {
+                tracing::warn!(%error, "cannot clear ended native input; retaining its owner");
+            }
+            recorded_input = 0;
             if let Some(ended) = client.take() {
                 finish_client(
                     ended,
@@ -1271,6 +1318,34 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 };
             }
         }
+        // Ready output and viewer changes precede the final ending judgment.
+        // A throttled/unconsumed activity report also invalidates the candidate.
+        if observed.view(viewers.iter().any(|v| v.live())) {
+            let _ = activity.send(observed);
+        }
+        #[cfg(test)]
+        lifetime_tests::before_judgment();
+        if let Ok(ending) = ending.try_recv() {
+            let event = ending
+                .confirm(&id, observed, !pending_input.is_empty())
+                .inspect_err(|error| {
+                    tracing::warn!(%error, owner = %id, "cannot confirm Session ending; judging again later");
+                })
+                .ok()
+                .flatten();
+            if let Some(event) = event {
+                end_viewers(&mut viewers, event);
+                snapshot::leave(&id, &output);
+                crate::platform::kill_process(std::process::id());
+            }
+            // Flush even throttled activity so the applicable quiet interval
+            // starts again and a settled owner can eventually end.
+            if ending.activity != observed {
+                let _ = activity.send(observed);
+            }
+        }
+        #[cfg(test)]
+        lifetime_tests::after_judgment(&output, observed)?;
         // Sleep until a descriptor has work; only held exit text and a
         // pending exit announcement are timed.
         let deadline = match exit {
@@ -1585,10 +1660,10 @@ fn send_frame(socket: &mut UnixStream, tag: Tag, payload: &[u8]) -> Result<()> {
 }
 
 /// This viewer's terminal device, named to others when it takes ownership.
-fn tty_name() -> Option<String> {
+fn tty_name(fd: RawFd) -> Option<String> {
     // SAFETY: ttyname returns null or a pointer to a static NUL-terminated name.
     unsafe {
-        let name = libc::ttyname(0);
+        let name = libc::ttyname(fd);
         (!name.is_null()).then(|| CStr::from_ptr(name).to_string_lossy().into_owned())
     }
 }
@@ -1714,7 +1789,7 @@ fn attach_with_terminal(
             own: Some(Own::Take),
             rows,
             cols,
-            name: tty_name(),
+            name: tty_name(libc::STDIN_FILENO),
             moved,
         },
     )?;

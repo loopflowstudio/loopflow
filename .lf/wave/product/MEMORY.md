@@ -28,8 +28,8 @@
   palette, LOO-387 native draft preparation. Programmatic Desktop control must
   reuse these owners. LOO-415 owns the transparent relay and all lf status
   emission; LOO-398 is reading only. LOO-422 owns host status/title fidelity.
-- LOO-418: a Task has zero or one PR; optional later work uses ordinary Tasks. Serial PR
-  chains below describe the retired implementation. LOO-401 selects
+- LOO-418: current PR and delivery history survive continued publication;
+  optional separate outcomes use ordinary Tasks. LOO-401 selects
   `self`, `config user`, app opening and HTML screenshot removal without a
   replacement. Desktop's native snapshot is separate. LOO-406 owns the accepted local
   planning lifecycle, preserving connected Linear repositories; LOO-412 owns exchange.
@@ -933,18 +933,19 @@ Paste / New line / keyboard visibility. No Wave view, shell panes or inspectors.
 He authorized native implementation alongside LOO-593 through interactive demo,
 without Auto-Ship. Describe-first creation follows recoverable shared create/start.
 
-The first native slice uses pinned SwiftTerm and shared Work DTOs. Its deterministic
-peer proves input effects, not live connectivity or device usability. Ghostty was
-compared at source/packaging level, not benchmarked on a phone. Native approval/Stop
-actions require trustworthy provider state and bindings; terminal text cannot
-authorize them. Viewing grants neither input nor geometry; reconnect never replays
-uncertain keys or creates another Session.
+Pinned SwiftTerm and shared Work DTOs support fixture input proof, not device or
+live acceptance. Ghostty comparison covered source/packaging only. Native
+approval/Stop requires trustworthy provider state and bindings, never screen text.
 
-LOO-593 owns the Machine codec and owner bridge. A client-authored WorkViewPlan
-fixture inside that envelope is not server admission or a terminal-wire proof.
-The same-user socket must not become a remote endpoint by proxying it through
-Tailscale. Carrier/pairing, takeover and hosting remain open; physical keyboard,
-IME/dictation and VoiceOver acceptance remain with device review.
+Recovery review exposed a presentation defect: mapping attachment errors to
+unavailable hid Reconnect. Retry now survives repeated failures in the selected
+screen and restores the same Session as an observer. Viewing grants neither input
+nor geometry; accepted-then-failed text and submission never replay. Missing,
+ended and mismatched Sessions retain their explanations. LOO-593 owns permanent
+error classification, the Machine codec and owner bridge; fixture readings prove
+neither server admission nor terminal framing. Never proxy the same-user socket
+through Tailscale. Carrier/pairing, takeover and hosting remain open; physical
+keyboard, IME/dictation and VoiceOver remain device-review obligations.
 
 ## Performance — launch renders before any read (2026-10-04)
 

@@ -5,7 +5,7 @@ Desktop styling, and a reduced Paste / New line / keyboard row. Jack invoked
 launch-plan on November 3, 2026: implement this native lane in the existing
 checkout alongside LOO-593, stopping for the feature Graph's interactive demo.
 No Auto-Ship approval. No Wave navigation, shells, inspectors or new-Task UI.
-Updated November 3, 2026 after the recovery correction.
+Reconciled November 3, 2026 against recovery commit `81f3a30854` and its test result.
 The native fixture exists; device acceptance and live integration remain open.
 
 ## Selected implementation
@@ -21,8 +21,8 @@ slice. No Ghostty simulator/device performance comparison was performed.
 
 `MobileClient` is an in-process UI dependency, not a wire protocol. Task fixtures
 decode through LOO-593's exact `MachineProtocol.swift` and existing WorkViewPlan.
-Canonical files and machine fixtures were consumed at their repository paths;
-LOO-593 remains their owner. Its November 3 working contract supports roadmap
+The consumed codec and six fixtures still match LOO-593's November 3 working files
+at their canonical paths; LOO-593 owns them. Its contract supports roadmap
 subscriptions, desktop_sessions reads and Session→owner lookup, but not view_plan.
 The phone's task-reading.json is client-authored WorkViewPlan data inside the
 shared envelope, not a recorded server response. Shared owner/command fixtures
@@ -58,24 +58,23 @@ does not repair or duplicate that implementation.
 ## Recovery correction — accepted November 3, 2026
 
 The headless concept review applied Jack Heart's same-Session/no-replay contract;
-`scratch/concept-review.html` preserves its findings. Attachment exceptions were
-mapped to `unavailable`, hiding Reconnect after an initial or repeated failure.
+`scratch/concept-review.html` preserves the original defect and corrected status.
+Attachment exceptions mapped to `unavailable`, hiding Reconnect after an initial
+or repeated failure.
 The correction uses `disconnected` and the existing in-screen action. It creates
 no client draft, recovery record, domain DTO, automatic retry or owner resolver.
 
-**Delete — do not maintain:** completed the transport-error → `unavailable`
-removal in `MobileWorkspace.open`. Removed its redundant cancellation and ended
-checks: every explicit disconnect invalidates the attachment generation before
-closing it, so stale events and completion share that one lifetime check. The
-test client derives its fixture link from the transport instead of storing both.
-No remaining deletion target; no renderer or transport replacement.
+`MobileWorkspace.open` now maps attachment exceptions to `disconnected`.
+Explicit disconnect invalidates the attachment generation before closing it;
+stale events and completion share that lifetime check. No recovery code remains
+to implement for this finding.
 
 Recovery stays on the selected Session screen and restores viewing, with input
 and geometry disabled until a fresh grant. The README owns usage instructions.
 Retained output while connecting is previous output, not current-state evidence.
-Tests exercise the production Reconnect button through two failures and success;
-accepted text and Return followed by send errors must preserve the peer draft and
-exactly one submission. Explicit drops and stream completion both disconnect.
+Passing tests exercise the production Reconnect button through two failures and
+success. Accepted text and Return followed by send errors preserve the peer draft
+and exactly one submission. Explicit drops and stream completion both disconnect.
 Wrong-Session output never renders and its attachment closes. Missing/invalid
 identity and owner termination retain unavailable/ended explanations and no retry,
 including after backgrounding.
@@ -84,6 +83,25 @@ LOO-593 still owns error/owner truth. Its future adapter must preserve authorita
 permanent failures rather than treating them as transport exceptions. This fixture
 correction chooses no carrier/pairing, remote takeover gesture or hosting tier.
 Physical input judgment remains with demo; live connectivity remains integration.
+
+## Concept review disposition — November 3, 2026
+
+Nothing further to change in the accepted native fixture design; no open product
+choice within this slice. Jack Heart's two-screen interaction now retains its
+recovery action. Task and Session identity survive attachment replacement;
+the peer retains submitted input and its draft, while control and geometry grants
+expire. Missing, ended and mismatched Sessions remain counterexamples to treating
+every failure as reconnectable. The existing README accurately describes this
+flow; no usage or skill rewrite is needed. No implementation changes are proposed.
+
+LOO-593's published local contract at `5b44a394cff91d0aa20c614c3b20c3f7e121affb`
+matches the consumed Swift codec byte for byte. Its owner lookup and binary bridge
+preserve the same ownership model; publication does not supply remote admission
+or a live WorkViewPlan reading. Carrier/pairing, remote takeover and hosting remain
+unresolved for follow-up C, as already scoped. Next proof remains the interactive
+native demo and the listed integration work, not another fixture redesign.
+The saved 21:06:45 xcresult confirms 14 passes and zero failures; this review
+changes only design prose and its page, so the suite was not rerun.
 
 ## Remaining proof and integration
 
@@ -108,4 +126,4 @@ Main sync includes terminal activity #1809/LOO-720 at ac8e088f5f. Session identi
 references; their delivery state was not established here. LOO-717/709/710/712
 retain shell, retention, snapshot and transport ownership. No policy changes in this lane.
 
-Check: `xcodebuild test -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath swift/.build/ios -skipPackagePluginValidation -parallel-testing-enabled NO -only-testing:LoopflowiOSTests/MobileTerminalTests CODE_SIGNING_ALLOWED=NO` — 14 passed, November 3, 2026, 21:07; broader checks remain with gate and device/live proof with demo/integration.
+Check: `xcodebuild test -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath swift/.build/ios -skipPackagePluginValidation -parallel-testing-enabled NO -only-testing:LoopflowiOSTests/MobileTerminalTests CODE_SIGNING_ALLOWED=NO` — 14 passed, November 3, 2026, 21:07; reused after reading the xcresult summary, with code unchanged. Broader checks remain with gate and device/live proof with demo/integration.

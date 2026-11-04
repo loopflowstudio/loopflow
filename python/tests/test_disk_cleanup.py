@@ -1,8 +1,6 @@
-import importlib
 import json
 import os
 import plistlib
-import shlex
 import shutil
 import subprocess
 import sys
@@ -10,13 +8,19 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import disk_cleanup as cleanup
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "disk-cleanup.sh"
-sys.path.insert(0, str(SCRIPT.parent))
-cleanup = importlib.import_module("disk_cleanup")
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="macOS maintenance script")
+
+
+def _activity(paths=frozenset(), builders=frozenset()):
+    processes = {999999: cleanup.Process(999999, 1, os.getuid(), "fixture", "cargo")}
+    files = tuple(cleanup.OpenPath(999999, "txt", path) for path in paths)
+    files += tuple(cleanup.OpenPath(999999, "cwd", path) for path in builders)
+    return cleanup.Activity(processes, files)
 
 
 def _write(path: Path, age_days: float, size: int = 4096) -> None:
@@ -43,14 +47,10 @@ def _run(
 ) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
-    for tool, body in {"lf": "exit 0", "uv": "exit 0", "xcrun": "exit 0", **(stubs or {})}.items():
+    for tool, body in {"uv": '[ "$2" != dir ] || echo "$HOME/.cache/uv"', **(stubs or {})}.items():
         stub = bin_dir / tool
         stub.write_text(f"#!/bin/sh\n{body}\n")
         stub.chmod(0o755)
-    public = tmp_path / "home/.local/bin"
-    public.mkdir(parents=True, exist_ok=True)
-    (public / "lf").unlink(missing_ok=True)
-    (public / "lf").symlink_to(bin_dir / "lf")
     env = {
         "HOME": str(tmp_path / "home"),
         "LF_HOME": str(tmp_path / "home/.lf"),
@@ -58,6 +58,9 @@ def _run(
         "TMPDIR": str(tmp_path),
         "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
     }
+    config = tmp_path / "home/.lf-machine/maintenance/disk-cleanup/config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text('{"enabled": true}')
     # Redirect only the host-wide OS lock into this disposable fixture. The
     # runner and flock behavior are unchanged; concurrent real recovery cannot
     # make preservation assertions pass merely because cleanup skipped.
@@ -65,6 +68,7 @@ def _run(
         "import sys; from pathlib import Path; "
         f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
         "import resource_envelope, disk_cleanup; "
+        f"disk_cleanup._temporary_roots = lambda: {{Path({str(tmp_path / 'temp')!r})}}; "
         f"resource_envelope.Path = lambda p: Path({str(tmp_path)!r}) if p == '/tmp' else Path(p); "
         "sys.argv = sys.argv[1:]; sys.exit(disk_cleanup.main())"
     )
@@ -79,42 +83,23 @@ def _run(
     return result.stdout + result.stderr
 
 
-def test_home_rotation_removes_week_old_material_and_keeps_the_store(tmp_path: Path) -> None:
+def test_durable_history_and_databases_survive(tmp_path: Path) -> None:
     lf = tmp_path / "home/.lf"
-    _write(lf / "loopflow.db", 30)
-    _write(lf / "loopflow.db-wal", 30)
-    _write(lf / "accounts/codex/a/sessions/old.jsonl", 60)
-    _write(lf / "loopflow.db.backup-0.14.7-0123456789abcdef", 20)
-    _write(lf / "loopflow.db.backup-0.14.7-0123456789abcdef-shm", 20)
-    _write(lf / "loopflow.db.backup-0.14.8-fedcba9876543210", 10)
-    _write(lf / "runs/ab/oldest/events.jsonl", 40)
-    _write(lf / "runs/ef/fresh/events.jsonl", 0)
-    _write(lf / "logs/old.log", 30)
-    _write(lf / "logs/held.log", 30)
-    _write(lf / "copies/.tmpAbC123/loopflow.db", 3)
-    _age_tree(lf / "runs/ab", 40)
-
-    with open(lf / "logs/held.log", "a"):
-        out = _run(tmp_path)
-
-    for gone in (
-        "runs/ab/oldest",
-        "logs/old.log",
-        "loopflow.db.backup-0.14.7-0123456789abcdef",
-        "loopflow.db.backup-0.14.7-0123456789abcdef-shm",
-    ):
-        assert not (lf / gone).exists(), f"{gone} survived:\n{out}"
-    for kept in (
+    paths = [
         "loopflow.db",
         "loopflow.db-wal",
         "accounts/codex/a/sessions/old.jsonl",
-        "loopflow.db.backup-0.14.8-fedcba9876543210",
-        "runs/ef/fresh/events.jsonl",
-        "logs/held.log",
-        "copies/.tmpAbC123",
-    ):
-        assert (lf / kept).exists(), f"{kept} was removed:\n{out}"
-    assert "removed captures" in (lf / "logs/disk.log").read_text()
+        "runs/ab/oldest/events.jsonl",
+        "logs/old.log",
+        "copies/retired/loopflow.db",
+        "loopflow.db.backup-old",
+        "loopflow.db.backup-new",
+    ]
+    for name in paths:
+        _write(lf / name, 40)
+    _age_tree(lf, 40)
+    _run(tmp_path)
+    assert all((lf / name).exists() for name in paths)
 
 
 def test_idle_ignored_build_output_goes_and_recent_or_tracked_output_stays(
@@ -135,7 +120,7 @@ def test_idle_ignored_build_output_goes_and_recent_or_tracked_output_stays(
     assert not (repo / "target").exists(), out
     assert (repo / "node_modules").exists(), out
     assert (repo / ".venv").exists(), out
-    assert "== repository kata" in out
+    assert repo.exists()
 
 
 def test_linked_worktree_loses_output_idle_for_four_hours(tmp_path: Path) -> None:
@@ -162,24 +147,7 @@ def test_linked_worktree_loses_output_idle_for_four_hours(tmp_path: Path) -> Non
     assert "written in the last" in out
 
 
-@pytest.mark.parametrize("held", [False, True])
-def test_backup_with_recent_or_open_sidecar_is_kept(tmp_path: Path, held: bool) -> None:
-    lf = tmp_path / "home/.lf"
-    old = lf / "loopflow.db.backup-old"
-    sidecar = Path(f"{old}-wal")
-    _write(old, 30)
-    _write(sidecar, 30 if held else 0)
-    _write(lf / "loopflow.db.backup-new", 10)
-
-    # A read-only handle leaves the sidecar's old timestamp intact.
-    with sidecar.open("rb") if held else open(os.devnull, "rb"):
-        out = _run(tmp_path)
-
-    assert old.exists(), out
-    assert sidecar.exists(), out
-
-
-def test_cache_and_trash_keep_open_or_recent_contents_and_log_removals(tmp_path: Path) -> None:
+def test_general_cache_and_trash_are_observation_only(tmp_path: Path) -> None:
     home = tmp_path / "home"
     for root in (home / "Library/Caches", home / ".Trash"):
         for name, age in (("old", 40), ("held", 40), ("recent", 0)):
@@ -190,12 +158,9 @@ def test_cache_and_trash_keep_open_or_recent_contents_and_log_removals(tmp_path:
         out = _run(tmp_path)
 
     for root in (home / "Library/Caches", home / ".Trash"):
-        assert not (root / "old").exists(), out
+        assert (root / "old").exists(), out
         assert (root / "held/data").exists(), out
         assert (root / "recent/data").exists(), out
-    log = (home / ".lf/logs/disk.log").read_text()
-    assert "removed cache" in log
-    assert "removed trash" in log
 
 
 def test_failed_open_file_inspection_stops_all_cleanup(tmp_path: Path) -> None:
@@ -233,175 +198,6 @@ def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
     return result.stdout.strip()
 
 
-def test_real_cleanup_preserves_unpublished_work_and_removes_finished_checkouts(
-    tmp_path: Path,
-) -> None:
-    root = SCRIPT.parent.parent
-    build_env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
-    subprocess.run(
-        ["cargo", "build", "-p", "loopflow", "--bin", "lf"],
-        cwd=root,
-        env=build_env,
-        stdin=subprocess.DEVNULL,
-        check=True,
-    )
-    metadata = json.loads(
-        subprocess.check_output(
-            ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root, env=build_env
-        )
-    )
-    binary = Path(metadata["target_directory"]) / "debug/lf"
-
-    # HOME does not redirect getpwuid_r. Interpose only that external account
-    # lookup in the fixture CLI so production registry/installation reads also
-    # resolve to this disposable Home; the production executable is unchanged.
-    source = tmp_path / "account.c"
-    source.write_text("""
-#include <pwd.h>
-#include <stdlib.h>
-static int fixture_getpwuid_r(uid_t uid, struct passwd *pwd, char *buf,
-                             size_t size, struct passwd **result) {
-    int status = getpwuid_r(uid, pwd, buf, size, result);
-    if (status == 0 && *result) pwd->pw_dir = getenv("LOOPFLOW_TEST_ACCOUNT_HOME");
-    return status;
-}
-__attribute__((used)) static struct { const void *replacement; const void *original; }
-interpose __attribute__((section("__DATA,__interpose"))) = {
-    (const void *)fixture_getpwuid_r, (const void *)getpwuid_r
-};
-""")
-    library = tmp_path / "account.dylib"
-    subprocess.run(["cc", "-dynamiclib", str(source), "-o", str(library)], check=True)
-    home = tmp_path / "home"
-    (tmp_path / "account").mkdir()
-    repo = home / "src/kata"
-    repo.mkdir(parents=True)
-    bare = tmp_path / "origin.git"
-    env = {
-        "HOME": str(home),
-        "LF_HOME": str(home / ".lf"),
-        "LF_BIN": str(binary),
-        "LOOPFLOW_TEST_ACCOUNT_HOME": str(tmp_path / "account"),
-        "DYLD_INSERT_LIBRARIES": str(library),
-        "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin",
-        "GIT_ALLOW_PROTOCOL": "file",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-    _git(repo, "init", "-qb", "main", env=env)
-    _git(repo, "config", "user.name", "Cleanup Fixture", env=env)
-    _git(repo, "config", "user.email", "fixture@example.com", env=env)
-    (repo / ".gitignore").write_text("target/\n")
-    _git(repo, "add", ".", env=env)
-    _git(repo, "commit", "-qm", "base", env=env)
-    _git(repo, "init", "--bare", str(bare), env=env)
-    _git(bare, "symbolic-ref", "HEAD", "refs/heads/main", env=env)
-    _git(repo, "remote", "add", "origin", "https://github.com/fixture/kata.git", env=env)
-    _git(repo, "config", f"url.{bare}.insteadOf", "https://github.com/fixture/kata.git", env=env)
-    _git(repo, "push", "-u", "origin", "main", env=env)
-    pulls = {}
-    kept = {}
-    finished = []
-    for branch in ["unpushed", "old-unpushed", "merged", "closed", "moved", "dirty"]:
-        path = repo.with_name(f"kata.{branch}")
-        _git(repo, "worktree", "add", "-b", branch, str(path), "main", env=env)
-        (path / "work.txt").write_text(branch)
-        _git(path, "add", ".", env=env)
-        date_env = (
-            {
-                **env,
-                "GIT_AUTHOR_DATE": "2020-01-01T00:00:00Z",
-                "GIT_COMMITTER_DATE": "2020-01-01T00:00:00Z",
-            }
-            if branch == "old-unpushed"
-            else env
-        )
-        _git(path, "commit", "-qm", branch, env=date_env)
-        head = _git(path, "rev-parse", "HEAD", env=env)
-        if branch in {"merged", "closed", "moved", "dirty"}:
-            pulls[branch] = [
-                {
-                    "number": len(pulls) + 1,
-                    "headRefOid": head,
-                    "state": "CLOSED" if branch == "closed" else "MERGED",
-                }
-            ]
-        if branch == "merged":
-            _git(repo, "merge", "--no-edit", branch, env=env)
-            _git(repo, "push", "origin", "main", env=env)
-        if branch == "moved":
-            (path / "work.txt").write_text("unpublished follow-up")
-            _git(path, "commit", "-am", "follow-up", env=env)
-        if branch == "dirty":
-            (path / "notes.txt").write_text("unfinished notes")
-        if branch == "old-unpushed":
-            # No Task or PR and idle for years: removed, its commit saved first.
-            saved = (branch, _git(path, "rev-parse", "HEAD", env=env))
-        if branch in {"merged", "closed", "old-unpushed"}:
-            finished.append((branch, path))
-        else:
-            kept[branch] = (
-                path,
-                _git(path, "rev-parse", "HEAD", env=env),
-                (path / "work.txt").read_bytes(),
-            )
-    gh = rf"""#!{sys.executable}
-import json, re, sys
-pulls = {pulls!r}
-if sys.argv[1:3] == ["api", "rate_limit"]:
-    budget = {{"limit": 5000, "remaining": 4900, "reset": 2000000000}}
-    print(json.dumps({{"resources": {{"graphql": budget}}}}))
-else:
-    query = next(arg[6:] for arg in sys.argv if arg.startswith("query="))
-    repo = {{}}
-    pattern = r'b(\d+): pullRequests\(first: 100, headRefName: "([^"]+)"'
-    for index, branch in re.findall(pattern, query):
-        repo["b" + index] = {{"nodes": pulls.get(branch, [])}}
-        repo["r" + index] = None
-    print(json.dumps({{"data": {{"repository": repo}}}}))
-"""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "gh").write_text(gh)
-    (bin_dir / "gh").chmod(0o755)
-    dry = subprocess.run(
-        [str(binary), "wt", "prune", "--dry-run"],
-        cwd=repo,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert "merged" in dry.stdout and "closed" in dry.stdout
-    assert all(path.exists() for _, path in finished)
-
-    # Set dyld variables at exec: macOS strips them while starting system shells.
-    lf = "exec env " + " ".join(
-        shlex.quote(f"{key}={env[key]}")
-        for key in [
-            "LF_BIN",
-            "DYLD_INSERT_LIBRARIES",
-            "LOOPFLOW_TEST_ACCOUNT_HOME",
-            "GIT_ALLOW_PROTOCOL",
-        ]
-    )
-    lf += f' {shlex.quote(str(binary))} "$@"'
-    out = _run(tmp_path, {"lf": lf})
-    for branch, path in finished:
-        assert not path.exists(), out
-        assert not _git(repo, "branch", "--list", branch, env=env), out
-    for branch, (path, head, content) in kept.items():
-        assert (path / "work.txt").read_bytes() == content, out
-        assert _git(path, "rev-parse", "HEAD", env=env) == head, out
-        assert _git(repo, "rev-parse", branch, env=env) == head, out
-    assert (kept["dirty"][0] / "notes.txt").read_text() == "unfinished notes"
-    saved_refs = _git(
-        repo, "for-each-ref", "--format=%(objectname)", f"refs/lf/pruned/{saved[0]}", env=env
-    )
-    assert saved_refs == saved[1], out
-    again = _run(tmp_path, {"lf": lf})
-    assert "0 removed," in again, again
-
-
 @pytest.fixture
 def cleaner(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
@@ -411,13 +207,13 @@ def cleaner(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LOOPFLOW_SRC", str(home / "src"))
     public = home / ".local/bin"
     public.mkdir(parents=True)
-    for name in ("lf", "uv", "xcrun"):
-        tool = public / name
-        tool.write_text("#!/bin/sh\nexit 0\n")
-        tool.chmod(0o755)
+    tool = public / "uv"
+    tool.write_text('#!/bin/sh\n[ "$2" != dir ] || echo "$HOME/.cache/uv"\n')
+    tool.chmod(0o755)
     monkeypatch.setenv("PATH", f"{public}:/usr/bin:/bin:/usr/sbin:/sbin")
+    monkeypatch.setattr(cleanup, "_temporary_roots", lambda: {tmp_path / "temp"})
     runner = cleanup.Cleaner(False, 1800)
-    monkeypatch.setattr(runner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset()))
+    monkeypatch.setattr(runner, "_activity", _activity)
     return runner
 
 
@@ -452,12 +248,13 @@ def test_nested_worktree_discovery_uses_owning_checkout(cleaner, monkeypatch, pr
     if protection == "recent":
         _age(output, 0)
     elif protection == "open":
+        _age(output, 0.5)
         monkeypatch.setattr(
-            cleaner, "_activity", lambda: cleanup.Activity(frozenset({output}), frozenset())
+            cleaner, "_activity", lambda: _activity(frozenset({output}), frozenset())
         )
     elif protection == "builder":
         monkeypatch.setattr(
-            cleaner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset({worktree}))
+            cleaner, "_activity", lambda: _activity(frozenset(), frozenset({worktree}))
         )
     elif protection == "tracked":
         _git(worktree, "add", "-f", str(output))
@@ -507,7 +304,7 @@ def test_global_derived_data_reclaims_idle_projects_and_preserves_open_recent_an
     home = tmp_path / "home"
     derived = home / "Library/Developer/Xcode/DerivedData"
     for name in ("idle", "open", "recent"):
-        _write(derived / name / "Build/output", 3, 1024 * 1024)
+        _write(derived / name / "Build/output", 0.5, 1024 * 1024)
         _age_tree(derived / name, 3)
     _age(derived / "recent/Build/output", 0)
     external = home / "unpublished/source.swift"
@@ -602,13 +399,11 @@ def test_reclaims_large_idle_profile_beside_live_output_and_unpublished_source(
 ) -> None:
     repo = _build_fixture(cleaner, 300, 128 * 1024**2)
     live = repo / "target/release/live"
-    _write(live, 5)
-    _age_tree(repo / "target", 5)
+    _write(live, 0.5)
+    _age_tree(repo / "target", 0.5)
     source = repo / "unpublished.rs"
     source.write_text("unfinished work")
-    monkeypatch.setattr(
-        cleaner, "_activity", lambda: cleanup.Activity(frozenset({live}), frozenset())
-    )
+    monkeypatch.setattr(cleaner, "_activity", lambda: _activity(frozenset({live}), frozenset()))
     assert cleaner.run() == 0
     assert not (repo / "target/debug").exists()
     assert live.exists()
@@ -638,9 +433,7 @@ def test_protected_build_output_is_retained(cleaner, monkeypatch, protection: st
     repo = _build_fixture(cleaner, 300)
     protected = repo / "target/debug/output"
     if protection == "builder":
-        monkeypatch.setattr(
-            cleaner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset({repo}))
-        )
+        monkeypatch.setattr(cleaner, "_activity", lambda: _activity(frozenset(), frozenset({repo})))
     elif protection == "tracked":
         _git(repo, "add", "-f", "target/debug/output")
     else:
@@ -668,7 +461,7 @@ def test_nested_symlink_is_removed_without_following_it(cleaner) -> None:
 
 def test_dry_run_reports_candidates_and_never_calls_native_cleanup(cleaner) -> None:
     repo = _build_fixture(cleaner, 300)
-    cleaner.lf.write_text("#!/bin/sh\nexit 99\n")
+    (cleaner.home / ".local/bin/uv").write_text("#!/bin/sh\nexit 99\n")
     cleaner.dry_run = True
     assert cleaner.run() == 0
     assert (repo / "target/debug/output").exists()
@@ -676,9 +469,9 @@ def test_dry_run_reports_candidates_and_never_calls_native_cleanup(cleaner) -> N
     assert cleaner.removed_bytes == 0
 
 
-def test_partial_native_failure_is_nonzero_after_reclamation(cleaner) -> None:
+def test_partial_cache_prune_failure_is_nonzero_after_reclamation(cleaner) -> None:
     repo = _build_fixture(cleaner, 300)
-    cleaner.lf.write_text("#!/bin/sh\necho broken >&2\nexit 7\n")
+    ((cleaner.home / ".local/bin") / "uv").write_text("#!/bin/sh\necho broken >&2\nexit 7\n")
     assert cleaner.run() == 1
     assert not (repo / "target").exists()
     receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
@@ -699,22 +492,11 @@ def test_failed_content_inspection_retains_output_and_reports_failure(cleaner, m
     assert any("inspection denied" in failure for failure in cleaner.failures)
 
 
-def test_public_cli_wins_over_stale_inherited_selection(cleaner, monkeypatch) -> None:
-    monkeypatch.setenv("LF_BIN", "/Applications/Stale.app/Contents/MacOS/lf")
-    monkeypatch.setenv("LF_AGENT_CALLER", "stale")
-    cleaner.lf.write_text('#!/bin/sh\n[ -z "$LF_BIN$LF_AGENT_CALLER" ] || exit 42\n')
-    runner = cleanup.Cleaner(False, 1800)
-    monkeypatch.setattr(runner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset()))
-    assert runner.run() == 0
-
-
 def test_child_deadline_kills_its_process_group(cleaner) -> None:
     marker = cleaner.home / "child-finished"
     start = time.time()
     with pytest.raises(subprocess.TimeoutExpired):
-        cleaner._command(
-            ["/bin/sh", "-c", f"(sleep 1; touch {shlex.quote(str(marker))}) & wait"], timeout=0.1
-        )
+        cleaner._command(["/bin/sh", "-c", f'(sleep 1; touch "{marker}") & wait'], timeout=0.1)
     assert time.time() - start < 1
     time.sleep(1.1)
     assert not marker.exists()
@@ -735,7 +517,18 @@ def test_activity_distinguishes_a_builder_from_an_idle_shell(cleaner, monkeypatc
         "_command",
         lambda *args, **kwargs: f"p123\nccargo\nfcwd\nn{repo}\np456\nczsh\nfcwd\nn{repo.parent}\n",
     )
-    assert cleaner._activity().builders == frozenset({repo})
+    monkeypatch.setattr(
+        cleaner,
+        "_processes",
+        lambda: {
+            123: cleanup.Process(123, 1, os.getuid(), "fixture", "cargo"),
+            456: cleanup.Process(456, 1, os.getuid(), "fixture", "zsh"),
+        },
+    )
+    assert (
+        cleaner._activity().reason(cleanup.Candidate(repo / "target", "build", repo))
+        == "builder in checkout"
+    )
 
 
 @pytest.fixture
@@ -747,12 +540,13 @@ def schedule(cleaner, monkeypatch):
     for name in (
         "disk-cleanup.sh",
         "disk_cleanup.py",
+        "cleanup_evidence.py",
         "resource_envelope.py",
         "performance-budgets.json",
     ):
         shutil.copyfile(SCRIPT.parent / name, scripts / name)
     monkeypatch.setattr(cleanup, "__file__", str(scripts / "disk_cleanup.py"))
-    public = cleaner.lf.parent
+    public = cleaner.home / ".local/bin"
     launchctl = public / "launchctl"
     launchctl.write_text("""#!/bin/sh
 case "$1" in
@@ -787,7 +581,10 @@ def test_launchd_install_replaces_only_old_cron_and_runs_mechanical_entrypoint(
     assert (cleaner.home / "cron").read_text() == "0 0 * * * keep-me\n"
     args = payload["ProgramArguments"]
     assert args[:2] == ["/usr/bin/env", "-i"]
-    assert args[-3:] == ["/bin/bash", str(cleaner.src / "loopflow/scripts/disk-cleanup.sh"), "run"]
+    assert args[-3] == "/bin/bash"
+    assert str(cleaner.state / "versions") in args[-2]
+    assert args[-1] == "run"
+    assert cleaner.src.as_posix() not in args[-2]
     assert next(arg for arg in args if arg.startswith("PATH=")).startswith(
         f"PATH={cleaner.home}/.local/bin:"
     )
@@ -836,7 +633,7 @@ def test_dead_process_releases_lock_without_stale_lock_removal(tmp_path: Path) -
 def test_builder_outside_checkout_does_not_retain_output(cleaner, monkeypatch) -> None:
     repo = _build_fixture(cleaner, 300)
     monkeypatch.setattr(
-        cleaner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset({Path("/")}))
+        cleaner, "_activity", lambda: _activity(frozenset(), frozenset({Path("/")}))
     )
     assert cleaner.run() == 0
     assert not (repo / "target").exists()
@@ -847,8 +644,8 @@ def test_output_opened_after_inventory_is_retained(cleaner, monkeypatch) -> None
     artifact = repo / "target/debug/output"
     snapshots = iter(
         [
-            cleanup.Activity(frozenset(), frozenset()),
-            cleanup.Activity(frozenset({artifact}), frozenset()),
+            _activity(frozenset(), frozenset()),
+            _activity(frozenset({artifact}), frozenset()),
         ]
     )
     monkeypatch.setattr(cleaner, "_activity", lambda: next(snapshots))
@@ -860,7 +657,7 @@ def test_launchd_bootstrap_failure_restores_existing_job(schedule, cleaner) -> N
     assert cleanup._schedule("install") == 0
     original = schedule.read_bytes()
     (cleaner.home / "cron").write_text("17 * * * * old # loopflow:disk-cleanup\n")
-    launchctl = cleaner.lf.parent / "launchctl"
+    launchctl = (cleaner.home / ".local/bin") / "launchctl"
     script = launchctl.read_text()
     script = script.replace(
         "bootstrap) echo",
@@ -928,10 +725,612 @@ def test_final_log_failure_is_in_receipt_and_exit_status(cleaner, monkeypatch) -
     assert receipt["removed_allocated_bytes"] > 0
 
 
-def test_newer_backup_directory_or_symlink_cannot_displace_newest_backup(cleaner) -> None:
-    backup = cleaner.lf_home / "loopflow.db.backup-current"
-    _write(backup, 30)
-    (cleaner.lf_home / "loopflow.db.backup-directory").mkdir()
-    (cleaner.lf_home / "loopflow.db.backup-link").symlink_to(backup)
+def test_pytest_garbage_and_known_temp_only(cleaner) -> None:
+    root = next(iter(cleaner.temp_roots))
+    garbage = root / "pytest-of-test/garbage-1234abcd"
+    old = root / "pytest-of-test/pytest-12"
+    current = root / "pytest-of-test/pytest-13"
+    unknown = root / "unknown-demo"
+    known = root / "lf-worlds-test"
+    for path in (garbage, old, current, unknown, known):
+        _write(path / "data", 3)
+        (path / ".cleanup-evidence.json").write_text('{"outcome": "passed"}')
+        _age(path / ".cleanup-evidence.json", 3)
+        _age_tree(path, 3)
+    _git(old, "init", "-q")
+    for path in (old / ".git").rglob("*"):
+        _age(path, 3)
+    _age_tree(old, 3)
+    _write(current / "data", 0)
+    (old.parent / "pytest-current").symlink_to(current)
     assert cleaner.run() == 0
-    assert backup.exists()
+    assert not garbage.exists()
+    assert not old.exists()
+    assert not known.exists()
+    assert current.exists() and unknown.exists()
+
+
+def test_chrome_requires_opt_in_retains_newest_and_held_copy(cleaner, monkeypatch) -> None:
+    temp = cleaner.home / "darwin/T"
+    temp.mkdir(parents=True)
+    cleaner.temp_roots = {temp}
+    root = temp.parent / "X/com.google.Chrome.code_sign_clone"
+    copies = [root / f"code_sign_clone.{name}" for name in ("old", "held", "new")]
+    for copy, days in zip(copies, (3, 2, 1.5)):
+        _write(copy / "Google Chrome.app.bundle/data", days)
+        _age_tree(copy, days)
+    assert cleaner.run() == 0
+    assert all(copy.exists() for copy in copies)
+    cleaner.config["chrome_copies"] = True
+    monkeypatch.setattr(
+        cleaner, "_activity", lambda: _activity({copies[1] / "Google Chrome.app.bundle/data"})
+    )
+    assert cleaner.run() == 0
+    assert not copies[0].exists()
+    assert copies[1].exists() and copies[2].exists()
+    assert cleaner.stopped == []
+
+
+@pytest.mark.parametrize("descriptor", ["txt", "cwd", "3u"])
+def test_activity_identifies_candidate_owner_not_repository_neighbor(cleaner, descriptor) -> None:
+    candidate = cleanup.Candidate(cleaner.home / "output", "build")
+    activity = cleanup.Activity(
+        {},
+        (
+            cleanup.OpenPath(123, descriptor, candidate.path / "binary"),
+            cleanup.OpenPath(456, "cwd", cleaner.home),
+        ),
+    )
+    assert activity.owners(candidate) == {123}
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_stops_real_demo_store_owner_and_descendant_before_removal(
+    cleaner, monkeypatch, force
+) -> None:
+    demo = cleaner.home / ".lf-machine/demos/test"
+    _write(demo / "store.db", 3)
+    marker = demo / ".disposable-coding-demo"
+    marker.write_text("disposable runtime; evidence stored elsewhere")
+    _age(marker, 3)
+    (demo / ".cleanup-evidence.json").write_text('{"outcome": "passed"}')
+    _age(demo / ".cleanup-evidence.json", 3)
+    _age_tree(demo, 3)
+    # A descendant deliberately outlives a graceful parent and holds no direct
+    # candidate handle. Teardown must retain its identity after reparenting.
+    code = (
+        "import subprocess, sys, signal, time; "
+        + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if force else "")
+        + "f=open(sys.argv[1], 'rb'); "
+        "child=subprocess.Popen(['/bin/sleep', '600']); "
+        "print(child.pid, flush=True); time.sleep(600)"
+    )
+    owner = subprocess.Popen(
+        [sys.executable, "-c", code, str(demo / "store.db")], stdout=subprocess.PIPE, text=True
+    )
+    neighbor = subprocess.Popen(["/bin/sleep", "600"], cwd=cleaner.home)
+    try:
+        child = int(owner.stdout.readline())
+        monkeypatch.delattr(cleaner, "_activity")
+        monkeypatch.setattr(cleanup, "OWNER_GRACE_SECONDS", 0.2)
+        assert cleaner.run() == 0
+        owner.wait(timeout=3)
+        assert not demo.exists()
+        assert neighbor.poll() is None
+        stopped = {item["pid"] for item in cleaner.stopped}
+        assert owner.pid in stopped and child in stopped
+        assert any(item["signal"] == "SIGKILL" for item in cleaner.stopped) == force
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=3)
+        neighbor.terminate()
+        neighbor.wait(timeout=3)
+        if "child" in locals():
+            try:
+                os.kill(child, 9)
+            except ProcessLookupError:
+                pass
+
+
+def test_stops_executable_mapping_owner_without_killing_unrelated_work(
+    cleaner, monkeypatch
+) -> None:
+    repo = _build_fixture(cleaner, 3000)
+    binary = repo / "target/debug/sleeper"
+    shutil.copyfile("/bin/sleep", binary)
+    binary.chmod(0o755)
+    _age(binary, 3)
+    _age_tree(repo / "target", 3)
+    owner = subprocess.Popen([str(binary), "600"], cwd=cleaner.home)
+    try:
+        monkeypatch.delattr(cleaner, "_activity")
+        monkeypatch.setattr(cleanup, "OWNER_GRACE_SECONDS", 0.2)
+        assert cleaner.run() == 0
+        owner.wait(timeout=3)
+        assert not (repo / "target").exists()
+        assert (repo / ".gitignore").exists()
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=3)
+
+
+@pytest.mark.parametrize(
+    "failure", ["unknown", "changed", "permission", "surviving", "interrupted"]
+)
+def test_owner_teardown_failure_preserves_output(cleaner, monkeypatch, failure) -> None:
+    repo = _build_fixture(cleaner, 3000)
+    artifact = repo / "target/debug/output"
+    process = cleanup.Process(999999, 1, os.getuid(), "original", "sleeper")
+    activity = cleanup.Activity(
+        {process.pid: process} if failure != "unknown" else {},
+        (cleanup.OpenPath(process.pid, "txt", artifact),),
+    )
+    monkeypatch.setattr(cleaner, "_activity", lambda: activity)
+    changed = cleanup.Process(process.pid, 1, os.getuid(), "changed", "sleeper")
+    monkeypatch.setattr(
+        cleaner, "_processes", lambda: {process.pid: changed if failure == "changed" else process}
+    )
+    monkeypatch.setattr(cleanup, "OWNER_GRACE_SECONDS", 0)
+
+    def signal_owner(pid, sig):
+        if failure == "permission":
+            raise PermissionError("cannot signal owner")
+        if failure == "interrupted":
+            raise cleanup.CleanupStopped("interrupted teardown")
+
+    monkeypatch.setattr(cleanup.os, "kill", signal_owner)
+    assert cleaner.run() == 1
+    assert artifact.exists()
+    assert cleaner.removed_bytes == 0
+
+
+def test_usage_growth_is_bounded_and_unknown_is_not_zero(cleaner, monkeypatch) -> None:
+    monkeypatch.setattr(cleanup, "HISTORY_LIMIT", 2)
+    path = str(cleaner.src / "repo")
+    for value in (10, 30, None):
+        cleaner._record_usage({"at": time.time(), "roots": [{"path": path, "bytes": value}]})
+    history = json.loads((cleaner.state / "usage.json").read_text())
+    assert len(history) == 2
+    assert history[0]["roots"][0]["delta_bytes"] == 20
+    assert history[1]["roots"][0]["delta_bytes"] is None
+    assert (cleaner.state / "usage.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_unknown_usage_is_reported_without_blocking_cleanup(cleaner, monkeypatch) -> None:
+    _build_fixture(cleaner, 300)
+    command = cleaner._command
+
+    def denied(args, **kwargs):
+        if args[0] == "du":
+            raise PermissionError("measurement denied")
+        return command(args, **kwargs)
+
+    monkeypatch.setattr(cleaner, "_command", denied)
+    assert cleaner.run() == 0
+    receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
+    assert any(
+        entry["error"] == "measurement denied" and entry["bytes"] is None
+        for entry in receipt["usage"]["roots"]
+    )
+    assert cleaner.removed_bytes > 0
+
+
+def test_mutating_run_requires_local_opt_in(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [str(SCRIPT), "run"], env={"HOME": str(tmp_path)}, capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "cleanup is disabled" in result.stderr
+
+
+@pytest.mark.parametrize("retention", ["keep_forever", "project_owned"])
+def test_accounting_labels_do_not_authorize_deletion_and_protection_vetoes(
+    cleaner, retention
+) -> None:
+    repo = _build_fixture(cleaner, 300)
+    other = cleaner.home / "Movies/movie"
+    _write(other, 40)
+    cleaner.usage_labels = {
+        repo / "target/debug/output": (retention, "code/development"),
+        other: ("emergency_reducible", "media"),
+    }
+    assert cleaner.run() == 0
+    assert (repo / "target").exists()
+    assert other.exists()
+    receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
+    roots = {entry["path"]: entry for entry in receipt["usage"]["roots"]}
+    assert roots[str(repo / "target/debug/output")]["retention"] == retention
+    assert roots[str(other)]["content_type"] == "media"
+    assert receipt["usage"]["unaccounted_physical_bytes"] is None
+
+
+def test_swift_output_reclaimed_beside_dependency_source(cleaner) -> None:
+    repo = _build_fixture(cleaner, 300)
+    (repo / ".gitignore").write_text("target/\n.build/\n")
+    source = repo / ".build/checkouts/package"
+    source.mkdir(parents=True)
+    _git(source, "init", "-q")
+    _write(source / "unpublished.swift", 3)
+    output = repo / ".build/arm64-apple-macosx/debug/output"
+    _write(output, 3)
+    _age_tree(output.parent.parent, 3)
+    assert cleaner.run() == 0
+    assert not output.exists()
+    assert (source / "unpublished.swift").exists()
+    assert (source / ".git").exists()
+
+
+@pytest.mark.parametrize("root_removed", [False, True])
+def test_concurrent_temp_removal_is_retained_without_false_failure(
+    cleaner, monkeypatch, root_removed
+) -> None:
+    repo = _build_fixture(cleaner, 300)
+
+    def vanished(candidate):
+        if root_removed:
+            shutil.rmtree(candidate.path)
+            raise RuntimeError("content inspection exceeded its budget")
+        raise FileNotFoundError("another process removed a child")
+
+    monkeypatch.setattr(cleaner, "_measure", vanished)
+    assert cleaner.run() == 0
+    assert (repo / "target").exists() is not root_removed
+    assert cleaner.entries[0]["reason"] == "changed during inspection"
+    assert cleaner.removed_bytes == 0
+
+
+def test_project_owned_state_preserves_its_output_owner(cleaner, monkeypatch) -> None:
+    repo = _build_fixture(cleaner, 3000)
+    reserved = cleaner.home / "project-state"
+    cleaner.usage_labels[reserved] = ("project_owned", "code/development")
+    process = cleanup.Process(999999, 1, os.getuid(), "fixture", "worker")
+    activity = cleanup.Activity(
+        {process.pid: process},
+        (
+            cleanup.OpenPath(process.pid, "txt", repo / "target/debug/output"),
+            cleanup.OpenPath(process.pid, "3u", reserved / "experiment.db"),
+        ),
+    )
+    monkeypatch.setattr(cleaner, "_activity", lambda: activity)
+    assert cleaner.run() == 1
+    assert (repo / "target/debug/output").exists()
+    assert cleaner.stopped == []
+    assert any("project-owned/deferred" in failure for failure in cleaner.failures)
+
+
+def test_ignored_data_is_not_walked_but_registered_nested_worktrees_are(
+    cleaner, monkeypatch
+) -> None:
+    repo = _build_fixture(cleaner, 300)
+    (repo / ".gitignore").write_text("target/\ncache/\nwork/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+    nested = repo / "work/nested"
+    _git(repo, "worktree", "add", "-qb", "nested", str(nested))
+    _write(nested / "target/output", 3)
+    _age_tree(nested / "target", 3)
+    for number in range(30):
+        (repo / f"cache/{number}/data").mkdir(parents=True)
+    monkeypatch.setattr(cleanup, "DISCOVERY_MAX_ENTRIES", 20)
+    assert cleaner.run() == 0
+    assert not (nested / "target").exists()
+    assert not (repo / "target").exists()
+    assert (repo / "cache/0/data").exists()
+
+
+@pytest.mark.parametrize("owner_kind", ["chrome", "self", "foreign"])
+def test_protected_process_owner_prevents_reclamation(cleaner, monkeypatch, owner_kind) -> None:
+    repo = _build_fixture(cleaner, 3000)
+    process = cleanup.Process(
+        os.getpid() if owner_kind == "self" else 999999,
+        1,
+        os.getuid() + (1 if owner_kind == "foreign" else 0),
+        "fixture",
+        "Google Chrome" if owner_kind == "chrome" else "worker",
+    )
+    activity = cleanup.Activity(
+        {process.pid: process},
+        (cleanup.OpenPath(process.pid, "txt", repo / "target/debug/output"),),
+    )
+    monkeypatch.setattr(cleaner, "_activity", lambda: activity)
+    assert cleaner.run() == 1
+    assert (repo / "target/debug/output").exists()
+    assert cleaner.stopped == []
+    assert any(
+        "Chrome owner" in failure or "cannot verify a stoppable owner" in failure
+        for failure in cleaner.failures
+    )
+
+
+def test_activity_resolves_shared_symlink_parent_and_leaf(cleaner, monkeypatch) -> None:
+    actual = cleaner.home / "actual"
+    actual.mkdir()
+    (actual / "output").write_text("generated")
+    alias = cleaner.home / "alias"
+    alias.symlink_to(actual)
+    leaf = cleaner.home / "leaf"
+    leaf.symlink_to(actual / "output")
+    monkeypatch.delattr(cleaner, "_activity")
+    process = cleanup.Process(123, 1, os.getuid(), "fixture", "worker")
+    monkeypatch.setattr(cleaner, "_processes", lambda: {123: process})
+    monkeypatch.setattr(
+        cleaner,
+        "_command",
+        lambda *args, **kwargs: f"p123\nf3u\nn{alias / 'output'}\nf4u\nn{leaf}\nfcwd\nn/\n",
+    )
+    activity = cleaner._activity()
+    assert activity.owners(cleanup.Candidate(actual, "build")) == {123}
+    assert [file.path for file in activity.files] == [
+        actual / "output",
+        actual / "output",
+        Path("/"),
+    ]
+
+
+def test_usage_history_respects_byte_limit_and_preserves_previous_on_oversize(
+    cleaner, monkeypatch
+) -> None:
+    monkeypatch.setattr(cleanup, "HISTORY_BYTES", 400)
+    for number in range(10):
+        cleaner._record_usage({"at": number, "roots": [{"path": "/synthetic", "bytes": number}]})
+    target = cleaner.state / "usage.json"
+    before = target.read_bytes()
+    assert len(before) <= 400
+    assert json.loads(before)[-1]["roots"][0]["delta_bytes"] == 1
+    with pytest.raises(RuntimeError, match="snapshot exceeds"):
+        cleaner._record_usage({"at": 11, "roots": [{"path": "/" + "x" * 500, "bytes": 10}]})
+    assert target.read_bytes() == before
+
+
+def test_unmarked_demo_history_is_reported_and_preserved(cleaner) -> None:
+    demo = cleaner.home / ".lf-machine/demos/retained"
+    _write(demo / "history.jsonl", 40)
+    _write(demo / "store.db", 40)
+    _age_tree(demo, 40)
+    assert cleaner.run() == 0
+    assert (demo / "history.jsonl").exists()
+    assert (demo / "store.db").exists()
+    assert any(
+        entry.get("reason") == "unmarked demo; preserve source and history"
+        for entry in cleaner.entries
+    )
+
+
+def test_busy_uv_cache_is_retained_without_forcing_its_lock(cleaner) -> None:
+    repo = _build_fixture(cleaner, 300)
+    (cleaner.home / ".local/bin/uv").write_text(
+        '#!/bin/sh\nif [ "$2" = dir ]; then echo "$HOME/.cache/uv"; exit 0; fi\n'
+        "echo 'Cache is currently in-use' >&2\n"
+        "echo 'Timeout (0s) when waiting for lock' >&2\nexit 2\n"
+    )
+    assert cleaner.run() == 0
+    assert not (repo / "target").exists()
+    receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
+    assert receipt["maintenance"][0]["status"] == "retained"
+    assert "currently in-use" in receipt["maintenance"][0]["reason"]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "age", "removed"),
+    [
+        ("passed", 0.5, False),
+        ("passed", 2, True),
+        ("failed", 2, False),
+        ("failed", 8, True),
+        ("unknown", 2, False),
+        ("unknown", 8, True),
+        ("saved", 40, False),
+    ],
+)
+def test_evidence_retention_follows_observed_outcome(cleaner, outcome, age, removed):
+    root = next(iter(cleaner.temp_roots)) / "pytest-of-fixture/pytest-100"
+    _write(root / "screenshot.png", age)
+    marker = root / ".cleanup-evidence.json"
+    marker.write_text(json.dumps({"saved": True} if outcome == "saved" else {"outcome": outcome}))
+    _age(marker, age)
+    _age_tree(root, age)
+    assert cleaner.run() == 0
+    assert root.exists() is not removed
+    entry = next(entry for entry in cleaner.entries if entry["path"] == str(root))
+    assert entry["evidence_outcome"] == outcome
+
+
+def test_saved_nested_evidence_survives_cleanup(cleaner):
+    root = next(iter(cleaner.temp_roots)) / "pytest-of-fixture/pytest-100"
+    _write(root / "case/.cleanup-keep", 40)
+    _write(root / "case/screenshot.png", 40)
+    _age_tree(root, 40)
+    assert cleaner.run() == 0
+    assert (root / "case/screenshot.png").exists()
+    assert any(entry["reason"] == "explicitly saved evidence" for entry in cleaner.entries)
+
+
+@pytest.mark.parametrize("passed", [True, False])
+def test_pytest_records_its_actual_outcome(tmp_path, passed):
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    shutil.copyfile(Path(__file__).with_name("conftest.py"), suite / "conftest.py")
+    (suite / "test_example.py").write_text(
+        'def test_example(tmp_path):\n    (tmp_path / "evidence").write_text("proof")\n'
+        f"    assert {passed}\n"
+    )
+    artifacts = tmp_path / "artifacts"
+    env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    env["PYTHONPATH"] = str(SCRIPT.parent)
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "--basetemp", str(artifacts), str(suite)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=30,
+    )
+    assert result.returncode == (0 if passed else 1), result.stdout + result.stderr
+    assert cleanup.evidence_outcome(artifacts) == ("passed" if passed else "failed")
+
+
+def test_uv_cache_sentinel_is_not_mistaken_for_a_checkout(cleaner):
+    repo = _build_fixture(cleaner, 300)
+    cache = repo / ".uv-cache"
+    _write(cache / "CACHEDIR.TAG", 40)
+    _write(cache / "sdists-v9/.git", 40)
+    candidates = cleaner._builds()
+    assert cache in cleaner.uv_caches
+    assert any(candidate.path == repo / "target" for candidate in candidates)
+    assert not cleaner.failures
+
+
+def test_native_uv_cap_reclaims_unused_downloads_and_preserves_reserved_cache(cleaner, monkeypatch):
+    cache = cleaner.home / ".cache/uv"
+    reserved = cleaner.home / "reserved-cache"
+    _write(cache / "download", 40)
+    _write(reserved / "download", 40)
+    cleaner.uv_caches.add(reserved)
+    cleaner.usage_labels[reserved] = ("project_owned", "code/development")
+    cleaner.cache_caps["uv_bytes"] = 1
+    original = cleaner._command
+
+    def command(args, **kwargs):
+        if args[:3] == ["uv", "cache", "dir"]:
+            return str(cache)
+        if args[:3] == ["uv", "cache", "prune"]:
+            return ""
+        if args[:3] == ["uv", "cache", "clean"]:
+            shutil.rmtree(Path(args[4]))
+            return ""
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(cleaner, "_command", command)
+    cleaner._prune_uv()
+    assert not cache.exists()
+    assert (reserved / "download").exists()
+    assert not cleaner.failures
+    assert any(entry.get("bytes_after") == 0 for entry in cleaner.maintenance)
+
+
+def test_docker_reclaims_only_old_reproducible_unused_images(cleaner, monkeypatch):
+    images = {"downloaded", "local", "used", "recent"}
+    build_cache = ["old-cache"]
+
+    def command(args, **kwargs):
+        if args[1:3] == ["context", "show"]:
+            return "desktop-linux"
+        if args[1:3] == ["context", "inspect"]:
+            return json.dumps("unix:///fixture/docker.sock")
+        assert args[:3] == ["docker", "--context", "desktop-linux"]
+        action = args[3:5]
+        if action == ["buildx", "inspect"]:
+            return "Driver: docker\nEndpoint: desktop-linux\n"
+        if action == ["buildx", "prune"]:
+            build_cache.clear()
+            return ""
+        if action == ["container", "ls"]:
+            return "stopped-container"
+        if action == ["container", "inspect"]:
+            return "used"
+        if action == ["image", "ls"]:
+            return "\n".join(images)
+        if action == ["image", "inspect"]:
+            identifier = args[-1]
+            created = (
+                cleanup.datetime.now(cleanup.timezone.utc).isoformat()
+                if identifier == "recent"
+                else "2020-01-01T00:00:00.123456789Z"
+            )
+            return "\t".join(
+                map(
+                    json.dumps,
+                    [
+                        identifier,
+                        created,
+                        [] if identifier == "local" else ["registry@sha256:fixture"],
+                    ],
+                )
+            )
+        if action == ["image", "rm"]:
+            assert "--force" not in args
+            images.remove(args[-1])
+            return ""
+        raise AssertionError(f"Unapproved Docker operation: {args}")
+
+    monkeypatch.setattr(cleaner, "_command", command)
+    cleaner._prune_docker()
+    assert images == {"local", "used", "recent"}
+    assert not build_cache
+    assert not cleaner.failures
+
+
+def test_remote_docker_context_is_observation_only(cleaner, monkeypatch):
+    def command(args, **kwargs):
+        if args[1:3] == ["context", "show"]:
+            return "remote"
+        if args[1:3] == ["context", "inspect"]:
+            return json.dumps("ssh://fixture")
+        raise AssertionError("Remote engine must not be changed")
+
+    monkeypatch.setattr(cleaner, "_command", command)
+    cleaner._prune_docker()
+    assert cleaner.maintenance == [
+        {"step": "docker", "status": "retained", "reason": "not a local Unix engine"}
+    ]
+
+
+@pytest.mark.parametrize("name", [".venv", "node_modules"])
+def test_in_use_dependencies_survive_even_after_a_day(cleaner, name):
+    root = cleaner.src / "repo" / name
+    _write(root / "executable", 40)
+    candidate = cleanup.Candidate(root, "build")
+    activity = _activity({root / "executable"})
+    assert cleaner._reason(candidate, time.time() - 40 * 86400, activity) == "held open"
+    assert (root / "executable").exists()
+
+
+def test_usage_rotates_to_previously_unmeasured_repositories(cleaner, monkeypatch):
+    early = cleaner.src / "aaa"
+    late = cleaner.src / "zzz"
+    _write(early / "source", 0)
+    _write(late / "source", 0)
+    snapshot = cleaner._usage()
+    for entry in snapshot["roots"]:
+        if entry["path"] == str(late):
+            entry.update(bytes=None, error="usage sampling budget exhausted")
+    cleaner._record_usage(snapshot)
+    now = [time.time()]
+    monkeypatch.setattr(cleanup.time, "time", lambda: now[0])
+
+    def measure(args, **kwargs):
+        now[0] += 121
+        return "42 fixture"
+
+    monkeypatch.setattr(cleaner, "_command", measure)
+    sample = {entry["path"]: entry for entry in cleaner._usage()["roots"]}
+    assert sample[str(late)]["bytes"] == 42 * 1024
+    assert sample[str(early)]["bytes"] is None
+    assert sample[str(early)]["error"] == "usage sampling budget exhausted"
+
+
+def test_growth_uses_last_known_measurement_across_unknown_samples(cleaner):
+    path = str(cleaner.src / "repo")
+    for at, value in [(1, 10), (2, None), (3, 30)]:
+        cleaner._record_usage({"at": at, "roots": [{"path": path, "bytes": value}]})
+    history = json.loads((cleaner.state / "usage.json").read_text())
+    assert history[1]["roots"][0]["delta_bytes"] is None
+    assert history[2]["roots"][0]["delta_bytes"] == 20
+    assert history[2]["roots"][0]["previous_at"] == 1
+
+
+def test_reserved_docker_storage_is_not_pruned(cleaner, monkeypatch):
+    cleaner.usage_labels[cleaner.home / "Library/Containers/com.docker.docker"] = (
+        "project_owned",
+        "code/development",
+    )
+
+    def command(*args, **kwargs):
+        raise AssertionError("Reserved storage must not be changed")
+
+    monkeypatch.setattr(cleaner, "_command", command)
+    cleaner._prune_docker()
+    assert cleaner.maintenance[0]["reason"] == "explicit reservation"

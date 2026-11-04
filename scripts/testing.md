@@ -33,8 +33,8 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
-On macOS it also builds the CLI before isolated Python cleanup tests, so native
-archives and Cargo dependencies are fetched before networking is disabled.
+On macOS it builds the CLI before isolated Python checkout-refresh proofs, so
+native archives and Cargo dependencies are fetched before networking is disabled.
 `binary(name)` matches the standalone `[[test]]` binaries in
 `rust/loopflow/Cargo.toml` and the CLI's own unit tests as `binary(lf)`;
 suites inside `integration` take `test(name::)`, and an unknown binary name

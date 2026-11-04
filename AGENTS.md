@@ -510,6 +510,11 @@ objects. Keep existing leaf views internal for `@testable` access rather than
 adding test-only constructors or mounting a window.
 Keep mounted terminal frame checks in `.requiresDisplay` suites.
 
+iOS UIKit input tests use the `LoopflowiOSTests` simulator target in `swift/ios.yml`.
+Mount the terminal controller in a UIWindow so keyboardLayoutGuide has valid
+geometry; these app-hosted simulator tests run headless. They verify UIKit input
+effects, not physical keyboard, dictation or VoiceOver interaction quality.
+
 ## When to Mock
 
 Mock to isolate your code from things that shouldn't be part of unit tests:

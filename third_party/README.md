@@ -59,3 +59,8 @@ respective material. This audit is packaging evidence, not legal certification.
 The historical public lf3/lf7 archives are immutable and are not republished by
 this change. Current app packaging supplies the material they lack; future
 GhosttyKit archives include it before publication.
+
+The iOS development target pins SwiftTerm separately in `swift/ios.yml` and
+bundles `notices/swiftterm.txt` plus the existing font notices directly. It does
+not link Desktop's Rust/GhosttyKit closure. Shared theme licenses remain in the
+Loopflow framework's resources.

@@ -1098,3 +1098,15 @@ A delayed restore keeps newer tabs and edits. Conflicts leave local content inta
 and show an error; **Reload saved intent** reconciles retained content before another
 save. File drafts compare their saved base with disk before editing. Restored shell
 intent has no launch command: a saved tab alone does not reattach a Process.
+
+## iOS client
+
+```sh
+xcodegen generate --spec swift/ios.yml
+open swift/LoopflowMobile.xcodeproj
+```
+
+The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
+[Native client and focused input tests](LoopflowiOS/README.md) describe its build,
+renderer choice and remaining device/live-integration proof. Desktop's project
+and package remain unchanged.

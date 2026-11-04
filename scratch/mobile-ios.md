@@ -1,19 +1,69 @@
-# LOO-718 native iOS implementation lane
+# LOO-718 native iOS implementation
 
-Jack Heart invoked launch-plan to start backend and frontend work together. Continue the selected native Swift experience in this existing checkout and Session. LOO-593 owns the Machine backend independently; do not implement a competing server here.
+Jack Heart accepted existing open Tasks → the selected existing Session terminal,
+Desktop styling, and a reduced Paste / New line / keyboard row. Jack invoked
+launch-plan on November 3, 2026: implement this native lane in the existing
+checkout alongside LOO-593, stopping for the feature Graph's interactive demo.
+No Auto-Ship approval. No Wave navigation, shells, inspectors or new-Task UI.
 
-## Deliver now
+## Selected implementation
 
-Build a real iOS target with the existing-open-Tasks list and an editable terminal for the selected existing Session, using Desktop typography/colors and the reduced key bar. Settle a viable native terminal renderer with evidence: Ghostty is preferred, not presumed iOS-ready. Verify native keyboard/IME, paste, selection, viewport resizing, hardware keys and accessibility; recorded output alone does not prove input. Use a deterministic terminal harness to verify generated input and its effects. Expose disconnected, unavailable, ended and control-loss states honestly. No fake production connectivity, inferred permission controls from terminal text, or second provider conversation.
+The iOS Xcode target lives in `swift/ios.yml`, including the shared project without
+editing Desktop's package/project. SwiftTerm 1.20.0 is pinned by revision; the
+UIKit terminal supplies committed input, IME, selection and accessibility.
+`LoopflowiOS/README.md` records the renderer evidence and exact focused command.
+Ghostty's existing artifact is Mac-only. Lakr's wrapper was inspected at
+`db22505bd74d968c7fc12393219420ecbcead393`: host I/O and UIKit input exist, but
+Swift 6.2/module collision/accessibility integration cost favors this SwiftTerm
+slice. No Ghostty simulator/device performance comparison was performed.
 
-Begin renderer/input and Task UI now using existing domain DTOs. LOO-593 owns wire schemas and shared executable fixtures; coordinate with its concrete contract as it develops. Build a small injectable transport boundary, not a new frontend Task model or generic SDK. Fixture mode is explicit. Do not invent a parallel permanent wire protocol to avoid waiting. UI and input work remain useful before launchd/remote setup is complete.
+`MobileClient` is an in-process UI dependency, not a wire protocol. Task fixtures
+decode through LOO-593's exact `MachineProtocol.swift` and existing WorkViewPlan.
+Canonical files and machine fixtures were consumed at their repository paths;
+LOO-593 remains their owner. The backend's current local allowlist covers roadmap,
+not view_plan; live primary-Session selection still needs joining. Its new
+Session→owner lookup and command trace fixtures are consumed unchanged. Fixture success establishes neither admission nor connectivity.
 
-This lane can ship a buildable native client and deterministic input/rendering proof; it must not claim live mobile completion until follow-up C connects it to the service over host Tailscale. Leave remote pairing/carrier and takeover gesture unresolved rather than silently treating HTML recommendations as accepted. The selected new-Task sheet is later work after shared recoverable creation. No Waves, generic shell panes, diffs, hub, push or TTS in this slice.
+Opening observes. The fixture-only **Use keyboard** action requests a non-forcing
+grant; this does not settle remote takeover UX. Input and geometry are separate
+permissions. Reconnect returns to the same Session as an observer and never
+replays input. Backgrounding releases the attachment. The deterministic peer
+owns its editor draft, processes native bytes and emits VT output; it executes
+no commands. The app visibly says Offline fixture on both screens and is
+unavailable without the explicit fixture launch argument.
 
-## Design and coordination
+Shared fonts/themes supply Desktop styling. Permission questions are answered
+inside the terminal. Conditional native approval and Stop buttons wait for
+trustworthy provider state plus supported action bindings; arbitrary screen text
+cannot create them. Multiline paste requires bracketed paste support.
 
-Read mobile-task-brief.md, mobile-prototypes.md, prototype-tasks.html and research-native-mobile.md. mobile-task-plan.md owns later integration/cutover/creation dependencies. mobile-backend.md is now a reference snapshot; the working backend design is in LOO-593 at /Users/jack/src/loopflow.loo-593-decide-the-desktop/scratch/mobile-backend.md. Read that artifact for current contract decisions and use actual shared DTO/fixture code once available.
+## Delete — do not maintain
 
-Preserve #1807 / LOO-582 Session identity, #1809 / LOO-720 terminal status and #1791 / LOO-673 Task-list behavior. #1808 changes shared Wave/RegistryQuery types; use the landed shape. Backend installation follows #1656 / LOO-312; Graph/agent defaults follow #1805 / LOO-714. UI automation stays app-owned; retention/snapshot/transport policy stays with existing execution owners. Do not modify those policies to make a fixture pass.
+No production iOS predecessor exists. Keep one renderer and one Machine codec.
+HTML studies remain historical interaction evidence, never an alternate product
+path. Detailed research is preserved at
+`9e4587bb53fc4102e8682a3bba61e9776a6de5c2:scratch/`; current notes summarize it
+without removing original assets or HTML. LOO-593 owns Work FFI removal; this lane
+does not repair or duplicate that implementation.
 
-LOO-718 owns iOS targets, renderer and native input/UI. LOO-593 owns Rust protocol/shared fixtures and representative macOS integration. Coordinate shared Swift package/project changes explicitly; do not duplicate DTOs in two packages. Keep this existing worktree and primary conversation. The feature Graph begins at implement and stops at demo; no Auto-Ship approval.
+## Remaining proof and integration
+
+- Device/demo: real keyboard-open layout, CJK keyboard conversion, dictation,
+  physical keyboard combinations, VoiceOver navigation, and output/energy use.
+  Mounted simulator tests exercise UIKit input APIs and accessibility reading;
+  they are not physical-device experience evidence.
+- LOO-593 joining: supported primary-Session read and use of its exact owner lookup;
+  shared terminal frame/event decoder and recorded snapshots; replacement
+  subscription readings, stream gaps, bounded queues and cancellation. Current
+  fixture uses the real Machine envelope, but terminal events remain in-process.
+- Live follow-up C: carrier/pairing/admission, canonical observer geometry,
+  elected terminal replies, Desktop handoff, suspend/reconnect beyond retention
+  and real host Tailscale. Never claim this fixture is live mobile completion.
+- Full Work cutover and describe-first creation remain separate outcomes in
+  mobile-task-plan.md; no additional Task or Graph was launched here.
+
+Preserve Session identity work #1807/LOO-582, terminal activity #1809/LOO-720,
+Task selection #1791/LOO-673 and DTO revert #1808. LOO-717/709/710/712 retain shell,
+retention, snapshot and transport ownership. No policy changes in this lane.
+
+Check: focused xcodebuild simulator suite passed (11 tests); updated backend codec fixture check also passed. Swift multiplatform boundary check passed. Device/live proof stays with demo and integration.

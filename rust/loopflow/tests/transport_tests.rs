@@ -4366,6 +4366,8 @@ i=0
 while [ "$i" -lt 512 ]; do
   cat "$HOME/output-chunk"
   read -r next < /dev/tty
+  printf '%s\n' "$next" >> "$HOME/output-acks"
+  [ "$next" = next ] || exit 1
   i=$((i+1))
 done
 printf '\r\noutput-complete\r\n'
@@ -4498,6 +4500,13 @@ printf 'output-final\r\n'
         std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
         "desktop draft + phone + desktop\ncontinued from phone\ncreated from phone\n",
         "Input must reach the child exactly once"
+    );
+    let acknowledgements =
+        std::fs::read_to_string(fixture.home.path().join("output-acks")).unwrap();
+    assert_eq!(
+        acknowledgements,
+        "next\n".repeat(512),
+        "Native edits must reach the busy terminal exactly once"
     );
 }
 

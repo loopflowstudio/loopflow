@@ -77,6 +77,10 @@ unchanged length-prefixed Machine stream, followed by owner frames after `bridge
 WebSocket message boundaries have no application meaning. Binary chunks are capped
 at 64 KiB and copy buffers are bounded; slow readers lose their connection without
 stopping execution. Browser origins and credentials in URLs are rejected.
+Ending a stream sends a WebSocket close frame with a bounded five-second flush;
+the carrier also answers ping frames while the Machine stream is idle. Native
+foreground streams use a 20-second ping interval with a five-second response
+deadline so a broken connection cannot leave an idle reading waiting indefinitely.
 
 The remote carrier checks its own device grant before shared operation dispatch.
 It never forwards to the private Unix socket or trusts a reverse proxy's UID or

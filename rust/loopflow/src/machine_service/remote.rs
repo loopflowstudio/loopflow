@@ -265,24 +265,71 @@ async fn bridge(socket: WebSocketStream<TcpStream>, stream: DuplexStream) -> Res
         }
         Ok(())
     };
-    tokio::select! {
+    let result = tokio::select! {
         result = upstream => result,
         result = downstream => result,
-    }
+    };
+    // End the WebSocket protocol as well as the byte stream. A TCP EOF without
+    // its close frame can leave native clients waiting after buffered output.
+    // A stalled peer gets the same bounded write grace, never an unbounded drain.
+    let closed = tokio::time::timeout(Duration::from_secs(5), sender.close()).await;
+    result?;
+    closed??;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{admission, connection, until_revoked, DeviceId, TcpListener, TcpStream};
+    use super::{admission, bridge, connection, until_revoked, DeviceId, TcpListener, TcpStream};
     use futures_util::{SinkExt, StreamExt};
     use secrecy::ExposeSecret;
     use std::sync::Arc;
     use std::time::Duration;
+    use tokio::io::AsyncWriteExt;
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
     use tokio_tungstenite::WebSocketStream;
 
     use crate::machine_service::wire::{Operation, Request, Response, VERSION};
     use crate::store::sqlite::SqliteStore;
+
+    #[tokio::test]
+    async fn completed_machine_stream_sends_websocket_close_after_its_last_bytes() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stream, mut machine) = tokio::io::duplex(1024);
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let websocket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            bridge(websocket, stream).await.unwrap();
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+            .await
+            .unwrap();
+        client
+            .send(Message::Ping(b"alive".to_vec().into()))
+            .await
+            .unwrap();
+        let pong = tokio::time::timeout(Duration::from_secs(2), client.next())
+            .await
+            .unwrap();
+        assert!(
+            matches!(pong, Some(Ok(Message::Pong(_)))),
+            "An idle stream must answer liveness checks"
+        );
+        machine.write_all(b"last screen").await.unwrap();
+        // The Machine may keep its read half alive while the owner has ended.
+        machine.shutdown().await.unwrap();
+        let last = client.next().await.unwrap().unwrap();
+        assert_eq!(last.into_data(), b"last screen"[..]);
+        let close = tokio::time::timeout(Duration::from_secs(2), client.next())
+            .await
+            .unwrap();
+        assert!(
+            matches!(close, Some(Ok(Message::Close(_)))),
+            "Expected WebSocket close, got {close:?}"
+        );
+        server.await.unwrap();
+    }
 
     async fn connect(
         store: Arc<SqliteStore>,

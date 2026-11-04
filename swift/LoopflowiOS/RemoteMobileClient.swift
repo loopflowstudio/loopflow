@@ -153,6 +153,7 @@ final class RemoteAttachment: MobileAttachment {
         while !link.decoder.ready && !link.decoder.ended {
             link.pendingEvents.append(contentsOf: try link.decoder.receive(await connection.receiveBytes()))
         }
+        connection.keepAlive()
         link.startWriter()
         return link
     }

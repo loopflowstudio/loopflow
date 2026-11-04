@@ -60,7 +60,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         observation.close()
         if let proof { try await exerciseSession(proof, client: reopened, tasks: refreshed) }
         if let directory = proof?.creationRepository { try await exerciseCreation(client: reopened, directory: directory) }
-        if let session = proof?.outputSession { try await exerciseOutput(client: reopened, session: session) }
+        if let session = proof?.outputSession {
+            try await exerciseOutput(client: reopened, session: session, task: try XCTUnwrap(refreshed.first))
+        }
     }
 
     private func exerciseConnectionLifecycle(credential: MachineCredential) async throws {
@@ -100,7 +102,12 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         await reader.value
     }
 
-    private func exerciseOutput(client: RemoteMobileClient, session: String) async throws {
+    private func exerciseOutput(client: RemoteMobileClient, session: String, task: WorkViewPlan.Content) async throws {
+        // Select the fixture's separate retained terminal in a real Work surface.
+        // Task selection is proven above; no synthetic owner/transport is used.
+        var fields = try JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(task))
+        fields["primary_session"] = .string(session)
+        let outputTask = try JSONDecoder().decode(WorkViewPlan.Content.self, from: JSONEncoder().encode(fields))
         let workspace = MobileWorkspace(client: client)
         let controller = SessionTerminalController(workspace: workspace)
         controller.loadViewIfNeeded()
@@ -121,61 +128,87 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         }
         let stalled = try await client.attach(sessionID: session)
         defer { stalled.close() }
-        let active = try await client.attach(sessionID: session)
-        defer { active.close() }
         let expected = 512 * 65536
         var received = 0
         var acknowledged = 0
-        var controlled = false
         var complete = false
         var tail = ""
-        var ended = false
-        var problem: String?
+        func problem() -> String? {
+            if case .disconnected(let reason) = workspace.state { return reason }
+            return nil
+        }
         var renderSeconds = 0.0
         var longestRender = 0.0
         var feeds = 0
-        let reader = Task {
-            for await event in active.events {
-                switch event {
-                case .geometry(let columns, let rows):
-                    workspace.setGeometry?(TerminalGeometry(columns: columns, rows: rows))
-                case .snapshot(let bytes): workspace.render?(bytes, true)
-                case .control(let held, _): controlled = held
-                case .output(let bytes):
-                    let start = ProcessInfo.processInfo.systemUptime
-                    workspace.render?(bytes, false)
-                    let elapsed = ProcessInfo.processInfo.systemUptime - start
-                    renderSeconds += elapsed
-                    longestRender = max(longestRender, elapsed)
-                    feeds += 1
-                    received += bytes.filter { $0 == 120 }.count
-                    while acknowledged < received / 65536 {
-                        do { try active.send(Data("next\n".utf8)); acknowledged += 1 }
-                        catch { problem = error.localizedDescription; return }
-                    }
-                    tail = String((tail + String(decoding: bytes.suffix(128), as: UTF8.self)).suffix(128))
-                    if tail.contains("output-complete") { complete = true }
-                case .ended: ended = true
-                case .disconnected(let reason): problem = reason
-                default: break
-                }
+        var acknowledgementSent: Double?
+        var inputResponseTimes: [Double] = []
+        let render = try XCTUnwrap(workspace.render)
+        workspace.render = { bytes, reset in
+            let start = ProcessInfo.processInfo.systemUptime
+            if !reset, !bytes.isEmpty, let sent = acknowledgementSent {
+                inputResponseTimes.append(start - sent)
+                acknowledgementSent = nil
+            }
+            render(bytes, reset)
+            guard !reset else { return }
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            renderSeconds += elapsed
+            longestRender = max(longestRender, elapsed)
+            feeds += 1
+            received += bytes.filter { $0 == 120 }.count
+            while acknowledged < received / 65536 {
+                // Native editing, not direct transport writes: the remote PTY
+                // checks each resulting line before sending the next chunk.
+                controller.terminal.insertText("nex")
+                controller.terminal.deleteBackward()
+                controller.terminal.insertText("xt\n")
+                acknowledgementSent = ProcessInfo.processInfo.systemUptime
+                acknowledged += 1
+            }
+            tail = String((tail + String(decoding: bytes.suffix(128), as: UTF8.self)).suffix(128))
+            if tail.contains("output-complete") { complete = true }
+        }
+        await workspace.open(outputTask)
+        try await wait("Output fixture did not become viewable") { workspace.state == .viewing || problem() != nil }
+        XCTAssertNil(problem())
+        workspace.requestControl()
+        try await wait("Output fixture did not grant control") { workspace.state == .controlling || problem() != nil }
+        XCTAssertNil(problem())
+        controller.update(theme: .light)
+        var schedulingGaps: [Double] = []
+        let heartbeat = Task {
+            var previous = ProcessInfo.processInfo.systemUptime
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                schedulingGaps.append(now - previous)
+                previous = now
             }
         }
-        defer { reader.cancel() }
-        try active.requestControl(size: TerminalGeometry(columns: 80, rows: 24))
-        try await wait("Output fixture did not grant control") { controlled || problem != nil }
-        XCTAssertNil(problem)
-        try active.send(Data("start\n".utf8))
+        defer { heartbeat.cancel() }
+        controller.terminal.insertText("start\n")
         do {
-            try await wait("Sustained output did not complete", seconds: 60) { complete || problem != nil }
+            try await wait("Sustained output did not complete", seconds: 60) { complete || problem() != nil }
         } catch {
-            print("Mobile output stopped: received=\(received), acknowledged=\(acknowledged), feeds=\(feeds), ended=\(ended), problem=\(problem ?? "none"); \(error.localizedDescription)")
+            print("Mobile output stopped: received=\(received), acknowledged=\(acknowledged), feeds=\(feeds), state=\(workspace.state), problem=\(problem() ?? "none"); \(error.localizedDescription)")
             throw error
         }
-        XCTAssertNil(problem)
+        heartbeat.cancel()
+        XCTAssertNil(problem())
+        XCTAssertEqual(acknowledged, 512)
         XCTAssertEqual(received, expected, "The active phone must receive every output byte")
         XCTAssertTrue(controller.terminal.accessibilityPageContent()?.contains("output-complete") == true)
-        print("Mobile render proof: \(feeds) feeds, \(renderSeconds) seconds feeding, \(longestRender) seconds longest feed")
+        let gaps = schedulingGaps.sorted()
+        XCTAssertFalse(gaps.isEmpty, "The main actor must service other tasks during output")
+        if !gaps.isEmpty {
+            print("Mobile scheduling proof: \(gaps.count) samples, p95 \(gaps[Int(Double(gaps.count - 1) * 0.95)]) seconds, longest \(gaps.last!) seconds")
+        }
+        let responses = inputResponseTimes.sorted()
+        XCTAssertEqual(responses.count, 512)
+        if !responses.isEmpty {
+            print("Mobile native-input response: p95 \(responses[Int(Double(responses.count - 1) * 0.95)]) seconds, longest \(responses.last!) seconds")
+        }
+        print("Mobile render proof: \(feeds) feeds, \(renderSeconds) seconds feeding, \(longestRender) seconds longest feed; \(acknowledged) native edited acknowledgements")
 
         var staleBytes = 0
         var stalledFinished = false
@@ -215,9 +248,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         }
         defer { returningReader.cancel() }
         try await wait("Stalled phone did not recover the current screen passively") { freshScreen && passive }
-        try active.send(Data("done\n".utf8))
-        try await wait("Output fixture did not end") { ended || problem != nil }
-        XCTAssertTrue(ended)
+        controller.terminal.insertText("done\n")
+        try await wait("Output fixture did not end") { workspace.state == .ended || problem() != nil }
+        XCTAssertEqual(workspace.state, .ended)
     }
 
     private func exerciseCreation(client: RemoteMobileClient, directory: String) async throws {

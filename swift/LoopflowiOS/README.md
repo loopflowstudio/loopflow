@@ -100,6 +100,10 @@ owner’s geometry. Every reconnect requests a fresh screen. The renderer reques
 the next output event as it consumes the stream; the adapter retains only the
 current decoded batch instead of filling a second event queue. Input queues,
 message sizes and connection deadlines are bounded.
+Long-lived Task updates and terminal streams check that the Machine still answers
+while the app is in use. A lost connection becomes a reconnectable error even if
+no new output arrives. The checks stop when that stream closes or backgrounds;
+they never replay a command or keystroke.
 The deterministic peer owns its draft and consumes actual terminal bytes.
 Its small line editor is test/demo code, not another server or Session runtime.
 

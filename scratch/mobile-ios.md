@@ -75,6 +75,12 @@ receipt. Runs remain unavailable through the same shared admission policy.
 
 ## Next work and acceptance
 
+Sustained output now exercises MobileWorkspace and native editing, and a stalled
+viewer recovers after foreground liveness detection; see the dated proof below.
+Continue with actual service/network interruption while editing, including idle
+Task-watch recovery. The current proof covers deliberate slow-consumer backpressure,
+not a separately operated Desktop restart or a physical phone changing networks.
+
 The mounted-terminal sustained-output proof now passes; retain its failure-stage
 diagnostics. Two earlier batching experiments failed at output/recovery deadlines
 with misleading socket-error attribution. Later batched and original-decoder runs
@@ -559,3 +565,57 @@ Logs: `/tmp/mobile-session-open-rust-final.log`, `/tmp/mobile-session-open-layou
 checks passed in `/tmp/mobile-session-open-last.log`; eight shared Swift protocol
 tests passed in `/tmp/mobile-session-open-protocol-final.log`. Cargo fmt, all-target
 Clippy with warnings denied and diff whitespace checks pass.
+
+### Native input under load and stream liveness — November 4, 05:13
+
+The 32 MiB proof now opens through MobileWorkspace and the native terminal's
+keyboard path. Every 64 KiB, UITextInput inserts, deletes and submits a line;
+the remote PTY checks all 512 lines exactly. A 16 ms main-actor heartbeat measures
+scheduling while output is being drawn. The fixture selects its separate real
+retained owner in a copied Work surface; canonical Task selection is proven by
+the earlier stages, not by that copied field. No production domain model changed.
+
+This reproduced a stalled-reader recovery failure: after rendering all output,
+a stopped reader drained about 1 MiB and never received disconnection within
+15 seconds. The precise stage appears in `/tmp/mobile-busy-input-native-failure.log`;
+XCTest's final InvalidTransition attribution is misleading. The carrier also
+closed TCP without a WebSocket close handshake, independently reproduced as
+ResetWithoutClosingHandshake in a focused Rust test. Adding a bounded close frame
+fixed that protocol regression but did not fix the stalled native read; its
+second failure is preserved in `/tmp/mobile-busy-close-native-failure.log`.
+
+Long-lived foreground connections now ping every 20 seconds, with a five-second
+response deadline. Failure closes the socket and lets the existing observer
+recovery report disconnection. It never retries input, commands, or attachment.
+Task watches and terminal attachments share this connection behavior; closing or
+backgrounding stops the monitor. An initial continuation adapter crashed when
+Foundation called a ping completion twice during cancellation. The final callback
+settles once under OSAllocatedUnfairLock and has no continuation bridge; that
+failure log is `/tmp/mobile-ping-callback-failure.log`. The live proof exercises
+both ongoing pongs and the canceled/dead stalled connection.
+
+Final host-Tailscale acceptance passed at
+`Test-LoopflowiOS-2026.11.04_05-11-57--0800.xcresult` (48.573 seconds). It rendered
+33,554,432 bytes in 32,769 feeds; all 512 native edited acknowledgements arrived
+once. Native-input-to-next-output latency was p95 13.9 ms/max 20.5 ms. Main-actor
+wake intervals were p95 33.6 ms/max 58.6 ms across 2,233 samples. Feed calls consumed
+16.034 seconds at the keyboard's phone-sized grid; this differs from the earlier
+manual-render/80-column setup and is not a comparable speed regression measure.
+The stalled socket had already closed before consumption, and a fresh observer
+received the complete current screen without claims. The active controller then
+ended its program. Existing handoff, explicit Session continuation and recoverable
+creation also passed with exactly their intended provider/submission counts.
+
+The temporary Serve route was removed and its original empty configuration
+verified. Rust carrier tests prove idle ping replies, final-byte delivery followed
+by a WebSocket close, pairing and admission. All-target Clippy and formatting pass.
+This establishes Simulator native input and scheduling under a paced stream, not
+physical typing, GPU frame rate, memory/energy bounds or arbitrary network outage
+recovery. Earlier intermittent failure logs remain evidence; the reproduced
+stalled-read gap is fixed without claiming every earlier failure had that cause.
+Logs: `/tmp/mobile-busy-heartbeat-final.log`,
+`/tmp/mobile-busy-heartbeat-final-native.log`, `/tmp/mobile-close-validation.log`.
+
+Final native regression suite passed at 05:14:24: 53 ordinary tests passed,
+one opt-in integration test skipped without its fixture ticket. The separate live
+carrier pass above supplies that proof. Log: `/tmp/mobile-stream-liveness-native.log`.

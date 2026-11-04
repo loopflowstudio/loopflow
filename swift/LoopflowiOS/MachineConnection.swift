@@ -1,5 +1,6 @@
 import Foundation
 import Loopflow
+import os
 
 /// Local saved state, stored only in Keychain. Never include this value in logs.
 struct MachineCredential: Codable {
@@ -25,6 +26,7 @@ final class MachineConnection {
     private var buffered = Data()
     private var closed = false
     private var timedOut = false
+    private var heartbeat: Task<Void, Never>?
 
     init(endpoint: URL, token: String, path: String = "/v1/machine") throws {
         let url = try Self.socketURL(endpoint: endpoint, path: path)
@@ -42,8 +44,40 @@ final class MachineConnection {
     func close() {
         guard !closed else { return }
         closed = true
+        heartbeat?.cancel()
+        heartbeat = nil
         socket.cancel(with: .goingAway, reason: nil)
         buffered.removeAll()
+    }
+
+    /// Long-lived foreground streams need a bounded liveness check even when
+    /// no Work or terminal output changes. This never resends application data.
+    func keepAlive() {
+        guard heartbeat == nil, !closed else { return }
+        heartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(20)) } catch { return }
+                guard let self, !closed else { return }
+                ping()
+            }
+        }
+    }
+
+    private func ping() {
+        let timeout = deadline(seconds: 5)
+        // Foundation can report a pending ping's failure again when the socket
+        // is canceled. Settle once without bridging that callback to a continuation.
+        let completed = OSAllocatedUnfairLock(initialState: false)
+        socket.sendPing { [weak self] error in
+            let first = completed.withLock { settled in
+                guard !settled else { return false }
+                settled = true
+                return true
+            }
+            guard first else { return }
+            timeout.cancel()
+            if error != nil { Task { @MainActor in self?.close() } }
+        }
     }
 
     func deadline(seconds: Int = 15) -> Task<Void, Never> {

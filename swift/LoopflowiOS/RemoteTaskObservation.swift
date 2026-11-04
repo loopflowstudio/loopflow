@@ -28,6 +28,7 @@ final class RemoteTaskObservation: MobileTaskObservation {
             let first = try await connection.request(.subscribe(query, generation: 1))
             let observation = RemoteTaskObservation(connection: connection, first: first)
             try observation.receive(first)
+            connection.keepAlive()
             observation.reader = Task { [weak observation] in
                 guard let observation else { return }
                 do {

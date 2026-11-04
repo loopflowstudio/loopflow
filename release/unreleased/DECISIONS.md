@@ -12,6 +12,6 @@
 
 **Context:** v0.15.1 read `regressed_in` from the release Machine's own Tasks, so a mark made on another Machine never held `stable`. After a release PR merged, `lf release run` also failed on a merge commit it had not fetched (LOO-691).
 
-**Decision:** Jack Heart chose the GitHub issue as the record: a `regressed-in:vX.Y.Z` label on an issue in the released repository holds `stable`, and Tasks carry no regression field. `--regressed-in` leaves `lf task create|edit`. Jack also chose the installed `lf` for host releases, with no separate release home; the dedicated host follows `dev`, so release fixes reach it from green main.
+**Decision:** Jack Heart chose the GitHub issue as the record: a `regressed-in:vX.Y.Z` label on an issue in the released repository holds `stable`, and Tasks carry no regression field. `--regressed-in` leaves `lf task create|edit`, and the Git plan exchange stops carrying the field. `lf release issues`, `regress` and `promote` own regressions and moving `stable`, which stays GitHub's Latest marker. Jack also chose the installed `lf` for host releases, with no separate release home; the dedicated host follows `dev`, so release fixes reach it from green main.
 
-**Implications:** When issues can't be read, the release publishes, `stable` holds and `lf release check` fails. `tasks.regressed_in` stays unread until released builds stop exchanging it (LOO-727).
+**Implications:** When issues can't be read, the release publishes, `stable` holds, and `lf release check` and `lf release promote` fail. `tasks.regressed_in` stays in migrated databases, unread, until LOO-730 drops it.

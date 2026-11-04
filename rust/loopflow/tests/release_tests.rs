@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use loopflow::ops::{
     bump_version, generate_release, preview_release_notes, release_bump, release_check,
-    release_notes, release_run, release_status, release_tag, NullProgress, OpsError, Progress,
-    ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseRunOutcome,
+    release_issues, release_notes, release_promote, release_regress, release_run, release_status,
+    release_tag, NullProgress, OpsError, Progress, ReleaseNotesDegradation, ReleaseNotesStatus,
+    ReleaseRunOutcome,
 };
 use loopflow::repository::RepoId;
 use loopflow::store::{open_store, storage_config_from_env, StorageConfig};
@@ -1585,37 +1586,214 @@ fn release_status_names_the_issue_holding_stable() {
     assert!(holds[1].starts_with("v0.9.2 soaks until "), "{holds:?}");
 }
 
+#[test]
+fn release_issues_filters_by_version_and_shows_the_hold() {
+    let mut earlier = regression_issue("OPEN", "", None);
+    earlier["number"] = 8.into();
+    let (repo, _log, _env) = stable_fixture(
+        &[
+            ("v0.9.3", 9, false),
+            ("v0.9.2", 12, false),
+            ("v0.9.1", 20, true),
+        ],
+        Regressions::labelled("v0.9.3", regression_issue("OPEN", "", None))
+            .and("v0.9.2", earlier)
+            .and("v0.9.1", {
+                let mut fixed = regression_issue("CLOSED", "COMPLETED", Some(25));
+                fixed["number"] = 9.into();
+                fixed
+            }),
+    );
+    let numbers = |version| -> Vec<u64> {
+        release_issues(repo.path(), version, None)
+            .unwrap()
+            .iter()
+            .map(|issue| issue.number)
+            .collect()
+    };
+
+    // v0.9.3 carries the bug v0.9.2 regressed in; v0.9.2 does not carry v0.9.3's.
+    assert_eq!(numbers(Some("v0.9.3")), [7, 8]);
+    assert_eq!(numbers(Some("0.9.2")), [8]);
+    assert_eq!(numbers(Some("v0.9.1")), [9]);
+    assert_eq!(numbers(None), [7, 8]);
+
+    let issues = release_issues(repo.path(), Some("v0.9.3"), None).unwrap();
+    assert_eq!(issues[0].title, "Sessions lose their name");
+    assert_eq!(issues[0].state, "OPEN");
+    assert_eq!(issues[0].url, "https://github.com/acme/app/issues/7");
+    assert_eq!(issues[0].regressed_in, "v0.9.3");
+    assert_eq!(issues[0].holds, ["v0.9.3"]);
+    assert_eq!(issues[1].holds, ["v0.9.3", "v0.9.2"]);
+    assert!(
+        release_issues(repo.path(), Some("v0.9.1"), None).unwrap()[0]
+            .holds
+            .is_empty()
+    );
+}
+
+#[test]
+fn release_issues_refuses_a_version_it_cannot_read_and_fails_on_unread_regressions() {
+    let (repo, _log, _env) = stable_fixture(&[("v0.9.1", 20, true)], Regressions::Unreadable);
+
+    let error = release_issues(repo.path(), Some("soon"), None).unwrap_err();
+    assert!(error.to_string().contains("invalid release version: soon"));
+
+    let error = release_issues(repo.path(), None, None).unwrap_err();
+    assert!(error.to_string().contains("issues are disabled"), "{error}");
+}
+
+#[test]
+fn release_regress_creates_a_missing_label_once_and_files_the_issue() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("gh.log");
+    let labels = state.path().join("labels");
+    fs::write(&labels, "bug\n").unwrap();
+    let gh = format!(
+        r#"#!/bin/sh
+[ "$1" != --version ] || exit 0
+case "$1 $2" in
+  'label list') cat '{labels}'; exit 0;;
+  'label create') echo "gh $*" >> '{log}'; echo "$3" >> '{labels}'; exit 0;;
+  'issue create') echo "gh $*" >> '{log}'; echo https://github.com/acme/app/issues/12; exit 0;;
+esac
+exit 1
+"#,
+        labels = labels.display(),
+        log = log.display(),
+    );
+    let _env = EnvGuard::new(&[("gh", gh.as_str())]);
+
+    let url = release_regress(repo.path(), "0.15.3", "Sessions lose their name").unwrap();
+    release_regress(repo.path(), "v0.15.3", "Tabs lose their order").unwrap();
+
+    assert_eq!(url, "https://github.com/acme/app/issues/12");
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "gh label create regressed-in:v0.15.3\n\
+         gh issue create --title Sessions lose their name --label regressed-in:v0.15.3 --body Regressed in v0.15.3.\n\
+         gh issue create --title Tabs lose their order --label regressed-in:v0.15.3 --body Regressed in v0.15.3.\n"
+    );
+
+    let error = release_regress(repo.path(), "soon", "Nope").unwrap_err();
+    assert!(error.to_string().contains("invalid release version: soon"));
+}
+
+#[test]
+fn release_promote_moves_stable_past_soak() {
+    let (repo, log, _env) = stable_fixture(
+        &[
+            ("v0.9.3", 1, false),
+            ("v0.9.2", 8, false),
+            ("v0.9.1", 20, true),
+        ],
+        Regressions::NoLabels,
+    );
+
+    let stable = release_promote(repo.path(), None, false, &NullProgress).unwrap();
+
+    assert_eq!(stable.next.unwrap().tag, "v0.9.2");
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
+    );
+}
+
+#[test]
+fn release_promote_stops_at_an_open_regression() {
+    let (repo, log, _env) = stable_fixture(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled("v0.9.2", regression_issue("OPEN", "", None)),
+    );
+
+    let stable = release_promote(repo.path(), None, false, &NullProgress).unwrap();
+
+    assert_eq!(stable.next, None);
+    let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+    assert_eq!(holds, ["#7 holds v0.9.2"]);
+    assert!(!log.exists());
+}
+
+#[test]
+fn release_promote_dry_run_says_what_would_move_and_leaves_latest() {
+    let (repo, log, _env) = stable_fixture(
+        &[("v0.9.2", 8, false), ("v0.9.1", 20, true)],
+        Regressions::NoLabels,
+    );
+
+    let stable = release_promote(repo.path(), None, true, &NullProgress).unwrap();
+
+    assert_eq!(stable.current.unwrap().tag, "v0.9.1");
+    assert_eq!(stable.next.unwrap().tag, "v0.9.2");
+    assert!(!log.exists());
+}
+
+#[test]
+fn release_promote_fails_with_the_reason_when_regressions_are_unread() {
+    let releases = [("v0.9.2", 12, false), ("v0.9.1", 20, true)];
+    let (repo, log, _env) = stable_fixture(&releases, Regressions::Unreadable);
+
+    for dry_run in [false, true] {
+        let error = release_promote(repo.path(), None, dry_run, &NullProgress).unwrap_err();
+        assert!(error.to_string().contains("issues are disabled"), "{error}");
+    }
+    assert!(!log.exists());
+}
+
+#[test]
+fn release_promote_needs_a_github_release_target() {
+    let repo = TestRepo::new();
+    let _env = EnvGuard::new(&[("gh", "#!/bin/sh\nexit 0\n")]);
+
+    let error = release_promote(repo.path(), None, true, &NullProgress).unwrap_err();
+
+    assert!(error.to_string().contains("no stable stream"), "{error}");
+}
+
 /// What the fake `gh` answers for the repository's regressions.
 enum Regressions {
     /// A repository with no labels, for which `gh` prints nothing.
     NoLabels,
-    Labelled {
-        label: String,
-        issue: serde_json::Value,
-    },
+    /// `(label, issue)` pairs.
+    Labelled(Vec<(String, serde_json::Value)>),
     /// Labels read; the issue read fails.
     Unreadable,
 }
 
 impl Regressions {
     fn labelled(version: &str, issue: serde_json::Value) -> Self {
-        Self::Labelled {
-            label: format!("regressed-in:{version}"),
-            issue,
-        }
+        Self::Labelled(vec![(format!("regressed-in:{version}"), issue)])
+    }
+
+    fn and(mut self, version: &str, issue: serde_json::Value) -> Self {
+        let Self::Labelled(issues) = &mut self else {
+            panic!("only labelled regressions take another issue");
+        };
+        issues.push((format!("regressed-in:{version}"), issue));
+        self
     }
 
     /// The `label list` and `issue list` arms of a fake `gh` script.
     fn gh_arms(&self) -> String {
         let (labels, issues) = match self {
             Self::NoLabels => (String::new(), String::new()),
-            Self::Labelled { label, issue } => (
-                format!("bug\nregressed-in:soon\n{label}"),
-                format!(
-                    "  'issue list') [ \"$6\" = '{label}' ] || exit 1; echo '{}'; exit 0;;\n",
-                    serde_json::json!([issue])
-                ),
-            ),
+            Self::Labelled(issues) => {
+                let labels: Vec<&str> = issues.iter().map(|(label, _)| label.as_str()).collect();
+                let reads: String = issues
+                    .iter()
+                    .map(|(label, issue)| {
+                        format!(
+                            "'{label}') echo '{}'; exit 0;; ",
+                            serde_json::json!([issue])
+                        )
+                    })
+                    .collect();
+                (
+                    format!("bug\nregressed-in:soon\n{}", labels.join("\n")),
+                    format!("  'issue list') case \"$6\" in {reads}esac; exit 1;;\n"),
+                )
+            }
             Self::Unreadable => (
                 "regressed-in:v0.9.2".to_string(),
                 "  'issue list') echo 'issues are disabled' >&2; exit 1;;\n".to_string(),
@@ -1630,7 +1808,9 @@ fn regression_issue(state: &str, reason: &str, closed_days_ago: Option<i64>) -> 
     let closed_at = closed_days_ago
         .map(|days| (chrono::Utc::now() - chrono::TimeDelta::days(days)).to_rfc3339());
     serde_json::json!({
-        "number": 7, "state": state, "stateReason": reason, "closedAt": closed_at,
+        "number": 7, "title": "Sessions lose their name",
+        "url": "https://github.com/acme/app/issues/7",
+        "state": state, "stateReason": reason, "closedAt": closed_at,
     })
 }
 

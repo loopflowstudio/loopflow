@@ -48,6 +48,17 @@ workflow, and the publisher under `release.targets` in `.lf/config.yaml`. Keep
 credential-free builds and smoke tests in the workflow. Keep signing,
 publication, deployment, and secret handling in the publisher.
 
+## Regressions and stable
+
+```bash
+lf release regress v0.15.3 "Sessions lose their name"  # file one against a release
+lf release issues v0.15.3                              # what it carries, and what each issue holds
+lf release promote --dry-run                           # what would move, or what holds it
+lf release promote                                     # move stable now, outside a run
+```
+
+A GitHub issue labelled `regressed-in:v<version>` is all a regression takes.
+
 ## Re-entry
 
 `lf release run` resumes an existing release PR or incomplete latest tag after

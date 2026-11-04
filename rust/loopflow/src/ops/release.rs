@@ -767,9 +767,124 @@ pub fn release_run(
     }
     let outcome = release_version(&main_repo, &target, version_input, progress, lock)?;
     if target.completion == ReleaseCompletion::GithubRelease {
-        advance_stable(&main_repo, &target, progress, lock)?;
+        let stable = advance_stable(&main_repo, &target, progress, lock)?;
+        for hold in &stable.holds {
+            progress.status(&hold.to_string());
+        }
     }
     Ok(outcome)
+}
+
+/// Move `stable` to the newest soaked release no regression covers, or with
+/// `dry_run` only say what would move. Returns the stream as read: `next` is
+/// where it moved, `holds` what keeps newer releases back. Regressions that
+/// cannot be read are an error here, where a person asked for the move.
+pub fn release_promote(
+    repo: &Path,
+    target_name: Option<&str>,
+    dry_run: bool,
+    progress: &impl Progress,
+) -> OpsResult<StableStream> {
+    let (main_repo, target) = resolve_stable_target(repo, target_name)?;
+    let stable = if dry_run {
+        read_stable_stream(&main_repo, &published_releases(&main_repo, &target)?)
+    } else {
+        let lock = ReleaseLock::acquire(&main_repo, &target.name)?;
+        advance_stable(&main_repo, &target, progress, &lock)?
+    };
+    if let Some(unread) = stable
+        .holds
+        .iter()
+        .find(|hold| matches!(hold, StableHold::RegressionsUnread { .. }))
+    {
+        return Err(OpsError::Message(format!("stable holds: {unread}")));
+    }
+    Ok(stable)
+}
+
+/// The issues reported against `version`: those labelled with it and those
+/// from earlier releases it still carries. Without a version, every open
+/// regression. Newest release first.
+pub fn release_issues(
+    repo: &Path,
+    version: Option<&str>,
+    target_name: Option<&str>,
+) -> OpsResult<Vec<ReleaseIssue>> {
+    let version = version.map(required_version).transpose()?;
+    let (main_repo, target) = resolve_stable_target(repo, target_name)?;
+    let releases = published_releases(&main_repo, &target)?;
+    let mut regressions = regressions(&main_repo)?;
+    regressions.sort_by_key(|regression| (std::cmp::Reverse(regression.version), regression.issue));
+    let past_stable = releases_past_stable(&releases, &regressions, chrono::Utc::now());
+    let release =
+        version.and_then(|version| releases.iter().find(|release| release.version == version));
+    Ok(regressions
+        .iter()
+        .filter(|regression| match version {
+            Some(version) => {
+                regression.version == version
+                    || release.is_some_and(|release| regression.covers(release))
+            }
+            None => regression.state == "OPEN",
+        })
+        .map(|regression| regression.issue_holding(&past_stable))
+        .collect())
+}
+
+/// File a regression against `version`, creating its label when this is the
+/// release's first. Returns the issue's URL.
+pub fn release_regress(repo: &Path, version: &str, title: &str) -> OpsResult<String> {
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+    let tag = version_tag(required_version(version)?);
+    let label = format!("{REGRESSED_IN_PREFIX}{tag}");
+    if !labels(repo)?.contains(&label) {
+        run_stdout(repo, "gh", &["label", "create", &label])?;
+    }
+    // `gh issue create` refuses to run without a terminal unless given a body.
+    let url = run_stdout(
+        repo,
+        "gh",
+        &[
+            "issue",
+            "create",
+            "--title",
+            title,
+            "--label",
+            &label,
+            "--body",
+            &format!("Regressed in {tag}."),
+        ],
+    )?;
+    Ok(url.trim().to_string())
+}
+
+fn version_tag((major, minor, patch): (u64, u64, u64)) -> String {
+    format!("v{major}.{minor}.{patch}")
+}
+
+fn required_version(version: &str) -> OpsResult<(u64, u64, u64)> {
+    parse_version(version)
+        .ok_or_else(|| OpsError::Message(format!("invalid release version: {version}")))
+}
+
+/// A target with a `stable` stream: one that completes on a GitHub Release.
+fn resolve_stable_target(
+    repo: &Path,
+    target_name: Option<&str>,
+) -> OpsResult<(PathBuf, ReleaseTarget)> {
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    if target.completion != ReleaseCompletion::GithubRelease {
+        return Err(OpsError::Message(format!(
+            "release target {} has no stable stream: it does not complete on a GitHub Release",
+            target.name
+        )));
+    }
+    Ok((main_repo, target))
 }
 
 fn release_version(
@@ -4315,6 +4430,9 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
 #[derive(Debug)]
 struct Regression {
     issue: u64,
+    title: String,
+    state: String,
+    url: String,
     version: (u64, u64, u64),
     fixed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -4326,12 +4444,46 @@ impl Regression {
                 .fixed_at
                 .is_none_or(|fixed_at| release.published_at < fixed_at)
     }
+
+    fn held_tags(&self, past_stable: &[&PublishedRelease]) -> Vec<String> {
+        past_stable
+            .iter()
+            .filter(|release| self.covers(release))
+            .map(|release| release.tag.clone())
+            .collect()
+    }
+
+    fn issue_holding(&self, past_stable: &[&PublishedRelease]) -> ReleaseIssue {
+        ReleaseIssue {
+            number: self.issue,
+            title: self.title.clone(),
+            state: self.state.clone(),
+            url: self.url.clone(),
+            regressed_in: version_tag(self.version),
+            holds: self.held_tags(past_stable),
+        }
+    }
+}
+
+/// A regression as `lf release issues` reports it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ReleaseIssue {
+    pub number: u64,
+    pub title: String,
+    /// GitHub's `OPEN` or `CLOSED`.
+    pub state: String,
+    pub url: String,
+    pub regressed_in: String,
+    /// The releases past `stable` it keeps back, newest first.
+    pub holds: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhRegressionIssue {
     number: u64,
+    title: String,
+    url: String,
     state: String,
     state_reason: Option<String>,
     closed_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -4349,18 +4501,26 @@ impl GhRegressionIssue {
         };
         Some(Regression {
             issue: self.number,
+            title: self.title,
+            state: self.state,
+            url: self.url,
             version,
             fixed_at,
         })
     }
 }
 
+const REGRESSED_IN_PREFIX: &str = "regressed-in:";
+
 /// The repository's regressions: its GitHub issues labelled
 /// `regressed-in:vX.Y.Z`, so every Machine reads the same ones.
 fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
     let mut regressions = Vec::new();
     for label in labels(repo)? {
-        let Some(version) = label.strip_prefix("regressed-in:").and_then(parse_version) else {
+        let Some(version) = label
+            .strip_prefix(REGRESSED_IN_PREFIX)
+            .and_then(parse_version)
+        else {
             continue;
         };
         let json = run_stdout(
@@ -4376,7 +4536,7 @@ fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
                 "--limit",
                 "1000",
                 "--json",
-                "number,state,stateReason,closedAt",
+                "number,title,url,state,stateReason,closedAt",
             ],
         )?;
         let issues: Vec<GhRegressionIssue> = serde_json::from_str(&json)
@@ -4441,6 +4601,24 @@ fn stable_advance<'a>(
         })
         .max_by_key(|release| release.version)
         .filter(|candidate| current.is_none_or(|current| candidate.version > current))
+}
+
+/// The published releases newer than where `stable` stands after its next
+/// move, newest first. Each is held: one soaked and uncovered would be the move.
+fn releases_past_stable<'a>(
+    releases: &'a [PublishedRelease],
+    regressions: &[Regression],
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<&'a PublishedRelease> {
+    let floor = stable_advance(releases, regressions, now)
+        .or_else(|| releases.iter().find(|release| release.is_latest))
+        .map(|release| release.version);
+    let mut past: Vec<&PublishedRelease> = releases
+        .iter()
+        .filter(|release| floor.is_none_or(|floor| release.version > floor))
+        .collect();
+    past.sort_by_key(|release| std::cmp::Reverse(release.version));
+    past
 }
 
 /// One release as the stable stream names it.
@@ -4509,21 +4687,11 @@ fn stable_stream(
 ) -> StableStream {
     let current = releases.iter().find(|release| release.is_latest);
     let next = stable_advance(releases, regressions, now);
-    let floor = next.or(current).map(|release| release.version);
-    let mut newer: Vec<&PublishedRelease> = releases
-        .iter()
-        .filter(|release| floor.is_none_or(|floor| release.version > floor))
-        .collect();
-    newer.sort_by_key(|release| std::cmp::Reverse(release.version));
-    // Every newer release is held: one soaked and uncovered would be `next`.
+    let newer = releases_past_stable(releases, regressions, now);
     let mut holds: Vec<StableHold> = regressions
         .iter()
         .filter_map(|regression| {
-            let tags: Vec<String> = newer
-                .iter()
-                .filter(|release| regression.covers(release))
-                .map(|release| release.tag.clone())
-                .collect();
+            let tags = regression.held_tags(&newer);
             (!tags.is_empty()).then_some(StableHold::Regression {
                 issue: regression.issue,
                 tags,
@@ -4558,13 +4726,10 @@ fn advance_stable(
     target: &ReleaseTarget,
     progress: &impl Progress,
     lock: &ReleaseLock,
-) -> OpsResult<()> {
+) -> OpsResult<StableStream> {
     let stable = read_stable_stream(repo, &published_releases(repo, target)?);
-    for hold in &stable.holds {
-        progress.status(&hold.to_string());
-    }
-    let Some(next) = stable.next else {
-        return Ok(());
+    let Some(next) = &stable.next else {
+        return Ok(stable);
     };
     progress.status(&format!(
         "Moving stable to {} (published {})...",
@@ -4589,7 +4754,7 @@ fn advance_stable(
         "gh",
         &["release", "edit", &next.tag, "--latest"],
     )?;
-    Ok(())
+    Ok(stable)
 }
 
 #[allow(clippy::too_many_arguments)] // Hook expansion and the two independent ownership scopes.
@@ -4700,6 +4865,14 @@ mod tests {
     fn regression(version: &str, fixed_days_ago: Option<i64>) -> Regression {
         Regression {
             issue: 1,
+            title: "Sessions lose their name".to_string(),
+            state: if fixed_days_ago.is_some() {
+                "CLOSED"
+            } else {
+                "OPEN"
+            }
+            .to_string(),
+            url: "https://github.com/acme/app/issues/1".to_string(),
             version: parse_version(version).unwrap(),
             fixed_at: fixed_days_ago.map(|days| chrono::Utc::now() - chrono::TimeDelta::days(days)),
         }

@@ -103,12 +103,13 @@ version as `lf --version` — no separate manifest to bump or drift.
 |--------|------------|--------------|
 | `dev` | Newest green main build | Every green main |
 | `preview` | Newest published release | Every release |
-| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago that no regression covers |
+| `stable` | GitHub's Latest marker | The daily release run or `lf release promote`, to the newest release published at least 7 days ago that no regression covers |
 
 Publishing never marks a release Latest (`gh release edit --latest=false`).
 After each run, including one with nothing to release, `lf release run` moves
-`stable` forward for a target with `completion: github-release`. It never
-moves it back: a Latest set ahead by hand stays until a newer release soaks.
+`stable` forward for a target with `completion: github-release`, the same move
+`lf release promote` makes on demand. Neither moves it back: a Latest set ahead
+by hand stays until a newer release soaks.
 Before moving the marker it runs the publisher's `promote --tag <tag>`, which
 points `Loopflow-latest.dmg` at that release's DMG after checking it against
 `SHA256SUMS`. A failed promotion leaves the marker for the next run.
@@ -144,21 +145,25 @@ first launch after an update runs `lf install adopt`, which migrates the store
 and links `lf` into the new bundle without moving files.
 
 ```bash
-gh label create regressed-in:v0.15.3                # once per release; gh refuses unknown labels
-gh issue create --title "Sessions lose their name" --label regressed-in:v0.15.3
-gh issue edit 12 --add-label regressed-in:v0.15.3    # mark an existing bug
-gh issue close 12 --reason completed                 # the fix landed
-gh issue close 12 --reason "not planned"             # it was not a regression
+lf release regress v0.15.3 "Sessions lose their name"  # creates the label if needed, files the issue
+lf release issues v0.15.3                              # what it carries, and what each issue holds
+lf release issues                                      # every open regression
+lf release promote --dry-run                           # what would move, or what holds it
+lf release promote                                     # checks soak and regressions, then moves stable
+gh issue edit 12 --add-label regressed-in:v0.15.3      # mark an existing bug
+gh issue close 12 --reason completed                   # the fix landed
+gh issue close 12 --reason "not planned"               # it was not a regression
 ```
 
 A regression is a GitHub issue on the repository being released, labelled with
-the release it regressed in. While it is open, `stable` stays below that
-release. Closing it as completed makes the first release published afterwards
-eligible once it soaks; releases in between still carry the bug and stay
-skipped. Closing it as not planned or as a duplicate, or removing the label,
+the release it regressed in; the label is all it takes. While it is open,
+`stable` stays below that release. Closing it as completed makes the first
+release published afterwards eligible once it soaks; releases in between still
+carry the bug and stay skipped. Closing it as not planned or as a duplicate, or removing the label,
 drops the hold. Every Machine reads the same issues. The run logs which issue
 holds `stable`. When GitHub can't be read, the release still publishes,
-`stable` stays put, and `lf release status` says why; `lf release check` fails.
+`stable` stays put, and `lf release status` says why; `lf release check` and
+`lf release promote` fail.
 
 ## What we took from other projects
 

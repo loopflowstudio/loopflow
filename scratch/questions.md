@@ -12,6 +12,7 @@ supervisor isolation; SMAppService updates may kill the helper; remote proxies
 cannot borrow Unix peer trust. Exact remote transport, takeover UX, unattended
 Mac hosting, create/start recovery and remaining Work cutover remain later work.
 
-Wave memory exceeds its token target by 51 tokens. This implement step has no
-Wave-memory write authority; proposed curation is to compress historical wording
-in the next Wave maintenance step. Its live decisions remain unchanged.
+The compress step's explicit context-budget instruction authorizes curation.
+Condensed repeated attribution guidance in Wave memory; live decisions and
+evidence remain unchanged. Prior wording is preserved at
+`5b44a394cff91d0aa20c614c3b20c3f7e121affb:.lf/wave/product/MEMORY.md`.

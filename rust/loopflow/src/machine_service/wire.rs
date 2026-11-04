@@ -92,15 +92,6 @@ pub enum ErrorCode {
     OutcomeUnknown,
 }
 
-/// After subscribe, checkpoints use the existing watch request shape. Closing
-/// the connection cancels. A new connection always gets a fresh reading.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Checkpoint {
-    pub id: u64,
-    pub args: Option<serde_json::Value>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::{Operation, Reply, Request, Response};

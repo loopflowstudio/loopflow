@@ -555,21 +555,16 @@ Attribution and receipts:
 `35e759aaf:wave/product/MEMORY.md`, this heading. AGENTS.md owns the naming rule;
 curation changes neither.
 
-- Personal `user.name`, the current participant and each request's original
-  author are different facts. Repository config cannot name every caller.
-  `LF_USER_NAME` carries launch participation; forwarded empty stays unknown
-  instead of adopting a remote Home owner's name. Detached work starts unnamed.
-  Native resume must deliver corrections and clearing to the model, not merely
-  change its environment; the update grants no review approval.
-- Store each text's author in its existing journal/provider record. Preserve
-  unknown on replay; provider IDs own identity and names are display data.
-  Publishers/editors need not be authors. No second name store, registry,
-  historical backfill or output-replacement filter is needed. Chat projections
-  must not fill absent historical names from the current participant.
-- Capture a name only for authored text. A preference-read failure once blocked
-  a bare Mac interrupt. Control inputs without text must remain independent of
-  display preferences. The repaired production loopback path demonstrated that
-  regression, not just a mock call.
+- Git identity, participant and original author are distinct. `LF_USER_NAME`
+  carries launch participation; forwarded empty stays unknown, and detached work
+  starts unnamed. Native resume must deliver corrections/clearing to the model;
+  changing environment alone is insufficient and grants no review approval.
+- Existing journal/provider records own authorship. Provider IDs identify;
+  names display. Preserve unknown on replay, never backfill from participants or
+  publishers/editors. No second store, registry or output-replacement filter.
+- Names apply to authored text, not control inputs. A preference-read failure
+  blocked a bare Mac interrupt; the repaired production loopback demonstrated
+  that regression. Controls must stay independent of display preferences.
 - A failed-demo conversation is useful evidence, never a success claim.
   Runnable prototyping and Flow alternatives belong to LOO-297.
 - Fixture renders do not prove tab/window interaction or native recovery.

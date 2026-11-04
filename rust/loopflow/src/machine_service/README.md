@@ -41,6 +41,8 @@ setup delegates to the promoted installation; source builds use an explicit
 - `subscribe {query,generation}` supports `roadmap`. `reading {generation,frame}`
   wraps the existing complete `answers/unavailable/body` watch frame. Subsequent
   client frames are existing watch checkpoints (`{"id":3}`) or argument changes.
+  The shared watch validates them, including its 16 KiB limit; an invalid
+  checkpoint ends the watch with an `unavailable` reading.
   Closing cancels. Reconnect opens a fresh subscription; no replay cursor exists.
 - `command {change}` supports `session_rename` using the existing `Write` shape
   and argv mapping. `command {trace_id,output,stderr,code}` reports the real CLI result.

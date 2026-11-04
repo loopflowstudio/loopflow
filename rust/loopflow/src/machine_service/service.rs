@@ -1,11 +1,11 @@
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Notify, Semaphore};
 
@@ -41,7 +41,6 @@ pub(super) async fn run() -> Result<()> {
     let instance = Arc::new(uuid::Uuid::new_v4().to_string());
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     tracing::info!(%instance, socket = %path.display(), "Machine service ready");
-    let _lock: File = lock;
     loop {
         let (socket, _) = listener.accept().await?;
         // Unix admission is deliberately unavailable to remote proxies.
@@ -169,25 +168,25 @@ async fn operation(
                 max_connections: MAX_CONNECTIONS,
             }
         }
-        Operation::Read { query } => {
-            if !supported_read(&query) {
-                return unsupported(socket, id, instance).await;
-            }
-            Reply::Read {
-                output: tokio::task::spawn_blocking(move || query.read()).await??,
-            }
-        }
-        Operation::Subscribe { query, generation } => {
-            if !matches!(query, Read::Roadmap { .. }) {
-                return unsupported(socket, id, instance).await;
-            }
+        Operation::Read { query } if supported_read(&query) => Reply::Read {
+            output: tokio::task::spawn_blocking(move || query.read()).await??,
+        },
+        Operation::Subscribe { query, generation } if matches!(query, Read::Roadmap { .. }) => {
             return subscribe(socket, id, instance, query, generation).await;
         }
-        Operation::Command { change } => {
-            if !matches!(change, Write::SessionRename { .. }) {
-                return unsupported(socket, id, instance).await;
+        Operation::Command { change } if matches!(change, Write::SessionRename { .. }) => {
+            command(change, id, instance)
+                .await
+                .unwrap_or_else(|error| Reply::Error {
+                    code: ErrorCode::OutcomeUnknown,
+                    message: format!("{error}; inspect Session state before retrying"),
+                })
+        }
+        Operation::Read { .. } | Operation::Subscribe { .. } | Operation::Command { .. } => {
+            Reply::Error {
+                code: ErrorCode::Unsupported,
+                message: "Operation is outside this service's advertised capabilities".into(),
             }
-            command(change, id, instance).await
         }
         Operation::Attach { owner } => {
             let mut destination = UnixStream::connect(crate::transport::endpoint(&owner)?)
@@ -216,19 +215,6 @@ fn supported_read(query: &Read) -> bool {
     )
 }
 
-async fn unsupported(socket: &mut UnixStream, id: &str, instance: &str) -> Result<()> {
-    respond(
-        socket,
-        id,
-        instance,
-        Reply::Error {
-            code: ErrorCode::Unsupported,
-            message: "Operation is outside this service's advertised capabilities".into(),
-        },
-    )
-    .await
-}
-
 async fn subscribe(
     socket: &mut UnixStream,
     id: &str,
@@ -249,7 +235,8 @@ async fn subscribe(
         tokio::select! {
             bytes = &mut input => {
                 let bytes = bytes?;
-                let _: super::wire::Checkpoint = serde_json::from_slice(&bytes)?;
+                // The shared watch owns checkpoint parsing and its final error
+                // reading, including argument validation and request limits.
                 subscription.request(&bytes);
                 drop(input);
                 input = Box::pin(receive(&mut reader, MAX_REQUEST));
@@ -258,10 +245,9 @@ async fn subscribe(
                 let pull = subscription.clone();
                 let frame = tokio::task::spawn_blocking(move || pull.pull()).await?;
                 if let Some(frame) = frame {
-                    let response = Response { id: id.into(), instance: instance.into(), result: Reply::Reading {
+                    respond(&mut writer, id, instance, Reply::Reading {
                         generation, frame: serde_json::from_slice(&frame)?,
-                    }};
-                    send(&mut writer, &serde_json::to_vec(&response)?).await?;
+                    }).await?;
                 }
                 if subscription.ended() { return Ok(()); }
             }
@@ -269,18 +255,9 @@ async fn subscribe(
     }
 }
 
-async fn command(change: Write, id: &str, instance: &str) -> Reply {
-    match execute(change, id, instance).await {
-        Ok(reply) => reply,
-        Err(error) => Reply::Error {
-            code: ErrorCode::OutcomeUnknown,
-            message: format!("{error}; inspect Session state before retrying"),
-        },
-    }
-}
-
-async fn execute(change: Write, id: &str, instance: &str) -> Result<Reply> {
-    let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
+async fn command(change: Write, id: &str, instance: &str) -> Result<Reply> {
+    let executable = crate::os_process::resolve_lf_binary()?;
+    let mut command = tokio::process::Command::new(&executable);
     // A service has no caller Session/Task. Never lend its launcher's identity
     // to requests, or change process-global environment while serving clients.
     for (key, _) in std::env::vars_os() {
@@ -291,44 +268,47 @@ async fn execute(change: Write, id: &str, instance: &str) -> Result<Reply> {
     let trace_id = crate::id::TraceId::default();
     command.env("LF_TRACE_ID", trace_id.as_str());
     command.env("LF_HOME", crate::store::lf_home_dir());
-    command.env("LF_BIN", crate::os_process::resolve_lf_binary()?);
+    command.env("LF_BIN", executable);
     command
         .args(change.argv())
         .current_dir(change.directory())
-        .stdin(std::process::Stdio::null());
-    command
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let mut child = command.spawn()?;
     tracing::info!(request = %id, %instance, pid = child.id(), %trace_id, "Machine command started");
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
-    let read = async |stream: Box<dyn tokio::io::AsyncRead + Send + Unpin>| -> Result<Vec<u8>> {
-        let mut bytes = Vec::new();
-        stream
-            .take((MAX_FRAME / 2) as u64)
-            .read_to_end(&mut bytes)
-            .await?;
-        anyhow::ensure!(
-            bytes.len() < MAX_FRAME / 2,
-            "command output exceeded its limit"
-        );
-        Ok(bytes)
-    };
-    let (output, errors, status) =
-        tokio::join!(read(Box::new(stdout)), read(Box::new(stderr)), child.wait());
+    let (output, errors, status) = tokio::join!(
+        read_command_output(stdout),
+        read_command_output(stderr),
+        child.wait()
+    );
     let status = status?;
     tracing::info!(request = %id, %instance, code = status.code(), %trace_id, "Machine command exited");
     Ok(Reply::Command {
         trace_id,
-        output: String::from_utf8(output?)?,
-        stderr: String::from_utf8(errors?)?,
+        output: output?,
+        stderr: errors?,
         code: status.code().unwrap_or(1),
     })
 }
 
+async fn read_command_output(stream: impl AsyncRead + Unpin) -> Result<String> {
+    let mut bytes = Vec::new();
+    stream
+        .take((MAX_FRAME / 2) as u64)
+        .read_to_end(&mut bytes)
+        .await?;
+    anyhow::ensure!(
+        bytes.len() < MAX_FRAME / 2,
+        "command output exceeded its limit"
+    );
+    Ok(String::from_utf8(bytes)?)
+}
+
 pub(super) async fn receive(
-    reader: &mut (impl tokio::io::AsyncRead + Unpin),
+    reader: &mut (impl AsyncRead + Unpin),
     limit: usize,
 ) -> Result<Vec<u8>> {
     let length = reader.read_u32().await? as usize;
@@ -338,29 +318,27 @@ pub(super) async fn receive(
     Ok(bytes)
 }
 
-async fn send(writer: &mut (impl tokio::io::AsyncWrite + Unpin), bytes: &[u8]) -> Result<()> {
+async fn respond(
+    writer: &mut (impl AsyncWrite + Unpin),
+    id: &str,
+    instance: &str,
+    result: Reply,
+) -> Result<()> {
+    let bytes = serde_json::to_vec(&Response {
+        id: id.into(),
+        instance: instance.into(),
+        result,
+    })?;
     anyhow::ensure!(
         bytes.len() <= MAX_FRAME,
         "Machine reading exceeds frame limit"
     );
     tokio::time::timeout(Duration::from_secs(5), async {
         writer.write_u32(bytes.len() as u32).await?;
-        writer.write_all(bytes).await
+        writer.write_all(&bytes).await
     })
     .await??;
     Ok(())
-}
-
-async fn respond(socket: &mut UnixStream, id: &str, instance: &str, result: Reply) -> Result<()> {
-    send(
-        socket,
-        &serde_json::to_vec(&Response {
-            id: id.into(),
-            instance: instance.into(),
-            result,
-        })?,
-    )
-    .await
 }
 
 #[cfg(test)]

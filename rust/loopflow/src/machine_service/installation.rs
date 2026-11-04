@@ -60,7 +60,7 @@ pub fn ensure() -> Result<Status> {
     lock.lock_exclusive()?;
     let before = status()?;
     if before.ready {
-        return status();
+        return Ok(before);
     }
     let home = crate::store::lf_home_dir().canonicalize()?;
     let executable = crate::os_process::resolve_lf_binary()?;

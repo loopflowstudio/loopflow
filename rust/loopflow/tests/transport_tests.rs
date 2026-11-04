@@ -3545,18 +3545,20 @@ impl<'a> MachineServiceProof<'a> {
                 "Concurrent startup must obtain one service"
             );
         } else {
-            service.child = Some(
-                fixture
-                    .command(&["machine", "service", "run"])
-                    .env_remove("RUST_LOG")
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .unwrap(),
-            );
+            service.child = Some(service.launch());
         }
         service.ready();
         service
+    }
+
+    fn launch(&self) -> Child {
+        self.fixture
+            .command(&["machine", "service", "run"])
+            .env_remove("RUST_LOG")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
     }
 
     fn ready(&self) -> String {
@@ -3586,15 +3588,7 @@ impl<'a> MachineServiceProof<'a> {
         if let Some(mut child) = self.child.take() {
             child.kill().unwrap();
             child.wait().unwrap();
-            self.child = Some(
-                self.fixture
-                    .command(&["machine", "service", "run"])
-                    .env_remove("RUST_LOG")
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .unwrap(),
-            );
+            self.child = Some(self.launch());
         } else {
             let output = Command::new("/bin/launchctl")
                 .args(["kickstart", "-k", &self.target()])
@@ -3693,6 +3687,33 @@ fn machine_receive(socket: &mut UnixStream) -> Value {
     let mut bytes = vec![0; length];
     socket.read_exact(&mut bytes).unwrap();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+#[test]
+fn machine_service_invalid_checkpoints_use_shared_watch_errors() {
+    let fixture = Fixture::new();
+    let service = MachineServiceProof::start(&fixture, false);
+    for checkpoint in [json!({"unknown": 1}), json!({"id": 1, "args": false})] {
+        let (mut socket, initial) = service.request(
+            "tasks",
+            json!({"kind":"subscribe","query":{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":7}),
+        );
+        assert_eq!(initial["result"]["kind"], "reading");
+        machine_send(&mut socket, checkpoint);
+        loop {
+            let response = machine_receive(&mut socket);
+            assert_eq!(response["id"], "tasks");
+            assert_eq!(response["result"]["kind"], "reading");
+            assert_eq!(response["result"]["generation"], 7);
+            let frame = &response["result"]["frame"];
+            if let Some(error) = frame["unavailable"].as_str() {
+                assert!(error.contains("invalid watch request"), "{error}");
+                assert!(frame["body"].is_null());
+                break;
+            }
+        }
+        assert_eq!(socket.read(&mut [0]).unwrap(), 0);
+    }
 }
 
 #[test]

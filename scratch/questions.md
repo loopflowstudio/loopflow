@@ -1,5 +1,12 @@
 # LOO-582 direction
 
+November 4, 2026 — newest direction supersedes pending-directory guidance below:
+Jack Heart requested immediate Session cwd changes on binding, removing
+`requested_cwd` and deferred-move state. Binding is rare and its live-process
+rough edges are accepted. Keep the same conversation and files; no new move
+lifecycle, interruption or approval flow. See the accepted simplification at
+the top of `loo-582.md`. Implement, publish and stop at demo; no merge approval.
+
 Jack Heart clarified on November 3, 2026: `session bind SESSION --task TASK`
 always selects the primary conversation and requests continuation in the Task's
 worktree. Remove `task promote`; do not add `--primary`. This supersedes the

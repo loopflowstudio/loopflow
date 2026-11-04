@@ -21,13 +21,12 @@ pub fn private_path(repo: &Path) -> Result<PathBuf> {
     Ok(root.join(PRIVATE_FILE))
 }
 
-pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<String> {
+pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
     if let Ok(id) = crate::id::WaveId::parse(name) {
-        return Ok(id.to_string());
+        return Ok(Some(id.to_string()));
     }
     let config = crate::work::wave::config::try_read_wave_config(repo, name)?;
-    config.and_then(|config| config.id).map(|id| id.to_string())
-        .with_context(|| format!("Wave {name} needs its authored id before private settings can follow it through renames"))
+    Ok(config.and_then(|config| config.id).map(|id| id.to_string()))
 }
 
 /// A user edit selects an owner, never a file plus an independently asserted scope.
@@ -119,7 +118,11 @@ impl Destination {
             (
                 private_path(&repository)?,
                 wave.as_deref()
-                    .map(|wave| wave_key(&repository, wave).map(|id| vec!["waves".into(), id]))
+                    .map(|wave| -> Result<Vec<String>> {
+                        let id = wave_key(&repository, wave)?
+                            .with_context(|| format!("Wave {wave} needs its authored id before private settings can follow it through renames"))?;
+                        Ok(vec!["waves".into(), id])
+                    })
                     .transpose()?
                     .unwrap_or_default(),
             )

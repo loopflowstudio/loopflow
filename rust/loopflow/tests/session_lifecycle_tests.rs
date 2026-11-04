@@ -1787,14 +1787,13 @@ fn declared_agent_can_start_another_tasks_graph() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "switch-proof"], "cwd": x,
+            "argv": ["env", format!("LF_BIN={}", bin.join("lf").display()), env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "switch-proof"], "cwd": x,
         }))
         .unwrap(),
     )
     .unwrap();
     let output = fixture
         .command(&["--task", "INF-124", "-a", "opencode", "-i", ":", "Start Y"])
-        .env("LF_BIN", bin.join("lf"))
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");

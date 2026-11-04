@@ -395,6 +395,15 @@ fn assert_launch_settings(launch: &serde_json::Value, inspected: &serde_json::Va
 
 #[test]
 fn runtime_and_exported_occurrences_resolve_live_preferences_at_the_same_authority() {
+    exercise_live_occurrence_preferences(false);
+}
+
+#[test]
+fn runtime_and_exported_occurrences_resolve_unsets_and_invocation_overrides() {
+    exercise_live_occurrence_preferences(true);
+}
+
+fn exercise_live_occurrence_preferences(overrides: bool) {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
@@ -498,18 +507,20 @@ graphs:
         }
         inspected
     };
-    let initial = launch_pair(&[], None, true);
-    for index in [0, 2] {
-        assert_eq!(
-            initial[index]["settings"]["agent"]["value"],
-            "claude:personal-step"
-        );
-    }
-    for index in [1, 3, 4] {
-        assert_eq!(
-            initial[index]["settings"]["agent"]["value"],
-            "claude:personal-skill"
-        );
+    if !overrides {
+        let initial = launch_pair(&[], None, true);
+        for index in [0, 2] {
+            assert_eq!(
+                initial[index]["settings"]["agent"]["value"],
+                "claude:personal-step"
+            );
+        }
+        for index in [1, 3, 4] {
+            assert_eq!(
+                initial[index]["settings"]["agent"]["value"],
+                "claude:personal-skill"
+            );
+        }
     }
     for (key, value) in [
         ("agent", "claude:edited-general"),
@@ -524,15 +535,18 @@ graphs:
             &["set", "--global", key, value],
         ));
     }
-    let edited = launch_pair(&[], None, true);
-    assert_eq!(
-        edited[0]["settings"]["agent"]["value"],
-        "claude:edited-step"
-    );
-    assert_eq!(
-        edited[4]["settings"]["agent"]["value"],
-        "claude:edited-skill"
-    );
+    if !overrides {
+        let edited = launch_pair(&[], None, true);
+        assert_eq!(
+            edited[0]["settings"]["agent"]["value"],
+            "claude:edited-step"
+        );
+        assert_eq!(
+            edited[4]["settings"]["agent"]["value"],
+            "claude:edited-skill"
+        );
+        return;
+    }
     for key in [
         "graphs.inner.steps.work.agent",
         "skills.probe.agent",

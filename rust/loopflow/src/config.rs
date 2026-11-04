@@ -724,10 +724,10 @@ pub(crate) fn private_wave_layers(
     let parts: Vec<_> = name.split('/').collect();
     for end in 1..=parts.len() {
         let selected = parts[..end].join("/");
-        let id = match files::wave_key(repo, &selected) {
-            Ok(id) => id,
-            Err(_) if end < parts.len() => continue,
-            Err(error) => return Err(LoadError::InvalidGraph(error.to_string())),
+        let Some(id) = files::wave_key(repo, &selected)
+            .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
+        else {
+            continue;
         };
         if let Some(mut value) = document
             .get("waves")
@@ -862,6 +862,22 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn private_wave_reads_allow_missing_identity_but_report_invalid_authored_config() {
+        let repo = tempfile::tempdir().unwrap();
+        let path = repo.path().join("lf.config.local.yaml");
+        let document = serde_yaml_ng::from_str("waves: {}\n").unwrap();
+        assert!(
+            super::private_wave_layers(repo.path(), Some("missing"), &path, &document)
+                .unwrap()
+                .is_empty()
+        );
+        let wave = repo.path().join(".lf/wave/broken");
+        std::fs::create_dir_all(&wave).unwrap();
+        std::fs::write(wave.join("config.yaml"), "id: [invalid\n").unwrap();
+        assert!(super::private_wave_layers(repo.path(), Some("broken"), &path, &document).is_err());
+    }
+
     #[test]
     fn resume_stays_native_until_the_provider_changes() {
         use super::Resume;

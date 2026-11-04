@@ -102,6 +102,15 @@ pub fn declaration(
     anyhow::ensure!(!(value.is_some() && unset), "choose a value or unset");
     let destination = destination.resolve()?;
     super::settings::validate_scope(key, destination.source, destination.scope)?;
+    if let ("graph", Some(value), Some(repository)) =
+        (key, value, destination.repository.as_deref())
+    {
+        let parsed = super::settings::parse_value(key, value)?;
+        if let Some(name) = parsed.as_str() {
+            let graph = crate::graph::load_authored_graph(name, repository)?;
+            crate::graph::compile_graph(&graph, repository)?;
+        }
+    }
     let mut parts: Vec<_> = destination.prefix.iter().map(String::as_str).collect();
     parts.extend(key.split('.'));
     file_value(&destination.path, &parts, key, value, unset)

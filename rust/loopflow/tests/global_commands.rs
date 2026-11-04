@@ -55,7 +55,7 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     .unwrap();
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "agent: not-a-launchable-harness\ndocs: [missing.md]\ncontext_budgets:\n  memory_tokens: 700\n  scratch_bytes: 10000\n",
+        "agent: not-a-launchable-harness\ndocs: [missing.md]\ncontext:\n  budgets:\n    memory_tokens: 700\n    scratch_bytes: 10000\n",
     )
     .unwrap();
     fs::write(
@@ -618,6 +618,15 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let selected = TestRepo::new();
+    success(
+        command(
+            home.path(),
+            selected.path(),
+            &["set", "--global", "default_agent", "codex"],
+        )
+        .output()
+        .unwrap(),
+    );
     let other = TestRepo::new();
     let first = "task_abcd1234400080000000000000000001";
     let second = "task_abcd1235400080000000000000000002";
@@ -791,7 +800,7 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
     repo.create_file(".lf/skills/probe.md", "Inspect preview marker.");
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  memory_tokens: 300\n",
+        "agent: codex\ndiff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  memory_tokens: 300\n",
     );
     let message = "Long supplied direction. ".repeat(500);
     let output = success(
@@ -1651,9 +1660,13 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     };
     let before = identity(&old);
     let session: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &old, &["resume", "--prepare", "--json"])
-            .output()
-            .unwrap(),
+        command(
+            home.path(),
+            &old,
+            &["-a", "codex", "resume", "--prepare", "--json"],
+        )
+        .output()
+        .unwrap(),
     ))
     .unwrap();
     let moved = root.join("after");

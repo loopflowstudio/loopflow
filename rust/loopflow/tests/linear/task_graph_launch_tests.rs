@@ -1169,6 +1169,7 @@ fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
 #[test]
 fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     let task = GraphTask::without_wave_graph(&[]);
+    task.ok(&["set", "--global", "default_agent", "claude"]);
     // New Tasks branch from the remote's main, which carries the fixture Graphs.
     assert!(Command::new("git")
         .args(["push", "origin", "main"])

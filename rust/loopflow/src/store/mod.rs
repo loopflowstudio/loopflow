@@ -3787,6 +3787,11 @@ mod tests {
 
         store.upsert_provider_account(&primary).await.unwrap();
         assert!(store.upsert_provider_account(&duplicate).await.is_err());
+        assert!(store
+            .get_provider_account("claude", &duplicate.account_id)
+            .await
+            .unwrap()
+            .is_none());
 
         duplicate.provider = "codex".to_string();
         store.upsert_provider_account(&duplicate).await.unwrap();

@@ -39,6 +39,11 @@ Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
 when adding a table: give displayed rows revision triggers and classify operation-only
 receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
 its shared repository publishes authored files that lifecycle operations may already commit.
+When settings leave SQLite, search fixture SQL in `src/`, `tests/`, and
+`tests/e2e/` for removed columns and tables. Seed preferences through `lf set`;
+keep runtime observations in SQLite. Run account, Machine, Wave lifecycle, and
+context-budget regressions as well as migration tests: moving storage must
+preserve their existing behavior.
 
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no

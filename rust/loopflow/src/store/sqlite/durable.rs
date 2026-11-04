@@ -88,9 +88,15 @@ impl SqliteStore {
                 "machine target and label must be nonempty; local is reserved".into(),
             ));
         }
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if map_local_machine(&tx)?.id == *machine_id {
+            return Err(StoreError::InvalidData(
+                "cannot add the local machine as remote".into(),
+            ));
+        }
         let now = now_unix();
-        conn.execute(
+        tx.execute(
             "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
             ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
             params![machine_id.as_str(), now],
@@ -98,10 +104,18 @@ impl SqliteStore {
         let declaration = crate::config::placement::MachineDeclaration {
             id: machine_id.clone(),
         };
-        let path = crate::config::placement::home(&conn)
+        let path = crate::config::placement::home(&tx)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
             .join("config.yaml");
         crate::config::files::update(&path, |document| {
+            if let Some(existing) = document
+                .get("machines")
+                .and_then(|machines| machines.get(label))
+            {
+                let existing: crate::config::placement::MachineDeclaration =
+                    serde_yaml_ng::from_value(existing.clone())?;
+                anyhow::ensure!(existing.id == *machine_id, "machine name already exists");
+            }
             crate::config::settings::insert(
                 document,
                 &["machines", label],
@@ -115,6 +129,7 @@ impl SqliteStore {
             Ok(())
         })
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        tx.commit()?;
         map_machine_by_id(&conn, machine_id)?.ok_or(StoreError::NotFound)
     }
 

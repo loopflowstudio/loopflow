@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::error::CoreError;
 use crate::prompt::{count_tokens, Document, DocumentSource};
 
-/// Keys in the existing `context_budgets` configuration block.
+/// Keys in the `context.budgets` configuration block.
 #[derive(
     schemars::JsonSchema,
     Debug,
@@ -71,7 +71,13 @@ impl ContextBudgets {
         // selection or the documents a future launch would request.
         for layer in &mut layers {
             if let Some(values) = layer.value.as_mapping_mut() {
-                values.retain(|key, _| key.as_str() == Some("context_budgets"));
+                values.retain(|key, _| key.as_str() == Some("context"));
+                if let Some(context) = values
+                    .get_mut("context")
+                    .and_then(serde_yaml_ng::Value::as_mapping_mut)
+                {
+                    context.retain(|key, _| key.as_str() == Some("budgets"));
+                }
             }
         }
         let resolved = crate::config::settings::resolve_layers(&layers, None)?;

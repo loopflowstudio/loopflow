@@ -130,7 +130,7 @@ pub(crate) fn location(
             None,
         ),
         DefaultScope::Wave(id) => conn.query_row(
-            "SELECT repo,id FROM wave_addresses WHERE id=?1 AND retired_at IS NULL",
+            "SELECT repo,id FROM wave_addresses WHERE id=?1",
             [id.as_str()],
             |row| Ok((row.get(0)?, Some(row.get(1)?))),
         )?,
@@ -271,13 +271,37 @@ pub(crate) fn write_account_preferences(
         plan: account.plan.clone(),
         paid_through: account.paid_through.map(|date| date.to_string()),
     };
-    write(
-        conn,
-        None,
-        &["accounts", &account.provider, account.account_id.as_str()],
-        Some(serde_yaml_ng::to_value(declaration)?),
-    )?;
-    Ok(())
+    let (path, _) = location(conn, None)?;
+    super::files::update(&path, |document| {
+        if let Some(accounts) = document
+            .get("accounts")
+            .and_then(|accounts| accounts.get(&account.provider))
+            .and_then(Value::as_mapping)
+        {
+            for (id, value) in accounts {
+                if id.as_str() == Some(account.account_id.as_str()) {
+                    continue;
+                }
+                let existing: AccountDeclaration = serde_yaml_ng::from_value(value.clone())?;
+                anyhow::ensure!(
+                    account.login_email.is_none() || existing.login_email != account.login_email,
+                    "{} login {} already belongs to account {}",
+                    account.provider,
+                    account
+                        .login_email
+                        .as_ref()
+                        .expect("duplicate login is present"),
+                    id.as_str().unwrap_or_default()
+                );
+            }
+        }
+        super::settings::insert(
+            document,
+            &["accounts", &account.provider, account.account_id.as_str()],
+            serde_yaml_ng::to_value(declaration)?,
+        );
+        Ok(())
+    })
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]

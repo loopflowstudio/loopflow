@@ -888,6 +888,7 @@ fn preview_machines() -> Machines {
     );
     // Seed identity using the normal operation before taking the read baseline.
     assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&["set", "--global", "default_agent", "codex"]));
     for bin in [fixture.root.path().join("bin"), remote.join(".local/bin")] {
         for program in ["gh", "security", "doppler", "claude", "codex", "opencode"] {
             executable(

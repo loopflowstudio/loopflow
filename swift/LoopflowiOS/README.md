@@ -39,6 +39,11 @@ running Session; it never implicitly starts or resumes a provider.
 Choose **New Task** (+), describe the work, and select a repository on the paired
 Machine. The sheet saves your draft and remembers that destination. Use the
 keyboard’s microphone to dictate, then edit before choosing **Create & start**.
+Tap the destination to search repositories by name or path. The list shows full
+paths so repositories with the same name stay distinct. Refresh there after
+adding a repository on the Machine; unavailable entries explain why they cannot
+be selected. Refresh preserves your instructions and chosen destination. If that
+destination disappears, choose another explicitly before starting.
 The Machine runs the shared creation command and opens its primary Session through
 the existing retained owner. A confirmed start opens that Session as an observer;
 **Use keyboard** explicitly takes input control.

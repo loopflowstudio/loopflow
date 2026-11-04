@@ -8,6 +8,71 @@ import XCTest
 
 @MainActor
 final class MobileTaskCreationTests: XCTestCase {
+    func testRepositoryRefreshAndSelectionPreserveInstructionsAndSavedDestination() async throws {
+        let client = try await CreationClient()
+        client.repositories = []
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        model.editText("Keep this idea while I connect a repository")
+        await model.prepare()
+        XCTAssertFalse(model.canCreate)
+
+        client.repositories = [PortfolioRepo(path: "/work/first", error: nil),
+                               PortfolioRepo(path: "/archive/first", error: nil),
+                               PortfolioRepo(path: "/offline/first", error: "Repository is unavailable")]
+        await model.prepare()
+        let picker = MobileRepositoryPicker(model: model, theme: .light)
+        let unavailable = try picker.inspect().find(text: "/offline/first").find(ViewType.Button.self, relation: .parent)
+        XCTAssertTrue(unavailable.isDisabled())
+        try picker.inspect().find(text: "/archive/first").find(ViewType.Button.self, relation: .parent).tap()
+        XCTAssertEqual(try store.load().directory, "/archive/first", "Equal names must still select the exact path")
+        XCTAssertEqual(try store.load().text, "Keep this idea while I connect a repository")
+        XCTAssertTrue(model.canCreate)
+
+        client.repositories = [PortfolioRepo(path: "/work/first", error: nil)]
+        await model.prepare()
+        XCTAssertEqual(model.draft.directory, "/archive/first", "Refresh cannot silently retarget a saved draft")
+        XCTAssertFalse(model.canCreate)
+        client.contextFailure = "Machine went offline"
+        await model.prepare()
+        XCTAssertEqual(model.error, "Machine went offline")
+        XCTAssertEqual(try store.load().directory, "/archive/first")
+        XCTAssertEqual(model.draft.text, "Keep this idea while I connect a repository")
+        XCTAssertTrue(client.requests.isEmpty)
+    }
+
+    func testRepositoryPickerRendersPathsErrorsAndEmptyState() async throws {
+        let client = try await CreationClient()
+        client.repositories = [
+            PortfolioRepo(path: "/Users/developer/src/loopflow", error: nil),
+            PortfolioRepo(path: "/Users/developer/experiments/loopflow", error: nil),
+            PortfolioRepo(path: "/Volumes/Projects/website", error: "This repository is unavailable on the Machine."),
+        ]
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        for (name, style, size) in [("light", ColorScheme.light, DynamicTypeSize.large),
+                                    ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
+            let view = NavigationStack {
+                MobileRepositoryPicker(model: model, theme: style == .dark ? .dark : .light)
+            }.environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+            try await capture(view, name: "repository-picker-\(name)")
+        }
+        try await capture(NavigationStack { MobileRepositoryPicker(model: model, theme: .light) },
+                          name: "repository-picker-search") { window in
+            let search = try XCTUnwrap(self.searchField(in: window))
+            XCTAssertTrue(search.becomeFirstResponder())
+            search.insertText("experiments")
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        client.repositories = []
+        await model.prepare()
+        try await capture(NavigationStack { MobileRepositoryPicker(model: model, theme: .light) },
+                          name: "repository-picker-empty")
+    }
+
     func testSavedRequestRecoversAfterRestartWithoutLosingNewDraft() async throws {
         let client = try await CreationClient()
         let store = temporaryStore()
@@ -303,7 +368,8 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertTrue(client.requests.isEmpty)
     }
 
-    private func capture<Content: View>(_ view: Content, name: String) async throws {
+    private func capture<Content: View>(_ view: Content, name: String,
+                                       interact: ((UIWindow) async throws -> Void)? = nil) async throws {
         let controller = UIHostingController(rootView: view)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.keyWindow
@@ -311,10 +377,15 @@ final class MobileTaskCreationTests: XCTestCase {
         window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            previous?.makeKey()
+        }
         controller.view.frame = window.bounds
         controller.view.layoutIfNeeded()
         // Let SwiftUI install its navigation and safe-area layout.
         try await Task.sleep(for: .milliseconds(250))
+        try await interact?(window)
         let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
             XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
         }
@@ -322,8 +393,11 @@ final class MobileTaskCreationTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-        window.isHidden = true
-        previous?.makeKey()
+    }
+
+    private func searchField(in view: UIView) -> UITextField? {
+        if let search = view as? UITextField { return search }
+        return view.subviews.lazy.compactMap { self.searchField(in: $0) }.first
     }
 
     private func temporaryStore() -> MobileTaskDraftStore {
@@ -341,6 +415,8 @@ private final class CreationClient: MobileTaskCreationClient {
     var delayReply = false
     var reply: CheckedContinuation<Void, Never>?
     var outcome: TaskCreateOutcome?
+    var repositories = [PortfolioRepo(path: "/work/first", error: nil), PortfolioRepo(path: "/work/second", error: nil)]
+    var contextFailure: String?
 
     init() async throws {
         let tasks = try await FixtureClient().workingTasks()
@@ -348,9 +424,8 @@ private final class CreationClient: MobileTaskCreationClient {
     }
 
     func creationContext() async throws -> MobileCreationContext {
-        MobileCreationContext(machineID: machineID, name: "Development Mac", repositories: [
-            PortfolioRepo(path: "/work/first", error: nil), PortfolioRepo(path: "/work/second", error: nil),
-        ])
+        if let contextFailure { throw RegistryQueryError(contextFailure) }
+        return MobileCreationContext(machineID: machineID, name: "Development Mac", repositories: repositories)
     }
 
     func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {

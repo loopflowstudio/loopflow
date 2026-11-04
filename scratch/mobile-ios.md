@@ -478,3 +478,27 @@ Checks: host-Tailscale native acceptance passed at
 Serve configuration was removed and verified empty. The preceding unchanged-
 decoder rendered proof also passed at 04:08:57. No Apple distribution work or
 physical-device acceptance is claimed.
+
+### Searchable creation destinations — November 4, 04:21
+
+The describe-first sheet now opens a native searchable repository list instead of
+a menu. Names and full paths distinguish equal basenames. Unavailable repositories
+show their shared error and cannot be selected. Pull-to-refresh and a toolbar action
+reload destinations, including after the list was empty. Refresh preserves the
+instructions and selected path; a missing selected repository requires an explicit
+new selection. Selection persists before returning to the composer. An unavailable
+Machine no longer remains labeled “Connecting…” after its request has failed.
+The same creation model/admission owns all effects; no new backend or Machine
+picker was introduced.
+
+Checks: 14 native creation tests passed at 04:17:36, including exact-path selection,
+empty-to-populated refresh, unavailable entries, missing saved destinations and
+offline refresh without losing the draft. The final native search capture passed
+at `Test-LoopflowiOS-2026.11.04_04-20-44--0800.xcresult` after correcting the test's
+UIKit assumption (this iOS build exposes UITextField, not UISearchBar). Native
+text insertion filtered a path fragment to the intended row; its capture was
+inspected, alongside light/dark, accessibility text and empty-state layouts.
+Logs: `/tmp/mobile-repository-picker-tests.log`, `/tmp/mobile-repository-search-field.log`.
+Captures: `demo-assets/mobile-repository-picker-{light,dark,large-text,empty,search}.png`.
+These are mounted Simulator views; physical-phone keyboard and VoiceOver review
+remain outstanding. Backend behavior is unchanged, so no carrier rerun was needed.

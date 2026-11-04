@@ -91,24 +91,30 @@ struct MobileNewTaskView: View {
     private var destination: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("On your Machine").font(Typography.caption(12)).foregroundStyle(theme.palette.textSecondary)
-            Label(model.draft.submission?.machineName ?? model.context?.name ?? "Connecting…", systemImage: "desktopcomputer")
+            Label(model.draft.submission?.machineName ?? model.context?.name
+                ?? (model.busy ? "Connecting…" : "Machine unavailable"), systemImage: "desktopcomputer")
                 .font(Typography.strong(15))
             if model.draft.submission == nil, let context = model.context {
-                if context.repositories.isEmpty {
-                    Text("Add a repository in Loopflow on this Machine, then try again.").font(Typography.body(14))
-                } else {
-                    Picker("Repository", selection: Binding(get: { model.draft.directory }, set: { model.selectRepository($0) })) {
-                        Text("Choose a repository").tag("")
-                        ForEach(context.repositories.filter { $0.error == nil }) { repository in
-                            Text(repository.displayName).tag(repository.path)
-                        }
+                NavigationLink {
+                    MobileRepositoryPicker(model: model, theme: theme)
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(context.repositories.first(where: { $0.path == model.draft.directory })?.displayName
+                            ?? "Choose a repository")
+                            .font(Typography.strong(17))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
                     }
-                    .pickerStyle(.menu)
-                    .font(Typography.body(15))
-                    if !context.repositories.contains(where: { $0.path == model.draft.directory && $0.error == nil }) {
-                        Text("The saved repository is unavailable. Choose a destination.")
-                            .font(Typography.body(14))
-                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .disabled(model.busy || model.storageUnavailable)
+                .accessibilityHint("Search repositories or refresh destinations on this Machine")
+                if !model.draft.directory.isEmpty,
+                   !context.repositories.contains(where: { $0.path == model.draft.directory && $0.error == nil }) {
+                    Text("The saved repository is unavailable. Choose a destination.")
+                        .font(Typography.body(14))
                 }
             }
             if !model.draft.directory.isEmpty {

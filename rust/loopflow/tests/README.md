@@ -435,7 +435,7 @@ suite does not check those additions.
 `docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
 appends the command tree from `lf help --all --json`, so a command or help-text
 change needs no reference update.
-Keep README and docs/index openings identical and regenerate docs/architecture.html
+Keep README and docs/index openings identical and regenerate docs/dev/index.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.
 
@@ -814,7 +814,7 @@ fixtures must declare opposite launch modes, independent of Session defaults.
 
 ## Client API server
 
-The [server boundary](../../../docs/architecture/server.md) assigns socket behavior
+The [server boundary](../../../docs/dev/server.md) assigns socket behavior
 to client access; OS registration/replacement belongs to installation. Their
 composed test must continue to prove both with existing execution owners live.
 

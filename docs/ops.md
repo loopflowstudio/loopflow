@@ -198,6 +198,19 @@ lf task run LOO-13 --stack-on LOO-12
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 
+## Client access and installation
+
+```bash
+lf server status   # observe the local client server
+lf install         # update Loopflow and reconcile its server registration
+```
+
+Desktop connects through the server; installation prepares it automatically.
+Use server status for connection problems and Machine commands to select where
+work runs. They have separate lifetimes: a server reconnect does not restart an
+agent or move a Task. See [Connect clients](server.md) for recovery and background
+access, and [Surfaces](surfaces.md) for app-owned Desktop automation.
+
 ## Other machines
 
 ```bash
@@ -277,6 +290,8 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |
 | `lf machine add\|list\|status\|use\|connect\|end` | Where work runs |
 | `lf pool …`, `lf ondemand …` | Machines you own, machines you rent |
+| `lf server status` | Observe local client access and connection errors |
+| `lf install` | Update Loopflow and its server registration |
 | `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
 
 Every flag is in the [`lf` reference](lf-reference.md#lf-ops).

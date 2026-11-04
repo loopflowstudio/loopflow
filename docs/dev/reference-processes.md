@@ -1,6 +1,6 @@
 # Locks, processes and Machines
 
-Part of the [Architecture Reference](../architecture-reference.md).
+Part of the [Architecture Reference](reference.md).
 
 ## OS locks and allowed contention
 

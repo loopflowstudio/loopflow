@@ -66,6 +66,25 @@ and any write that held the store lock for 3 s or more, grouped by the lf
 binary that logged them, with the holder's pids and the function that held the
 lock. Lines from binaries older than this check group as `unidentified (older lf)`.
 
+## Desktop cannot connect
+
+```bash
+lf server status   # readiness, socket, server instance and connection diagnosis
+lf doctor          # selected installation and store health
+```
+
+**Reconnecting…** means Desktop is trying the same Session owner. Keep the pane
+open; its screen and local reading actions remain available. If automatic retries
+end, **Retry** reconnects without replaying input or restarting the provider.
+A read-only pane's **Move here** requests control explicitly; a lost connection
+alone never takes it from another viewer.
+
+If the diagnosis reports disabled background access, enable Loopflow in macOS
+System Settings, or enable its user service on Linux. Retry and status do not
+change that setting. Use `lf install` for an installation/build mismatch; do not
+start a second foreground server. A server outage alone is no reason to relaunch
+the Task's Graph. See [Connect clients](server.md).
+
 ## A Task stopped advancing
 
 **Symptom:** the Task is not done, but nothing is moving, or its agent

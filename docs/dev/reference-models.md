@@ -1,6 +1,6 @@
 # Models and vocabulary
 
-Part of the [Architecture Reference](../architecture-reference.md).
+Part of the [Architecture Reference](reference.md).
 
 ## The system grows outward from a direct Skill launch
 

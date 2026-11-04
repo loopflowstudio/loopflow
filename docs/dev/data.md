@@ -50,7 +50,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 A Machine owns its local store and payloads. Linear and GitHub remain shared truth;
 a local snapshot cannot authorize a provider mutation when a fresh observation
 is required. An identifier joins evidence without transferring authority.
-The [checked inventory](../architecture-reference.md#complete-ownership-map)
+The [checked inventory](reference.md#complete-ownership-map)
 retains exact current tables, source paths and subprocess edges in one place.
 
 ## Conversation and process history

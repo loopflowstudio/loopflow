@@ -1749,6 +1749,10 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
                 <li class="docs-nav-child">
 <a href="https://loopflow.studio/architecture/machines">Machines and processes</a>                </li>
                 <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/server">Client API server</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/environment">Environment</a>                </li>
+                <li class="docs-nav-child">
 <a href="https://loopflow.studio/architecture/data">Data and persistence</a>                </li>
                 <li class="docs-nav-child">
 <a href="https://loopflow.studio/architecture/codebase">Codebase map</a>                </li>
@@ -1784,7 +1788,7 @@ and the step processes it starts.</p>
 <a href="https://loopflow.studio/architecture/reference-cutover#cutover-status">cutover status</a>, the remaining work
 map and the checked current-source inventory.</p>
 <p>This guide is for developers changing Loopflow. It starts with the smallest
-complete path, then opens into the six areas that own the system. Command
+complete path, then opens into the areas that own the system. Command
 syntax lives in the <a href="https://loopflow.studio/docs/lf-reference"><code>lf</code> reference</a>; the exhaustive checked inventory
 lives in <a href="https://loopflow.studio/architecture/reference">Architecture Reference</a>.</p>
 <h2 id="run-one-skill">Run one Skill<a class="anchor-link" href="#run-one-skill" title="Link to this section">#</a></h2>
@@ -1902,8 +1906,13 @@ operations available to helpers without becoming standing Work identities.</p>
 </tr>
 <tr>
 <td>Machines</td>
-<td>Task ownership, SSH routing, installation</td>
+<td>Execution destinations, Task ownership and SSH routing</td>
 <td><a href="https://loopflow.studio/architecture/machines">Machines and processes</a></td>
+</tr>
+<tr>
+<td>Client access and installation</td>
+<td>Server admission, registration/update and continuity across replacement</td>
+<td><a href="https://loopflow.studio/architecture/server">Client API server</a></td>
 </tr>
 <tr>
 <td>Data</td>
@@ -1982,7 +1991,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
 
 another machine is another Machine; cross it explicitly with `lf --machine`
 </code></pre>
-<p>Each host can expose a <a href="https://loopflow.studio/docs/architecture/server">client API server</a> to Desktop and
+<p>Each host can expose a <a href="https://loopflow.studio/architecture/server">client API server</a> to Desktop and
 mobile; it does not centralize execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,

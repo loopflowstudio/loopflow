@@ -206,6 +206,9 @@ DOCS_AREAS = (
         "See your work wherever you are, and change how it runs.",
         (
             DocPage("Surfaces", "surfaces", "Desktop, cmux, Herdr, tmux, and your own view"),
+            DocPage(
+                "Connect clients", "server", "Local server status, updates and connection recovery"
+            ),
             DocPage("Telemetry", "telemetry", "What agents did and what it cost"),
             DocPage("Orchestration", "orchestration", "Skills, Graphs, Workflows, and Goals"),
             DocPage(
@@ -240,81 +243,93 @@ DOCS_AREAS = (
 
 ARCHITECTURE_AREA = DocArea(
     "Developer architecture",
-    "architecture",
+    "dev/index",
     "Follow one Skill run through the implementation, then open the subsystem you need.",
     (
-        DocPage("Architecture", "architecture", "A developer's path through the whole system"),
+        DocPage("Architecture", "dev/index", "A developer's path through the whole system"),
         DocPage(
             "Execution",
-            "architecture/execution",
+            "dev/execution",
             "Skill discovery, prompts, providers, harnesses, and Run evidence",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Planning",
-            "architecture/planning",
+            "dev/planning",
             "Graphs, Work, Steer and Ask",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Delivery",
-            "architecture/delivery",
+            "dev/delivery",
             "Task worktrees, commits, serial PRs, checks, and merge",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Machines and processes",
-            "architecture/machines",
-            "Placement, services, SSH, process authority, and promotion",
-            parent="architecture",
+            "dev/machines",
+            "Execution destinations, SSH, process authority, and promotion",
+            parent="dev/index",
+        ),
+        DocPage(
+            "Client API server",
+            "dev/server",
+            "Client admission, installation and execution ownership",
+            parent="dev/index",
+        ),
+        DocPage(
+            "Environment",
+            "dev/environment",
+            "Environment authority at launch and transport boundaries",
+            parent="dev/index",
         ),
         DocPage(
             "Data and persistence",
-            "architecture/data",
+            "dev/data",
             "Truth owners, stores, append-only evidence, and projections",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Codebase map",
-            "architecture/codebase",
+            "dev/codebase",
             "Source territories, public surfaces, binaries, and extension points",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Checked reference",
-            "architecture-reference",
+            "dev/reference",
             "The exhaustive, machine-checked inventory",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Cutover status",
-            "architecture/reference-cutover",
+            "dev/reference-cutover",
             "Which cutovers remain open",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Models and vocabulary",
-            "architecture/reference-models",
+            "dev/reference-models",
             "Work, Graph, Process and Session models and their APIs",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Code, persistence and public APIs",
-            "architecture/reference-code",
+            "dev/reference-code",
             "Source territories, persistence and process entry points",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Launch, Graphs and delivery",
-            "architecture/reference-runtime",
+            "dev/reference-runtime",
             "Harness launch, Task Graphs, communication and delivery",
-            parent="architecture",
+            parent="dev/index",
         ),
         DocPage(
             "Locks, processes and Machines",
-            "architecture/reference-processes",
+            "dev/reference-processes",
             "OS locks, process control, Machine topology and promotion",
-            parent="architecture",
+            parent="dev/index",
         ),
     ),
 )
@@ -430,7 +445,7 @@ def _resolve_doc_target(target: str, current_slug: str, architecture: bool = Fal
             slug = resolved.removesuffix(".md")
             path = (
                 _architecture_href(slug)
-                if architecture and slug in ARCHITECTURE_SLUGS
+                if slug in ARCHITECTURE_SLUGS
                 else ("/docs" if slug == "index" else f"/docs/{slug}")
             )
         return urlunsplit(("", "", path, parsed.query, parsed.fragment))
@@ -544,12 +559,12 @@ def DocsNav(current: str = "index"):
 
 
 def _architecture_href(slug: str, markdown: bool = False) -> str:
-    if slug == "architecture":
+    if slug == "dev/index":
         suffix = ""
-    elif slug == "architecture-reference":
+    elif slug == "dev/reference":
         suffix = "/reference"
     else:
-        suffix = f"/{slug.removeprefix('architecture/')}"
+        suffix = f"/{slug.removeprefix('dev/')}"
     return f"/architecture{suffix}{'.md' if markdown else ''}"
 
 
@@ -614,7 +629,7 @@ def DocsBreadcrumb(slug: str, title: str):
 
 
 def ArchitectureBreadcrumb(slug: str, title: str):
-    if slug == "architecture":
+    if slug == "dev/index":
         return None
     crumbs = [Li(A("Architecture", href="/architecture"))]
     crumbs.append(Li(Span(title, **{"aria-current": "page"})))
@@ -1071,10 +1086,10 @@ def get(request, slug: str):
 def _architecture_source_slug(route_slug: str) -> str | None:
     route_slug = route_slug.removesuffix(".md").strip("/")
     if not route_slug:
-        return "architecture"
+        return "dev/index"
     if route_slug == "reference":
-        return "architecture-reference"
-    candidate = f"architecture/{route_slug}"
+        return "dev/reference"
+    candidate = f"dev/{route_slug}"
     return candidate if candidate in ARCHITECTURE_SLUGS else None
 
 

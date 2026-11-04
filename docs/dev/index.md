@@ -10,13 +10,13 @@ Process records an lf command and its outcome; LfSession records a conversation;
 and the step processes it starts.
 
 This guide specifies the accepted model. The reference owns
-[cutover status](architecture/reference-cutover.md#cutover-status), the remaining work
+[cutover status](reference-cutover.md#cutover-status), the remaining work
 map and the checked current-source inventory.
 
 This guide is for developers changing Loopflow. It starts with the smallest
-complete path, then opens into the six areas that own the system. Command
-syntax lives in the [`lf` reference](lf-reference.md); the exhaustive checked inventory
-lives in [Architecture Reference](architecture-reference.md).
+complete path, then opens into the areas that own the system. Command
+syntax lives in the [`lf` reference](../lf-reference.md); the exhaustive checked inventory
+lives in [Architecture Reference](reference.md).
 
 ## Run one Skill
 
@@ -50,21 +50,21 @@ Processes rather than bypassing installation authority to create a receipt.
 LfSession history records provider outcomes, retries and usage. Process records
 the command's outcome. A provider can finish successfully before a later command
 operation fails; neither result overwrites the other. Missing telemetry stays
-missing. The [execution contract](architecture/reference-models.md#core-models-and-apis)
+missing. The [execution contract](reference-models.md#core-models-and-apis)
 defines these ownership boundaries.
 
 The implementation follows the same order as the diagram:
 
 | Stage | Concrete owner | Produces |
 | --- | --- | --- |
-| Parse and dispatch | [`lf/mod.rs`](../rust/loopflow/src/lf/mod.rs) | One command and launch context |
-| Find the Skill | [`skills/catalog.rs`](../rust/loopflow/src/skills/catalog.rs) | One selected Skill source |
-| Assemble context | [`prompt/mod.rs`](../rust/loopflow/src/prompt/mod.rs) | System and task prompts |
-| Select credentials and route | [`provider_account.rs`](../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
-| Launch and normalize | [`harness/`](../rust/loopflow/src/harness/) | Provider output and usage events |
-| Record command and conversation evidence | [`journal/`](../rust/loopflow/src/journal/) and the store | Process completion, LfSession history and immutable payloads |
+| Parse and dispatch | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | One command and launch context |
+| Find the Skill | [`skills/catalog.rs`](../../rust/loopflow/src/skills/catalog.rs) | One selected Skill source |
+| Assemble context | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | System and task prompts |
+| Select credentials and route | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
+| Launch and normalize | [`harness/`](../../rust/loopflow/src/harness) | Provider output and usage events |
+| Record command and conversation evidence | [`journal/`](../../rust/loopflow/src/journal) and the store | Process completion, LfSession history and immutable payloads |
 
-[Follow the complete execution path →](architecture/execution.md)
+[Follow the complete execution path →](execution.md)
 
 ## Add one capability at a time
 
@@ -91,12 +91,13 @@ one Skill run
 
 | Area | What it adds | Start here |
 | --- | --- | --- |
-| Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](architecture/execution.md) |
-| Planning | Graph composition, Wave/Task Work, Steer, questions, review GraphSteps | [Planning](architecture/planning.md) |
-| Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
-| Machines | Task ownership, SSH routing, installation | [Machines and processes](architecture/machines.md) |
-| Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
-| Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
+| Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](execution.md) |
+| Planning | Graph composition, Wave/Task Work, Steer, questions, review GraphSteps | [Planning](planning.md) |
+| Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](delivery.md) |
+| Machines | Execution destinations, Task ownership and SSH routing | [Machines and processes](machines.md) |
+| Client access and installation | Server admission, registration/update and continuity across replacement | [Client API server](server.md) |
+| Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](data.md) |
+| Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](codebase.md) |
 
 The source tree makes the planning boundary literal:
 
@@ -175,7 +176,7 @@ user / agent --> lf CLI --------+----------+-----------+
 another machine is another Machine; cross it explicitly with `lf --machine`
 ```
 
-Each host can expose a [client API server](architecture/server.md) to Desktop and
+Each host can expose a [client API server](server.md) to Desktop and
 mobile; it does not centralize execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
@@ -260,7 +261,7 @@ prove untouched backlog. Rotation converges from fresh provider facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.
 
-The [reference](architecture/reference-models.md#core-models-and-apis) owns the field and
+The [reference](reference-models.md#core-models-and-apis) owns the field and
 write contracts and the current-state conversion boundary. Process and LfSession
 are the execution owners; Run has no separate lifecycle.
 
@@ -330,14 +331,14 @@ the behavior.
 
 | If you are changing… | Read |
 | --- | --- |
-| provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
-| Graph semantics, Work state, Steer, questions, review GraphSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
-| worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
-| remote execution, Task ownership, process control, promotion | [Machines and processes](architecture/machines.md) |
-| schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |
-| module ownership, APIs, binaries, routes, or code size | [Codebase map](architecture/codebase.md) |
+| provider launch, retries, usage, or telemetry | [Execution](execution.md) |
+| Graph semantics, Work state, Steer, questions, review GraphSteps, chapter rotation and Task advancement | [Planning](planning.md) |
+| worktrees, commits, PR ranges, checks, or landing | [Delivery](delivery.md) |
+| remote execution, Task ownership, process control, promotion | [Machines and processes](machines.md) |
+| schema, files, projections, DTOs, or consistency | [Data and persistence](data.md) |
+| module ownership, APIs, binaries, routes, or code size | [Codebase map](codebase.md) |
 
-For exhaustive lookup, open the [checked architecture reference](architecture-reference.md).
+For exhaustive lookup, open the [checked architecture reference](reference.md).
 Its bounded checker compares CLI families, process boundaries, SQLite tables,
 HTTP routes, providers, subprocess edges, projections, and historical vocabulary.
 A successful check covers that inventory, not configured runtime behavior.

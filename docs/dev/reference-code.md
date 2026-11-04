@@ -1,6 +1,6 @@
 # Code, persistence and public APIs
 
-Part of the [Architecture Reference](../architecture-reference.md).
+Part of the [Architecture Reference](reference.md).
 
 ## Code territory and rough size
 

@@ -85,7 +85,7 @@ ownership into a central service.
 
 The Machine and ownership types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
-the CLI under [`lf/`](../../rust/loopflow/src/lf/).
+the CLI under [`lf/`](../../rust/loopflow/src/lf).
 
 ## Own Tasks
 
@@ -407,7 +407,7 @@ jobs pin that path. The installation promotion lock likewise stays at
 
 Artifact switching lives in
 [`installation.rs`](../../rust/loopflow/src/installation.rs) and the
-install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf/commands/).
+install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf/commands).
 
 ## Boundary contracts
 

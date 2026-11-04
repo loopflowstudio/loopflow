@@ -9,6 +9,15 @@ Project APIs in an existing conversation. Choose the commands and Skills that
 fit the requested work. Work context does not select a Graph or authorize Wave
 memory maintenance; the selected Loopflow Graph owns that procedure.
 
+## Select the execution or client surface
+
+Use `lf --machine mini …` to run a command at a saved execution destination.
+Use `lf server status` to inspect local Desktop client access; it installs
+nothing and starts no agent. `lf install` owns updates and server registration.
+`lf desktop` controls app windows and panes. Ordinary Work commands remain the
+agent API and do not require the client server. [Connect clients](server.md)
+covers connection recovery and the current local-only scope.
+
 ## Inspect instruction selection
 
 ```bash
@@ -73,7 +82,7 @@ A child command records its causal parent and, when issued by an agent, its
 calling conversation and AgentProcess. That evidence grants neither
 process-control authority nor permission to move a Graph cursor. An attachment
 handoff retains conversation identity while fencing the old writer.
-Passive observation acquires no claim. See the [contract and cutover status](architecture/reference-cutover.md#cutover-status)
+Passive observation acquires no claim. See the [contract and cutover status](dev/reference-cutover.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 
 ## Delegate

@@ -69,3 +69,9 @@ endpoint/lock is simpler than aliases or a parallel listener. No credentials or
 Work records move. This branch has no
 persisted remote settings; LOO-718 must retain its credential/config locations
 when integrating the namespace change.
+
+November 4 documentation feedback: Jack Heart requested that the responsibility
+split reach the main user guides and that developer documentation move under
+`docs/dev/`. The local correction updates user-facing server/recovery guidance,
+source links, website navigation and checked-reference consumers. Existing website
+architecture URLs remain valid. No Graph is restarted by this documentation edit.

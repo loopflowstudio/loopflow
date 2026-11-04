@@ -1,6 +1,6 @@
 # Launch, Graphs and delivery
 
-Part of the [Architecture Reference](../architecture-reference.md).
+Part of the [Architecture Reference](reference.md).
 
 ## Harness launch and Session captures
 

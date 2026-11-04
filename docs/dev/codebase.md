@@ -33,7 +33,7 @@ complexity.
 | External tests | Rust, Python, and Swift test roots | 27,100 | cross-module, wire, migration, CLI, and app proofs |
 
 The table is intentionally broad. The checked
-[Architecture Reference](../architecture-reference.md) maps every top-level CLI
+[Architecture Reference](reference.md) maps every top-level CLI
 family, live table, process entrypoint, HTTP route, provider, and literal
 subprocess edge to one concept.
 
@@ -45,16 +45,16 @@ subprocess edge to one concept.
 | Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Graph |
 | prompt assembly | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | system/task prompt pair |
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
-| provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
+| provider streams | [`harness/`](../../rust/loopflow/src/harness) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
-| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
+| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
 | Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
 | Graph process | [`lf/commands/graph.rs`](../../rust/loopflow/src/lf/commands/graph.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
-| Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
-| Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
-| store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
+| Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave) | identity, config, memory, repository scope |
+| Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave) | goals, metrics, memory, relocation |
+| store abstraction | [`store/`](../../rust/loopflow/src/store) | domain rows and transactions |
 | installation | [`installation.rs`](../../rust/loopflow/src/installation.rs) | artifact set and switch receipt |
-| Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow/) | required-field DTOs from `lf --json` |
+| Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow) | required-field DTOs from `lf --json` |
 
 ## Public process surfaces
 
@@ -77,9 +77,10 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
 | `lf history`, `history show`, `usage` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf machine`, `lf --machine` | Machine identity and command routing |
+| `lf machine`, `lf --machine` | Machine identity and execution-destination routing |
+| `lf server` | Client API serving and observational readiness |
 | `lf account` | provider credential and account authority |
-| `lf install`, `release` | artifact selection and release workflow |
+| `lf install`, `release` | Artifact selection, server registration/update and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf-reference.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
@@ -179,6 +180,6 @@ coherent, simplify the model or move the history to review notes.
 
 ## Next
 
-[Architecture →](../architecture.md) returns to the developer guide.
-[Architecture Reference →](../architecture-reference.md) opens the checked
+[Architecture →](index.md) returns to the developer guide.
+[Architecture Reference →](reference.md) opens the checked
 inventory.

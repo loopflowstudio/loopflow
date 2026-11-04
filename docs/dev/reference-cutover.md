@@ -1,6 +1,6 @@
 # Cutover status
 
-Part of the [Architecture Reference](../architecture-reference.md).
+Part of the [Architecture Reference](reference.md).
 
 **Local client server boundary implemented (LOO-593).** `lf server run/status`
 serves clients; installation owns registration and replacement. Machine retains

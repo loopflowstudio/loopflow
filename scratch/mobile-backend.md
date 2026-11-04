@@ -18,12 +18,24 @@ Jack selected this split, then requested updating the design and relaunching pur
   Keep `lf desktop` and `DesktopServer` separate from the shared server.
 
 The canonical boundary and usage are in
-[Clients, servers and execution destinations](../docs/architecture/server.md).
+[Clients, servers and execution destinations](../docs/dev/server.md).
 This replaces the earlier Machine-service framing. Jack Heart now authorizes
 implementation and publication of this cutover in the existing Task, followed by
 interactive review. The earlier docs-only boundary is superseded. No merge or
 Auto-Ship approval is given. Publication returns to the existing feature graph’s
 interactive demo boundary.
+
+## Documentation review correction · November 4
+
+Jack Heart identified that the Machine/server/installation split appeared in
+architecture docs without reaching the user guides, and requested renaming the
+developer directory to `docs/dev/`. The user-facing server guide is now
+`docs/server.md`, linked from setup, Ops, Surfaces, Sessions, troubleshooting and
+the glossary. Developer sources, checked reference and portable export live
+under `docs/dev/`; the existing `/architecture` website URLs retain their meaning.
+Navigation includes the server and environment developer pages, and links from
+user guides resolve to that surface. This is a local documentation correction;
+it does not advance the Task past demo or authorize shipping.
 
 ## Implementation status and remaining work
 

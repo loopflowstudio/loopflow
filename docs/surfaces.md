@@ -62,11 +62,22 @@ Queries take `wave:`, `task:`, `kind:task|wave` and
 `state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
 means AND, and `or` and parentheses compose.
 
+### Connection recovery
+
+Desktop uses the local Loopflow server to read Work and attach Session terminals.
+Installation prepares the connection. Check availability with `lf server status`.
+The native connection row shows recovery while keeping the screen and local
+reading actions available; input waits for acknowledgement. **Retry** reconnects;
+**Move here** explicitly requests control when another viewer has it. Recovery
+never replays uncertain input. See [Connect clients](server.md) for updates,
+background access and the distinction from Machine execution destinations.
+
 ## Drive Desktop from a script
 
 `lf desktop` is Desktop's own pane API, the same kind of thing as tmux's,
 cmux's, Herdr's or Rex's. Use theirs directly in those hosts; use this one in
-Desktop. Every key and menu item is a verb here by the same name.
+Desktop. Every key and menu item is a verb here by the same name. This automation
+endpoint lives with the app; the client server has an independent lifetime.
 
 ```bash
 lf desktop run 'cargo test -p loopflow'           # a new shell tab in the Task's checkout; focus stays put

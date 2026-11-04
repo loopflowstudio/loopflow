@@ -762,7 +762,7 @@ in-app Rust library (`rust/loopflow-ffi/include/loopflow.h`). Each part names it
 `ServedRead`, the `lf` command above that prints the same frames. Task files,
 diffs, Waves, Machine identity, Portfolio, saved panes, Task owners and Graphs
 still use that library. First connection obtains the selected `lf` helper.
-The [server boundary](../docs/architecture/server.md) puts registration
+The [server boundary](../docs/dev/server.md) puts registration
 and updates under installation, connection readiness in the server client, and
 Machine destination routing separately. `ServerClient` caches the socket path
 after installation readiness; reconnect never installs or re-registers a helper.

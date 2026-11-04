@@ -311,8 +311,8 @@ are separate: a fresh claim token fences every attachment and release, including
 A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
 The full contract lives in
-[Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
-the [Architecture Reference](docs/architecture-reference.md) indexes the rest,
+[Core models and APIs](docs/dev/reference-models.md#core-models-and-apis);
+the [Architecture Reference](docs/dev/reference.md) indexes the rest,
 including cutover status.
 
 # Development Environment

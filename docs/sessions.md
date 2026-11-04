@@ -49,6 +49,14 @@ starts from that log and current instructions, and the old thread stays in
 `lf session list --all` covers every repository on this machine; `--history`
 adds finished conversations, and `--search` narrows the list.
 
+## When Desktop loses its connection
+
+Desktop reconnects to the same live owner automatically and shows connection
+status outside the terminal. Typing pauses while the screen remains available.
+A newer viewer keeps control until an explicit **Move here** request. **Retry**
+repairs connectivity; it does not resume a new provider or replay input.
+[Connect clients](server.md) covers server updates and connection diagnosis.
+
 ## After a crash or reboot
 
 ```bash

@@ -218,7 +218,7 @@ relay obtains an `attach` bridge from the local client API server before speakin
 this same owner protocol. No owner or provider is created on bridge failure.
 Ordinary CLI attachments keep their direct socket path. See
 [current server protocol](../server/README.md) for admission and framing.
-The [server boundary](../../../../docs/architecture/server.md) separates
+The [server boundary](../../../../docs/dev/server.md) separates
 client access from Machine routing. `lf session serve` remains the execution-owner
 entry, distinct from the server serving entry.
 

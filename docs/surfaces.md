@@ -109,6 +109,21 @@ argv layouts and existing Session observation. It does not implement Wave follow
 remote forwarding or live process migration. Native close removes only that
 workspace; an uncertain creation is retained for inspection before retry.
 
+## Open files where you are
+
+```bash
+lf open --file docs/usage.md --file README.md
+```
+
+Open the actual files in the current host without starting a conversation.
+Paths are relative to the selected checkout. Desktop uses its Files view;
+Rex, Herdr, cmux and tmux open the Files editor alongside existing work.
+Terminal editors follow `VISUAL`, then `EDITOR`, then `vi`. Existing panes and
+unsaved edits remain in place. No attached host means a successful no-op; the
+command never launches a host as a fallback.
+Terminal file presentation currently requires a local checkout; Desktop Files
+also supports Tasks on another Machine.
+
 ## Share a link
 
 ```bash

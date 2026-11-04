@@ -6,6 +6,7 @@
 //! other terminal routes use `lf session resume`, whose attachment fences own
 //! reuse. Desktop resolves the same address through `--link --json`.
 
+mod files;
 mod workspace;
 
 use std::io::IsTerminal;
@@ -957,13 +958,14 @@ pub(crate) fn host_placement() -> Option<String> {
 /// names the terminal it launched in, which may since be closed or left.
 fn viewed_placement() -> Option<(OpenHost, String)> {
     let caller = crate::journal::agent_caller()?;
+    session_placement(caller.session_id.as_str())
+}
+
+fn session_placement(session: &str) -> Option<(OpenHost, String)> {
     let store = crate::store::read_existing_registry().ok().flatten()?;
     let placement = store
         .sqlite
-        .session_summary(
-            caller.session_id.as_str(),
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
+        .session_summary(session, time::OffsetDateTime::now_utc().unix_timestamp())
         .ok()
         .flatten()?
         .terminal_id?;
@@ -1575,6 +1577,9 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
 pub struct OpenArgs {
     /// Work address, such as loopflow://loopflow/task/LOO-507
     pub url: Option<String>,
+    /// Present a file in the current host without opening a conversation; repeat for several files. No host is a no-op.
+    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["available", "session", "diff", "link", "copy", "watch_workspace", "local_workspace"])]
+    pub files: Vec<PathBuf>,
     /// Presentation destination; auto follows the current Rex/Herdr/tmux/cmux viewer
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
@@ -1687,6 +1692,9 @@ fn links(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<WorkLink>, Vec<St
 }
 
 pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> {
+    if !args.files.is_empty() {
+        return files::run(cli, args, true);
+    }
     let (links, unknown) = links(cli, args)?;
     if json {
         println!(
@@ -1705,6 +1713,9 @@ pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> 
 }
 
 pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
+    if !args.files.is_empty() {
+        return files::run(cli, args, false);
+    }
     let json = args.json || cli.json;
     if args.link {
         let (links, unknown) = links(cli, args)?;

@@ -1,4 +1,18 @@
-# LOO-498 — unresolved restoration and host evidence
+# LOO-728 — integration assumptions
+
+November 4, 2026: `lf sync --plan origin/jack-heart/write-docs-first` refuses
+an explicit target for a stacked Task because sync selects the stack parent.
+Jack Heart explicitly requested merging this source while retaining LOO-498 as
+parent. A local Git merge of the pinned source prepares the integration without
+changing the Task's parent; Loopflow will finalize the merge. No source branch,
+checkout or PR is removed.
+
+The following inherited LOO-498 notes are historical dependency context, not
+work assigned to this Task. Their full source is
+`da41d2031f:scratch/questions.md`; the parent plan and demo remain in the
+adjacent notes. LOO-728's active plan is `write-docs-first.md`.
+
+## LOO-498 — unresolved restoration and host evidence
 
 **Demo correction, November 3:** [workspace-demo.md](workspace-demo.md) records
 that the configured LF opening failed at database-schema compatibility. The

@@ -49,16 +49,7 @@ pub fn run(
                 full.starts_with(checkout.worktree.canonicalize()?),
                 "Files target is outside the recorded checkout"
             );
-            let editor = if full.is_dir() {
-                std::env::var("LF_FILE_BROWSER").ok()
-            } else {
-                None
-            }
-            .or_else(|| std::env::var("VISUAL").ok())
-            .or_else(|| std::env::var("EDITOR").ok())
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "vi".into());
-            editor_command(&editor, &full)
+            file_editor(&full)
         }
         Tool::Changes => {
             if !difftool {
@@ -125,6 +116,18 @@ fn page(checkout: &Path, patch: &str) -> Result<()> {
         "Git's selected pager exited with {status}"
     );
     Ok(())
+}
+
+pub(crate) fn file_editor(path: &Path) -> Command {
+    let editor = path
+        .is_dir()
+        .then(|| std::env::var("LF_FILE_BROWSER").ok())
+        .flatten()
+        .or_else(|| std::env::var("VISUAL").ok())
+        .or_else(|| std::env::var("EDITOR").ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "vi".into());
+    editor_command(&editor, path)
 }
 
 fn editor_command(editor: &str, path: &Path) -> Command {

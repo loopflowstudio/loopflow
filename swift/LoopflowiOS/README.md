@@ -11,6 +11,14 @@ Session. Paste and **New line** preserve multiline input; Return submits. Try
 `permission`, then `y` or `n` and Return. Nothing executes outside the app.
 The keyboard button hides the software keyboard while retaining hardware input.
 Text selection and VoiceOver reading belong to the native terminal.
+Search the compact Task list by title or checkout path. A Task without a recorded
+Session opens an explanation instead of an empty terminal.
+
+Observing preserves the owner's grid in a scrollable viewport. Taking geometry
+control fits the terminal to the phone and software keyboard; losing it restores
+the owner's grid. Layout changes send a resize only when the granted size changes.
+A fresh keyboard grant restores the software keyboard even if it was hidden in
+the previous attachment. Theme colors are installed only when the theme changes.
 
 Without `--fixture`, this build displays an unavailable Machine connection.
 It contains no live network endpoint, pairing, provider launch or on-phone CLI.
@@ -25,9 +33,10 @@ The app uses the shared Loopflow fonts, Light/Dark themes and WorkViewPlan types
 `MobileClient` is an injectable UI boundary, not a serialized protocol.
 `MachineProtocol.swift` and `tests/fixtures/dto/machine/` come from LOO-593 at their
 canonical paths. Client-authored Task data passes through that codec; it is not
-a recorded Machine reading. The current local service admits roadmap reads and
-resolves a Session to its existing owner. Live
-WorkViewPlan admission still needs joining before a remote adapter can use this screen.
+a recorded Machine reading. LOO-593's current local service admits WorkViewPlan
+and repository-path reads and resolves a Session to its existing owner. Joining
+that service still requires authenticated remote admission and the binary owner
+adapter; its private Unix socket must not be forwarded to remote callers.
 The deterministic peer owns its draft and consumes actual terminal bytes.
 Its small line editor is test/demo code, not another server or Session runtime.
 
@@ -67,7 +76,7 @@ The pinned package's build plugin only generates source-control version metadata
 `-skipPackagePluginValidation` permits that reviewed plugin in headless builds.
 The tests mount the actual UIKit terminal and assert editing, marked-text commit, combining characters,
 multiline paste, native replacement, selection, rendered accessibility text,
-viewport resizing, control loss, repeated in-screen retry, identity rejection and
+viewport resizing, preserved observer geometry, control loss, repeated in-screen retry, identity rejection and
 accepted-then-failed input without replay or duplicate submission. They also consume the
 backend's shared Machine fixtures, without inventing a second codec.
 

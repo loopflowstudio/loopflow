@@ -109,6 +109,75 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(code, 0)
     }
 
+    func testFreshControlGrantRestoresKeyboardAfterHiddenAttachment() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let bar = try XCTUnwrap(controller.view.subviews.first { $0 is UIStackView } as? UIStackView)
+        let keyboard = try XCTUnwrap(bar.arrangedSubviews.last as? UIButton)
+        keyboard.sendActions(for: .touchUpInside)
+        XCTAssertNotNil(controller.terminal.inputView)
+        workspace.send(Data("keep this draft".utf8))
+
+        client.link.loseControl()
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertFalse(controller.terminal.canWrite)
+        await workspace.reconnect()
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertEqual(workspace.state, .viewing)
+        workspace.requestControl()
+        await settle()
+        controller.update(theme: .light)
+
+        XCTAssertNil(controller.terminal.inputView)
+        XCTAssertTrue(controller.terminal.isFirstResponder)
+        XCTAssertEqual(keyboard.accessibilityLabel, "Hide keyboard")
+        XCTAssertEqual(client.terminal.draft, "keep this draft")
+        XCTAssertTrue(client.terminal.submissions.isEmpty)
+    }
+
+    func testObserverPreservesOwnerGridAcrossPhoneLayoutAndControlHandoff() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        client.link.loseControl()
+        client.link.reportGeometry(columns: 120, rows: 40)
+        await settle()
+        controller.update(theme: .light)
+        let sizeReports = client.link.sizes.count
+        XCTAssertEqual(controller.terminal.getTerminal().cols, 120)
+        XCTAssertEqual(controller.terminal.getTerminal().rows, 40)
+
+        controller.view.frame.size = CGSize(width: 320, height: 400)
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(controller.terminal.getTerminal().cols, 120)
+        XCTAssertEqual(controller.terminal.getTerminal().rows, 40)
+        XCTAssertGreaterThan(controller.terminal.bounds.width, controller.view.bounds.width)
+        let viewport = try XCTUnwrap(controller.terminal.superview as? UIScrollView)
+        XCTAssertGreaterThan(viewport.contentSize.width, viewport.bounds.width)
+        viewport.setContentOffset(CGPoint(x: 150, y: 0), animated: false)
+        viewport.layoutIfNeeded()
+        XCTAssertEqual(viewport.contentOffset.x, 150)
+        XCTAssertEqual(controller.terminal.getTerminal().cols, 120)
+        XCTAssertEqual(client.link.sizes.count, sizeReports)
+        controller.terminal.insertText("observer must not type")
+        XCTAssertTrue(client.terminal.draft.isEmpty)
+
+        workspace.requestControl()
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertLessThan(controller.terminal.getTerminal().cols, 120)
+        XCTAssertLessThan(controller.terminal.getTerminal().rows, 40)
+        XCTAssertEqual(client.link.sizes.last?.0, controller.terminal.getTerminal().cols)
+        XCTAssertEqual(client.link.sizes.last?.1, controller.terminal.getTerminal().rows)
+        let grantedReports = client.link.sizes.count
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(client.link.sizes.count, grantedReports, "Unchanged layout must not send resize traffic")
+        XCTAssertTrue(controller.terminal.getTerminal().bracketedPasteMode,
+                      "Changing viewport must not soft-reset terminal input modes")
+    }
+
     func testTaskReadingRejectsStaleAndUnavailableReplies() async throws {
         let url = try XCTUnwrap(Bundle.main.url(forResource: "task-reading", withExtension: "json"))
         let data = try Data(contentsOf: url)

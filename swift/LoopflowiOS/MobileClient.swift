@@ -42,11 +42,17 @@ protocol MobileAttachment: AnyObject {
 // Renderer-facing events after the transport has validated identity and ownership.
 // These are intentionally not Codable; LOO-593 owns the actual framing and codec.
 enum MobileTerminalEvent {
+    case geometry(columns: Int, rows: Int)
     case snapshot(Data)
     case output(Data)
     case control(input: Bool, geometry: Bool)
     case ended
     case disconnected(String)
+}
+
+struct TerminalGeometry: Equatable {
+    let columns: Int
+    let rows: Int
 }
 
 enum MobileConnectionState: Equatable {
@@ -56,7 +62,7 @@ enum MobileConnectionState: Equatable {
     var label: String {
         switch self {
         case .loading: "Opening Session…"
-        case .viewing: "Viewing · keyboard control is elsewhere or unclaimed"
+        case .viewing: "Viewing Session"
         case .controlling: "Keyboard connected"
         case .ended: "Session ended"
         case .disconnected(let reason): "Disconnected · \(reason)"
@@ -74,8 +80,10 @@ final class MobileWorkspace {
     private var generation = 0
     private var taskGeneration = 0
     private var ownsGeometry = false
+    private var terminalGeometry: TerminalGeometry?
     private var replaying = false
-    private var viewport: (columns: Int, rows: Int)?
+    private var viewport: TerminalGeometry?
+    private var sentViewport: TerminalGeometry?
     private(set) var tasks: [WorkViewPlan.Content] = []
     private(set) var isLoadingTasks = false
     private(set) var tasksError: String?
@@ -83,6 +91,8 @@ final class MobileWorkspace {
     private(set) var state: MobileConnectionState = .loading
     // A mounted renderer consumes output immediately; no second scrollback store.
     var render: ((Data, Bool) -> Void)?
+    // Grid dimensions, not pixels. Observers preserve the owner's terminal geometry.
+    var setGeometry: ((TerminalGeometry?) -> Void)?
 
     init(client: any MobileClient) { self.client = client }
 
@@ -105,7 +115,11 @@ final class MobileWorkspace {
     func open(_ task: WorkViewPlan.Content) async {
         let sameSession = selected?.primarySession == task.primarySession
         disconnect()
-        if !sameSession { render?(Data(), true) }
+        if !sameSession {
+            terminalGeometry = nil
+            setGeometry?(nil)
+            render?(Data(), true)
+        }
         selected = task
         state = .loading
         guard let session = task.primarySession else {
@@ -157,9 +171,12 @@ final class MobileWorkspace {
 
     func resize(columns: Int, rows: Int) {
         guard columns > 0, rows > 0 else { return }
-        viewport = (columns, rows)
-        guard ownsGeometry else { return }
-        do { try attachment?.resize(columns: columns, rows: rows) }
+        viewport = TerminalGeometry(columns: columns, rows: rows)
+        guard ownsGeometry, sentViewport != viewport else { return }
+        do {
+            try attachment?.resize(columns: columns, rows: rows)
+            sentViewport = viewport
+        }
         catch { fail(error.localizedDescription) }
     }
 
@@ -175,17 +192,24 @@ final class MobileWorkspace {
         disconnect()
         selected = nil
         render = nil
+        setGeometry = nil
     }
 
     private func receive(_ event: MobileTerminalEvent) {
         switch event {
+        case .geometry(let columns, let rows):
+            guard columns > 0, rows > 0 else { return }
+            terminalGeometry = TerminalGeometry(columns: columns, rows: rows)
+            if !ownsGeometry { setGeometry?(terminalGeometry) }
         case .snapshot(let data):
             replaying = true
             render?(data, true)
             replaying = false
         case .output(let data): render?(data, false)
         case .control(let input, let geometry):
+            if ownsGeometry != geometry { sentViewport = nil }
             ownsGeometry = geometry
+            setGeometry?(geometry ? nil : terminalGeometry)
             state = input ? .controlling : .viewing
             if geometry, let viewport { resize(columns: viewport.columns, rows: viewport.rows) }
         case .ended:
@@ -207,5 +231,7 @@ final class MobileWorkspace {
         eventTask = nil
         attachment?.close()
         attachment = nil
+        sentViewport = nil
+        setGeometry?(terminalGeometry)
     }
 }

@@ -3,6 +3,22 @@ import SwiftTerm
 import SwiftUI
 import UIKit
 
+private final class TerminalViewport: UIScrollView {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === panGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        let velocity = panGestureRecognizer.velocity(in: self)
+        if abs(velocity.x) > abs(velocity.y) {
+            return contentSize.width > bounds.width
+        }
+        // At an edge, let the terminal's own scrollback take the next gesture.
+        return velocity.y < 0
+            ? contentOffset.y < contentSize.height - bounds.height
+            : contentOffset.y > 0
+    }
+}
+
 final class SessionTerminalView: TerminalView {
     var canWrite = false
     var pasteUnavailable: ((String) -> Void)?
@@ -56,6 +72,7 @@ struct SessionTerminal: UIViewControllerRepresentable {
 
     static func dismantleUIViewController(_ controller: SessionTerminalController, coordinator: ()) {
         controller.workspace.render = nil
+        controller.workspace.setGeometry = nil
         controller.terminal.updateUiClosed()
     }
 }
@@ -63,6 +80,11 @@ struct SessionTerminal: UIViewControllerRepresentable {
 final class SessionTerminalController: UIViewController, @preconcurrency TerminalViewDelegate {
     let workspace: MobileWorkspace
     let terminal = SessionTerminalView(frame: .zero)
+    private let viewport = TerminalViewport()
+    private var terminalWidth: NSLayoutConstraint!
+    private var terminalHeight: NSLayoutConstraint!
+    private var geometry: TerminalGeometry?
+    private var appliedTheme: String?
     private let bar = UIStackView()
     private let message = UILabel()
     private let pasteButton = UIButton(type: .system)
@@ -90,6 +112,12 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             if reset { terminal.feed(text: "\u{1b}c") }
             terminal.feed(byteArray: Array(bytes)[...])
         }
+        workspace.setGeometry = { [weak self] geometry in
+            guard let self else { return }
+            self.geometry = geometry
+            self.view.setNeedsLayout()
+            self.view.layoutIfNeeded()
+        }
 
         pasteButton.setTitle("Paste", for: .normal)
         pasteButton.addAction(UIAction { [weak self] _ in self?.terminal.paste(nil) }, for: .touchUpInside)
@@ -103,23 +131,62 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         for button in [pasteButton, newlineButton, keyboardButton] { bar.addArrangedSubview(button) }
         message.font = .preferredFont(forTextStyle: .caption1)
         message.numberOfLines = 0
-        for subview in [terminal, message, bar] {
+        viewport.contentInsetAdjustmentBehavior = .never
+        viewport.isDirectionalLockEnabled = true
+        terminal.panGestureRecognizer.require(toFail: viewport.panGestureRecognizer)
+        viewport.accessibilityIdentifier = "terminal-viewport"
+        terminal.translatesAutoresizingMaskIntoConstraints = false
+        viewport.addSubview(terminal)
+        terminalWidth = terminal.widthAnchor.constraint(equalToConstant: 1)
+        terminalHeight = terminal.heightAnchor.constraint(equalToConstant: 1)
+        for subview in [viewport, message, bar] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
         NSLayoutConstraint.activate([
-            terminal.topAnchor.constraint(equalTo: view.topAnchor),
-            terminal.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            terminal.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            terminal.bottomAnchor.constraint(equalTo: message.topAnchor),
-            message.leadingAnchor.constraint(equalTo: terminal.leadingAnchor, constant: 8),
-            message.trailingAnchor.constraint(equalTo: terminal.trailingAnchor, constant: -8),
+            viewport.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            viewport.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            viewport.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            viewport.bottomAnchor.constraint(equalTo: message.topAnchor),
+            terminal.leadingAnchor.constraint(equalTo: viewport.contentLayoutGuide.leadingAnchor),
+            terminal.trailingAnchor.constraint(equalTo: viewport.contentLayoutGuide.trailingAnchor),
+            terminal.topAnchor.constraint(equalTo: viewport.contentLayoutGuide.topAnchor),
+            terminal.bottomAnchor.constraint(equalTo: viewport.contentLayoutGuide.bottomAnchor),
+            terminalWidth, terminalHeight,
+            message.leadingAnchor.constraint(equalTo: viewport.leadingAnchor, constant: 8),
+            message.trailingAnchor.constraint(equalTo: viewport.trailingAnchor, constant: -8),
             message.bottomAnchor.constraint(equalTo: bar.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: terminal.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: terminal.trailingAnchor),
+            bar.leadingAnchor.constraint(equalTo: viewport.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: viewport.trailingAnchor),
             bar.heightAnchor.constraint(equalToConstant: 44),
             bar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
         ])
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard viewport.bounds.width > 0, viewport.bounds.height > 0 else { return }
+        let grid = terminal.getTerminal()
+        let frame = terminal.getOptimalFrameSize()
+        let cell = CGSize(width: frame.width / CGFloat(grid.cols), height: frame.height / CGFloat(grid.rows))
+        let size: CGSize
+        if let geometry {
+            // Size the actual renderer, so UIKit layout never briefly reflows a
+            // desktop snapshot at phone width. The surrounding viewport pans.
+            // Leave a point for UIKit's pixel rounding; truncating a fractional
+            // cell boundary would otherwise silently lose the last column.
+            size = CGSize(width: ceil(CGFloat(geometry.columns) * cell.width) + 1,
+                          height: ceil(CGFloat(geometry.rows) * cell.height) + 1)
+        } else {
+            size = viewport.bounds.size
+        }
+        if terminalWidth.constant != size.width || terminalHeight.constant != size.height {
+            terminalWidth.constant = size.width
+            terminalHeight.constant = size.height
+            viewport.layoutIfNeeded()
+        }
+        workspace.resize(columns: max(1, Int(viewport.bounds.width / cell.width)),
+                         rows: max(1, Int(viewport.bounds.height / cell.height)))
     }
 
     func update(theme: ThemeDefinition) {
@@ -128,13 +195,23 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         terminal.canWrite = canWrite
         for button in [pasteButton, newlineButton, keyboardButton] { button.isEnabled = canWrite }
         if changed {
-            if canWrite { terminal.becomeFirstResponder() }
+            if canWrite {
+                // A new input grant starts an intentional typing interaction, even if
+                // the previous attachment had hidden its software keyboard.
+                keyboardHidden = false
+                terminal.inputView = nil
+                updateKeyboardButton()
+                terminal.reloadInputViews()
+                terminal.becomeFirstResponder()
+            }
             else {
                 // Commit/discard any platform composition only after the transport input gate closed.
                 terminal.unmarkText()
                 terminal.resignFirstResponder()
             }
         }
+        guard appliedTheme != theme.id else { return }
+        appliedTheme = theme.id
         terminal.nativeBackgroundColor = UIColor(theme.terminal.background.color)
         terminal.nativeForegroundColor = UIColor(theme.terminal.foreground.color)
         terminal.selectedTextBackgroundColor = UIColor(theme.terminal.selectionBackground.color)
@@ -156,13 +233,17 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         terminal.inputView = keyboardHidden ? UIView(frame: .zero) : nil
         terminal.reloadInputViews()
         terminal.becomeFirstResponder()
+        updateKeyboardButton()
+    }
+
+    private func updateKeyboardButton() {
         keyboardButton.accessibilityLabel = keyboardHidden ? "Show keyboard" : "Hide keyboard"
         keyboardButton.setImage(UIImage(systemName: keyboardHidden ? "keyboard" : "keyboard.chevron.compact.down"), for: .normal)
     }
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) { workspace.send(Data(data)) }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        workspace.resize(columns: newCols, rows: newRows)
+        if geometry == nil { workspace.resize(columns: newCols, rows: newRows) }
     }
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}

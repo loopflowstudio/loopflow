@@ -1,5 +1,41 @@
 # LOO-718 native iOS implementation
 
+## Overnight direction — November 3, 2026
+
+Jack Heart asked for sustained autonomous improvement toward an excellent iOS app, expanding toward Desktop capabilities where useful while prioritizing polish, performance and UX over feature count. The offline slice is a starting point, not the completion boundary. Continue in this checkout; neither the earlier demo stop nor absent feedback ends implementation. No request to merge was made.
+
+Next work: improve Task-list density/search and honest unavailable states; make terminal keyboard recovery and spacing comfortable; then join the actual Machine contract and authenticated host-Tailscale transport. LOO-593's current published branch now admits view_plan and repository_path, superseding the missing-view-plan limitation recorded below. Revalidate actual source and fixtures at integration. TestFlight remains LOO-721; physical-device and live-host evidence are still required. Favor a complete Task → usable Session over additional panes. Record observed behavior separately from product acceptance.
+
+### November 3 overnight checkpoint
+
+The compact searchable Task list, honest missing-Session screen, terminal insets
+and fresh-grant keyboard restoration are implemented. The renderer now preserves
+reported owner columns/rows while observing and fits the local viewport only with
+geometry ownership. A wrapping scroll view pans that fixed canvas; local size
+changes are remembered without sending observer resizes. Duplicate geometry
+reports and repeated theme installation are eliminated. The shared owner still
+owns all authority; this introduces no serialized domain types or retention policy.
+
+The mounted UIKit tests prove 120 × 40 survives phone layout changes, observer
+typing is ignored, ownership fits the phone, terminal input modes survive and
+unchanged layouts send no extra resize messages. Manual Simulator inspection
+verified Task-list density, missing-Session explanation and keyboard-open fitting.
+Touch panning was not established by the automation gesture; keep it as real-device
+proof rather than equating programmatic content-offset tests with gesture quality.
+
+Next: consume the actual owner frames (including resize-before-render ordering,
+nonce-qualified events and bounded streaming), add authenticated host-Tailscale
+admission to the existing service, and join actual Task reads/Session attachment.
+The backend lives on LOO-593's branch at 07a6a184d4, not in this checkout yet;
+integrate that dependency instead of writing another Machine implementation.
+
+Check: the README's focused native command passed 16 tests with zero failures
+at 23:40 on November 3; result `swift/.build/ios/Logs/Test/Test-LoopflowiOS-2026.11.03_23-40-33--0800.xcresult`.
+This includes programmatic viewport panning without grid changes. Search was
+also exercised in Simulator: “review” leaves only Review a change, which opens
+its Session; dismissing search restores all three Tasks. Updated captures are
+`demo-assets/polished-tasks.png` and `demo-assets/polished-keyboard.png`.
+
 Jack Heart accepted existing open Tasks → the selected existing Session terminal,
 Desktop styling, and a reduced Paste / New line / keyboard row. Jack invoked
 launch-plan on November 3, 2026: implement this native lane in the existing

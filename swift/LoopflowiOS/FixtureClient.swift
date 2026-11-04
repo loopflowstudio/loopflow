@@ -34,6 +34,7 @@ final class FixtureAttachment: MobileAttachment {
         self.sessionID = sessionID
         self.terminal = terminal
         (events, continuation) = AsyncStream.makeStream()
+        continuation.yield(.geometry(columns: terminal.columns, rows: terminal.rows))
         continuation.yield(.snapshot(Data(terminal.screen.utf8)))
         continuation.yield(.control(input: false, geometry: false))
     }
@@ -53,6 +54,13 @@ final class FixtureAttachment: MobileAttachment {
     func resize(columns: Int, rows: Int) throws {
         guard controlling, !closed else { throw CocoaError(.fileWriteNoPermission) }
         sizes.append((columns, rows))
+        reportGeometry(columns: columns, rows: rows)
+    }
+
+    func reportGeometry(columns: Int, rows: Int) {
+        terminal.columns = columns
+        terminal.rows = rows
+        continuation.yield(.geometry(columns: columns, rows: rows))
     }
 
     func loseControl() {
@@ -73,6 +81,8 @@ final class FixtureAttachment: MobileAttachment {
 /// Tiny deterministic terminal peer for the native input proof. Its prompt owns the draft.
 /// Implements only the editor keys exercised here, never executes a command.
 final class FixtureTerminal {
+    var columns = 80
+    var rows = 24
     private(set) var draft = ""
     private(set) var submissions: [String] = []
     private var cursor = 0

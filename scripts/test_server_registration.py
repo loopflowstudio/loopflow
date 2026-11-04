@@ -23,7 +23,7 @@ PROBE = r"""
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-int lf_machine_service_register(const char *, bool, char *, size_t);
+int lf_server_register(const char *, const char *, bool, char *, size_t);
 int perform(int argc, const char **argv) {
     @autoreleasepool {
         if (argc < 3) return 2;
@@ -57,8 +57,9 @@ int perform(int argc, const char **argv) {
             }
         }
         char error[1024] = {0};
-        int code = lf_machine_service_register(
-            argv[2], !strcmp(argv[1], "replace"), error, sizeof(error));
+        int code = lf_server_register(
+            argv[2], !strcmp(argv[1], "migrate") ? argv[3] : NULL,
+            !strcmp(argv[1], "replace") || !strcmp(argv[1], "migrate"), error, sizeof(error));
         if (code) fprintf(stderr, "%s\n", error);
         return code;
     }
@@ -79,7 +80,7 @@ def _run(*args: str) -> None:
     subprocess.run(args, check=True, stdin=subprocess.DEVNULL, capture_output=True, text=True)
 
 
-def _probe(executable: Path, action: str, plist: str, candidate: Path | None = None) -> None:
+def _probe(executable: Path, action: str, plist: str, candidate: Path | str | None = None) -> None:
     bundle = executable.parent.parent.parent
     result = bundle.parent / "probe-result"
     log = bundle.parent / "probe.log"
@@ -132,10 +133,10 @@ def main() -> None:
     args = parser.parse_args()
     if bool(args.lf) != bool(args.home):
         parser.error("--lf and --home must be supplied together")
-    label = "com.loopflow.machine-proof." + uuid.uuid4().hex
+    label = "com.loopflow.server-proof." + uuid.uuid4().hex
     with tempfile.TemporaryDirectory(prefix="lf-service-package-") as temporary:
         root = Path(temporary)
-        contents = root / "MachineProof.app/Contents"
+        contents = root / "ServerProof.app/Contents"
         executable = contents / "MacOS/probe"
         agents = contents / "Library/LaunchAgents"
         executable.parent.mkdir(parents=True)
@@ -163,7 +164,7 @@ def main() -> None:
                 {
                     "Label": label,
                     "BundleProgram": "Contents/MacOS/lf" if args.lf else "Contents/MacOS/probe",
-                    "ProgramArguments": [str(helper), "machine", "service", "run"]
+                    "ProgramArguments": [str(helper), "server", "run"]
                     if args.lf
                     else ["probe", "serve", str(root / "pid")],
                     "EnvironmentVariables": {"LF_HOME": str(args.home), "LF_BIN": str(helper)}
@@ -181,6 +182,11 @@ def main() -> None:
                 }
             )
         )
+        legacy_name = label + ".legacy.plist"
+        legacy_label = label + ".legacy"
+        legacy = plistlib.loads((agents / plist_name).read_bytes())
+        legacy["Label"] = legacy_label
+        (agents / legacy_name).write_bytes(plistlib.dumps(legacy))
         source = root / "probe.m"
         source.write_text(PROBE)
         _run(
@@ -191,7 +197,7 @@ def main() -> None:
             "-framework",
             "ServiceManagement",
             str(source),
-            str(ROOT / "rust/loopflow/src/machine_service/registration.m"),
+            str(ROOT / "rust/loopflow/src/installation/registration.m"),
             "-o",
             str(executable),
         )
@@ -225,10 +231,21 @@ def main() -> None:
             _probe(executable, "register", plist_name)
             assert _pid(root / "pid") == first, "Repeated registration replaced a live helper"
             _probe(executable, "replace", plist_name)
-            assert _pid(root / "pid", first) != first
+            second = _pid(root / "pid", first)
+            _probe(executable, "remove", plist_name)
+            _probe(executable, "register", legacy_name)
+            previous = _pid(root / "pid", second)
+            _probe(executable, "migrate", plist_name, legacy_name)
+            assert _pid(root / "pid", previous) != previous
+            old_job = subprocess.run(
+                ["launchctl", "print", f"gui/{os.getuid()}/{legacy_label}"],
+                capture_output=True,
+                check=False,
+            )
+            assert old_job.returncode != 0, "Migration left the old helper registered"
             print(
                 "Signed bundle registered, repeated startup preserved it, "
-                "replacement started a new helper."
+                "replacement and legacy migration each left one new helper."
             )
         finally:
             if args.lf and not replaced:
@@ -243,6 +260,10 @@ def main() -> None:
                         ("state =", "pid =", "last exit code =", "last exit reason =", "program =")
                     ):
                         print("launchd: " + line.strip(), file=sys.stderr)
+            try:
+                _probe(executable, "remove", legacy_name)
+            except (RuntimeError, subprocess.CalledProcessError):
+                pass
             try:
                 _probe(executable, "remove", plist_name)
             except (RuntimeError, subprocess.CalledProcessError):

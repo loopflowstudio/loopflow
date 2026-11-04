@@ -496,12 +496,12 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var lastCommandBlockRefresh: CFTimeInterval = 0
     private var focusRequested = false
     private var inputEnabled = true
-    private var machineConnection: MachineConnection?
+    private var serverConnection: ServerConnection?
     private var connectionReadonly = false
-    var connectionAcceptsInput: Bool { machineConnection?.reading.acceptsInput ?? true }
+    var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
     private let connectionLabel = NSTextField(labelWithString: "")
-    private lazy var retryConnection = NSButton(title: "Retry", target: self, action: #selector(retryMachineConnection))
-    private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveMachineConnection))
+    private lazy var retryConnection = NSButton(title: "Retry", target: self, action: #selector(retryServerConnection))
+    private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveServerConnection))
     lazy var connectionBar: NSStackView = {
         let bar = NSStackView(views: [connectionLabel, moveConnection, retryConnection])
         bar.orientation = .horizontal
@@ -512,15 +512,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         return bar
     }()
 
-    @objc private func retryMachineConnection() {
-        machineConnection?.retry()
+    @objc private func retryServerConnection() {
+        serverConnection?.retry()
     }
 
-    @objc private func moveMachineConnection() {
-        machineConnection?.moveHere()
+    @objc private func moveServerConnection() {
+        serverConnection?.moveHere()
     }
 
-    private func showConnection(_ reading: MachineConnectionReading) {
+    private func showConnection(_ reading: ServerConnectionReading) {
         let readonly = !reading.acceptsInput
         if surface != nil, connectionReadonly != readonly {
             performBinding("toggle_readonly")
@@ -586,15 +586,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         let surfaceCommand: String?
         if case .session = terminal, let command {
-            let connection = MachineConnection()
+            let connection = ServerConnection()
             do {
                 try connection.start { [weak self] reading in self?.showConnection(reading) }
             } catch {
                 onSurfaceFailed("Cannot open native connection status: \(error.localizedDescription)")
                 return
             }
-            machineConnection = connection
-            let script = "export LF_MACHINE_STATUS=\(shellEscape(connection.path)); export LF_MACHINE_SERVICE=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
+            serverConnection = connection
+            let script = "export LF_SERVER_STATUS=\(shellEscape(connection.path)); export LF_SERVER=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
             surfaceCommand = ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
         } else {
             surfaceCommand = command
@@ -608,7 +608,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if surface != nil { pendingInput = nil }
 
         if surface != nil {
-            if let machineConnection { showConnection(machineConnection.reading) }
+            if let serverConnection { showConnection(serverConnection.reading) }
             updateContentScale()
             updateSurfaceSize()
             installCommandBlockOverlay()
@@ -618,8 +618,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             setupTrackingArea()
             onSurfaceCreated()
         } else {
-            machineConnection?.stop()
-            machineConnection = nil
+            serverConnection?.stop()
+            serverConnection = nil
             onSurfaceFailed("Could not create the native terminal surface.")
         }
     }
@@ -688,8 +688,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func destroySurface() {
-        machineConnection?.stop()
-        machineConnection = nil
+        serverConnection?.stop()
+        serverConnection = nil
         copyDismissal?.cancel()
         publishCopyConfirmation(nil)
         retainedSearchBar?.end()

@@ -43,7 +43,6 @@ from pathlib import Path
 
 import boto3
 import botocore.exceptions
-
 from app_bundle import install_app_executable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -843,9 +842,8 @@ def _build_control_tools() -> Path:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
-    agents = app_macos_dir.parent / "Library" / "LaunchAgents"
-    agents.mkdir(parents=True, exist_ok=True)
-    shutil.copy(SWIFT_DIR / "LaunchAgents" / "com.loopflow.machine.plist", agents)
+    agents = app_macos_dir.parent / "Library/LaunchAgents"
+    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
     shutil.copy(_build_control_tools(), app_macos_dir / "lf")
 
 

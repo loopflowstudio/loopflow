@@ -761,11 +761,11 @@ service uses the shared Rust subscription. Other parts still run through the
 in-app Rust library (`rust/loopflow-ffi/include/loopflow.h`). Each part names its
 `ServedRead`, the `lf` command above that prints the same frames. Task files,
 diffs, Waves, Machine identity, Portfolio, saved panes, Task owners and Graphs
-still use that library. Readiness currently obtains the selected `lf` helper.
-The accepted [server boundary](../docs/architecture/server.md) puts registration
+still use that library. First connection obtains the selected `lf` helper.
+The [server boundary](../docs/architecture/server.md) puts registration
 and updates under installation, connection readiness in the server client, and
-Machine destination routing separately. The `MachineService` / `MachineProtocol`
-source names and CLI namespace await that coordinated cutover.
+Machine destination routing separately. `ServerClient` caches the socket path
+after installation readiness; reconnect never installs or re-registers a helper.
 Session rename crosses the server and runs the complete CLI command.
 Completing, reopening, deferring, moving and editing a Task, saving a Task
 file, binding a Session, ensuring a Wave's Project, the planning
@@ -982,8 +982,8 @@ keeps input paused until acknowledgement and retains the draft and running
 provider. A lost reply recovers passively; it never repeats the takeover.
 Closing the pane cancels its pending action. These operations surface service
 errors without a direct FFI fallback. Other Work operations retain FFI until their
-cutover. See the [local protocol](../rust/loopflow/src/machine_service/README.md).
-`scripts/test_desktop.sh --filter MachineProtocolTests` builds the consumer and
+cutover. See the [local protocol](../rust/loopflow/src/server/README.md).
+`scripts/test_desktop.sh --filter ServerProtocolTests` builds the consumer and
 checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
 source experiments select a separate `LF_HOME`.
 

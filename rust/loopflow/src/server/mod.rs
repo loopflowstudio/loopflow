@@ -1,13 +1,13 @@
 //! Standalone transport for shared reads and commands; owns no execution.
 pub mod client;
-pub mod installation;
 mod service;
 pub mod wire;
 
 use std::path::PathBuf;
 
 pub fn socket_path() -> anyhow::Result<PathBuf> {
-    // Reuse the private, short per-Machine transport directory and its checks.
+    // Keep the installed revision-1 endpoint stable: relays from before the
+    // namespace cutover must reconnect to this same listener after an update.
     Ok(crate::transport::private_directory()?.join("machine.sock"))
 }
 

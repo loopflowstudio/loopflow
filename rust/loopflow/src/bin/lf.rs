@@ -790,6 +790,7 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
         } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         OpsCommand::People { json } => loopflow::lf::commands::people::run(*json),
         OpsCommand::Tokens { json, days } => loopflow::lf::commands::tokens::run(*json, *days),
+        OpsCommand::Server { cmd } => loopflow::lf::commands::server::run(cmd),
         OpsCommand::Machine { cmd } => loopflow::lf::commands::machine::run(cmd, cli.batch),
         OpsCommand::Pr { cmd } => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
@@ -1566,7 +1567,7 @@ fn init_tracing(verbose: bool) {
         return;
     }
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("warn,loopflow::machine_service=info"))
+        .with_env_filter(EnvFilter::new("warn,loopflow::server=info"))
         .with_ansi(false)
         .with_writer(|| loopflow::diagnostic_log::DiagnosticLog)
         .event_format(loopflow::diagnostic_log::IdentifiedLines)
@@ -1903,6 +1904,14 @@ fn run() -> anyhow::Result<()> {
         return loopflow::lf::commands::doctor::run(*json);
     }
 
+    // Availability and bootstrap are observational; no Work admission or repair.
+    if let Some(Commands::Ops {
+        cmd: OpsCommand::Server { cmd },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::server::run(cmd);
+    }
+
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
@@ -1931,6 +1940,14 @@ fn run() -> anyhow::Result<()> {
             ),
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
+            }
+            Some(InstallCommand::Server) => {
+                loopflow::installation::server::delegate_selected()?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&loopflow::installation::server::ensure()?)?
+                );
+                Ok(())
             }
             Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
             Some(InstallCommand::CanOpen { tag }) => loopflow::lf::commands::install::can_open(tag),

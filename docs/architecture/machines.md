@@ -3,7 +3,7 @@
 `lf machine` manages execution destinations: connections, defaults, pools and
 rentals. `lf --machine` runs a command at its destination. Client access and
 server installation have separate owners; see the accepted
-[server boundary](server.md) and its pending command cutover.
+[server boundary](server.md).
 
 A machine is one OS user's Loopflow authority in one data directory. It owns local processes,
 credentials, planning storage, command and conversation records, and OS locks.

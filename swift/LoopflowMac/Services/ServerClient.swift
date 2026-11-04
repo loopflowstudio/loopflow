@@ -4,31 +4,31 @@ import Foundation
 import Loopflow
 
 /// Migrated operations have exactly one path; service errors remain visible.
-enum MachineService {
+enum ServerClient {
     static func read(_ query: ServedRead) async throws -> String {
         let response = try await request(.read(query))
-        guard case .read(let output) = response else { throw RegistryQueryError("Unexpected Machine reading") }
+        guard case .read(let output) = response else { throw RegistryQueryError("Unexpected Server reading") }
         return output
     }
 
     static func write(_ change: ServedWrite) async throws -> String {
         let response = try await request(.command(change))
         guard case .command(_, let output, let stderr, let code) = response else {
-            throw RegistryQueryError("Machine command outcome unknown; inspect Session before retrying")
+            throw RegistryQueryError("Server command outcome unknown; inspect Session before retrying")
         }
         guard code == 0 else { throw RegistryQueryError(stderr) }
         return output
     }
 
-    private static func request(_ operation: MachineOperation) async throws -> MachineReply {
-        let path = try await MachineLocation.shared.path()
+    private static func request(_ operation: ServerOperation) async throws -> ServerReply {
+        let path = try await ServerLocation.shared.path()
         return try await withCheckedThrowingContinuation { continuation in
             Thread.detachNewThread {
                 do {
-                    let connection = try MachineSocket(path: path)
+                    let connection = try ServerSocket(path: path)
                     defer { connection.close() }
                     let id = UUID().uuidString
-                    try connection.send(JSONEncoder().encode(MachineRequest(version: 1, id: id, operation: operation)))
+                    try connection.send(JSONEncoder().encode(ServerRequest(version: 1, id: id, operation: operation)))
                     continuation.resume(returning: try connection.receive(id: id).result)
                 } catch { continuation.resume(throwing: error) }
             }
@@ -36,19 +36,21 @@ enum MachineService {
     }
 
     static func watch(_ query: ServedRead) throws -> LineWatch {
-        let watch = MachineWatch(query)
+        let watch = ServerWatch(query)
         return LineWatch(lines: watch.lines, send: watch.send, cancel: watch.cancel)
     }
 }
 
-private actor MachineLocation {
-    static let shared = MachineLocation()
+private actor ServerLocation {
+    static let shared = ServerLocation()
     private var obtaining: Task<String, any Error>?
+    private var socketPath: String?
 
     func path() async throws -> String {
+        if let socketPath { return socketPath }
         if let obtaining { return try await obtaining.value }
         let task = Task {
-            let result = try await LocalWaveAgentLauncher.queryLf(["machine", "service", "ensure"], cwd: "/")
+            let result = try await LocalWaveAgentLauncher.queryLf(["install", "server"], cwd: "/")
             struct Status: Decodable {
                 let socket: String
                 let ready: Bool
@@ -56,18 +58,20 @@ private actor MachineLocation {
                 let error: String?
             }
             let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
-            guard status.ready else { throw RegistryQueryError(status.error ?? "Machine service unavailable") }
+            guard status.ready else { throw RegistryQueryError(status.error ?? "Loopflow server unavailable") }
             return status.socket
         }
         obtaining = task
         defer { obtaining = nil }
-        return try await task.value
+        let path = try await task.value
+        socketPath = path
+        return path
     }
 }
 
 /// One bounded stream and a single reader. Shutdown interrupts the read; only
 /// the reader closes its descriptor, so cancellation cannot race descriptor reuse.
-private final class MachineSocket: @unchecked Sendable {
+private final class ServerSocket: @unchecked Sendable {
     private let fd: Int32
     private let writes = NSLock()
     private let state = NSLock()
@@ -78,11 +82,11 @@ private final class MachineSocket: @unchecked Sendable {
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         guard path.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else {
-            throw RegistryQueryError("Machine socket path is too long")
+            throw RegistryQueryError("Server socket path is too long")
         }
         withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path.utf8) }
         fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw RegistryQueryError("Cannot open Machine socket") }
+        guard fd >= 0 else { throw RegistryQueryError("Cannot open Server socket") }
         let connected = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
@@ -92,7 +96,7 @@ private final class MachineSocket: @unchecked Sendable {
         var gid: gid_t = 0
         guard connected == 0, getpeereid(fd, &uid, &gid) == 0, uid == geteuid() else {
             Darwin.close(fd)
-            throw RegistryQueryError("Machine service unavailable or owned by another account")
+            throw RegistryQueryError("Loopflow server unavailable or owned by another account")
         }
         var enabled: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
@@ -102,8 +106,8 @@ private final class MachineSocket: @unchecked Sendable {
 
     func send(_ body: Data) throws {
         try writes.withLock {
-            guard !state.withLock({ closed }) else { throw RegistryQueryError("Machine connection is closed") }
-            guard body.count <= 65536 else { throw RegistryQueryError("Machine request exceeds 64 KiB") }
+            guard !state.withLock({ closed }) else { throw RegistryQueryError("Server connection is closed") }
+            guard body.count <= 65536 else { throw RegistryQueryError("Server request exceeds 64 KiB") }
             var length = UInt32(body.count).bigEndian
             var bytes = withUnsafeBytes(of: &length) { Data($0) }
             bytes.append(body)
@@ -112,19 +116,19 @@ private final class MachineSocket: @unchecked Sendable {
                 while offset < buffer.count {
                     let sent = Darwin.write(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
                     if sent < 0 && errno == EINTR { continue }
-                    guard sent > 0 else { throw RegistryQueryError("Machine send failed; delivery is unknown") }
+                    guard sent > 0 else { throw RegistryQueryError("Server send failed; delivery is unknown") }
                     offset += sent
                 }
             }
         }
     }
 
-    func receive(id: String) throws -> MachineResponse {
+    func receive(id: String) throws -> ServerResponse {
         let header = try read(4)
         let length = header.reduce(0) { ($0 << 8) | Int($1) }
-        guard length <= Self.maxFrame else { throw RegistryQueryError("Machine frame exceeds limit") }
-        let response = try JSONDecoder().decode(MachineResponse.self, from: read(length))
-        guard response.id == id else { throw RegistryQueryError("Machine response identity mismatch") }
+        guard length <= Self.maxFrame else { throw RegistryQueryError("Server frame exceeds limit") }
+        let response = try JSONDecoder().decode(ServerResponse.self, from: read(length))
+        guard response.id == id else { throw RegistryQueryError("Server response identity mismatch") }
         if case .error(let code, let message) = response.result { throw RegistryQueryError("\(code): \(message)") }
         return response
     }
@@ -136,7 +140,7 @@ private final class MachineSocket: @unchecked Sendable {
             while offset < count {
                 let received = Darwin.read(fd, buffer.baseAddress!.advanced(by: offset), count - offset)
                 if received < 0 && errno == EINTR { continue }
-                guard received > 0 else { throw RegistryQueryError("Machine disconnected; refresh state before retrying a command") }
+                guard received > 0 else { throw RegistryQueryError("Server disconnected; refresh state before retrying a command") }
                 offset += received
             }
         }
@@ -153,15 +157,15 @@ private final class MachineSocket: @unchecked Sendable {
     }
 }
 
-private final class MachineWatch: @unchecked Sendable {
+private final class ServerWatch: @unchecked Sendable {
     let lines: AsyncThrowingStream<Data, any Error>
     private let continuation: AsyncThrowingStream<Data, any Error>.Continuation
     private let lock = NSLock()
-    private var connection: MachineSocket?
+    private var connection: ServerSocket?
     private var pending: [Data] = []
     private var stopped = false
     private var queuedWrites = 0
-    private let writer = DispatchQueue(label: "studio.loopflow.machine-checkpoints")
+    private let writer = DispatchQueue(label: "studio.loopflow.server-checkpoints")
 
     init(_ query: ServedRead) {
         // Never drop a checkpoint silently. A slow consumer reconnects with a
@@ -170,7 +174,7 @@ private final class MachineWatch: @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in self?.stop() }
         Task {
             do {
-                let path = try await MachineLocation.shared.path()
+                let path = try await ServerLocation.shared.path()
                 Thread.detachNewThread { self.run(path: path, query: query) }
             } catch { continuation.finish(throwing: error) }
         }
@@ -178,10 +182,10 @@ private final class MachineWatch: @unchecked Sendable {
 
     private func run(path: String, query: ServedRead) {
         do {
-            let socket = try MachineSocket(path: path)
+            let socket = try ServerSocket(path: path)
             defer { socket.close() }
             let id = UUID().uuidString
-            try socket.send(JSONEncoder().encode(MachineRequest(version: 1, id: id, operation: .subscribe(query, generation: 1))))
+            try socket.send(JSONEncoder().encode(ServerRequest(version: 1, id: id, operation: .subscribe(query, generation: 1))))
             let start = try lock.withLock {
                 guard !stopped else { return false }
                 connection = socket
@@ -193,10 +197,10 @@ private final class MachineWatch: @unchecked Sendable {
             while true {
                 let response = try socket.receive(id: id)
                 guard case .reading(let generation, let frame) = response.result, generation == 1 else {
-                    throw RegistryQueryError("Unexpected Machine subscription generation")
+                    throw RegistryQueryError("Unexpected Server subscription generation")
                 }
                 if case .dropped = continuation.yield(try JSONEncoder().encode(frame)) {
-                    throw RegistryQueryError("Machine subscription fell behind; reconnect for current Work")
+                    throw RegistryQueryError("Server subscription fell behind; reconnect for current Work")
                 }
             }
         } catch { continuation.finish(throwing: error) }
@@ -210,12 +214,12 @@ private final class MachineWatch: @unchecked Sendable {
             return true
         }
         guard admitted else {
-            continuation.finish(throwing: RegistryQueryError("Machine checkpoints exceeded limit or connection closed"))
+            continuation.finish(throwing: RegistryQueryError("Server checkpoints exceeded limit or connection closed"))
             stop()
             return
         }
         writer.async {
-            let socket: MachineSocket? = self.lock.withLock {
+            let socket: ServerSocket? = self.lock.withLock {
                 self.queuedWrites -= 1
                 guard !self.stopped else { return nil }
                 if let socket = self.connection { return socket }

@@ -31,7 +31,7 @@ struct Reading<'a> {
 
 impl Status {
     pub(super) fn from_env() -> Option<Self> {
-        std::env::var_os("LF_MACHINE_STATUS").map(|path| Self {
+        std::env::var_os("LF_SERVER_STATUS").map(|path| Self {
             path: path.into(),
             attempts: 0,
             generation: 0,
@@ -118,7 +118,7 @@ impl Status {
                 let owner = owner.clone();
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
-                    let result = crate::machine_service::client::bridge_existing(&owner);
+                    let result = crate::server::client::bridge_existing(&owner);
                     let _ = send.send(result);
                 });
                 loop {
@@ -157,7 +157,7 @@ impl Status {
     // waiting on the registration lock after its viewer has gone away.
     fn prepare(&self) -> Result<bool> {
         let diagnostic = self.path.with_extension("setup");
-        let mut child = crate::machine_service::client::setup_command()?
+        let mut child = crate::installation::server::readiness_command()?
             .stdout(Stdio::null())
             .stderr(std::fs::File::create(&diagnostic)?)
             .spawn()?;
@@ -175,7 +175,7 @@ impl Status {
                     );
                     return Ok(true);
                 }
-                anyhow::ensure!(Instant::now() < deadline, "Machine service setup timed out; check the selected installation and Background Items");
+                anyhow::ensure!(Instant::now() < deadline, "Loopflow server setup timed out; check the selected installation and Background Items");
             }
         })();
         // Also reap a failed/timed-out setup; no subprocess outlives this call.

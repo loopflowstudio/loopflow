@@ -178,7 +178,7 @@ pub(crate) fn start(
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["session", "serve"])
-        .env_remove("LF_MACHINE_STATUS");
+        .env_remove("LF_SERVER_STATUS");
     if terminal {
         command.arg("--terminal");
     }
@@ -1840,15 +1840,15 @@ fn attach_with_terminal(
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
 ) -> Result<()> {
-    let machine = std::env::var_os("LF_MACHINE_SERVICE").is_some();
+    let server = std::env::var_os("LF_SERVER").is_some();
     let mut status = connection::Status::from_env();
     let mut socket = if let Some(status) = &mut status {
         let Some(socket) = status.connect(id, true)? else {
             return Ok(());
         };
         socket
-    } else if machine {
-        crate::machine_service::client::bridge(id)?
+    } else if server {
+        crate::server::client::bridge(id)?
     } else {
         UnixStream::connect(endpoint(id)?).context(
             "Execution owner is unavailable; no provider was restarted and no input was replayed",
@@ -1871,7 +1871,7 @@ fn attach_with_terminal(
     );
     let mut interrupted = match initial {
         Ok(()) => None,
-        Err(error) if machine => Some(error.to_string()),
+        Err(error) if server => Some(error.to_string()),
         Err(error) => return Err(error),
     };
     let mut decoder = Decoder::default();
@@ -1893,7 +1893,7 @@ fn attach_with_terminal(
             let next = if let Some(status) = &mut status {
                 status.connect(id, false)?
             } else {
-                reconnect_machine(id, &mut terminal, &reason)?
+                reconnect_server(id, &mut terminal, &reason)?
             };
             let Some(next) = next else {
                 return Ok(());
@@ -1912,7 +1912,7 @@ fn attach_with_terminal(
         }
         title.tick();
         if acknowledgement_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            if machine {
+            if server {
                 interrupted =
                     Some("Attachment was not acknowledged; its outcome is unknown".to_owned());
                 continue;
@@ -1946,7 +1946,7 @@ fn attach_with_terminal(
             let mut bytes = [0; 16384];
             let n = match socket.read(&mut bytes) {
                 Ok(n) if n != 0 => n,
-                result if machine => {
+                result if server => {
                     interrupted = Some(match result {
                         Err(error) => error.to_string(),
                         _ => "The bridge closed".to_owned(),
@@ -2146,7 +2146,7 @@ fn attach_with_terminal(
                 stdin_open = false;
                 if terminal.is_none() && controlled {
                     if let Err(error) = send(&mut socket, Request::EndInput) {
-                        if !machine {
+                        if !server {
                             return Err(error);
                         }
                         interrupted = Some(error.to_string());
@@ -2164,7 +2164,7 @@ fn attach_with_terminal(
                 return Ok(());
             } else if controlled {
                 if let Err(error) = send_frame(&mut socket, Tag::Input, &bytes[..n]) {
-                    if !machine {
+                    if !server {
                         return Err(error);
                     }
                     // The write may have reached the owner. Never retain or resend it.
@@ -2184,7 +2184,7 @@ fn attach_with_terminal(
                 },
             );
             if let Err(error) = resized {
-                if !machine {
+                if !server {
                     return Err(error);
                 }
                 interrupted = Some(error.to_string());
@@ -2195,7 +2195,7 @@ fn attach_with_terminal(
 
 /// Deliberate connection recovery, retaining the exact owner in this relay.
 /// No Session preparation, provider command, or uncertain input is repeated.
-fn reconnect_machine(
+fn reconnect_server(
     id: &LfProcessId,
     terminal: &mut Option<ViewerTerminal>,
     reason: &str,
@@ -2208,7 +2208,7 @@ fn reconnect_machine(
         terminal.make_raw()?;
     }
     discard_reconnect_input()?;
-    write_output(terminal, 2, format!("\r\nMachine connection lost: {reason}.\r\nCtrl+R to reconnect; Ctrl+] to close. Typing while disconnected is discarded.\r\n").as_bytes())?;
+    write_output(terminal, 2, format!("\r\nServer connection lost: {reason}.\r\nCtrl+R to reconnect; Ctrl+] to close. Typing while disconnected is discarded.\r\n").as_bytes())?;
     loop {
         let mut bytes = [0; 8192];
         let n = io::stdin().read(&mut bytes)?;
@@ -2218,9 +2218,9 @@ fn reconnect_machine(
         if !bytes[..n].contains(&0x12) {
             continue;
         }
-        match crate::machine_service::client::bridge(id) {
+        match crate::server::client::bridge_existing(id) {
             Ok(socket) => return Ok(Some(socket)),
-            Err(error) if error.is::<crate::machine_service::client::BridgeRefused>() => {
+            Err(error) if error.is::<crate::server::client::BridgeRefused>() => {
                 return Err(error);
             }
             Err(error) => write_output(

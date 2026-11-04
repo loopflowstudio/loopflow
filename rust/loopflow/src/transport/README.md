@@ -38,7 +38,7 @@ unavailable** and a native **Retry** action. Only an owner exit event means ende
 Closing the surface cancels recovery. Ordinary explicit Open remains separate.
 
 The native surface creates a private temporary mailbox directory and passes
-`LF_MACHINE_STATUS` to its relay only. Atomic JSON readings carry connection
+`LF_SERVER_STATUS` to its relay only. Atomic JSON readings carry connection
 generation, state, input capability and optional explanation; `status.retry`
 requests another bounded cycle. `status.move` carries the current generation;
 the relay consumes it once before requesting an explicit replacing attachment,
@@ -213,15 +213,14 @@ provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
 
-Desktop Session panes set `LF_MACHINE_SERVICE=1` for their terminal relay. The
+Desktop Session panes set `LF_SERVER=1` for their terminal relay. The
 relay obtains an `attach` bridge from the local client API server before speaking
 this same owner protocol. No owner or provider is created on bridge failure.
 Ordinary CLI attachments keep their direct socket path. See
-[current server protocol](../machine_service/README.md) for admission and framing.
-`LF_MACHINE_SERVICE` and the module names still reflect the pre-cutover namespace;
-the accepted [server boundary](../../../../docs/architecture/server.md) separates
+[current server protocol](../server/README.md) for admission and framing.
+The [server boundary](../../../../docs/architecture/server.md) separates
 client access from Machine routing. `lf session serve` remains the execution-owner
-entry, distinct from the proposed server serving entry.
+entry, distinct from the server serving entry.
 
 Native providers own their Program Status (OSC 7501) reports, which pass through
 unchanged. Claude's native title updates stay enabled because disabling them also

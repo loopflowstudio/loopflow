@@ -25,7 +25,7 @@ pub(super) async fn run() -> Result<()> {
         .mode(0o600)
         .open(path.with_extension("lock"))?;
     lock.try_lock_exclusive()
-        .context("Machine service is already running")?;
+        .context("Loopflow server is already running")?;
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
@@ -40,7 +40,7 @@ pub(super) async fn run() -> Result<()> {
     );
     let instance = Arc::new(uuid::Uuid::new_v4().to_string());
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
-    tracing::info!(%instance, socket = %path.display(), "Machine service ready");
+    tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         let (socket, _) = listener.accept().await?;
         // Unix admission is deliberately unavailable to remote proxies.
@@ -49,19 +49,19 @@ pub(super) async fn run() -> Result<()> {
             continue;
         }
         let Ok(permit) = slots.clone().try_acquire_owned() else {
-            tracing::warn!(%instance, "Machine connection capacity reached");
+            tracing::warn!(%instance, "Server connection capacity reached");
             continue;
         };
         tracing::debug!(
             active = MAX_CONNECTIONS - slots.available_permits(),
-            "Machine connection admitted"
+            "Server connection admitted"
         );
         let instance = instance.clone();
         let executable_sha256 = executable_sha256.clone();
         tokio::spawn(async move {
             let _permit = permit;
             if let Err(error) = connection(socket, &instance, &executable_sha256).await {
-                tracing::warn!(%instance, %error, "Machine connection ended");
+                tracing::warn!(%instance, %error, "Server connection ended");
             }
         });
     }
@@ -94,7 +94,7 @@ async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &
             Reply::Error {
                 code: ErrorCode::Incompatible,
                 message: format!(
-                    "Machine protocol {VERSION} required; update the client or service"
+                    "Server protocol {VERSION} required; update the client or service"
                 ),
             },
         )
@@ -113,9 +113,9 @@ async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &
         request.operation,
     )
     .await;
-    tracing::debug!(request = %id, %instance, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Machine request ended");
+    tracing::debug!(request = %id, %instance, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
     if let Err(error) = result {
-        tracing::warn!(request = %id, %instance, %error, "Machine request failed");
+        tracing::warn!(request = %id, %instance, %error, "Server request failed");
         respond(
             &mut socket,
             id,
@@ -201,7 +201,7 @@ async fn operation(
             if let Err(error) = tokio::io::copy_bidirectional(socket, &mut destination).await {
                 // Once bridged, this connection speaks only the owner protocol.
                 // Close it on failure; a JSON error would corrupt that stream.
-                tracing::debug!(%error, "Machine owner bridge disconnected");
+                tracing::debug!(%error, "Server owner bridge disconnected");
             }
             return Ok(());
         }
@@ -282,7 +282,7 @@ async fn command(change: Write, id: &str, instance: &str) -> Result<Reply> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let mut child = command.spawn()?;
-    tracing::info!(request = %id, %instance, pid = child.id(), %trace_id, "Machine command started");
+    tracing::info!(request = %id, %instance, pid = child.id(), %trace_id, "Server command started");
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
     let (output, errors, status) = tokio::join!(
@@ -291,7 +291,7 @@ async fn command(change: Write, id: &str, instance: &str) -> Result<Reply> {
         child.wait()
     );
     let status = status?;
-    tracing::info!(request = %id, %instance, code = status.code(), %trace_id, "Machine command exited");
+    tracing::info!(request = %id, %instance, code = status.code(), %trace_id, "Server command exited");
     Ok(Reply::Command {
         trace_id,
         output: output?,
@@ -318,7 +318,7 @@ pub(super) async fn receive(
     limit: usize,
 ) -> Result<Vec<u8>> {
     let length = reader.read_u32().await? as usize;
-    anyhow::ensure!(length <= limit, "Machine frame exceeds {limit} bytes");
+    anyhow::ensure!(length <= limit, "Server frame exceeds {limit} bytes");
     let mut bytes = vec![0; length];
     reader.read_exact(&mut bytes).await?;
     Ok(bytes)
@@ -337,7 +337,7 @@ async fn respond(
     })?;
     anyhow::ensure!(
         bytes.len() <= MAX_FRAME,
-        "Machine reading exceeds frame limit"
+        "Server reading exceeds frame limit"
     );
     tokio::time::timeout(Duration::from_secs(5), async {
         writer.write_u32(bytes.len() as u32).await?;
@@ -350,9 +350,7 @@ async fn respond(
 #[cfg(test)]
 mod tests {
     use super::{connection, receive};
-    use crate::machine_service::wire::{
-        ErrorCode, Operation, Reply, Request, Response, MAX_FRAME, VERSION,
-    };
+    use crate::server::wire::{ErrorCode, Operation, Reply, Request, Response, MAX_FRAME, VERSION};
     use tokio::io::AsyncWriteExt;
     use tokio::net::UnixStream;
 

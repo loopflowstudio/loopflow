@@ -4,11 +4,11 @@ import Testing
 
 @Suite(.serialized)
 @MainActor
-struct MachineConnectionTests {
+struct ServerConnectionTests {
     @Test func recoveryPreservesReadingAndRequiresAcknowledgedInput() async throws {
-        let connection = MachineConnection()
+        let connection = ServerConnection()
         defer { connection.stop() }
-        var visible: MachineConnectionReading?
+        var visible: ServerConnectionReading?
         try connection.start { visible = $0 }
         #expect(visible?.acceptsInput == false)
         #expect(visible?.title?.contains("Reconnecting") == true)
@@ -32,9 +32,9 @@ struct MachineConnectionTests {
     }
 
     @Test func moveHereIsConnectionBoundAndWaitsForAcknowledgement() async throws {
-        let connection = MachineConnection()
+        let connection = ServerConnection()
         defer { connection.stop() }
-        var visible: MachineConnectionReading?
+        var visible: ServerConnectionReading?
         try connection.start { visible = $0 }
         let action = connection.directory.appendingPathComponent("status.move")
         connection.moveHere()
@@ -61,7 +61,7 @@ struct MachineConnectionTests {
     }
 
     @Test func lostMoveAcknowledgementAndClosureNeverRepeatAction() async throws {
-        let connection = MachineConnection()
+        let connection = ServerConnection()
         defer { connection.stop() }
         try connection.start { _ in }
         try await publish(connection, generation: 2, state: "connected", input: false)
@@ -80,7 +80,7 @@ struct MachineConnectionTests {
         #expect(!FileManager.default.fileExists(atPath: connection.directory.path))
     }
 
-    private func publish(_ connection: MachineConnection, generation: UInt64, state: String, input: Bool, message: String? = nil) async throws {
+    private func publish(_ connection: ServerConnection, generation: UInt64, state: String, input: Bool, message: String? = nil) async throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "generation": generation, "state": state, "input": input, "message": message as Any? ?? NSNull()
         ])

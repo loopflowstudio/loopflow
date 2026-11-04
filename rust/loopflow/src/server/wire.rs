@@ -1,4 +1,4 @@
-//! Carrier-independent Machine operations. Local admission is same-user only.
+//! Carrier-independent server operations. Local admission is same-user only.
 use crate::id::LfProcessId;
 use crate::lf::commands::{read::Read, write::Write};
 use serde::{Deserialize, Serialize};
@@ -99,10 +99,10 @@ mod tests {
     #[test]
     fn shared_client_fixtures_decode_and_round_trip_without_defaults() {
         for raw in [
-            include_str!("../../../../tests/fixtures/dto/machine/subscribe.json"),
-            include_str!("../../../../tests/fixtures/dto/machine/attach.json"),
-            include_str!("../../../../tests/fixtures/dto/machine/session_owner.json"),
-            include_str!("../../../../tests/fixtures/dto/machine/view_plan.json"),
+            include_str!("../../../../tests/fixtures/dto/server/subscribe.json"),
+            include_str!("../../../../tests/fixtures/dto/server/attach.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_owner.json"),
+            include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
         ] {
             let request: Request = serde_json::from_str(raw).unwrap();
             let actual = serde_json::to_value(&request).unwrap();
@@ -112,10 +112,10 @@ mod tests {
             );
         }
         for raw in [
-            include_str!("../../../../tests/fixtures/dto/machine/bootstrap.json"),
-            include_str!("../../../../tests/fixtures/dto/machine/command.json"),
-            include_str!("../../../../tests/fixtures/dto/machine/owner.json"),
-            include_str!("../../../../tests/fixtures/dto/machine/reading.json"),
+            include_str!("../../../../tests/fixtures/dto/server/bootstrap.json"),
+            include_str!("../../../../tests/fixtures/dto/server/command.json"),
+            include_str!("../../../../tests/fixtures/dto/server/owner.json"),
+            include_str!("../../../../tests/fixtures/dto/server/reading.json"),
         ] {
             let response: Response = serde_json::from_str(raw).unwrap();
             assert_eq!(

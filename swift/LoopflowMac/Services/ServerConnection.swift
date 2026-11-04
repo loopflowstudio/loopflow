@@ -1,7 +1,7 @@
 import Foundation
 
 /// A surface owns this temporary mailbox; it conveys no Session authority.
-struct MachineConnectionReading: Decodable, Equatable {
+struct ServerConnectionReading: Decodable, Equatable {
     enum State: String, Decodable { case connected, moving, reconnecting, unavailable, ended }
     let generation: UInt64
     let state: State
@@ -22,16 +22,16 @@ struct MachineConnectionReading: Decodable, Equatable {
 }
 
 @MainActor
-final class MachineConnection {
+final class ServerConnection {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("lf-view-" + UUID().uuidString)
     private var statusURL: URL { directory.appendingPathComponent("status.json") }
     var path: String { statusURL.path }
-    private(set) var reading = MachineConnectionReading(generation: 0, state: .reconnecting, input: false, message: nil)
+    private(set) var reading = ServerConnectionReading(generation: 0, state: .reconnecting, input: false, message: nil)
     private var observation: Task<Void, Never>?
-    private var changed: (@MainActor (MachineConnectionReading) -> Void)?
+    private var changed: (@MainActor (ServerConnectionReading) -> Void)?
     private var pendingMove: UInt64?
 
-    func start(changed: @escaping @MainActor (MachineConnectionReading) -> Void) throws {
+    func start(changed: @escaping @MainActor (ServerConnectionReading) -> Void) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                                                attributes: [.posixPermissions: 0o700])
         self.changed = changed
@@ -40,7 +40,7 @@ final class MachineConnection {
             while !Task.isCancelled {
                 guard let self else { return }
                 if let data = FileManager.default.contents(atPath: path),
-                   let next = try? JSONDecoder().decode(MachineConnectionReading.self, from: data),
+                   let next = try? JSONDecoder().decode(ServerConnectionReading.self, from: data),
                    pendingMove.map({ next.generation > $0 }) ?? true,
                    next != reading {
                     pendingMove = nil
@@ -63,7 +63,7 @@ final class MachineConnection {
             let action = statusURL.deletingPathExtension().appendingPathExtension("move")
             try JSONEncoder().encode(reading.generation).write(to: action, options: .atomic)
             pendingMove = reading.generation
-            reading = MachineConnectionReading(generation: reading.generation, state: .moving, input: false, message: nil)
+            reading = ServerConnectionReading(generation: reading.generation, state: .moving, input: false, message: nil)
             changed?(reading)
         } catch {
             // A removed mailbox means this surface has closed. No action is queued.

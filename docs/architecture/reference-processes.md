@@ -213,11 +213,11 @@ qualify (`lf install --dev`). An unreleased build's receipt, `lf --version`
 and `lf doctor` name it, e.g. `build e9b2c2eac on v0.14.16`, or `schema work …`
 when it carries an unmerged migration.
 
-The installation promotion lock serializes artifact selection and server
-registration/replacement. This belongs to installation, independently of Machine
-connections and client admission; see the [server boundary](server.md). It does not discover, drain, stop, or settle conversations and it is not
-held by ordinary harnesses. A store snapshot lets preview prove a candidate
-schema without mutating the selected store.
+The promotion lock serializes artifact selection. After it is released,
+installation reconciles server registration under the server's installation lock.
+Neither operation discovers, drains, stops or settles conversations; ordinary
+harnesses hold neither lock. See the [server boundary](server.md). A store snapshot
+lets preview prove a candidate schema without mutating the selected store.
 
 An already-running `lf` retains its executable and selected store path.
 An execution-schema cutover must account for those writers before activation. On the first published-to-development switch, the process may keep

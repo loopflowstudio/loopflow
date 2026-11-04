@@ -1,19 +1,19 @@
 import Foundation
 
-/// Revision 1 of the Machine application protocol; carriers add no Work authority.
-public struct MachineRequest: Encodable, Sendable {
+/// Revision 1 of the server application protocol; carriers add no Work authority.
+public struct ServerRequest: Encodable, Sendable {
     public let version: Int
     public let id: String
-    public let operation: MachineOperation
+    public let operation: ServerOperation
 
-    public init(version: Int, id: String, operation: MachineOperation) {
+    public init(version: Int, id: String, operation: ServerOperation) {
         self.version = version
         self.id = id
         self.operation = operation
     }
 }
 
-public enum MachineOperation: Encodable, Sendable {
+public enum ServerOperation: Encodable, Sendable {
     case bootstrap
     case sessionOwner(session: String)
     case read(ServedRead)
@@ -46,13 +46,13 @@ public enum MachineOperation: Encodable, Sendable {
     }
 }
 
-public struct MachineResponse: Decodable, Sendable {
+public struct ServerResponse: Decodable, Sendable {
     public let id: String
     public let instance: String
-    public let result: MachineReply
+    public let result: ServerReply
 }
 
-public enum MachineReply: Decodable, Sendable {
+public enum ServerReply: Decodable, Sendable {
     case bootstrap(version: Int, build: String, executableSHA256: String, machine: JSONValue, capabilities: [String], maxFrame: Int, maxConnections: Int)
     case read(String)
     case reading(generation: UInt64, frame: JSONValue)
@@ -80,7 +80,7 @@ public enum MachineReply: Decodable, Sendable {
         case "session_owner": self = .sessionOwner(owner: try box.decodeIfPresent(String.self, forKey: .owner))
         case "bridged": self = .bridged
         case "error": self = .error(code: try box.decode(String.self, forKey: .code), message: try box.decode(String.self, forKey: .message))
-        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: box, debugDescription: "Unsupported Machine response; update the client")
+        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: box, debugDescription: "Unsupported Server response; update the client")
         }
     }
 }

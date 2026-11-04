@@ -1,12 +1,12 @@
 # Separate execution destinations, client access and installation
 
-LOO-593 · Design revised November 4, 2026 · Interactive demo
+LOO-593 · Implementation selected November 4, 2026 · Pursue → interactive demo
 
 ## Accepted direction
 
 Jack Heart requested returning to the drawing board after identifying that
 `lf machine service` mixes remote execution management with client API access.
-Jack selected a documentation/design rewrite around this split:
+Jack selected this split, then requested updating the design and relaunching pursue:
 
 - **Machine** names where work runs: identity, SSH connections, destination
   defaults, pools and rentals. Keep `lf machine` and `lf --machine` here.
@@ -17,12 +17,82 @@ Jack selected a documentation/design rewrite around this split:
 - **Desktop** owns its windows, panes, rendering and app-owned automation API.
   Keep `lf desktop` and `DesktopServer` separate from the shared server.
 
-The canonical boundary and proposed usage are in
+The canonical boundary and usage are in
 [Clients, servers and execution destinations](../docs/architecture/server.md).
-This replaces the earlier Machine-service framing. The command migration is
-not implemented by this review. Jack requested docs edits, not a Graph restart,
-publication or shipping. Earlier authorization reached interactive demo; no
-merge or Auto-Ship approval follows from this rewrite.
+This replaces the earlier Machine-service framing. Jack Heart now authorizes
+implementation and publication of this cutover in the existing Task, followed by
+interactive review. The earlier docs-only boundary is superseded. No merge or
+Auto-Ship approval is given. The existing feature graph runs its pursue
+composition through implementation, compression, sync, realignment, concept
+review and publication, then stops at demo. A bare pursuit reaching end would
+violate this accepted review boundary.
+
+## Implementation status and remaining work
+
+The local cutover is implemented in this checkout: `lf server run/status`, hidden
+installation readiness, renamed Rust/Swift protocol clients, environment flags,
+DTO fixtures and packaging. Registration is under `installation/`; no serving or
+setup subcommand remains on Machine. Desktop caches its endpoint after initial
+readiness; retries only reconnect. The protocol wire fields remain revision 1.
+
+Upgrade retires old OS labels before registering the server. The native bundle
+retains only an old plist migration descriptor; its obsolete argv cannot start a
+new server. Custom-home launchd migration checks both disabled labels, and systemd
+migration respects existing disabled/masked units. The installed revision-1 socket address/lock stay stable: changing the basename
+would strand live relays running the prior executable during replacement.
+One endpoint and its existing singleton lock exclude competing listeners.
+No Work or credential state moves. A focused migration check found and fixed the
+old launchctl parser's assumption that overrides print `true`; current macOS
+prints `disabled`.
+
+Remaining through the existing pursue composition:
+
+- Compress/sync/realign against overlapping installation work, preserving this
+  boundary and the existing recovery semantics. No wider FFI or remote cutover.
+- Gate the affected command, protocol, relay, Swift and packaging boundaries;
+  repeat the composed signed installed replacement with draft/Graph live, and
+  run formatting/Clippy and the broader Xcode link check. The focused checks
+  below do not replace gate or the combined LOO-718 release proof.
+- Publish to existing PR #1813 and stop at interactive demo. Native rendered
+  recovery, reading/copy/Find/scroll and Move here remain demo evidence. Linux
+  supervisor replacement remains Linux-host acceptance. No merge or Auto-Ship.
+
+Current open overlap inventory (November 4):
+
+- [Native phone client · LOO-718 / PR #1812](https://github.com/loopflowstudio/loopflow/pull/1812)
+  extends the same server modules and wire with remote admission, pairing and
+  create/start. Preserve its shared contract; supply the migration map for its
+  integration. Do not overwrite its checkout or duplicate remote implementation.
+- [Coherent installed build · LOO-723 / PR #1815](https://github.com/loopflowstudio/loopflow/pull/1815)
+  changes install and published-artifact selection. Keep its selection/update
+  authority intact; reconcile new landed code during sync instead of forking it.
+- [Task shell lifetimes · LOO-717 / PR #1811](https://github.com/loopflowstudio/loopflow/pull/1811)
+  touches Machine commands. Preserve its shell lifetime and remote routing work.
+- [Preferences and agent selection · LOO-714 / PR #1805](https://github.com/loopflowstudio/loopflow/pull/1805)
+  touches published installation. Preserve preference/default behavior.
+- [Mac installation · LOO-312 / PR #1656](https://github.com/loopflowstudio/loopflow/pull/1656)
+  changes installation and onboarding. This pursuit changes server registration,
+  not its product choices or first-run account setup.
+
+Re-read overlap state before integrating; this inventory is evidence, not
+permission to change another Task's work. Refresh Wave terminology only through
+the graph's authored realign procedure.
+
+## Delete — do not maintain
+
+- Removed `MachineCommand::Service` and `MachineServiceCommand`; `ServerCommand`
+  owns serving/status and hidden `install server` requests installation readiness.
+- Moved `machine_service/installation.rs` and `registration.m` into
+  `installation/`; the remaining module is `server/`, with old exports removed.
+- Renamed Swift service/protocol/connection types, transport environment flags
+  and the DTO fixture directory together; Machine identity fields are unchanged.
+- Replaced old supervisor jobs with server names; the installed socket
+  address/lock remains so live older relays still reconnect. The bundled old
+  plist is retained only as an SMAppService migration descriptor, never registered
+  by new code; it is required to inspect approval and unregister existing jobs.
+  Remove that descriptor when support for upgrading pre-cutover installations ends.
+- Removed old public setup examples; owner continuity and read-only terminal
+  coverage remain on the surviving routes.
 
 ## Experience and ownership
 
@@ -51,9 +121,9 @@ Graphs already protect their owners; the server adds no retention authority.
 CLI use does not require the server. No scheduler, shadow Work store or durable
 viewer registry belongs here.
 
-## What exists and what must change
+## Local contract and mobile integration
 
-LOO-593 has implemented a local server under `machine_service/`, with roadmap
+LOO-593 implements a local server under `server/`, with roadmap
 read/watch, Session rename through the CLI and exact existing-owner attachment.
 Those migrated operations have no direct-FFI fallback. Other Work operations
 still use their existing adapters. App-owned UI automation remains separate.
@@ -64,14 +134,33 @@ recoverable create/start work. That is evidence from the parallel branch, not
 verification of the combined release. LOO-593 is the local foundation; LOO-718
 owns the remote/mobile experience. Both need the accepted naming boundary.
 
-| Current implementation | Target responsibility | Required change |
-| --- | --- | --- |
-| `lf machine service run/status` | Server availability | Move to proposed `lf server run/status`; status stays observational |
-| `lf machine service ensure` and registration under `machine_service/` | Installation plus connection readiness | Put selected-build registration/update under installation; keep connection/bootstrap in the client; remove public setup machinery |
-| Remote enablement, pairing and device commands in LOO-718's Machine group | Server client access | Move under the server group; settle the exact subcommands with that branch |
-| `MachineService`, `MachineProtocol`, service-specific `machine_*` files | Server client/protocol | Rename callers and fixtures together; keep domain Machine identity intact |
-| Bundled LaunchAgent/systemd names and persisted access settings | Installation migration | Replace registration once; preserve settings/credentials and prevent duplicate listeners |
-| Remaining Work FFI adapters | Shared operations reached through server | Inventory and delete each replaced route during the wider cutover; preserve renderer FFI |
+| Previous path | Current path / authority |
+| --- | --- |
+| `lf machine service run/status` | `lf server run/status` (`ops server` in the canonical tree) |
+| `lf machine service ensure` | Hidden `lf install server`; installation readiness only |
+| `machine_service/{installation.rs,registration.m}` | `installation/{server.rs,registration.m}` |
+| Remaining `machine_service/` module | `server/` with unchanged revision-1 operation shapes |
+| `MachineService`, `MachineProtocol`, `MachineConnection` | `ServerClient`, `ServerProtocol`, `ServerConnection` |
+| `LF_MACHINE_SERVICE`, `LF_MACHINE_STATUS` | `LF_SERVER`, `LF_SERVER_STATUS` |
+| `tests/fixtures/dto/machine/` | `tests/fixtures/dto/server/` |
+| Installed `machine.sock` / old OS job labels | Socket/lock stay stable for live relays; OS jobs migrate to server labels, with only the old bundle descriptor retained for migration |
+
+### LOO-718 integration handoff
+
+Read-only inspection of its current open PR head `983b271695` confirmed
+`MachineServiceCommand::{Mobile,Pair,Devices,Revoke}` and
+`Run { remote_port }`. Move those variants to `ServerCommand` and dispatch via
+`lf/commands/server.rs`. Keep the existing verbs/flags as `lf server mobile`,
+`pair`, `devices`, `revoke` and `run --remote-port`; remove its `Ensure` variant.
+Move `admission.rs`, `mobile.rs`, `remote.rs` with the server module; route its
+registration changes through `installation/server.rs`. The existing `mobile`
+key in `LF_HOME/config.yaml`, SQLite pairing/device rows, ticket hashes and Serve
+route ownership remain unchanged. Rename its additional DTO fixtures and Swift
+protocol references with this foundation; preserve every wire field including
+`machine`/`machine_id`. No namespace-only protocol revision is needed.
+
+This handoff does not modify LOO-718's checkout or import its schema/remote paths.
+LOO-723/PR #1815 was still open at this pass; sync owns integration if it lands.
 
 Do not create compatibility aliases for internal commands or duplicate protocol
 implementations. Persisted state and installed supervisor registrations need an
@@ -81,9 +170,9 @@ The namespace change alone does not require a new wire revision.
 
 ## Preserve the working contract
 
-[The local protocol README](../rust/loopflow/src/machine_service/README.md) owns
+[The local protocol README](../rust/loopflow/src/server/README.md) owns
 revision-1 operations and bounds. Rust wire types, the Swift mirror and fixtures
-under `tests/fixtures/dto/machine/` currently supply both clients. `view_plan`
+under `tests/fixtures/dto/server/` supply both clients. `view_plan`
 returns authoritative `contents[].primary_session`; roadmap membership cannot
 select a primary. Owner resolution never starts a provider. Attach names the
 exact existing owner and bridges its unchanged binary protocol.
@@ -152,6 +241,24 @@ active execution; deleting Desktop implies no standalone hosting promise.
 
 ## Evidence and remaining proof
 
+The socket contract test now owns read/write parity, watch checkpoints and trace
+isolation once. Restart, installed replacement and Move here each exercise the
+same smaller owner/draft/Graph continuity fixture. Packaging copies the authored
+LaunchAgents directory, including the migration descriptor, without repeating
+its file inventory in the release and development builders. Server fixtures now
+initialize their disposable Machine store explicitly: the observational entry
+correctly refused bootstrap when the previous fixture started it before any Work.
+
+November 4 focused checks: `cargo test -p loopflow --lib server` (8), the
+`transport_tests` status and opt-in registration migration tests (1 each),
+`scripts/test_desktop.sh --filter 'Server(Connection|Protocol)Tests'` (7),
+`uv run python scripts/test_server_registration.py` and
+`uv run pytest python/tests/test_release_loopflow.py` (13) passed; `cargo fmt`
+and `git diff --check` passed. The migration test was repeated after retaining
+the installed socket address. Compression verification: `cargo test -p loopflow --test transport_tests -- server_reads_commands_and_subscriptions_share_cli_semantics server_invalid_checkpoints_use_shared_watch_errors server_preserves_owner_and_graph_across_restart server_move_here_preserves_draft_provider_and_graph server_status_does_not_install_or_create_work` — 5 passed; `uv run pytest python/tests/test_release_loopflow.py python/tests/test_loopflow_dev.py -q` — 22 passed; formatting, Clippy (`--all-targets -- -D warnings`), Ruff and whitespace checks passed. Gate owns remaining affected suites, broader Xcode link and the renamed
+`installed_server_preserves_owner_and_graph_across_replacement` composition;
+demo owns rendered continuity.
+
 The composed macOS fixture starts an owner and Graph from an installed helper,
 holds a draft, replaces the executable inode with the same candidate's signed
 bytes, checks the bundle seal and exercises production unregister/register. Its
@@ -167,9 +274,9 @@ Publication at `8c54f5e08a` also passed the opt-in installed replacement proof,
 formatting, Clippy with warnings denied, Ruff and whitespace checks. A fixture
 repair replaced `open -W`'s unreliable short-process watch with the updater's
 existing completion result; it does not retry registration or replacement.
-These are previous implementation evidence, not tests of the proposed rename.
+These are previous implementation evidence, not tests of this namespace cutover.
 
-Next proof after the coordinated cutover:
+Gate/demo still own these acceptance checks after the local cutover:
 
 - Install/update through the real selected installation; prove one registered
   server and one local endpoint. Existing paired credentials/settings survive.

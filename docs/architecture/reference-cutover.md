@@ -2,16 +2,14 @@
 
 Part of the [Architecture Reference](../architecture-reference.md).
 
-**Client server command boundary is pending (LOO-593 / LOO-718).** The local
-backend and automatic exact-owner recovery exist under `machine_service`.
-Jack Heart selected a separate server command group on November 4: Machine owns
-execution destinations, server owns client access, installation owns registration
-and updates, and Desktop retains app automation. Current commands still use
-`lf machine service`; remote client commands in LOO-718 require coordinated
-migration. The [accepted design](server.md) names the deletions and installed-state
-migration. Same-build signed replacement has composed proof; native rendered
-continuity, Linux replacement and the renamed installation path still need proof.
-
+**Local client server boundary implemented (LOO-593).** `lf server run/status`
+serves clients; installation owns registration and replacement. Machine retains
+execution destinations and Desktop retains app automation. Old supervisor jobs
+migrate before the new server starts, preserving disabled choices and live
+execution owners. LOO-718 owns remote admission and its command migration.
+The [server boundary](server.md) records ownership and persisted-state migration.
+Rendered Desktop continuity and Linux supervisor replacement remain acceptance
+work; local source/namespace migration does not establish combined mobile proof.
 
 **AgentProcess cutover is incomplete (LOO-443).** Provider identity and attachment
 now live on tagged process rows; recorded-agent views and scheduled settlement

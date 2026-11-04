@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Migration descriptor only: inspect approval and unregister the pre-server job. -->
 <plist version="1.0"><dict>
     <key>Label</key><string>com.loopflow.machine</string>
     <key>BundleProgram</key><string>Contents/MacOS/lf</string>

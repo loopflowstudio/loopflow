@@ -814,22 +814,32 @@ fixtures must declare opposite launch modes, independent of Session defaults.
 
 ## Client API server
 
-These commands retain current `machine_service` test names until the coordinated
-[server cutover](../../../docs/architecture/server.md). Socket behavior belongs
+The [server boundary](../../../docs/architecture/server.md) assigns socket behavior
 to client access; OS registration/replacement belongs to installation. Their
 composed test must continue to prove both with existing execution owners live.
 
 ```bash
-cargo test -p loopflow --lib machine_service::
-cargo test -p loopflow --test transport_tests machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart
-cargo test -p loopflow --test transport_tests machine_service_reconnect_
-cargo test -p loopflow --test transport_tests machine_service_move_here_
-cargo test -p loopflow --test transport_tests installed_machine_service_preserves_owner_and_graph_across_replacement -- --ignored
+cargo test -p loopflow --lib server::
+cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
+cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
+cargo test -p loopflow --test transport_tests server_reads_commands_and_subscriptions_share_cli_semantics
+cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
+cargo test -p loopflow --test transport_tests server_reconnect_
+cargo test -p loopflow --test transport_tests server_move_here_
+cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
 ```
 
-The ordinary socket proof covers Task subscription changes, CLI/command parity,
-authoritative primary-Session selection, concurrent trace isolation and editable
-owner/Graph continuity with the real relay connected during service restart.
+The development registration proof uses two isolated launchd labels: disabled
+legacy setup refuses; enabling it lets concurrent readiness requests retire the
+old job and obtain one server while preserving a live owner. The installed socket
+address/lock remain stable so old relays can reconnect while an obsolete server
+executable cannot open a competing listener.
+The bundled registrar harness separately proves SMAppService label migration.
+
+The socket contract proof covers Task subscription changes, CLI/command parity,
+authoritative primary-Session selection and concurrent trace isolation once.
+Separate lifecycle proofs keep the real relay connected through server restart,
+installed replacement and explicit takeover with an editable draft and live Graph.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer
 viewers retaining input/geometry, expired output and owner exit without relaunch.
 Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
@@ -845,7 +855,7 @@ the exact owner/provider survives and the Graph advances. Cleanup unregisters th
 unique job and LaunchServices registration. The updater runs as the signed app
 through LaunchServices; no UI or App Management permission changes are needed.
 Run outside the network sandbox. The underlying registrar harness is
-`scripts/test_machine_service_registration.py`; its default mode separately checks
+`scripts/test_server_registration.py`; its default mode separately checks
 idempotent registration without Work. Native rendered continuity remains demo.
 Linux supervisor replacement remains a Linux installation check; this service
 starts no providers or Graphs, and keeps systemd's control-group cleanup.

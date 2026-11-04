@@ -1,31 +1,35 @@
 # Connect to the local Loopflow server
 
-This README documents the **current implementation**. The accepted
-[responsibility split](../../../../docs/architecture/server.md) moves serving and
-client access to `lf server`, with registration/update owned by installation.
-That command and source-name cutover is pending; the commands below still use the
-current `machine service` spelling. Machine connections, pools, rentals and SSH
-routing remain separate.
-
 ```sh
-lf machine service ensure   # obtain the selected installation's service
-lf machine service status   # readiness, socket and service incarnation as JSON
+lf server status   # readiness, socket and server incarnation as JSON
 ```
 
-The foreground `lf machine service run` belongs to the OS supervisor. Desktop
+Installation prepares client access automatically. Desktop's first connection
+requests readiness through the selected installation; subsequent connections and
+terminal recovery never re-register a server. `lf server status` only observes.
+
+The foreground `lf server run` belongs to the OS supervisor. Desktop
 uses the service for Task readings, Session rename and existing terminal
 attachment. Other Work operations still use their existing transport pending
 LOO-718's full cutover. Desktop's UI automation socket remains app-owned.
 
-Installation owns registration and replacement, even while its adapter lives in
-this module. Readiness must not become a second installation authority.
+`installation/server.rs` owns registration and replacement. Its hidden
+`install server` bridge is for local clients, not a separate setup workflow.
 
-On macOS the signed selected app bundles `com.loopflow.machine.plist` and
+On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
 named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
 stop the service. Session owners retain their existing lifetime policy; this
 service creates no PTYs, retention records or Graphs. Logout/reboot do not
-preserve live processes. Disabled Background Items remain disabled.
+preserve live processes. Disabled Background Items remain disabled. Upgrade
+retires the previous
+`com.loopflow.machine` registration before starting `com.loopflow.server`.
+The old bundled plist remains only for SMAppService approval inspection/removal.
+Development jobs and Linux units migrate their hashed labels the same way;
+existing disabled/masked units require explicit enablement. The revision-1
+`machine.sock` address and its lock remain stable so already-running relays can
+recover across the rename. There is one listener, with no alias or alternate
+protocol path. Work and credentials stay in place.
 
 ## Local protocol, revision 1
 
@@ -35,8 +39,8 @@ at 32 MiB and connections at 64. Writes have a five-second deadline. The socket
 and its directory are private; remote proxies must never forward this endpoint.
 Remote admission is outside this revision.
 
-`wire.rs` owns the Rust types; `swift/Loopflow/Services/MachineProtocol.swift`
-mirrors them. Executable fixtures live in `tests/fixtures/dto/machine/`.
+`wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
+mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 
 A request has required `version`, `id` and `operation`. A response has required
 `id`, `instance` and `result`. Unsupported revisions fail before reading Work.

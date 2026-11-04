@@ -658,6 +658,11 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: WtCommand,
     },
+    /// Serve Desktop and other clients on this host
+    Server {
+        #[command(subcommand)]
+        cmd: ServerCommand,
+    },
     /// Name, connect, pool and rent Machines
     Machine {
         #[command(subcommand)]
@@ -1238,7 +1243,9 @@ impl OpsCommand {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
+            Self::Server { .. } | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => {
+                false
+            }
             Self::Commit { .. } | Self::Sync(_) => true,
         }
     }
@@ -1302,11 +1309,9 @@ impl WtCommand {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum MachineServiceCommand {
+pub enum ServerCommand {
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
-    /// Register the selected installation's service and wait for local readiness.
-    Ensure,
     /// Report local readiness without registering or starting anything.
     Status,
 }
@@ -1314,9 +1319,7 @@ pub enum MachineServiceCommand {
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Id { .. } | Self::List { .. } | Self::Status { .. } | Self::Service { .. } => {
-                false
-            }
+            Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
                 MachineCredentialCommand::Receive => true,
@@ -1364,7 +1367,8 @@ impl SelfCommand {
             Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
                 Some(
-                    InstallCommand::Preflight { .. }
+                    InstallCommand::Server
+                    | InstallCommand::Preflight { .. }
                     | InstallCommand::ReaderCatalog
                     | InstallCommand::CanOpen { .. },
                 ) => false,
@@ -2301,6 +2305,9 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
+    /// Reconcile the selected installation's local server for a client.
+    #[command(hide = true)]
+    Server,
     /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
@@ -2585,11 +2592,6 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
-    /// Run or obtain this Machine's standalone local service.
-    Service {
-        #[command(subcommand)]
-        cmd: MachineServiceCommand,
-    },
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
@@ -3159,6 +3161,40 @@ mod tests {
             error.to_string(),
             format!("lf {}\n", crate::build_info::VERSION_LINE)
         );
+    }
+
+    #[test]
+    fn server_access_is_separate_from_machine_routing_and_installation() {
+        let args = crate::lf::navigation::normalize_args(
+            ["lf", "server", "status"].map(str::to_owned).to_vec(),
+        )
+        .unwrap();
+        assert_eq!(args, ["lf", "ops", "server", "status"]);
+        let command = Cli::try_parse_from(args).unwrap().command.unwrap();
+        assert!(!command.changes_work());
+        assert!(matches!(
+            command,
+            Commands::Ops {
+                cmd: OpsCommand::Server {
+                    cmd: ServerCommand::Status
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["lf", "ops", "machine", "service", "run"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "server", "ensure"]).is_err());
+        let tree = crate::lf::navigation::command_tree();
+        let install = tree
+            .find_subcommand("self")
+            .unwrap()
+            .find_subcommand("install")
+            .unwrap();
+        assert!(install.find_subcommand("server").unwrap().is_hide_set());
+        let remote = crate::lf::navigation::machine_invocation(
+            &["lf", "--machine", "worker", "server", "status"].map(str::to_owned),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(remote.1, ["ops", "server", "status"]);
     }
 
     #[test]

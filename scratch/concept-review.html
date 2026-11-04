@@ -12,10 +12,10 @@
 </head>
 <body><main>
 <header>
-<p class="meta">LOO-593 · Interactive demo / design revision · November 4, 2026<br>
-Sources: <a href="mobile-backend.md">working design</a>, <a href="../docs/architecture/server.md">server boundary</a>, <a href="../rust/loopflow/src/machine_service/README.md">current protocol</a></p>
+<p class="meta">LOO-593 · Local implementation / review boundary · November 4, 2026<br>
+Sources: <a href="mobile-backend.md">working design</a>, <a href="../docs/architecture/server.md">server boundary</a>, <a href="../rust/loopflow/src/server/README.md">current protocol</a></p>
 <h1>Where work runs.<br>How clients reach it.<br>How it gets installed.</h1>
-<p class="decision"><strong>Accepted:</strong> Machine, server and installation have separate responsibilities. The next design detail is how remote-access commands read within <code>lf server</code>; the namespace migration is still unimplemented.</p>
+<p class="decision"><strong>Accepted:</strong> Machine, server and installation have separate responsibilities. Jack Heart has authorized implementing this split and publishing for review. The local namespace migration is implemented; installed replacement and native interaction still need the checks in the working design.</p>
 <p>Jack Heart requested this rewrite after <code>lf machine service</code> made execution destinations and phone access appear to be one concept.</p>
 </header>
 <h2>Actions → concepts → APIs</h2>
@@ -23,24 +23,24 @@ Sources: <a href="mobile-backend.md">working design</a>, <a href="../docs/archit
 <thead><tr><th>What you do</th><th>What owns it</th><th>Command or API</th></tr></thead>
 <tbody>
 <tr><td>Run an agent on mini</td><td>Machine destination</td><td>Existing <code>lf --machine mini …</code></td></tr>
-<tr><td>Read Work and continue editing from a client</td><td>Server admission and connections</td><td>Proposed <code>lf server</code>; shared reads, commands, owner bridge</td></tr>
-<tr><td>Install or update Loopflow</td><td>Installation</td><td>Existing <code>lf install</code>; registration/update moves behind this authority</td></tr>
+<tr><td>Read Work and continue editing from a client</td><td>Server admission and connections</td><td><code>lf server</code>; shared reads, commands, owner bridge</td></tr>
+<tr><td>Install or update Loopflow</td><td>Installation</td><td>Existing <code>lf install</code>; owns registration/update</td></tr>
 <tr><td>Arrange Desktop's panes</td><td>Desktop presentation</td><td>Existing <code>lf desktop</code>; app-owned socket</td></tr>
 </tbody></table>
 <h2>Before and after</h2>
-<h3>Current command shape</h3>
+<h3>Previous command shape</h3>
 <pre><code>lf machine
   connections / pools / rentals
   service run / status / ensure
   remote client access in LOO-718</code></pre>
 <p>The mismatch is responsibility: choosing a worker and admitting a phone are independent actions. Server registration is installation machinery, even when its code lives beside the listener.</p>
-<h3>Accepted ownership; proposed command shape</h3>
+<h3>Implemented local command shape</h3>
 <pre><code>lf machine       execution destinations
 lf --machine …   route a command to one
 lf server        client access and availability
 lf install       artifacts, registration, updates
 lf desktop       windows, panes, app automation</code></pre>
-<p class="note">Current executable commands still use <code>lf machine service</code>. Final remote-access subcommands need reconciliation with LOO-718. This page does not claim the rename has shipped.</p>
+<p class="note">The local executable now uses <code>lf server</code>; installation owns its hidden readiness bridge. LOO-718's existing remote-access verbs will move with their semantics preserved during integration. This page does not claim the rename has shipped.</p>
 <h2>Keep editing through replacement</h2>
 <ol>
 <li><strong>Open Desktop.</strong> Installation prepares the local server. Desktop connects without a separate setup ritual.</li>
@@ -49,7 +49,7 @@ lf desktop       windows, panes, app automation</code></pre>
 <li><strong>Continue on that owner.</strong> Automatic recovery preserves a newer viewer's claim. A read-only pane offers <strong>Move here</strong> for explicit control. <strong>Retry</strong> repairs connectivity only.</li>
 </ol>
 <p class="decision">If takeover succeeds but its reply is lost, and another viewer claims control, recovery must leave that newer claim intact. Never replay takeover, typing or an uncertain command.</p>
-<p>The composed signed same-build replacement test already retains the owner, provider, draft and Graph. Rendered Desktop continuity and Linux replacement remain proof to complete; the new command layout needs its own installation migration check.</p>
+<p>The composed signed same-build replacement test already retains the owner, provider, draft and Graph. Rendered Desktop continuity and Linux replacement remain proof to complete; the command cutover has focused registration-migration coverage; gate owns the composed installed replacement rerun.</p>
 <h2>One server, existing owners</h2>
 <pre><code>Desktop ─ Unix socket ─┐
                       ├─ server ─ shared reads / subscriptions
@@ -57,12 +57,12 @@ phone ─ HTTPS / WSS ───┘         ├ complete CLI commands
         (LOO-718)               └ Session owner ─ provider / PTY</code></pre>
 <p>The server owns admission and delivery. Session owners retain terminal control and lifetime; Graphs retain execution. Drafts, active turns, pending requests and running Graphs already protect their owners.</p>
 <p>A paired phone is a client credential. It does not become a worker, move a Task or own its provider. Remote access has separate authentication; turning it off must leave local access and execution intact.</p>
-<h2>What the implementation must replace</h2>
-<p>Move command routes, supervisor entries, installed launcher calls, Swift names and fixtures together. Remove the old internal paths. Migrate installed registrations and access settings without duplicate listeners or lost credentials. Preserve <code>MachineId</code>, <code>machine_id</code>, SSH routing and existing owner protocols.</p>
-<p>LOO-593 owns the local foundation and recovery. LOO-718 owns remote access and the native phone path. This review changes docs and records their shared cutover; it does not restart either Graph.</p>
+<h2>Migration boundary</h2>
+<p>Local command routes, supervisor entries, Swift names and fixtures now share the server namespace. The old bundled plist remains only to inspect and retire existing registration. The socket address stays stable for live relays. <code>MachineId</code>, <code>machine_id</code>, SSH routing, credentials and owner protocols stay in place.</p>
+<p>LOO-593 owns the local foundation and recovery. LOO-718 owns remote access and the native phone path. This pursuit implements the local cutover in LOO-593 and records the migration LOO-718 needs. It preserves the stop at interactive demo and leaves the other checkout alone.</p>
 <h2>Questions for the next review</h2>
 <ol>
-<li><strong>Remote command wording:</strong> should enablement read as <code>server access</code>, with pairing and clients alongside it, or as one remote-access subgroup? The responsibility is settled; these spellings remain proposed.</li>
+<li><strong>Implementation proof:</strong> does an installed update retire the old registration, expose one server and preserve the same draft, owner and Graph?</li>
 <li><strong>Boundary check:</strong> is any action shown here still making you understand installation machinery just to connect and keep editing?</li>
 </ol>
 <p class="note">GUI-less distribution and before-login hosting remain separate questions. Neither is needed to establish this split. Auto-Ship remains off.</p>

@@ -1,17 +1,15 @@
 # Clients, servers and execution destinations
 
-**Accepted design, November 4, 2026.** Jack Heart selected separate Machine,
-server and installation responsibilities. The local backend exists in LOO-593;
-the command and source-name migration below is pending. Proposed commands on this
-page are not yet executable examples. LOO-718 supplies the mobile client and
-remote-access extension.
+Jack Heart selected separate Machine, server and installation responsibilities
+on November 4, 2026. LOO-593 implements the local boundary; LOO-718 supplies the
+mobile client and remote admission.
 
 ## Start from the action
 
 | Action | Concept | Surface |
 | --- | --- | --- |
 | Run an agent on a different computer | Execution destination | Existing `lf machine` connections, pools and rentals; `lf --machine` routes the command |
-| Read Work or continue a Session from Desktop or a phone | Client connection to Loopflow on a host | Proposed `lf server`; shared reads, commands and terminal bridges |
+| Read Work or continue a Session from Desktop or a phone | Client connection to Loopflow on a host | `lf server`; shared reads, commands and terminal bridges |
 | Install or update Loopflow | Installation | Existing `lf install`; selected artifacts, server registration and replacement |
 | Focus a window or arrange its panes | Desktop presentation | Existing `lf desktop`; the app-owned automation socket |
 
@@ -79,8 +77,7 @@ disabled background item or change the selected build.
 
 The current macOS package uses a signed app's bundled helper with SMAppService;
 Linux uses a user systemd service. Development data directories have separate
-supervisor identities. The registration code's current location under
-`machine_service/` does not make it Machine routing's responsibility.
+supervisor identities. Registration lives under `installation/`, outside Machine routing.
 
 Server replacement must leave detached Session and Graph owners alive under the
 actual OS supervisor. `setsid()` alone proves no such isolation. The signed macOS
@@ -90,29 +87,28 @@ Sleep makes the host unavailable; logout and reboot do not preserve live
 processes. Before-login hosting and a GUI-less distribution remain separate
 product choices. Removal must preserve Work and credentials.
 
-## Command cutover
+## Commands and installed-state migration
 
-The proposed public surface is `lf server run` for the supervisor's foreground
-entry and `lf server status` for diagnostics. Remote enablement, pairing and
-client revocation belong to that group too; their final subcommand spellings
-must be settled with LOO-718. Installation remains `lf install`.
+`lf server run` is the supervisor's foreground entry. `lf server status` reports
+readiness without registering a helper. The hidden `install server` operation
+lets local clients request readiness from the selected installation; it does not
+select or install a different build. Machine has no service subcommands.
 
-Current LOO-593 uses `lf machine service run`, `status` and `ensure`.
-Replace those paths in the CLI tree, routing, supervisor definitions, installed
-launcher, Swift adapter, fixtures and documentation together. Registration and
-the installation part of `ensure` move behind installation; readiness belongs to
-the server client. Do not simply rename `ensure` into another public installer.
-Remove the old internal command routes after their callers migrate.
+Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
+under `tests/fixtures/dto/server/` retain revision 1. Machine identity fields,
+`LF_HOME`, SSH routing and Work ownership are unchanged. Native terminal relays
+use `LF_SERVER` and `LF_SERVER_STATUS`.
 
-Rename implementation concepts such as `machine_service`, `MachineService` and
-`MachineProtocol` to server concepts in the same coordinated cutover. Keep
-`MachineId`, `machine_id`, `LF_HOME`, destination routing and Work ownership:
-those still describe the host authority correctly. Coordinate wire/fixture
-changes with both clients; namespace cleanup alone needs no protocol revision.
+Installation retires the old supervisor job before registering the server job.
+The old bundled plist is only an SMAppService migration descriptor: inspect
+approval, then unregister; never register it from new code. Disabled choices
+remain respected. Custom-home jobs and systemd units migrate their hashed labels;
+the revision-1 `machine.sock` address and singleton lock stay stable. Relays from
+before the namespace change can recover to the same listener; old and new
+executables cannot listen concurrently. No socket alias or second path exists.
+No Work, credential or remote-setting files move in this local cutover.
 
-Installed OS labels and persisted configuration require explicit migration:
-replace the old registration without leaving two listeners, preserve remote
-access settings and paired credentials, and do not retire busy owners' executables.
-LOO-718 must move its remote-access and pairing commands with this boundary.
-The [current local protocol](../../rust/loopflow/src/machine_service/README.md)
-retains executable commands and exact source names until that work lands.
+LOO-718 must move remote admission/pairing commands under `lf server` while
+retaining its credential/settings storage. The [local protocol](../../rust/loopflow/src/server/README.md)
+owns operation shapes and bounds. The working design records the precise handoff
+and acceptance still owed by the combined release.

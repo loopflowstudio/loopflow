@@ -3756,17 +3756,24 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
     );
 }
 
-// Machine adapter proofs keep the existing owner/provider fixture and its
+// Server adapter proofs keep the existing owner/provider fixture and its
 // protocol. The service must never become another execution authority.
-struct MachineServiceProof<'a> {
+struct ServerProof<'a> {
     fixture: &'a Fixture,
     child: Option<Child>,
     supervised: bool,
     executable: PathBuf,
 }
 
-impl<'a> MachineServiceProof<'a> {
+impl<'a> ServerProof<'a> {
     fn start(fixture: &'a Fixture, supervised: bool) -> Self {
+        // The server observes an installed Machine; startup creates no Work.
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loopflow::store::open_ephemeral_store(
+                &loopflow::store::StorageConfig::sqlite(fixture.home.path().join("loopflow.db")),
+            ))
+            .unwrap();
         let mut service = Self {
             fixture,
             child: None,
@@ -3778,7 +3785,7 @@ impl<'a> MachineServiceProof<'a> {
                 .args([
                     "run",
                     "python",
-                    "scripts/test_machine_service_registration.py",
+                    "scripts/test_server_registration.py",
                     "--lf",
                     env!("CARGO_BIN_EXE_lf"),
                     "--home",
@@ -3807,12 +3814,7 @@ impl<'a> MachineServiceProof<'a> {
         if supervised {
             // Concurrent Desktop/CLI setup must obtain the same installed helper.
             let results = std::thread::scope(|scope| {
-                let ensure = || {
-                    service
-                        .command(&["machine", "service", "ensure"])
-                        .output()
-                        .unwrap()
-                };
+                let ensure = || service.command(&["install", "server"]).output().unwrap();
                 let first = scope.spawn(ensure);
                 let second = scope.spawn(ensure);
                 [first.join().unwrap(), second.join().unwrap()]
@@ -3845,13 +3847,13 @@ impl<'a> MachineServiceProof<'a> {
         let status = self.fixture.home.path().join("connection.json");
         let mut command = self.command(&["session", "attach", owner]);
         command
-            .env("LF_MACHINE_SERVICE", "1")
-            .env("LF_MACHINE_STATUS", &status);
+            .env("LF_SERVER", "1")
+            .env("LF_SERVER_STATUS", &status);
         (command, status)
     }
 
     fn launch(&self) -> Child {
-        self.command(&["machine", "service", "run"])
+        self.command(&["server", "run"])
             .env_remove("RUST_LOG")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -3866,17 +3868,17 @@ impl<'a> MachineServiceProof<'a> {
                 socket
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
-                machine_send(
+                server_send(
                     &mut socket,
                     json!({"version":1,"id":"ready","operation":{"kind":"bootstrap"}}),
                 );
-                let response = machine_receive(&mut socket);
+                let response = server_receive(&mut socket);
                 assert_eq!(response["result"]["kind"], "bootstrap", "{response}");
                 return response["instance"].as_str().unwrap().to_owned();
             }
             assert!(
                 Instant::now() < deadline,
-                "Machine service did not become ready: {:?}",
+                "Server service did not become ready: {:?}",
                 std::fs::read_to_string(self.fixture.home.path().join("installed-helper.log"))
             );
             std::thread::sleep(Duration::from_millis(20));
@@ -3918,11 +3920,11 @@ impl<'a> MachineServiceProof<'a> {
         socket
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
-        machine_send(
+        server_send(
             &mut socket,
             json!({"version":1,"id":id,"operation":operation}),
         );
-        let response = machine_receive(&mut socket);
+        let response = server_receive(&mut socket);
         assert_eq!(response["id"], id);
         (socket, response)
     }
@@ -3936,13 +3938,13 @@ impl<'a> MachineServiceProof<'a> {
     }
 }
 
-impl Drop for MachineServiceProof<'_> {
+impl Drop for ServerProof<'_> {
     fn drop(&mut self) {
         self.stop();
     }
 }
 
-fn wait_machine_status(path: &Path, state: &str, input: bool, generation: u64) {
+fn wait_server_status(path: &Path, state: &str, input: bool, generation: u64) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let reading = std::fs::read(path)
@@ -3963,7 +3965,7 @@ fn wait_machine_status(path: &Path, state: &str, input: bool, generation: u64) {
     }
 }
 
-fn request_machine_move(status: &Path) {
+fn request_server_move(status: &Path) {
     let reading: Value = serde_json::from_slice(&std::fs::read(status).unwrap()).unwrap();
     assert_eq!(reading["state"], "connected");
     assert_eq!(reading["input"], false);
@@ -3972,7 +3974,7 @@ fn request_machine_move(status: &Path) {
     std::fs::rename(pending, status.with_extension("move")).unwrap();
 }
 
-fn machine_send(socket: &mut UnixStream, value: Value) {
+fn server_send(socket: &mut UnixStream, value: Value) {
     let bytes = serde_json::to_vec(&value).unwrap();
     socket
         .write_all(&(bytes.len() as u32).to_be_bytes())
@@ -3980,7 +3982,7 @@ fn machine_send(socket: &mut UnixStream, value: Value) {
     socket.write_all(&bytes).unwrap();
 }
 
-fn machine_receive(socket: &mut UnixStream) -> Value {
+fn server_receive(socket: &mut UnixStream) -> Value {
     let mut header = [0; 4];
     socket.read_exact(&mut header).unwrap();
     let length = u32::from_be_bytes(header) as usize;
@@ -3990,19 +3992,127 @@ fn machine_receive(socket: &mut UnixStream) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+#[cfg(target_os = "macos")]
 #[test]
-fn machine_service_invalid_checkpoints_use_shared_watch_errors() {
+#[ignore = "uses the login launchd domain with isolated development jobs"]
+fn server_registration_migrates_old_job_and_respects_disabled_choice() {
+    struct Jobs(Vec<String>);
+    impl Drop for Jobs {
+        fn drop(&mut self) {
+            for target in &self.0 {
+                for action in ["bootout", "enable"] {
+                    let _ = Command::new("/bin/launchctl")
+                        .args([action, target])
+                        .output();
+                }
+            }
+        }
+    }
     let fixture = Fixture::new();
-    let service = MachineServiceProof::start(&fixture, false);
+    let home = fixture.home.path().canonicalize().unwrap();
+    let digest = hex::encode(Sha256::digest(home.as_os_str().as_encoded_bytes()));
+    // SAFETY: geteuid has no preconditions.
+    let domain = format!("gui/{}", unsafe { libc::geteuid() });
+    let old_label = format!("com.loopflow.machine.{}", &digest[..16]);
+    let new_label = format!("com.loopflow.server.{}", &digest[..16]);
+    let old = format!("{domain}/{old_label}");
+    let new = format!("{domain}/{new_label}");
+    let _jobs = Jobs(vec![old.clone(), new.clone()]);
+    let launchctl = |args: &[&str]| {
+        let output = Command::new("/bin/launchctl").args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    launchctl(&["disable", &old]);
+    let refused = fixture.command(&["install", "server"]).output().unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("disabled"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(!fixture.endpoint("machine").exists());
+    launchctl(&["enable", &old]);
+    let owner = fixture.owner(fixture.command(&["session", "serve", "--", "/bin/cat"]));
+    let _owner = StopOwner(&fixture, owner.clone());
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let legacy_plist = home.join("machine-service.plist");
+    std::fs::write(
+        &legacy_plist,
+        format!(
+            r#"<?xml version="1.0"?>
+<plist version="1.0"><dict><key>Label</key><string>{old_label}</string>
+<key>ProgramArguments</key><array><string>/bin/sleep</string><string>120</string></array>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>"#
+        ),
+    )
+    .unwrap();
+    launchctl(&["bootstrap", &domain, legacy_plist.to_str().unwrap()]);
+    std::fs::write(fixture.endpoint("machine"), "retired endpoint").unwrap();
+    let results = std::thread::scope(|scope| {
+        let ensure = || fixture.command(&["install", "server"]).output().unwrap();
+        let first = scope.spawn(ensure);
+        let second = scope.spawn(ensure);
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    let readings = results.map(|result| {
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<Value>(&result.stdout).unwrap()
+    });
+    assert_eq!(readings[0]["ready"], true);
+    assert_eq!(readings[0]["instance"], readings[1]["instance"]);
+    assert!(!Command::new("/bin/launchctl")
+        .args(["print", &old])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    launchctl(&["print", &new]);
+    assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+    assert!(!legacy_plist.exists());
+    assert!(fixture.endpoint("machine").exists());
+    // The retired executable's lock cannot admit a second listener.
+    let lock = std::fs::File::open(fixture.endpoint("machine").with_extension("lock")).unwrap();
+    assert!(fs2::FileExt::try_lock_exclusive(&lock).is_err());
+}
+
+#[test]
+fn server_status_does_not_install_or_create_work() {
+    let fixture = Fixture::new();
+    let result = fixture.command(&["server", "status"]).output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let status: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(status["ready"], false);
+    assert!(status["instance"].is_null());
+    assert!(!fixture.endpoint("machine").exists());
+    assert!(!fixture.home.path().join("server.plist").exists());
+    assert!(!fixture.home.path().join("loopflow.db").exists());
+}
+
+#[test]
+fn server_invalid_checkpoints_use_shared_watch_errors() {
+    let fixture = Fixture::new();
+    let service = ServerProof::start(&fixture, false);
     for checkpoint in [json!({"unknown": 1}), json!({"id": 1, "args": false})] {
         let (mut socket, initial) = service.request(
             "tasks",
             json!({"kind":"subscribe","query":{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":7}),
         );
         assert_eq!(initial["result"]["kind"], "reading");
-        machine_send(&mut socket, checkpoint);
+        server_send(&mut socket, checkpoint);
         loop {
-            let response = machine_receive(&mut socket);
+            let response = server_receive(&mut socket);
             assert_eq!(response["id"], "tasks");
             assert_eq!(response["result"]["kind"], "reading");
             assert_eq!(response["result"]["generation"], 7);
@@ -4018,426 +4128,13 @@ fn machine_service_invalid_checkpoints_use_shared_watch_errors() {
 }
 
 #[test]
-fn machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart() {
-    machine_service_continuity(false, false);
-}
-
-#[test]
-fn machine_service_reconnect_preserves_newer_viewers_input_and_geometry() {
-    // Exercise both byte-counted Resume and fresh terminal-screen recovery.
-    for terminal in [false, true] {
-        let fixture = Fixture::new();
-        let owner = fixture.owner(fixture.serve(terminal, &[
-            "/bin/sh", "-c",
-            "printf 'ready-for-input\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
-        ]));
-        let _cleanup = StopOwner(&fixture, owner.clone());
-        let mut service = MachineServiceProof::start(&fixture, false);
-        let (command, status) = service.relay_command(&owner);
-        let mut relay = if terminal {
-            Terminal::spawn(command)
-        } else {
-            Terminal::stream(command)
-        };
-        relay.wait_text("ready-for-input");
-        service.stop();
-        wait_machine_status(&status, "reconnecting", false, 2);
-
-        let mut newer = fixture.attach(
-            &owner,
-            json!({
-                "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
-            }),
-        );
-        relay.input(b"uncertain typing");
-        service.child = Some(service.launch());
-        service.ready();
-        wait_machine_status(&status, "connected", false, 2);
-        relay.assert_viewing("Recovered observer");
-        relay.input(b"must not reach the provider\n");
-        let mut observer = fixture.connect(&owner);
-        observer.request(
-            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
-        );
-        let reply = observer.until_reply();
-        assert_eq!(reply["owner"], newer.id, "reconnect cannot steal geometry");
-        assert!(reply["token"].is_null());
-        newer.input("newer viewer\n");
-        newer.finish();
-        assert_eq!(fixture.wait_file("answer"), "newer viewer");
-        assert!(relay.wait_exit().success());
-        if !terminal {
-            let screen = relay.screen.lock().unwrap();
-            assert_eq!(
-                String::from_utf8_lossy(&screen)
-                    .matches("ready-for-input")
-                    .count(),
-                1,
-                "Resume must continue at the received byte, not replay the initial output"
-            );
-        }
-    }
-}
-
-#[test]
-fn machine_service_move_here_lost_ack_preserves_newer_claim_and_discards_input() {
-    for terminal in [false, true] {
-        machine_move_lost_ack(terminal);
-    }
-}
-
-fn machine_move_lost_ack(terminal: bool) {
+fn server_reads_commands_and_subscriptions_share_cli_semantics() {
     let fixture = Fixture::new();
-    let owner = fixture.owner(fixture.serve(
-        terminal,
-        &[
-            "/bin/sh",
-            "-c",
-            "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
-        ],
-    ));
+    let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
     let _cleanup = StopOwner(&fixture, owner.clone());
-    let owner_pid = pid_of_process(&fixture, &owner);
-    let mut service = MachineServiceProof::start(&fixture, false);
-    let (command, status) = service.relay_command(&owner);
-    let mut relay = if terminal {
-        Terminal::spawn(command)
-    } else {
-        Terminal::stream(command)
-    };
-    wait_machine_status(&status, "connected", true, 1);
-    service.stop();
-    wait_machine_status(&status, "reconnecting", false, 2);
-    let _other = fixture.viewer(&owner, true);
-
-    // Intercept the real owner's takeover acknowledgement, after it has applied
-    // the claim. Recovery will go directly to that same owner again.
-    let endpoint = fixture.endpoint(&owner);
-    let retained = endpoint.with_extension("retained");
-    std::fs::rename(&endpoint, &retained).unwrap();
-    let listener = UnixListener::bind(&endpoint).unwrap();
-    let (ack_send, ack_receive) = std::sync::mpsc::sync_channel(1);
-    let (close_send, close_receive) = std::sync::mpsc::sync_channel(1);
-    std::thread::scope(|scope| {
-        let proxy_retained = retained.clone();
-        let proxy = scope.spawn(move || {
-            let (mut downstream, _) = listener.accept().unwrap();
-            let mut upstream = UnixStream::connect(&proxy_retained).unwrap();
-            for socket in [&downstream, &upstream] {
-                socket
-                    .set_read_timeout(Some(Duration::from_secs(15)))
-                    .unwrap();
-                socket
-                    .set_write_timeout(Some(Duration::from_secs(15)))
-                    .unwrap();
-            }
-            let mut requests = downstream.try_clone().unwrap();
-            let mut destination = upstream.try_clone().unwrap();
-            let forward = scope.spawn(move || {
-                let _ = std::io::copy(&mut requests, &mut destination);
-            });
-            while let Some((tag, payload)) = read_frame(&mut upstream) {
-                if tag == REPLY {
-                    let reply: Value = serde_json::from_slice(&payload).unwrap();
-                    if reply["kind"] == "attached" && reply["token"].is_string() {
-                        ack_send.send(()).unwrap();
-                        close_receive.recv_timeout(Duration::from_secs(15)).unwrap();
-                        break;
-                    }
-                }
-                downstream.write_all(&frame(tag, &payload)).unwrap();
-            }
-            downstream.shutdown(std::net::Shutdown::Both).unwrap();
-            upstream.shutdown(std::net::Shutdown::Both).unwrap();
-            forward.join().unwrap();
-        });
-        service.child = Some(service.launch());
-        service.ready();
-        wait_machine_status(&status, "connected", false, 2);
-        request_machine_move(&status);
-        ack_receive.recv_timeout(Duration::from_secs(15)).unwrap();
-        wait_machine_status(&status, "moving", false, 3);
-        relay.input(b"must not be replayed");
-        let mut newer = Viewer::new(UnixStream::connect(&retained).unwrap()).attach(json!({
-            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
-        }));
-        std::fs::remove_file(&endpoint).unwrap();
-        std::fs::rename(&retained, &endpoint).unwrap();
-        // Even a delayed duplicate of the consumed action cannot cross recovery.
-        std::fs::write(status.with_extension("move"), "2").unwrap();
-        close_send.send(()).unwrap();
-        proxy.join().unwrap();
-        wait_machine_status(&status, "connected", false, 4);
-        assert!(!status.with_extension("move").exists());
-        let mut observer = fixture.connect(&owner);
-        observer.request(
-            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
-        );
-        assert_eq!(observer.until_reply()["owner"], newer.id);
-        assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
-        newer.input("newer viewer\n");
-        newer.finish();
-        assert_eq!(fixture.wait_file("answer"), "newer viewer");
-        assert!(relay.wait_exit().success());
-    });
-}
-
-#[test]
-fn machine_service_move_here_pending_action_is_cancelled_by_pane_closure() {
-    let fixture = Fixture::new();
-    let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "read -r answer"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
-    let mut service = MachineServiceProof::start(&fixture, false);
-    let directory = fixture.home.path().join("pane");
-    std::fs::create_dir(&directory).unwrap();
-    let status = directory.join("status.json");
-    let (mut command, _) = service.relay_command(&owner);
-    command.env("LF_MACHINE_STATUS", &status);
-    let mut relay = Terminal::stream(command);
-    wait_machine_status(&status, "connected", true, 1);
-    service.stop();
-    wait_machine_status(&status, "reconnecting", false, 2);
-    let mut newer = fixture.attach(
-        &owner,
-        json!({
-            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
-        }),
-    );
-    service.child = Some(service.launch());
-    service.ready();
-    wait_machine_status(&status, "connected", false, 2);
-    let pid = relay.child.id() as libc::pid_t;
-    // SAFETY: stop only this fixture's relay so closure precedes consumption.
-    assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
-    let paused = PausedOwner(pid);
-    let mut stopped = 0;
-    // SAFETY: waitpid observes our child's stop; stopped is writable.
-    assert_eq!(
-        unsafe { libc::waitpid(pid, &mut stopped, libc::WUNTRACED) },
-        pid
-    );
-    request_machine_move(&status);
-    std::fs::remove_dir_all(&directory).unwrap();
-    drop(paused);
-    assert!(relay.wait_exit().success());
-    let mut observer = fixture.connect(&owner);
-    observer
-        .request(json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}));
-    assert_eq!(observer.until_reply()["owner"], newer.id);
-    newer.input("still controlled\n");
-    newer.finish();
-}
-
-#[test]
-fn machine_service_reconnect_refreshes_expired_output_without_replaying_input() {
-    let fixture = Fixture::new();
-    let owner = fixture.owner(fixture.serve(
-        false,
-        &[
-            "/bin/sh",
-            "-c",
-            r#"
-printf 'ready-for-outage\n'
-while [ ! -f "$HOME/release" ]; do sleep 0.02; done
-dd if=/dev/zero bs=65536 count=20 2>/dev/null | tr '\000' x
-printf '\ncurrent-output\n'
-printf done > "$HOME/filled"
-read -r answer
-printf '%s' "$answer" > "$HOME/answer"
-"#,
-        ],
-    ));
-    let _cleanup = StopOwner(&fixture, owner.clone());
-    let mut service = MachineServiceProof::start(&fixture, false);
-    let (command, status) = service.relay_command(&owner);
-    let mut relay = Terminal::stream(command);
-    relay.wait_text("ready-for-outage");
-    service.stop();
-    wait_machine_status(&status, "reconnecting", false, 2);
-    std::fs::write(fixture.home.path().join("release"), "go").unwrap();
-    fixture.wait_file("filled");
-    relay.input(b"discarded");
-    service.child = Some(service.launch());
-    service.ready();
-    wait_machine_status(&status, "connected", true, 2);
-    relay.wait_text("current-output");
-    relay.input(b"fresh input\n");
-    assert_eq!(fixture.wait_file("answer"), "fresh input");
-    assert!(relay.wait_exit().success());
-}
-
-#[test]
-fn machine_service_reconnect_reports_unavailable_without_starting_another() {
-    let fixture = Fixture::new();
-    let path = fixture.provider(
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-printf '%s\n' "$$" >> "$HOME/launches"
-printf 'provider-ready\n'
-read -r answer < /dev/tty
-"#,
-    );
-    let owner = fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "hello"));
-    let _cleanup = StopOwner(&fixture, owner.clone());
-    let first = fixture.launches(1);
-    let mut service = MachineServiceProof::start(&fixture, false);
-    let (mut command, status) = service.relay_command(&owner);
-    command.env("PATH", &path);
-    let mut relay = Terminal::spawn(command);
-    relay.wait_text("provider-ready");
-    service.stop();
-    wait_machine_status(&status, "reconnecting", false, 2);
-    fixture.stop(&owner);
-    fixture.ends(&owner);
-    service.child = Some(service.launch());
-    service.ready();
-    wait_machine_status(&status, "unavailable", false, 2);
-    relay.assert_viewing("Unavailable keeps the last screen");
-    relay.input(&[0x1d]);
-    assert!(relay.wait_exit().success());
-    assert_eq!(
-        fixture.launches(1),
-        first,
-        "connection recovery cannot launch or resume a provider"
-    );
-}
-
-#[test]
-fn machine_service_reconnect_retries_after_exhaustion_without_sending_retry_to_provider() {
-    let fixture = Fixture::new();
-    let owner = fixture.owner(fixture.serve(
-        false,
-        &[
-            "/bin/sh",
-            "-c",
-            "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
-        ],
-    ));
-    let _cleanup = StopOwner(&fixture, owner.clone());
-    let mut service = MachineServiceProof::start(&fixture, false);
-    let (command, status) = service.relay_command(&owner);
-    let mut relay = Terminal::stream(command);
-    relay.wait_text("ready");
-    service.stop();
-    wait_machine_status(&status, "unavailable", false, 2);
-    relay.input(b"discarded");
-    service.child = Some(service.launch());
-    service.ready();
-    std::fs::write(status.with_extension("retry"), "").unwrap();
-    wait_machine_status(&status, "connected", true, 2);
-    relay.input(b"submitted\n");
-    assert_eq!(fixture.wait_file("answer"), "submitted");
-    assert!(relay.wait_exit().success());
-}
-
-#[test]
-fn machine_service_startup_cancels_its_pending_installer_when_pane_closes() {
-    let fixture = Fixture::new();
-    let directory = fixture.home.path().join("native-pane");
-    std::fs::create_dir(&directory).unwrap();
-    let installer = fixture.home.path().join("installer");
-    std::fs::write(
-        &installer,
-        "#!/bin/sh\nprintf '%s' \"$$\" > \"$HOME/installer-pid\"\nexec sleep 60\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let owner = uuid::Uuid::new_v4().to_string();
-    let mut command = fixture.command(&["session", "attach", &owner]);
-    command
-        .env("LF_BIN", &installer)
-        .env("LF_MACHINE_SERVICE", "1")
-        .env("LF_MACHINE_STATUS", directory.join("status.json"));
-    let mut relay = Terminal::stream(command);
-    let pid = fixture.wait_file("installer-pid").parse::<i32>().unwrap();
-    std::fs::remove_dir_all(directory).unwrap();
-    assert!(relay.wait_exit().success());
-    // SAFETY: signal zero only inspects the fixture's recorded installer PID.
-    assert_eq!(
-        unsafe { libc::kill(pid, 0) },
-        -1,
-        "cancelled setup must be reaped"
-    );
-}
-
-#[test]
-fn machine_service_reconnect_cancels_when_native_pane_closes() {
-    let fixture = Fixture::new();
-    let owner = fixture.owner(fixture.serve(
-        false,
-        &["/bin/sh", "-c", "printf 'ready\\n'; read -r answer"],
-    ));
-    let _cleanup = StopOwner(&fixture, owner.clone());
-    let mut service = MachineServiceProof::start(&fixture, false);
-    let directory = fixture.home.path().join("native-pane");
-    std::fs::create_dir(&directory).unwrap();
-    let status = directory.join("status.json");
-    let mut command = fixture.command(&["session", "attach", &owner]);
-    command
-        .env("LF_MACHINE_SERVICE", "1")
-        .env("LF_MACHINE_STATUS", &status);
-    let mut relay = Terminal::stream(command);
-    wait_machine_status(&status, "connected", true, 1);
-    service.stop();
-    wait_machine_status(&status, "reconnecting", false, 2);
-    std::fs::remove_dir_all(&directory).unwrap();
-    assert!(relay.wait_exit().success());
-    // The pane owns cancellation, never the provider's lifetime.
-    assert!(pid_of_process(&fixture, &owner) > 0);
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-#[ignore = "registers and removes an isolated launchd job; run explicitly outside network sandbox"]
-fn installed_machine_service_preserves_owner_and_graph_across_replacement() {
-    machine_service_continuity(true, false);
-}
-
-#[test]
-fn machine_service_move_here_preserves_draft_provider_and_graph() {
-    machine_service_continuity(false, true);
-}
-
-fn machine_service_continuity(supervised: bool, takeover: bool) {
-    let fixture = Fixture::new();
-    let path = fixture.provider(
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-stty -echo < /dev/tty
-printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
-printf 'machine-proof-provider-ready\n'
-read -r answer < /dev/tty
-printf '%s\n' "$answer" >> "$HOME/answers"
-"#,
-    );
-    fixture
-        .repo
-        .create_file(".lf/skills/probe.md", "Do the fixture work.");
-    fixture
-        .repo
-        .create_file(".lf/graphs/machine-proof.yaml", "- probe\n- probe\n");
-    let mut service = MachineServiceProof::start(&fixture, supervised);
-    let mut command = service.command(&["session", "serve", "--terminal", "--"]);
-    command
-        .arg(&service.executable)
-        .args(["-i", "-a", "claude", "graph", "machine-proof"])
-        .env("PATH", path);
-    let owner = fixture.owner(command);
-    let _cleanup = StopOwner(&fixture, owner.clone());
-    let first = fixture.launches(1);
-    let owner_pid = pid_of_process(&fixture, &owner);
-    let session = fixture.session_of_owner(&owner);
-    let first_instance = service.ready();
-    let (_, resolved) =
-        service.request("resolve", json!({"kind":"session_owner","session":session}));
-    assert_eq!(resolved["result"]["owner"], owner);
-    let mut viewer = service.viewer(&owner);
-    viewer.input("draft");
-    drop(viewer); // Desktop quit: the owner keeps its native editor.
-    let (command, status) = service.relay_command(&owner);
-    let mut relay = Terminal::spawn(command);
-    relay.wait_text("machine-proof-provider-ready");
-    fixture.wait_controlled(&owner);
+    let session = fixture.session(&owner);
+    let service = ServerProof::start(&fixture, false);
+    let instance = service.ready();
     let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
     let (mut watch, initial) = service.request(
         "tasks",
@@ -4445,8 +4142,8 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     );
     assert_eq!(initial["result"]["kind"], "reading");
     assert_eq!(initial["result"]["generation"], 7);
-    machine_send(&mut watch, json!({"id":17}));
-    let confirmed = machine_receive(&mut watch);
+    server_send(&mut watch, json!({"id":17}));
+    let confirmed = server_receive(&mut watch);
     assert_eq!(confirmed["result"]["frame"]["answers"], 17);
 
     // Compare the shared CLI write with the socket write, including its real
@@ -4494,10 +4191,10 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         assert!(
             diagnostics
                 .lines()
-                .any(|line| line.contains("Machine command exited")
+                .any(|line| line.contains("Server command exited")
                     && line.contains(trace)
                     && line.contains(change["id"].as_str().unwrap())
-                    && line.contains(&first_instance)),
+                    && line.contains(&instance)),
             "{diagnostics}"
         );
     }
@@ -4510,7 +4207,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let registered = support::register_task_with_pr(
         fixture.home.path(),
         &fixture.repo.path().canonicalize().unwrap(),
-        "machine-proof",
+        "server-proof",
         &fixture.repo.head_sha(),
     );
     let db = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
@@ -4538,9 +4235,9 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let cli_plan: Value = serde_json::from_slice(&cli.stdout).unwrap();
     assert_eq!(socket_plan, cli_plan);
     assert_eq!(socket_plan["contents"][0]["primary_session"], session);
-    machine_send(&mut watch, json!({"id":18}));
+    server_send(&mut watch, json!({"id":18}));
     loop {
-        let changed = machine_receive(&mut watch);
+        let changed = server_receive(&mut watch);
         if changed["result"]["frame"]["answers"] == 18 {
             assert!(
                 changed["result"]["frame"]["body"]
@@ -4552,10 +4249,433 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         }
     }
     drop(watch);
+}
+
+#[test]
+fn server_preserves_owner_and_graph_across_restart() {
+    server_continuity(false, false);
+}
+
+#[test]
+fn server_reconnect_preserves_newer_viewers_input_and_geometry() {
+    // Exercise both byte-counted Resume and fresh terminal-screen recovery.
+    for terminal in [false, true] {
+        let fixture = Fixture::new();
+        let owner = fixture.owner(fixture.serve(terminal, &[
+            "/bin/sh", "-c",
+            "printf 'ready-for-input\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ]));
+        let _cleanup = StopOwner(&fixture, owner.clone());
+        let mut service = ServerProof::start(&fixture, false);
+        let (command, status) = service.relay_command(&owner);
+        let mut relay = if terminal {
+            Terminal::spawn(command)
+        } else {
+            Terminal::stream(command)
+        };
+        relay.wait_text("ready-for-input");
+        service.stop();
+        wait_server_status(&status, "reconnecting", false, 2);
+
+        let mut newer = fixture.attach(
+            &owner,
+            json!({
+                "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+            }),
+        );
+        relay.input(b"uncertain typing");
+        service.child = Some(service.launch());
+        service.ready();
+        wait_server_status(&status, "connected", false, 2);
+        relay.assert_viewing("Recovered observer");
+        relay.input(b"must not reach the provider\n");
+        let mut observer = fixture.connect(&owner);
+        observer.request(
+            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
+        );
+        let reply = observer.until_reply();
+        assert_eq!(reply["owner"], newer.id, "reconnect cannot steal geometry");
+        assert!(reply["token"].is_null());
+        newer.input("newer viewer\n");
+        newer.finish();
+        assert_eq!(fixture.wait_file("answer"), "newer viewer");
+        assert!(relay.wait_exit().success());
+        if !terminal {
+            let screen = relay.screen.lock().unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&screen)
+                    .matches("ready-for-input")
+                    .count(),
+                1,
+                "Resume must continue at the received byte, not replay the initial output"
+            );
+        }
+    }
+}
+
+#[test]
+fn server_move_here_lost_ack_preserves_newer_claim_and_discards_input() {
+    for terminal in [false, true] {
+        server_move_lost_ack(terminal);
+    }
+}
+
+fn server_move_lost_ack(terminal: bool) {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        terminal,
+        &[
+            "/bin/sh",
+            "-c",
+            "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let mut service = ServerProof::start(&fixture, false);
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = if terminal {
+        Terminal::spawn(command)
+    } else {
+        Terminal::stream(command)
+    };
+    wait_server_status(&status, "connected", true, 1);
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    let _other = fixture.viewer(&owner, true);
+
+    // Intercept the real owner's takeover acknowledgement, after it has applied
+    // the claim. Recovery will go directly to that same owner again.
+    let endpoint = fixture.endpoint(&owner);
+    let retained = endpoint.with_extension("retained");
+    std::fs::rename(&endpoint, &retained).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    let (ack_send, ack_receive) = std::sync::mpsc::sync_channel(1);
+    let (close_send, close_receive) = std::sync::mpsc::sync_channel(1);
+    std::thread::scope(|scope| {
+        let proxy_retained = retained.clone();
+        let proxy = scope.spawn(move || {
+            let (mut downstream, _) = listener.accept().unwrap();
+            let mut upstream = UnixStream::connect(&proxy_retained).unwrap();
+            for socket in [&downstream, &upstream] {
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(15)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(15)))
+                    .unwrap();
+            }
+            let mut requests = downstream.try_clone().unwrap();
+            let mut destination = upstream.try_clone().unwrap();
+            let forward = scope.spawn(move || {
+                let _ = std::io::copy(&mut requests, &mut destination);
+            });
+            while let Some((tag, payload)) = read_frame(&mut upstream) {
+                if tag == REPLY {
+                    let reply: Value = serde_json::from_slice(&payload).unwrap();
+                    if reply["kind"] == "attached" && reply["token"].is_string() {
+                        ack_send.send(()).unwrap();
+                        close_receive.recv_timeout(Duration::from_secs(15)).unwrap();
+                        break;
+                    }
+                }
+                downstream.write_all(&frame(tag, &payload)).unwrap();
+            }
+            downstream.shutdown(std::net::Shutdown::Both).unwrap();
+            upstream.shutdown(std::net::Shutdown::Both).unwrap();
+            forward.join().unwrap();
+        });
+        service.child = Some(service.launch());
+        service.ready();
+        wait_server_status(&status, "connected", false, 2);
+        request_server_move(&status);
+        ack_receive.recv_timeout(Duration::from_secs(15)).unwrap();
+        wait_server_status(&status, "moving", false, 3);
+        relay.input(b"must not be replayed");
+        let mut newer = Viewer::new(UnixStream::connect(&retained).unwrap()).attach(json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+        }));
+        std::fs::remove_file(&endpoint).unwrap();
+        std::fs::rename(&retained, &endpoint).unwrap();
+        // Even a delayed duplicate of the consumed action cannot cross recovery.
+        std::fs::write(status.with_extension("move"), "2").unwrap();
+        close_send.send(()).unwrap();
+        proxy.join().unwrap();
+        wait_server_status(&status, "connected", false, 4);
+        assert!(!status.with_extension("move").exists());
+        let mut observer = fixture.connect(&owner);
+        observer.request(
+            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
+        );
+        assert_eq!(observer.until_reply()["owner"], newer.id);
+        assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+        newer.input("newer viewer\n");
+        newer.finish();
+        assert_eq!(fixture.wait_file("answer"), "newer viewer");
+        assert!(relay.wait_exit().success());
+    });
+}
+
+#[test]
+fn server_move_here_pending_action_is_cancelled_by_pane_closure() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "read -r answer"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let directory = fixture.home.path().join("pane");
+    std::fs::create_dir(&directory).unwrap();
+    let status = directory.join("status.json");
+    let (mut command, _) = service.relay_command(&owner);
+    command.env("LF_SERVER_STATUS", &status);
+    let mut relay = Terminal::stream(command);
+    wait_server_status(&status, "connected", true, 1);
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    let mut newer = fixture.attach(
+        &owner,
+        json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+        }),
+    );
+    service.child = Some(service.launch());
+    service.ready();
+    wait_server_status(&status, "connected", false, 2);
+    let pid = relay.child.id() as libc::pid_t;
+    // SAFETY: stop only this fixture's relay so closure precedes consumption.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+    let paused = PausedOwner(pid);
+    let mut stopped = 0;
+    // SAFETY: waitpid observes our child's stop; stopped is writable.
+    assert_eq!(
+        unsafe { libc::waitpid(pid, &mut stopped, libc::WUNTRACED) },
+        pid
+    );
+    request_server_move(&status);
+    std::fs::remove_dir_all(&directory).unwrap();
+    drop(paused);
+    assert!(relay.wait_exit().success());
+    let mut observer = fixture.connect(&owner);
+    observer
+        .request(json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}));
+    assert_eq!(observer.until_reply()["owner"], newer.id);
+    newer.input("still controlled\n");
+    newer.finish();
+}
+
+#[test]
+fn server_reconnect_refreshes_expired_output_without_replaying_input() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            r#"
+printf 'ready-for-outage\n'
+while [ ! -f "$HOME/release" ]; do sleep 0.02; done
+dd if=/dev/zero bs=65536 count=20 2>/dev/null | tr '\000' x
+printf '\ncurrent-output\n'
+printf done > "$HOME/filled"
+read -r answer
+printf '%s' "$answer" > "$HOME/answer"
+"#,
+        ],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = Terminal::stream(command);
+    relay.wait_text("ready-for-outage");
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    std::fs::write(fixture.home.path().join("release"), "go").unwrap();
+    fixture.wait_file("filled");
+    relay.input(b"discarded");
+    service.child = Some(service.launch());
+    service.ready();
+    wait_server_status(&status, "connected", true, 2);
+    relay.wait_text("current-output");
+    relay.input(b"fresh input\n");
+    assert_eq!(fixture.wait_file("answer"), "fresh input");
+    assert!(relay.wait_exit().success());
+}
+
+#[test]
+fn server_reconnect_reports_unavailable_without_starting_another() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s\n' "$$" >> "$HOME/launches"
+printf 'provider-ready\n'
+read -r answer < /dev/tty
+"#,
+    );
+    let owner = fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "hello"));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let first = fixture.launches(1);
+    let mut service = ServerProof::start(&fixture, false);
+    let (mut command, status) = service.relay_command(&owner);
+    command.env("PATH", &path);
+    let mut relay = Terminal::spawn(command);
+    relay.wait_text("provider-ready");
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    fixture.stop(&owner);
+    fixture.ends(&owner);
+    service.child = Some(service.launch());
+    service.ready();
+    wait_server_status(&status, "unavailable", false, 2);
+    relay.assert_viewing("Unavailable keeps the last screen");
+    relay.input(&[0x1d]);
+    assert!(relay.wait_exit().success());
+    assert_eq!(
+        fixture.launches(1),
+        first,
+        "connection recovery cannot launch or resume a provider"
+    );
+}
+
+#[test]
+fn server_reconnect_retries_after_exhaustion_without_sending_retry_to_provider() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = Terminal::stream(command);
+    relay.wait_text("ready");
+    service.stop();
+    wait_server_status(&status, "unavailable", false, 2);
+    relay.input(b"discarded");
+    service.child = Some(service.launch());
+    service.ready();
+    std::fs::write(status.with_extension("retry"), "").unwrap();
+    wait_server_status(&status, "connected", true, 2);
+    relay.input(b"submitted\n");
+    assert_eq!(fixture.wait_file("answer"), "submitted");
+    assert!(relay.wait_exit().success());
+}
+
+#[test]
+fn server_startup_cancels_its_pending_installer_when_pane_closes() {
+    let fixture = Fixture::new();
+    let directory = fixture.home.path().join("native-pane");
+    std::fs::create_dir(&directory).unwrap();
+    let installer = fixture.home.path().join("installer");
+    std::fs::write(
+        &installer,
+        "#!/bin/sh\nprintf '%s' \"$$\" > \"$HOME/installer-pid\"\nexec sleep 60\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let owner = uuid::Uuid::new_v4().to_string();
+    let mut command = fixture.command(&["session", "attach", &owner]);
+    command
+        .env("LF_BIN", &installer)
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", directory.join("status.json"));
+    let mut relay = Terminal::stream(command);
+    let pid = fixture.wait_file("installer-pid").parse::<i32>().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    assert!(relay.wait_exit().success());
+    // SAFETY: signal zero only inspects the fixture's recorded installer PID.
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        -1,
+        "cancelled setup must be reaped"
+    );
+}
+
+#[test]
+fn server_reconnect_cancels_when_native_pane_closes() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &["/bin/sh", "-c", "printf 'ready\\n'; read -r answer"],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let directory = fixture.home.path().join("native-pane");
+    std::fs::create_dir(&directory).unwrap();
+    let status = directory.join("status.json");
+    let mut command = fixture.command(&["session", "attach", &owner]);
+    command
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", &status);
+    let mut relay = Terminal::stream(command);
+    wait_server_status(&status, "connected", true, 1);
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    std::fs::remove_dir_all(&directory).unwrap();
+    assert!(relay.wait_exit().success());
+    // The pane owns cancellation, never the provider's lifetime.
+    assert!(pid_of_process(&fixture, &owner) > 0);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "registers and removes an isolated launchd job; run explicitly outside network sandbox"]
+fn installed_server_preserves_owner_and_graph_across_replacement() {
+    server_continuity(true, false);
+}
+
+#[test]
+fn server_move_here_preserves_draft_provider_and_graph() {
+    server_continuity(false, true);
+}
+
+fn server_continuity(supervised: bool, takeover: bool) {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'server-proof-provider-ready\n'
+read -r answer < /dev/tty
+printf '%s\n' "$answer" >> "$HOME/answers"
+"#,
+    );
+    fixture
+        .repo
+        .create_file(".lf/skills/probe.md", "Do the fixture work.");
+    fixture
+        .repo
+        .create_file(".lf/graphs/server-proof.yaml", "- probe\n- probe\n");
+    let mut service = ServerProof::start(&fixture, supervised);
+    let mut command = service.command(&["session", "serve", "--terminal", "--"]);
+    command
+        .arg(&service.executable)
+        .args(["-i", "-a", "claude", "graph", "server-proof"])
+        .env("PATH", path);
+    let owner = fixture.owner(command);
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let first = fixture.launches(1);
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let session = fixture.session_of_owner(&owner);
+    let first_instance = service.ready();
+    let (_, resolved) =
+        service.request("resolve", json!({"kind":"session_owner","session":session}));
+    assert_eq!(resolved["result"]["owner"], owner);
+    let mut viewer = service.viewer(&owner);
+    viewer.input("draft");
+    drop(viewer); // Desktop quit: the owner keeps its native editor.
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = Terminal::spawn(command);
+    relay.wait_text("server-proof-provider-ready");
+    fixture.wait_controlled(&owner);
     let newer =
         if takeover {
             service.stop();
-            wait_machine_status(&status, "reconnecting", false, 2);
+            wait_server_status(&status, "reconnecting", false, 2);
             Some(fixture.attach(&owner, json!({
             "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
         })))
@@ -4575,11 +4695,11 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         first,
         "reconnect must not launch another provider"
     );
-    wait_machine_status(&status, "connected", !takeover, 2);
+    wait_server_status(&status, "connected", !takeover, 2);
     if takeover {
         relay.input(b"discard this uncertain input");
-        request_machine_move(&status);
-        wait_machine_status(&status, "connected", true, 3);
+        request_server_move(&status);
+        wait_server_status(&status, "connected", true, 3);
         let mut observer = fixture.connect(&owner);
         observer.request(json!({
             "kind":"attach", "control":false, "replace":false, "rows":24, "cols":80,
@@ -4591,7 +4711,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         assert_eq!(fixture.launches(1), first);
     }
     let screen = relay.screen.lock().unwrap().clone();
-    assert!(!String::from_utf8_lossy(&screen).contains("Machine connection lost"));
+    assert!(!String::from_utf8_lossy(&screen).contains("Server connection lost"));
     relay.input(b" kept\n");
     fixture.launches(2); // The existing Graph advanced exactly once.
     relay.input(b"done\n");

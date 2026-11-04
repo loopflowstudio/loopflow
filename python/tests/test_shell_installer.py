@@ -1,7 +1,7 @@
 """Tests for the versioned release shell installer.
 
-These tests exercise its argument parsing and download error handling with stub
-curl/tar binaries so no network is touched.
+Exercise download failures, destination selection and recovery with stub tools;
+no network, installed apps or production receipts are touched.
 """
 
 from __future__ import annotations
@@ -21,74 +21,101 @@ def _write_stubs(stub_dir: Path) -> None:
     stub_dir.mkdir(parents=True, exist_ok=True)
     curl = stub_dir / "curl"
     curl.write_text(
-        "#!/bin/sh\n"
-        'out=""; prev=""; effective="0"; url=""\n'
-        'for a in "$@"; do\n'
-        '  [ "$prev" = "-o" ] && out="$a"\n'
-        '  [ "$prev" = "-w" ] && effective="1"\n'
-        '  url="$a"; prev="$a"\n'
-        "done\n"
-        'echo "$@" >> "$LFTEST_LOG"\n'
-        'if [ -n "$out" ] && [ "$out" != "/dev/null" ]; then\n'
-        '  if [ "${url##*/}" = "SHA256SUMS" ]; then\n'
-        "    digest=$(printf \"dummy\\n\" | shasum -a 256 | awk '{ print $1 }')\n"
-        '    [ "${LFTEST_BAD_SUMS:-0}" = "1" ] && '
-        'digest="0000000000000000000000000000000000000000000000000000000000000000"\n'
-        "    for name in lf-aarch64-apple-darwin.tar.gz "
-        "lf-x86_64-apple-darwin.tar.gz lf-x86_64-unknown-linux-gnu.tar.gz "
-        "lf-aarch64-unknown-linux-gnu.tar.gz Loopflow.dmg install.sh; do\n"
-        '      echo "$digest  $name" >> "$out"\n'
-        "    done\n"
-        "  else\n"
-        '    echo dummy > "$out"\n'
-        "  fi\n"
-        "fi\n"
-        'case "$url" in\n'
-        '  */releases\\?per_page=*) printf \'%s\' '
-        '\'[{"tag_name":"v9.10.0-rc.1","draft":false,"prerelease":true},\' '
-        '\'{"tag_name":"v9.9.10","draft":false,"prerelease":false},\' '
-        '\'{"tag_name":"v9.9.9","draft":false,"prerelease":false}]\' ;;\n'
-        "esac\n"
-        'if [ "$effective" = "1" ]; then\n'
-        '  case "$url" in\n'
-        '    */releases/latest) printf "%s" '
-        '"https://github.com/loopflowstudio/loopflow/releases/'
-        'tag/v9.9.9" ;;\n'
-        '    *) printf "%s" "https://release-assets.githubusercontent.com/asset" ;;\n'
-        "  esac\n"
-        "fi\n"
-        "exit ${LFTEST_CURL_RC:-0}\n"
+        r"""#!/bin/sh
+out=""; prev=""; effective="0"; url=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && out="$a"
+  [ "$prev" = "-w" ] && effective="1"
+  url="$a"; prev="$a"
+done
+echo "$@" >> "$LFTEST_LOG"
+if [ -n "$out" ] && [ "$out" != "/dev/null" ]; then
+  if [ "${url##*/}" = "SHA256SUMS" ]; then
+    digest=$(printf "dummy\n" | shasum -a 256 | awk '{ print $1 }')
+    [ "${LFTEST_BAD_SUMS:-0}" = "1" ] && digest="wrong-digest"
+    for name in lf-aarch64-apple-darwin.tar.gz lf-x86_64-apple-darwin.tar.gz \
+      lf-x86_64-unknown-linux-gnu.tar.gz lf-aarch64-unknown-linux-gnu.tar.gz \
+      Loopflow.dmg install.sh; do
+      echo "$digest  $name" >> "$out"
+    done
+  else
+    echo dummy > "$out"
+  fi
+fi
+case "$url" in
+  */releases\?per_page=*)
+    printf '%s' \
+      '[{"tag_name":"v9.10.0-rc.1","draft":false,"prerelease":true},' \
+      '{"tag_name":"v9.9.10","draft":false,"prerelease":false},' \
+      '{"tag_name":"v9.9.9","draft":false,"prerelease":false}]' ;;
+esac
+if [ "$effective" = "1" ]; then
+  case "$url" in
+    */releases/latest)
+      printf "%s" "https://github.com/loopflowstudio/loopflow/releases/tag/v9.9.9" ;;
+    *) printf "%s" "https://release-assets.githubusercontent.com/asset" ;;
+  esac
+fi
+exit ${LFTEST_CURL_RC:-0}
+"""
     )
     tar = stub_dir / "tar"
     tar.write_text(
-        "#!/bin/sh\n"
-        'dir=""; prev=""\n'
-        'for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done\n'
-        'if [ -n "$dir" ]; then\n'
-        "  cat > \"$dir/lf\" <<'LF'\n"
-        "#!/bin/sh\n"
-        'printf \'%s\\n\' "$*" >> "$LFTEST_PROMOTE_LOG"\n'
-        'prev=""\n'
-        'for arg in "$@"; do\n'
-        '  case "$prev" in\n'
-        '    --cli-target) cp "$0" "$arg" ;;\n'
-        "  esac\n"
-        '  prev="$arg"\n'
-        "done\n"
-        "exit 0\n"
-        "LF\n"
-        "fi\n"
-        "exit 0\n"
+        r"""#!/bin/sh
+dir=""; prev=""
+for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done
+if [ -n "$dir" ]; then
+  cat > "$dir/lf" <<'LF'
+#!/bin/sh
+if [ "$*" = "install recover-switch --help" ]; then
+  if [ "${LFTEST_OLDER_CANDIDATE:-0}" = "1" ]; then
+    echo "Usage: lf install recover-switch --switch <SWITCH>"
+  else
+    echo "Usage: lf install recover-switch [OPTIONS]"
+  fi
+  exit 0
+fi
+if [ "$*" = "install recover-switch" ]; then
+  [ "${LFTEST_OLDER_CANDIDATE:-0}" != "1" ] || exit 2
+  [ -z "${LFTEST_RECOVER_APP:-}" ] ||
+    ln -sf "$LFTEST_RECOVER_APP/Contents/MacOS/lf" "$LF_INSTALL_DIR/lf"
+  exit "${LFTEST_RECOVER_RC:-0}"
+fi
+printf '%s\n' "$*" >> "$LFTEST_PROMOTE_LOG"
+[ "$*" != "install schedule" ] || exit 0
+[ "${LFTEST_PREFLIGHT_RC:-0}" = "0" ] || exit "$LFTEST_PREFLIGHT_RC"
+prev=""; cli=""; app=""
+for arg in "$@"; do
+  case "$prev" in
+    --cli-target) cli="$arg" ;;
+    --app-target) app="$arg" ;;
+  esac
+  prev="$arg"
+done
+if [ -n "$app" ]; then
+  mkdir -p "$app/Contents/MacOS"
+  cp "$0" "$app/Contents/MacOS/lf"
+  chmod +x "$app/Contents/MacOS/lf"
+  ln -sf "$app/Contents/MacOS/lf" "$cli"
+else
+  cp "$0" "$cli"
+fi
+exit 0
+LF
+fi
+exit 0
+"""
     )
     hdiutil = stub_dir / "hdiutil"
     hdiutil.write_text(
-        "#!/bin/sh\n"
-        'if [ "$1" = "attach" ]; then\n'
-        '  prev=""; mount=""\n'
-        '  for arg in "$@"; do [ "$prev" = "-mountpoint" ] && mount="$arg"; prev="$arg"; done\n'
-        '  mkdir -p "$mount/Loopflow.app"\n'
-        "fi\n"
-        "exit 0\n"
+        r"""#!/bin/sh
+if [ "$1" = "attach" ]; then
+  prev=""; mount=""
+  for arg in "$@"; do [ "$prev" = "-mountpoint" ] && mount="$arg"; prev="$arg"; done
+  mkdir -p "$mount/Loopflow.app"
+fi
+exit 0
+"""
     )
     codesign = stub_dir / "codesign"
     codesign.write_text("#!/bin/sh\nexit 0\n")
@@ -96,14 +123,13 @@ def _write_stubs(stub_dir: Path) -> None:
     spctl.write_text("#!/bin/sh\nexit 0\n")
     uname = stub_dir / "uname"
     uname.write_text(
-        "#!/bin/sh\n"
-        'case "$1" in\n'
-        '  -s) [ -n "${LFTEST_UNAME_SYSTEM:-}" ] && '
-        'echo "$LFTEST_UNAME_SYSTEM" || /usr/bin/uname -s ;;\n'
-        '  -m) [ -n "${LFTEST_UNAME_ARCH:-}" ] && '
-        'echo "$LFTEST_UNAME_ARCH" || /usr/bin/uname -m ;;\n'
-        '  *) /usr/bin/uname "$@" ;;\n'
-        "esac\n"
+        r"""#!/bin/sh
+case "$1" in
+  -s) [ -n "${LFTEST_UNAME_SYSTEM:-}" ] && echo "$LFTEST_UNAME_SYSTEM" || /usr/bin/uname -s ;;
+  -m) [ -n "${LFTEST_UNAME_ARCH:-}" ] && echo "$LFTEST_UNAME_ARCH" || /usr/bin/uname -m ;;
+  *) /usr/bin/uname "$@" ;;
+esac
+"""
     )
     for f in (curl, tar, hdiutil, codesign, spctl, uname):
         f.chmod(0o755)
@@ -151,26 +177,11 @@ def test_removed_no_interactive_flag_fails_clearly(installer: Path, env: dict[st
     assert "Unknown option" in result.stderr
 
 
-def test_positional_version_builds_versioned_url(
-    installer: Path, env: dict[str, str], tmp_path: Path
+@pytest.mark.parametrize("args", [["0.9.9"], ["--version", "0.9.9"], ["--version=0.9.9"]])
+def test_version_builds_versioned_url(
+    installer: Path, env: dict[str, str], tmp_path: Path, args: list[str]
 ) -> None:
-    result = _run(installer, ["0.9.9"], env)
-    assert result.returncode == 0, result.stderr
-    assert "download/v0.9.9/" in (tmp_path / "curl.log").read_text()
-
-
-def test_explicit_version_builds_versioned_url(
-    installer: Path, env: dict[str, str], tmp_path: Path
-) -> None:
-    result = _run(installer, ["--version", "0.9.9"], env)
-    assert result.returncode == 0, result.stderr
-    assert "download/v0.9.9/" in (tmp_path / "curl.log").read_text()
-
-
-def test_equals_version_builds_versioned_url(
-    installer: Path, env: dict[str, str], tmp_path: Path
-) -> None:
-    result = _run(installer, ["--version=0.9.9"], env)
+    result = _run(installer, args, env)
     assert result.returncode == 0, result.stderr
     assert "download/v0.9.9/" in (tmp_path / "curl.log").read_text()
 
@@ -247,18 +258,11 @@ def test_unknown_flag_fails_clearly(installer: Path, env: dict[str, str]) -> Non
     assert "Usage:" in result.stderr
 
 
-def test_download_failure_aborts_without_cryptic_error(installer: Path, tmp_path: Path) -> None:
+def test_download_failure_aborts_without_cryptic_error(
+    installer: Path, env: dict[str, str]
+) -> None:
     """A failed download must abort loudly, not leak a confusing `cp` error."""
-    stub_dir = tmp_path / "stub"
-    _write_stubs(stub_dir)
-    env_extra = {
-        "PATH": f"{stub_dir}:{os.environ['PATH']}",
-        "LF_INSTALL_DIR": str(tmp_path / "dest"),
-        "LFTEST_LOG": str(tmp_path / "curl.log"),
-        "LFTEST_CURL_RC": "22",
-        "HOME": str(tmp_path / "home"),
-    }
-    result = _run(installer, [], env_extra)
+    result = _run(installer, [], {**env, "LFTEST_CURL_RC": "22"})
     assert result.returncode != 0
     assert "Download failed" in result.stderr
     assert "No such file" not in (result.stdout + result.stderr)
@@ -319,3 +323,107 @@ def test_cli_only_keeps_an_existing_app_in_the_update(
     args = (tmp_path / "promote.log").read_text().splitlines()[0].split()
     assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
     assert "/Loopflow.dmg" in (tmp_path / "curl.log").read_text()
+
+
+@pytest.mark.parametrize("cli_only", ["0", "1"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_custom_app_destination_survives_updates(
+    installer: Path, env: dict[str, str], tmp_path: Path, cli_only: str, explicit: bool
+) -> None:
+    app = tmp_path / "Custom Tools/Loopflow.app"
+    helper = app / "Contents/MacOS/lf"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("old helper")
+    public = tmp_path / "dest/lf"
+    public.parent.mkdir()
+    # Follow a relative link chain, including directories with spaces.
+    public.symlink_to("next")
+    (public.parent / "next").symlink_to("../Custom Tools/Loopflow.app/Contents/MacOS/lf")
+    destination = tmp_path / "Other Tools" if explicit else app.parent
+    destination.mkdir(exist_ok=True)
+    result = _run(
+        installer,
+        [],
+        {
+            **env,
+            "LF_INSTALL_CLI_ONLY": cli_only,
+            "LF_APPLICATIONS_DIR": str(destination) if explicit else "",
+            "LFTEST_UNAME_SYSTEM": "Darwin",
+            "LFTEST_UNAME_ARCH": "arm64",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert public.resolve() == destination / "Loopflow.app/Contents/MacOS/lf"
+    assert public.read_text() != "old helper"
+    assert "warning:" not in result.stderr
+    assert "/Loopflow.dmg" in (tmp_path / "curl.log").read_text()
+
+
+@pytest.mark.parametrize("failure", ["LFTEST_CURL_RC", "LFTEST_PREFLIGHT_RC"])
+def test_failed_custom_update_preserves_the_public_selection(
+    installer: Path, env: dict[str, str], tmp_path: Path, failure: str
+) -> None:
+    app = tmp_path / "Custom/Loopflow.app"
+    helper = app / "Contents/MacOS/lf"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("old helper")
+    public = tmp_path / "dest/lf"
+    public.parent.mkdir()
+    public.symlink_to(helper)
+    result = _run(
+        installer,
+        [],
+        {
+            **env,
+            "LF_APPLICATIONS_DIR": "",
+            "LFTEST_UNAME_SYSTEM": "Darwin",
+            "LFTEST_UNAME_ARCH": "arm64",
+            failure: "23",
+        },
+    )
+    assert result.returncode != 0
+    assert public.resolve() == helper
+    assert public.read_text() == "old helper"
+
+
+def test_recovery_precedes_custom_destination_discovery(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    app = tmp_path / "Recovered/Loopflow.app"
+    helper = app / "Contents/MacOS/lf"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("recovered helper")
+    public = tmp_path / "dest/lf"
+    public.parent.mkdir()
+    public.write_text("interrupted selection")
+    result = _run(
+        installer,
+        [],
+        {
+            **env,
+            "LF_APPLICATIONS_DIR": "",
+            "LFTEST_UNAME_SYSTEM": "Darwin",
+            "LFTEST_UNAME_ARCH": "arm64",
+            "LFTEST_RECOVER_APP": str(app),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert public.resolve() == helper
+    assert helper.read_text() != "recovered helper"
+
+
+def test_failed_recovery_stops_before_a_new_promotion(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(installer, [], {**env, "LFTEST_RECOVER_RC": "23"})
+    assert result.returncode == 23
+    assert not (tmp_path / "promote.log").exists()
+
+
+def test_bootstrap_can_still_install_an_older_published_candidate(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(installer, [], {**env, "LFTEST_OLDER_CANDIDATE": "1"})
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "dest/lf").is_file()
+    assert (tmp_path / "promote.log").read_text().splitlines()[-1] == "install schedule"

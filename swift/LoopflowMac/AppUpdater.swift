@@ -87,7 +87,7 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @unchecked Sendable {
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
     }
 
-    /// `lf install` asks a running app to update (`loopflow://update`).
+    /// Check through Sparkle from the app's update action (`loopflow://update`).
     @MainActor func checkForUpdates() {
         controller?.checkForUpdates(nil)
     }

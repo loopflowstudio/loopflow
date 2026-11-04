@@ -889,7 +889,6 @@ fn prepare_artifacts(
     candidate_binary: &Path,
     preview: &PromotionPreview,
     upgrade_id: &str,
-    app_verdict: Option<&Verdict>,
 ) -> Result<PreparedArtifacts> {
     let bin_dir = lf_bin_dir();
     let cli_binary = stage_binary(candidate_binary, &bin_dir)?;
@@ -904,11 +903,7 @@ fn prepare_artifacts(
     let app_source = match (artifacts.app_source, artifacts.app_target) {
         // A bundle already at its target (Sparkle updated it in place) is the candidate.
         (Some(source), Some(target)) if source == target => {
-            validate_staged_app_helper(
-                target,
-                &preview.candidate,
-                app_verdict.unwrap_or(&preview.verdict),
-            )?;
+            validate_staged_app_helper(target, &preview.candidate, &preview.verdict)?;
             None
         }
         (Some(source), Some(target)) => Some(stage_app_bundle(&AppPromotion {
@@ -916,7 +911,7 @@ fn prepare_artifacts(
             target,
             superseded: None,
             expected_candidate: &preview.candidate,
-            expected_verdict: app_verdict.unwrap_or(&preview.verdict),
+            expected_verdict: &preview.verdict,
         })?),
         (None, None) if artifacts.legacy_app_target.is_none() => None,
         _ => {
@@ -2085,7 +2080,6 @@ fn active_install_matches_candidate(
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
     candidate: &CandidateIdentity,
-    helper_verdict: &Verdict,
     store: &Path,
 ) -> Result<bool> {
     if active.selection.source != crate::installation::InstallSource::Published
@@ -2101,17 +2095,6 @@ fn active_install_matches_candidate(
         || set.source_identity != candidate.source_identity
     {
         return Ok(false);
-    }
-    match (artifacts.app_source, artifacts.app_target) {
-        (Some(app_source), Some(_)) => {
-            validate_staged_app_helper(app_source, candidate, helper_verdict)?;
-        }
-        (None, None) if artifacts.legacy_app_target.is_none() => {}
-        _ => {
-            return Err(anyhow!(
-                "--app-source and --app-target must be supplied together; --legacy-app-target requires both"
-            ))
-        }
     }
     let digest = artifact_set_digest(candidate_binary, artifacts.app_source)?;
     if set.content_sha256 != digest {
@@ -2247,7 +2230,7 @@ fn delegate_switch_recovery(receipt: &crate::installation::SwitchReceipt) -> Res
         std::env::current_exe().context("resolve running install recovery coordinator")?,
     )?;
     if current == recovery.path {
-        return recover_switch(&receipt.id);
+        return recover_switch(Some(&receipt.id));
     }
     // The pinned owner can predate the machine rename; resolve the operation
     // without coupling recovery to its command group.
@@ -2541,7 +2524,15 @@ fn running_executables() -> Result<Vec<PathBuf>> {
     Ok(running)
 }
 
-pub fn recover_switch(switch_id: &str) -> Result<()> {
+pub fn recover_switch(switch_id: Option<&str>) -> Result<()> {
+    let Some(switch_id) = switch_id else {
+        if let crate::installation::InstallationState::Switching(receipt) =
+            crate::installation::read_state(&crate::installation::root()?)?
+        {
+            delegate_switch_recovery(&receipt)?;
+        }
+        return Ok(());
+    };
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
     let root = crate::installation::root()?;
@@ -2709,13 +2700,23 @@ fn promote_from_installation(
             reasons.join("\n  - ")
         ));
     }
-    if let Some(app) = artifacts.app_source {
-        validate_staged_app_helper(app, &preview.candidate, &preview.verdict).with_context(|| {
-            format!(
-                "{} and the CLI must update together; run `lf install` to acquire the complete signed build",
-                app.display()
-            )
-        })?;
+    // Validate the pair once before either preview or the already-installed path.
+    // Preparation still validates the copied bytes before activation.
+    match (artifacts.app_source, artifacts.app_target) {
+        (Some(app), Some(_)) => {
+            validate_staged_app_helper(app, &preview.candidate, &preview.verdict).with_context(|| {
+                format!(
+                    "{} and the CLI must update together; run `lf install` to acquire the complete signed build",
+                    app.display()
+                )
+            })?;
+        }
+        (None, None) if artifacts.legacy_app_target.is_none() => {}
+        _ => {
+            return Err(anyhow!(
+                "--app-source and --app-target must be supplied together; --legacy-app-target requires both"
+            ));
+        }
     }
     if preview_only {
         println!("  (preview only: no target changed)");
@@ -2732,7 +2733,6 @@ fn promote_from_installation(
                 &artifacts,
                 candidate_binary,
                 &preview.candidate,
-                &preview.verdict,
                 &store_path,
             )?
         {
@@ -2745,7 +2745,7 @@ fn promote_from_installation(
         }
     }
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
-    let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
+    let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id)?;
     let target_set = installation_artifact_set(
         &root,
         crate::installation::InstallSource::Published,
@@ -2853,7 +2853,7 @@ fn promote_from_installation(
     Ok(artifacts.app_target.map(Path::to_path_buf))
 }
 
-/// Resolve the installed app from the public entry, then the configured location.
+/// Find the installed bundle even when the next update names another destination.
 fn installed_app(cli: &Path) -> PathBuf {
     if let Ok(cli) = fs::canonicalize(cli) {
         if let Some(app) = cli.ancestors().nth(3) {
@@ -2862,7 +2862,11 @@ fn installed_app(cli: &Path) -> PathBuf {
             }
         }
     }
-    published::applications_dir().join("Loopflow.app")
+    std::env::var_os("LF_APPLICATIONS_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/Applications"))
+        .join("Loopflow.app")
 }
 
 fn include_installed_app<'a>(
@@ -2881,11 +2885,7 @@ pub fn promote(
     sync_skills: bool,
     preview_only: bool,
 ) -> Result<()> {
-    if let crate::installation::InstallationState::Switching(receipt) =
-        crate::installation::read_state(&crate::installation::root()?)?
-    {
-        delegate_switch_recovery(&receipt)?;
-    }
+    recover_switch(None)?;
     let current = fs::canonicalize(std::env::current_exe()?)?;
     let app = promote_from_installation(artifacts, &current, sync_skills, preview_only)?;
     if sync_skills && !preview_only {
@@ -3202,10 +3202,14 @@ mod artifact_tests {
 
     #[test]
     fn interrupted_activation_restores_the_receipts_complete_bundle_and_entries() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["LF_APPLICATIONS_DIR"]);
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("install");
         let source = directory.path().join("source/Loopflow.app");
-        let app = directory.path().join("Applications/Loopflow.app");
+        let app = directory.path().join("Custom Tools/Loopflow.app");
+        // Recovery honors the receipt even if the next request supplies a new target.
+        std::env::set_var("LF_APPLICATIONS_DIR", directory.path().join("Other Tools"));
         let public = directory.path().join("bin/lf");
         let candidate = CandidateIdentity::current();
         let preview = serde_json::json!({"candidate": candidate, "verdict": {"kind": "promote"}});

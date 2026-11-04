@@ -43,6 +43,9 @@ signed bundle through one recoverable installation switch, quitting and reopenin
 Desktop when necessary. `LF_INSTALL_CLI_ONLY=1` skips initial Desktop setup on an
 app-free Machine; an existing app always updates with the CLI. Direct promotion
 can reuse an installed bundle only when its helper matches the candidate.
+Updates follow the app reached by the public `lf` entry, preserving custom
+locations through ordinary and scheduled updates. `LF_APPLICATIONS_DIR` supplies
+an explicit destination; `/Applications` is the default for initial setup.
 Freshness checks the public link, bundled helper identity and store compatibility,
 as well as the app's release version. A matching version string alone is insufficient.
 

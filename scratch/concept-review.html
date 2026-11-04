@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-723 — one installation destination</title>
+<style>
+  :root { color-scheme: light dark; font: 17px/1.6 system-ui, sans-serif; }
+  body { max-width: 48rem; margin: auto; padding: 3rem 1.25rem 4rem; }
+  header, small { color: light-dark(#555, #bbb); }
+  h1 { font-size: 2rem; line-height: 1.2; margin: .8rem 0 1.3rem; }
+  h2 { margin-top: 2.5rem; font-size: 1.25rem; }
+  p { margin: 1rem 0; }
+  code { font-size: .88em; overflow-wrap: anywhere; }
+  pre { padding: 1rem; background: light-dark(#f3f3ef, #252724); overflow-x: auto; }
+  pre code { white-space: pre-wrap; }
+  .finding { border-left: 3px solid light-dark(#775019, #dfb66e); padding-left: 1rem; }
+  ol { padding-left: 1.4rem; }
+  li { margin: 1rem 0; }
+  a { color: light-dark(#185c77, #92d5ed); }
+</style>
+<main>
+<header>LOO-723 · concept-review · 2026-11-04<br>
+Built from <code>scratch/loo-723.md</code>, <code>scratch/questions.md</code>,
+<code>install.rs</code>, <code>install/published.rs</code>,
+<code>release/install.sh</code>, <code>release/README.md</code>,
+<code>.lf/skills/hotfix.md</code> and <code>AppUpdater.swift</code>.</header>
+<h1>Resolve one installation destination before acquiring an update.</h1>
+<p><strong>Headless outcome: design changed.</strong> Preserving custom app locations
+already follows from the accepted coherent-installation requirement. The next
+implementation should use that location for download, freshness and promotion.
+No new product approval is needed.</p>
+
+<section class="finding">
+<h2>The mismatch</h2>
+<p>The public CLI can point into <code>/Volumes/Tools/Loopflow.app</code>, while
+the scheduled installer chooses <code>/Applications/Loopflow.app</code>. Promotion
+knows how to discover the first app, but acquisition has already supplied the second
+as an explicit target. One installation has two location decisions.</p>
+<p><small>Established by source inspection; no installed reproduction or rollout
+is claimed.</small></p>
+</section>
+
+<h2>Current branch behavior</h2>
+<pre><code>Scheduled lf install
+  → LF_APPLICATIONS_DIR absent
+  → download / freshness choose /Applications
+  → promote receives an explicit /Applications target
+  → custom app can remain on the old build</code></pre>
+<p>With CLI-only and no default app, acquisition can omit the bundle instead;
+promotion then refuses because the custom app's helper differs from the candidate.</p>
+
+<h2>Proposed next implementation</h2>
+<pre><code>LF_APPLICATIONS_DIR=/Volumes/Tools lf install --preview
+lf install
+# The schedule follows the same installed bundle.</code></pre>
+<p>Without an explicit destination, updates follow the app reached by the public
+CLI. An explicit destination still selects the target; the default location serves
+initial setup. CLI-only skips first setup and keeps an existing app paired.</p>
+<pre><code>Action: lf install / scheduled install
+  → one resolved destination + complete signed candidate
+Concept: PromotionArtifacts
+  → promote validates the app/helper pair
+Record: SwitchReceipt.activation
+  → activate app, public link and gate
+Recovery: finish the same receipt at its recorded paths</code></pre>
+<p>Reuse the public link and existing receipt. Carry the chosen target into older
+downloaded installers; make the standalone shell entry follow the same rule.
+No destination registry or new schema is needed.</p>
+
+<h2>Failure and return</h2>
+<p>A failed download or preflight leaves the existing installation usable. After
+store advancement, retry completes the recorded custom app, public link and gate.
+Only Desktop is replaced; Session owners and Graphs retain their running images,
+and live retired bundles remain available.</p>
+<p>The next proof exercises a custom location without its original environment,
+CLI-only, explicit destination with a detached link, scheduled and shell entry,
+then interrupted activation and retry. Signed desktop/mini rollout and usable
+existing Sessions remain required after delivery.</p>
+
+<h2>Guidance that must follow the contract</h2>
+<p><strong>Proposed hotfix instruction:</strong> “With Desktop installed, promote
+a complete matching signed app and CLI. Deliver a standalone CLI fix in the
+complete build before installing it. App-free Machines retain standalone
+promotion.” Remove the stale instruction to leave Desktop behind and use existing
+idle retirement for owners. Keep the Sparkle UI; correct its stale comment about
+CLI delegation.</p>
+
+<h2>Review questions, resolved from accepted direction</h2>
+<ol>
+<li>Should ordinary and scheduled updates preserve the installed custom location?
+<strong>Yes.</strong> This follows from one coherent installation and the retained
+custom-directory constraint.</li>
+<li>Should raw hotfix promotion bypass pairing?
+<strong>No.</strong> The accepted complete-bundle requirement applies; the skill
+must stop promising a stale Desktop.</li>
+<li>Is a product choice still open?
+<strong>None identified.</strong> The first-setup interpretation of CLI-only remains
+the recorded headless assumption, not a newly attributed decision by Jack Heart.</li>
+</ol>
+<p><small>Working direction: <a href="loo-723.md">scratch/loo-723.md</a>.
+This review changed design notes only; it did not run implementation or delivery.</small></p>
+</main>
+</html>

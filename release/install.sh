@@ -24,6 +24,26 @@ resolve_install_dir() {
   echo "$DEFAULT_INSTALL_DIR"
 }
 
+# Follow the public entry without requiring readlink -f (absent on older Macs).
+linked_app() {
+  entry="$install_dir/lf"
+  links=0
+  while [ -L "$entry" ]; do
+    links=$((links + 1))
+    [ "$links" -le 40 ] || return 0
+    link=$(readlink "$entry") || return 0
+    case "$link" in
+      /*) entry="$link" ;;
+      *) entry="$(dirname "$entry")/$link" ;;
+    esac
+  done
+  [ -e "$entry" ] || return 0
+  directory=$(cd -P "$(dirname "$entry")" && pwd) || return 0
+  case "$directory/$(basename "$entry")" in
+    */Loopflow.app/Contents/MacOS/lf) printf '%s\n' "${directory%/Contents/MacOS}" ;;
+  esac
+}
+
 detect_target() {
   os=$(uname -s)
   arch=$(uname -m)
@@ -230,10 +250,17 @@ main() {
   src="$tmpdir/lf"
   dst="$install_dir/lf"
   chmod +x "$src"
+  # Published older candidates require a receipt id and recover during promotion.
+  # New candidates can finish that switch before destination discovery as well.
+  if ! "$src" install recover-switch --help | grep -q '^Usage:.*--switch'; then
+    "$src" install recover-switch
+  fi
   app_source=""
-  applications_dir="${LF_APPLICATIONS_DIR:-/Applications}"
+  existing_app=$(linked_app)
+  applications_dir="${LF_APPLICATIONS_DIR:-${existing_app%/Loopflow.app}}"
+  applications_dir="${applications_dir:-/Applications}"
   # CLI-only skips initial app setup; it cannot split an existing installation.
-  if [ "$(uname -s)" = "Darwin" ] && { [ "$cli_only" != "1" ] || [ -e "$applications_dir/Loopflow.app" ]; }; then
+  if [ "$(uname -s)" = "Darwin" ] && { [ "$cli_only" != "1" ] || [ -n "$existing_app" ] || [ -e "$applications_dir/Loopflow.app" ]; }; then
     if [ ! -d "$applications_dir" ] || [ ! -w "$applications_dir" ]; then
       echo "Application target is not writable: $applications_dir (CLI-only skips the app only when none is installed)" >&2
       exit 1

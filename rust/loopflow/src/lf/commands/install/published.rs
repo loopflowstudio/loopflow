@@ -67,12 +67,15 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
         }
         None => recorded_stream(&home)?.unwrap_or(Stream::Stable),
     };
+    super::recover_switch(None)?;
+    let directory = install_dir()?;
+    let app = app_destination(&directory.join("lf"));
     if stream == Stream::Dev {
-        return main_build();
+        return main_build(&directory, app.as_deref());
     }
     let client = http_client()?;
     let tag = stream_release(&client, stream)?;
-    install_release(&client, stream, &tag)
+    install_release(&client, stream, &tag, &directory, app.as_deref())
 }
 
 /// The release a release stream is at: preview's newest, or stable's GitHub Latest.
@@ -96,20 +99,18 @@ fn stream_release(client: &Client, stream: Stream) -> Result<String> {
     release_tag(latest.url().path())
 }
 
-fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
-    let directory = install_dir()?;
-    let applications = installs_app().then(applications_dir);
+fn install_release(
+    client: &Client,
+    stream: Stream,
+    tag: &str,
+    directory: &Path,
+    app: Option<&Path>,
+) -> Result<()> {
     let stream = stream.as_str();
-    if is_current(&directory, tag, applications.as_deref()) {
+    if is_current(directory, tag, app) {
         // Matching files can still have an interrupted receipt or a stale gate.
         // Let the same promotion owner reconcile them before reporting success.
-        promote_build(
-            &directory.join("lf"),
-            &directory,
-            applications
-                .map(|root| root.join("Loopflow.app"))
-                .as_deref(),
-        )?;
+        promote_build(&directory.join("lf"), directory, app.map(|app| (app, app)))?;
         println!("{stream} {tag} is already installed.");
         return Ok(());
     }
@@ -123,7 +124,7 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
     }
     let installer = release_asset(client, tag, "install.sh")?;
     let temporary = tempfile::tempdir()?;
-    run_verified_installer(&directory, temporary.path(), tag, &manifest, &installer)?;
+    run_verified_installer(directory, app, temporary.path(), tag, &manifest, &installer)?;
     println!(
         "{stream}: {tag}\ninstalled: {}",
         directory.join("lf").display()
@@ -136,7 +137,7 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
 /// files. The app's first launch runs this through its own bundled `lf`.
 pub fn adopt() -> Result<()> {
     let current = fs::canonicalize(std::env::current_exe()?)?;
-    let app = applications_dir().join("Loopflow.app");
+    let app = super::installed_app(&current);
     if fs::canonicalize(app.join("Contents/MacOS/lf")).ok() != Some(current.clone()) {
         println!(
             "{} is not {}'s lf; nothing to adopt",
@@ -158,16 +159,17 @@ pub fn adopt() -> Result<()> {
 }
 
 /// CLI-only omits initial Desktop setup; an existing app stays in the installation.
-fn installs_app() -> bool {
-    cfg!(target_os = "macos")
+fn app_destination(cli: &Path) -> Option<PathBuf> {
+    let installed = super::installed_app(cli);
+    let app = std::env::var_os("LF_APPLICATIONS_DIR")
+        .filter(|value| !value.is_empty())
+        .map(|directory| PathBuf::from(directory).join("Loopflow.app"))
+        .unwrap_or_else(|| installed.clone());
+    (cfg!(target_os = "macos")
         && (std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1")
-            || applications_dir().join("Loopflow.app").exists())
-}
-
-pub(super) fn applications_dir() -> PathBuf {
-    std::env::var_os("LF_APPLICATIONS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Applications"))
+            || installed.exists()
+            || app.exists()))
+    .then_some(app)
 }
 
 /// Succeed only when release `tag` can open this Machine's store; Loopflow.app's
@@ -285,7 +287,7 @@ fn record_stream(home: &Path, stream: Stream) -> Result<()> {
 /// Install the package CI built for the newest green main commit, with its
 /// Loopflow.app on a Mac. GitHub keeps those artifacts behind authentication,
 /// so this uses the `gh` login.
-fn main_build() -> Result<()> {
+fn main_build(directory: &Path, app: Option<&Path>) -> Result<()> {
     let target =
         package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
     let runs = gh(&[
@@ -319,16 +321,12 @@ fn main_build() -> Result<()> {
         bail!("could not unpack {} ({status})", archive.display());
     }
     let candidate = temporary.path().join("lf");
-    let directory = install_dir()?;
     // Mounted until promotion has copied the app out of it.
-    let image = installs_app()
-        .then(|| DiskImage::download(run, temporary.path()))
+    let image = app
+        .map(|_| DiskImage::download(run, temporary.path()))
         .transpose()?;
-    promote_build(
-        &candidate,
-        &directory,
-        image.as_ref().map(DiskImage::app).as_deref(),
-    )?;
+    let source = image.as_ref().map(DiskImage::app);
+    promote_build(&candidate, directory, source.as_deref().zip(app))?;
     println!(
         "main: {revision}\ninstalled: {}",
         directory.join("lf").display()
@@ -336,22 +334,21 @@ fn main_build() -> Result<()> {
     schedule(None)
 }
 
-fn promote_build(candidate: &Path, directory: &Path, app: Option<&Path>) -> Result<()> {
+fn promote_build(candidate: &Path, directory: &Path, app: Option<(&Path, &Path)>) -> Result<()> {
     let mut promote = Command::new(candidate);
     super::isolate_candidate_command(&mut promote);
     promote
         .args(["install", "promote", "--cli-target"])
         .arg(directory.join("lf"))
         .arg("--sync-skills");
-    if let Some(app) = app {
-        let applications = applications_dir();
+    if let Some((source, target)) = app {
         promote
             .arg("--app-source")
-            .arg(app)
+            .arg(source)
             .arg("--app-target")
-            .arg(applications.join("Loopflow.app"))
+            .arg(target)
             .arg("--legacy-app-target")
-            .arg(applications.join("Concerto.app"));
+            .arg(target.with_file_name("Concerto.app"));
     }
     let status = promote.status().context("start installation promotion")?;
     if !status.success() {
@@ -517,14 +514,14 @@ fn install_dir() -> Result<PathBuf> {
     Ok(home.join(".local/bin"))
 }
 
-fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool {
+fn is_current(directory: &Path, tag: &str, app: Option<&Path>) -> bool {
     let version = tag.trim_start_matches('v');
     let Ok(lf) = fs::canonicalize(directory.join("lf")) else {
         return false;
     };
     // The public entry must name the bundled helper. Once paired, one preflight
     // checks their shared build and store compatibility; promotion reconciles receipts.
-    if applications.is_some_and(|root| !has_release_app(root, version, &lf)) {
+    if app.is_some_and(|app| !has_release_app(app, version, &lf)) {
         return false;
     }
     inspect(&lf, &["--version"]).is_some_and(|output| {
@@ -573,10 +570,9 @@ pub(super) fn app_info(app: &Path) -> Option<serde_json::Value> {
     .and_then(|output| serde_json::from_slice(&output.stdout).ok())
 }
 
-fn has_release_app(applications: &Path, version: &str, resolved_cli: &Path) -> bool {
-    let app = applications.join("Loopflow.app");
+fn has_release_app(app: &Path, version: &str, resolved_cli: &Path) -> bool {
     let helper = app.join("Contents/MacOS/lf");
-    app_info(&app).is_some_and(|info| {
+    app_info(app).is_some_and(|info| {
         info["CFBundleShortVersionString"] == version && info["CFBundleVersion"] == version
     }) && ["Loopflow", "lf"].iter().all(|name| {
         fs::metadata(app.join("Contents/MacOS").join(name))
@@ -604,6 +600,7 @@ fn verify_asset(manifest: &str, name: &str, bytes: &[u8]) -> Result<()> {
 
 fn run_verified_installer(
     directory: &Path,
+    app: Option<&Path>,
     temporary: &Path,
     tag: &str,
     manifest: &str,
@@ -612,16 +609,19 @@ fn run_verified_installer(
     verify_asset(manifest, "install.sh", installer)?;
     let path = temporary.join("install.sh");
     fs::write(&path, installer)?;
-    let status = Command::new("/bin/sh")
+    let mut command = Command::new("/bin/sh");
+    command
         .arg(path)
         .args(["--version", tag])
         .env("LF_INSTALL_DIR", directory)
-        .env(
-            "LF_INSTALL_CLI_ONLY",
-            if installs_app() { "0" } else { "1" },
-        )
-        .status()
-        .context("start the published installer")?;
+        .env("LF_INSTALL_CLI_ONLY", if app.is_some() { "0" } else { "1" });
+    if let Some(app) = app {
+        command.env(
+            "LF_APPLICATIONS_DIR",
+            app.parent().context("app destination has no parent")?,
+        );
+    }
+    let status = command.status().context("start the published installer")?;
     if !status.success() {
         bail!(
             "published installation failed ({status}); fix the error above and rerun `lf install`"
@@ -882,16 +882,131 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::env::set_var("LF_INSTALL_CLI_ONLY", "1");
         std::env::set_var("LF_APPLICATIONS_DIR", temp.path());
-        assert!(!super::installs_app());
+        assert!(super::app_destination(&temp.path().join("lf")).is_none());
         let payload =
             b"#!/bin/sh\nprintf '%s' \"$LF_INSTALL_CLI_ONLY\" > \"$LF_INSTALL_DIR/mode\"\n";
         let manifest = format!("{:x}  install.sh\n", Sha256::digest(payload));
-        run_verified_installer(temp.path(), temp.path(), "v9.9.9", &manifest, payload).unwrap();
+        run_verified_installer(temp.path(), None, temp.path(), "v9.9.9", &manifest, payload)
+            .unwrap();
         assert_eq!(fs::read_to_string(temp.path().join("mode")).unwrap(), "1");
         fs::create_dir(temp.path().join("Loopflow.app")).unwrap();
-        assert!(super::installs_app());
-        run_verified_installer(temp.path(), temp.path(), "v9.9.9", &manifest, payload).unwrap();
+        let app = super::app_destination(&temp.path().join("lf"));
+        assert!(app.is_some());
+        run_verified_installer(
+            temp.path(),
+            app.as_deref(),
+            temp.path(),
+            "v9.9.9",
+            &manifest,
+            payload,
+        )
+        .unwrap();
         assert_eq!(fs::read_to_string(temp.path().join("mode")).unwrap(), "0");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ordinary_and_scheduled_updates_pass_the_custom_destination_to_older_installers() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&[
+            "LF_INSTALL_CLI_ONLY",
+            "LF_APPLICATIONS_DIR",
+            "LF_INSTALL_DIR",
+        ]);
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("bin");
+        fs::create_dir(&directory).unwrap();
+        let app = temp.path().join("Custom Tools/Loopflow.app");
+        let helper = app.join("Contents/MacOS/lf");
+        fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        fs::write(&helper, "old helper").unwrap();
+        std::os::unix::fs::symlink(
+            "../Custom Tools/Loopflow.app/Contents/MacOS/lf",
+            directory.join("lf"),
+        )
+        .unwrap();
+        let app = app.canonicalize().unwrap();
+        // An older installer only understands its environment, not link discovery.
+        let payload = br##"#!/bin/sh
+set -eu
+[ "$LF_INSTALL_CLI_ONLY" = 0 ]
+printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
+"##;
+        let manifest = format!("{:x}  install.sh\n", Sha256::digest(payload));
+        let plist = temp.path().join("schedule.plist");
+        fs::write(
+            &plist,
+            super::schedule_plist(
+                temp.path(),
+                &directory.join("lf"),
+                temp.path(),
+                crate::lf::InstallFrequency::Daily,
+            ),
+        )
+        .unwrap();
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-convert", "json", "-o", "-"])
+            .arg(&plist)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let schedule: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        for scheduled in [false, true] {
+            for cli_only in ["0", "1"] {
+                std::env::set_var(
+                    "LF_INSTALL_DIR",
+                    if scheduled {
+                        schedule["EnvironmentVariables"]["LF_INSTALL_DIR"]
+                            .as_str()
+                            .unwrap()
+                    } else {
+                        directory.to_str().unwrap()
+                    },
+                );
+                std::env::set_var("LF_INSTALL_CLI_ONLY", cli_only);
+                let directory = super::install_dir().unwrap();
+                let destination = super::app_destination(&directory.join("lf"));
+                assert_eq!(destination.as_deref(), Some(app.as_path()));
+                fs::write(&helper, "old helper").unwrap();
+                run_verified_installer(
+                    &directory,
+                    destination.as_deref(),
+                    temp.path(),
+                    "v9.9.9",
+                    &manifest,
+                    payload,
+                )
+                .unwrap();
+                assert_eq!(fs::read_to_string(&helper).unwrap(), "updated");
+                assert_eq!(
+                    directory.join("lf").canonicalize().unwrap(),
+                    helper.canonicalize().unwrap()
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn explicit_destination_wins_without_splitting_an_existing_cli_only_install() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore =
+            crate::test_ambient::EnvGuard::clear(&["LF_INSTALL_CLI_ONLY", "LF_APPLICATIONS_DIR"]);
+        let temp = tempfile::tempdir().unwrap();
+        let installed = temp.path().join("Old/Loopflow.app/Contents/MacOS/lf");
+        fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        fs::write(&installed, "old helper").unwrap();
+        let cli = temp.path().join("lf");
+        std::os::unix::fs::symlink(&installed, &cli).unwrap();
+        let destination = temp.path().join("New/Loopflow.app");
+        std::env::set_var("LF_INSTALL_CLI_ONLY", "1");
+        std::env::set_var("LF_APPLICATIONS_DIR", destination.parent().unwrap());
+        assert_eq!(super::app_destination(&cli), Some(destination.clone()));
+        // A detached public entry still discovers an explicitly located app.
+        fs::remove_file(&cli).unwrap();
+        fs::write(&cli, "detached").unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        assert_eq!(super::app_destination(&cli), Some(destination));
     }
 
     #[test]
@@ -925,15 +1040,21 @@ mod tests {
         let payload = b"#!/bin/sh\nprintf '%s' \"$2\" > \"$LF_INSTALL_DIR/installed\"\n";
         let manifest = format!("{:x}  install.sh\n", Sha256::digest(payload));
         let tag = release_tag("/loopflowstudio/loopflow/releases/tag/v9.9.9").unwrap();
-        run_verified_installer(temp.path(), temp.path(), &tag, &manifest, payload).unwrap();
+        run_verified_installer(temp.path(), None, temp.path(), &tag, &manifest, payload).unwrap();
         assert_eq!(
             fs::read_to_string(temp.path().join("installed")).unwrap(),
             "v9.9.9"
         );
         fs::remove_file(temp.path().join("installed")).unwrap();
-        let error =
-            run_verified_installer(temp.path(), temp.path(), &tag, "00 install.sh", payload)
-                .unwrap_err();
+        let error = run_verified_installer(
+            temp.path(),
+            None,
+            temp.path(),
+            &tag,
+            "00 install.sh",
+            payload,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("digest mismatch"));
         assert!(!temp.path().join("installed").exists());
         assert!(release_tag("/loopflowstudio/loopflow/releases/latest").is_err());
@@ -1043,8 +1164,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let payload = b"#!/bin/sh\nexit 23\n";
         let manifest = format!("{:x} *install.sh\n", Sha256::digest(payload));
-        let error = run_verified_installer(temp.path(), temp.path(), "v9.9.9", &manifest, payload)
-            .unwrap_err();
+        let error =
+            run_verified_installer(temp.path(), None, temp.path(), "v9.9.9", &manifest, payload)
+                .unwrap_err();
         assert!(error.to_string().contains("published installation failed"));
     }
 
@@ -1054,7 +1176,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         binary(&temp.path().join("lf"), "lf");
         let applications = temp.path().join("Applications");
-        let current = || is_current(temp.path(), "v9.9.9", Some(&applications));
+        let current = || {
+            is_current(
+                temp.path(),
+                "v9.9.9",
+                Some(&applications.join("Loopflow.app")),
+            )
+        };
         assert!(!current());
         let contents = applications.join("Loopflow.app/Contents");
         fs::create_dir_all(contents.join("MacOS")).unwrap();

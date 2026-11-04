@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use super::super::{Opened, RouteError};
 use super::{
-    array, identity, layout, now, scope, HostWorkspace, Presentation, Resolved, SqliteStore,
+    array, identity, layout, now, scope, Host, HostWorkspace, Presentation, Resolved, SqliteStore,
 };
 
 // Herdr's bounded adapter uses its documented local socket protocol. Layouts
@@ -76,6 +76,7 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
             diff: target.url.diff,
             ..Presentation::default()
         },
+        Host::Herdr,
     )?;
     workspace.container_id = None;
     workspace.creation_pending = true;
@@ -97,7 +98,7 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
     herdr_call(
         &socket,
         "layout.apply",
-        json!({"tab_id":tab,"root":herdr_layout(&native)?,"focus":false}),
+        json!({"tab_id":tab,"root":native,"focus":false}),
     )?;
     // Herdr reopens the whole workspace; its replacement tab ID is not a locator.
     workspace.creation_pending = false;
@@ -111,18 +112,6 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
         )?;
     }
     Ok(Opened::opening(Some(container)))
-}
-
-fn herdr_layout(native: &Value) -> Result<Value> {
-    if let Some(block) = native.get("block") {
-        return Ok(
-            json!({"type":"pane","label":block["label"],"cwd":block["options"]["cwd"],"command":block["options"]["command"],"env":{}}),
-        );
-    }
-    let split = native.get("split").context("Tool layout is unavailable")?;
-    Ok(
-        json!({"type":"split","direction":if split["direction"] == "horizontal" {"right"} else {"down"},"ratio":split["ratio"],"first":herdr_layout(&split["before"] )?,"second":herdr_layout(&split["after"])?}),
-    )
 }
 
 fn herdr_call(path: &str, method: &str, params: Value) -> Result<Value> {

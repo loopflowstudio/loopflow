@@ -32,6 +32,16 @@ fn lf_with(
     env: &[(&str, &str)],
     args: &[&str],
 ) -> Output {
+    lf_command(home, cwd, bin, env, args).output().unwrap()
+}
+
+fn lf_command(
+    home: &Path,
+    cwd: &Path,
+    bin: Option<&Path>,
+    env: &[(&str, &str)],
+    args: &[&str],
+) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
@@ -51,11 +61,11 @@ fn lf_with(
     command
         .envs(env.iter().copied())
         .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .current_dir(cwd)
         .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap()
+        .stdin(std::process::Stdio::null());
+    command
 }
 
 fn json(output: &Output) -> Value {
@@ -1082,6 +1092,72 @@ cat '{bin}/'"$method.reply"
 }
 
 #[test]
+fn rex_created_shell_reopens_on_its_server_without_placement_flags() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[
+            "open",
+            "--task",
+            "INF-123",
+            "--host",
+            "rex",
+            "--server",
+            "unix:///fixture/rex.sock",
+            "--no-focus",
+            "--json",
+        ],
+    ));
+    let launches = bin.path().join("session.new_window.requests");
+    let created = std::fs::read_to_string(&launches).unwrap();
+    let request: Value = serde_json::from_str(created.trim()).unwrap();
+    let command = request["layout"]["split"]["after"]["block"]["options"]["command"]
+        .as_array()
+        .unwrap();
+    let args = command
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect::<Vec<_>>();
+    // Execute the generated native shell launcher. Rex supplies block/session
+    // identity; the launcher must carry the server across task-tool's exec.
+    let shell = bin.path().join("fixture-shell");
+    std::fs::write(&shell, format!(
+        "#!/bin/sh\n[ \"$REX_SERVER\" = unix:///fixture/rex.sock ] || exit 91\nexec '{}' open --no-focus --json\n", env!("CARGO_BIN_EXE_lf")
+    )).unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        bin.path().join("session.list.reply"),
+        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(bin.path().join("session.view.reply"), r#"{"windows":[{"window_id":"window:fixture","layers":[{"blocks":[{"block_id":"block:shell"}]}]}]}"#).unwrap();
+    let mut launch = Command::new(args[0]);
+    launch
+        .env_clear()
+        .env("HOME", home.path())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.path().display()))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("SHELL", shell)
+        .env("REX_SESSION", "session:fixture")
+        .env("REX_BLOCK", "block:shell")
+        .current_dir(repo.path())
+        .args(&args[1..]);
+    let reopened = json(&launch.output().unwrap());
+    assert_eq!(reopened["receipts"][0]["destination"], "window:fixture");
+    assert_eq!(std::fs::read_to_string(launches).unwrap(), created);
+    assert_eq!(sessions(home.path()), 0);
+}
+
+#[test]
 fn rex_remote_arrival_is_passive_reused_and_preserves_conversation_input() {
     use std::os::unix::process::CommandExt;
 
@@ -1368,6 +1444,221 @@ fn rex_remote_follower_routes_locally_unstarted_tasks_without_fallback() {
         .status
         .success());
     assert!(!requests.exists());
+}
+
+#[test]
+fn rex_remote_follower_reconnects_without_work_changes_and_reuses_a_lost_reply() {
+    use std::io::{Read, Seek, Write};
+    use std::os::fd::FromRawFd;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    use loopflow::durable::MachineId;
+    use loopflow::store::sqlite::SqliteStore;
+    use loopflow::work::selection::{Selection, SelectionExpression, SelectionId};
+
+    let repo = TestRepo::new();
+    let checkout = repo.create_named_worktree("remote-task");
+    let home = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let remote_bin = remote.path().join(".local/bin");
+    std::fs::create_dir_all(&remote_bin).unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let peer = MachineId::new();
+    store
+        .add_machine(&peer, "remote.invalid", "Remote")
+        .unwrap();
+    store.claim_task(&registered.task.id).unwrap();
+    store.handoff_task(&registered.task.id, &peer).unwrap();
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    // The two Machines share planning identities, but only the destination has
+    // the checkout. No planning import or local Work mutation follows startup.
+    db.execute(
+        "VACUUM INTO ?1",
+        [remote.path().join("loopflow.db").to_str().unwrap()],
+    )
+    .unwrap();
+    let remote_db = rusqlite::Connection::open(remote.path().join("loopflow.db")).unwrap();
+    remote_db
+        .execute(
+            "UPDATE machines SET route='source.invalid' WHERE route='local'",
+            [],
+        )
+        .unwrap();
+    remote_db
+        .execute(
+            "UPDATE machines SET route='local' WHERE id=?1",
+            [peer.as_str()],
+        )
+        .unwrap();
+    remote_db
+        .execute(
+            "UPDATE tasks SET worktree=?1,checkout_machine_id=?2 WHERE id=?3",
+            rusqlite::params![
+                checkout.to_str().unwrap(),
+                peer.as_str(),
+                registered.task.id.as_str()
+            ],
+        )
+        .unwrap();
+    db.execute(
+        "UPDATE tasks SET worktree=NULL,checkout_machine_id=NULL WHERE id=?1",
+        [registered.task.id.as_str()],
+    )
+    .unwrap();
+    let selected = Selection {
+        id: SelectionId("workspace".into()),
+        expression: SelectionExpression::Wave {
+            wave: registered.task.wave_id.clone().unwrap(),
+        },
+    };
+    db.execute(
+        "INSERT INTO host_workspaces(id,repository_id,host,server,selection_json,copy_name,container_id,creation_pending,updated_at)
+         VALUES('follow-roundtrip',?1,'rex','unix:///fixture/rex.sock',?2,'review','session:fixture',0,1)",
+        rusqlite::params![registered.task.repository_id.as_str(), serde_json::to_string(&selected).unwrap()],
+    ).unwrap();
+    rex_peer(bin.path());
+    rex_peer(&remote_bin);
+    std::fs::write(
+        bin.path().join("session.list.reply"),
+        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
+    )
+    .unwrap();
+    // Pin the actual receiving CLI inside SSH's remote PATH boundary.
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), remote_bin.join("lf")).unwrap();
+    let script = format!(
+        r#"#!/bin/sh
+for arg in "$@"; do remote_command="$arg"; done
+printf '%s\n' attempt >> '{bin}/attempts'
+if [ ! -f '{bin}/connected' ]; then touch '{bin}/disconnected'; echo disconnected >&2; exit 255; fi
+cd '{remote}' || exit 1
+env -i HOME='{remote}' LF_HOME='{remote}' LF_BIN='{lf}' PATH='{remote_bin}:/usr/bin:/bin' /bin/bash -c "$remote_command" > '{bin}/receipt' || exit $?
+# The native peer retains its view even if SSH loses the successful receipt.
+printf '%s' '{{"sessions":[{{"session_id":"session:fixture"}}]}}' > '{remote_bin}/session.list.reply'
+printf '%s' '{{"windows":[{{"window_id":"window:fixture","label":"Renamed task"}}]}}' > '{remote_bin}/session.view.reply'
+if [ ! -f '{bin}/lost-reply' ]; then touch '{bin}/lost-reply'; echo lost-reply >&2; exit 255; fi
+cat '{bin}/receipt'
+touch '{bin}/delivered'
+"#,
+        bin = bin.path().display(),
+        remote = remote.path().display(),
+        remote_bin = remote_bin.display(),
+        lf = env!("CARGO_BIN_EXE_lf")
+    );
+    std::fs::write(bin.path().join("ssh"), script).unwrap();
+    std::fs::set_permissions(
+        bin.path().join("ssh"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: valid output pointers; null selects default terminal settings.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned two fresh independently owned descriptors.
+    let mut master = unsafe { std::fs::File::from_raw_fd(master) };
+    // SAFETY: slave is the other fresh descriptor returned by openpty.
+    let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+    let stdout = tempfile::tempfile().unwrap();
+    let stderr = tempfile::tempfile().unwrap();
+    let mut follower = NativeServer(
+        lf_command(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &[],
+            &[
+                "open",
+                "--host",
+                "rex",
+                "--watch-workspace",
+                "follow-roundtrip",
+            ],
+        )
+        .stdin(slave)
+        .stdout(stdout.try_clone().unwrap())
+        .stderr(stderr.try_clone().unwrap())
+        .process_group(0)
+        .spawn()
+        .unwrap(),
+    );
+    let diagnostics = || {
+        let mut log = stderr.try_clone().unwrap();
+        log.rewind().unwrap();
+        let mut text = String::new();
+        log.read_to_string(&mut text).unwrap();
+        text
+    };
+    let deadline = Instant::now() + Duration::from_secs(55);
+    while !bin.path().join("delivered").exists() {
+        if bin.path().join("disconnected").exists() {
+            std::fs::write(bin.path().join("connected"), "").unwrap();
+        }
+        assert!(
+            follower.0.try_wait().unwrap().is_none(),
+            "follower exited before delivery: {}",
+            diagnostics()
+        );
+        assert!(
+            Instant::now() < deadline,
+            "remote reconciliation did not recover: {}",
+            diagnostics()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    master.write_all(b"q\n").unwrap();
+    while follower.0.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "follower did not stop");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let receipt: Value =
+        serde_json::from_str(&std::fs::read_to_string(bin.path().join("receipt")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["receipts"][0]["destination"], "window:fixture");
+    assert!(diagnostics().contains("disconnected"));
+    assert!(diagnostics().contains("lost-reply"));
+    let launches = std::fs::read_to_string(remote_bin.join("session.new_window.requests")).unwrap();
+    assert_eq!(
+        launches.lines().count(),
+        1,
+        "lost replies must reuse the destination"
+    );
+    let request: Value = serde_json::from_str(launches.trim()).unwrap();
+    assert_eq!(request["focus"], false);
+    assert_eq!(
+        request["layout"]["block"]["options"]["cwd"],
+        checkout.to_str().unwrap()
+    );
+    let command = request["layout"]["block"]["options"]["command"]
+        .as_array()
+        .unwrap();
+    assert!(command.windows(2).any(|pair| pair == ["task", "view"]));
+    assert!(!command.iter().any(|arg| arg == "resume" || arg == "shell"));
+    assert!(!bin.path().join("session.new_window.requests").exists());
+    assert!(!remote_bin.join("session.new_split.requests").exists());
+    assert!(!remote_bin.join("session.focus_window.requests").exists());
+    assert_eq!(sessions(home.path()), 0);
+    assert_eq!(sessions(remote.path()), 0);
+    assert_eq!(
+        store.task(&registered.task.id).unwrap().unwrap().worktree,
+        None
+    );
 }
 
 #[test]

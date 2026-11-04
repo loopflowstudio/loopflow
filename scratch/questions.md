@@ -26,8 +26,10 @@ merge are not. [rex-workspace.md](rex-workspace.md) holds the plan and remaining
   to preserve that accepted boundary.
 - **Bare-open endpoint discovery:** native custom-server children supply session/
   block IDs but not REX_SERVER. Current-viewer placement helps recorded viewers;
-  first direct calls in arbitrary custom servers remain unresolved. No guessed
-  socket or running-app scan supplies destination evidence.
+  LF-created tools now carry their resolved server through launch argv. A fresh
+  isolated probe of unqualified `rex whoami` with native caller variables retained
+  identified a different endpoint. Arbitrary pre-existing custom-server terminals
+  remain unresolved; no guessed socket or running-app scan supplies evidence.
 
 Implementation choice, November 4: remote arrivals reconcile every fifteen seconds
 through the existing Machine request path, in addition to local Work changes.

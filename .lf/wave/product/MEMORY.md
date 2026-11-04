@@ -584,14 +584,17 @@ absence, so repairs need a fresh authorized read. These records changed no Task.
 ## Native host workspaces (LOO-498/717, revised 2026-11-04)
 
 Jack Heart selected Rex first, bounded Herdr second, shared Work/conversation
-identity and tools/defaults. November 4: LF templates flow one way; Rex owns native
-edits, shells and restoration. Reopen preserves the destination; confirmed absence
-permits template launch. IDs/creation receipts preserve rename reuse and uncertain
-creation, never prove retention or authorize replay. Named-copy removal is unaccepted.
-Started Tasks arrive passively; backlog is explicit. Bare open must follow current
-viewer placement through agent calls/resume/move. Native splits must use the source
-Task's worktree/Machine. Revision-8 API probes instead start in HOME; no scoped setter
-was found. The app's Split action remains unproved.
+identity and tools/defaults.
+November 4: LF templates flow one way; Rex owns edits, shells and restoration.
+Reopen preserves native work; confirmed absence permits template launch.
+IDs/receipts support reuse and uncertain creation, not retention or replay.
+Named copies remain required. Started Tasks arrive passively; backlog is explicit.
+Local Working projections omit remote-only checkouts: the execution Machine must
+judge startup, with retry independent of local Work changes. Receiver/failed-SSH
+fixtures do not prove two-Machine delivery.
+Bare open follows current viewers through agent calls/resume/move. Native splits
+must use the source Task's worktree/Machine. Revision-8 probes start in HOME;
+no scoped setter was found. App Split remains unproved.
 
 Jack's November 4 correction supersedes Rex away/native-settlement: retained Task
 Session terminals prevent cleanup regardless of focus; confirmed final removal

@@ -4,7 +4,7 @@ mod herdr;
 mod layout;
 
 pub(super) use herdr::open_herdr;
-use layout::{block, layout};
+use layout::{layout, Host};
 
 use std::collections::{BTreeSet, HashMap};
 use std::io::{IsTerminal, Read, Write};
@@ -532,7 +532,7 @@ fn ensure_container(
             if let Some(session) =
                 store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
             {
-                windows.push(json!({"window_label":"Conversation","layout":block("Conversation",cwd,viewer_argv(cwd,&["session","view",session.id.as_str()])?)}));
+                windows.push(json!({"window_label":"Conversation","layout":Host::Rex(&rex.server).block("Conversation",cwd,viewer_argv(cwd,&["session","view",session.id.as_str()])?)}));
             }
         }
         let result = rex.call(
@@ -806,7 +806,7 @@ fn materialize(
         occurrence.creation != "pending" || occurrence.destination_id.is_some(),
         "Task window creation outcome is unknown; no duplicate was attempted"
     );
-    let (layout, shells) = layout(store, content, repo, presentation)?;
+    let (layout, shells) = layout(store, content, repo, presentation, Host::Rex(&rex.server))?;
     occurrence.destination_id = None;
     occurrence.creation = "pending".into();
     store.save_host_occurrence(&occurrence)?;
@@ -854,7 +854,7 @@ fn activate(
     if presentation.passive || occurrence.creation != "passive" || content.location.is_none() {
         return Ok((id, false, 0));
     }
-    let (layout, shells) = layout(store, content, repo, presentation)?;
+    let (layout, shells) = layout(store, content, repo, presentation, Host::Rex(&rex.server))?;
     occurrence.creation = "tools_pending".into();
     store.save_host_occurrence(occurrence)?;
     rex.call("session.new_split", json!({"session_id":container,"window_id":id,"direction":"horizontal","side":"after","focus":false,"layout":layout}))?;
@@ -896,7 +896,7 @@ fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path, follow: Fol
     if matches!(follow, Follow::Local) {
         words.push("--local-workspace");
     }
-    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":block("Workspace",cwd,viewer_argv(cwd,&words)?)}))?;
+    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":Host::Rex(&rex.server).block("Workspace",cwd,viewer_argv(cwd,&words)?)}))?;
     Ok(())
 }
 

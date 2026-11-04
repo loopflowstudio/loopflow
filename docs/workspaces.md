@@ -126,11 +126,17 @@ that tab stops following; opening the workspace again restores following.
 Closing a Task tab leaves that occurrence closed during following. An exited
 follower is replaced in a new Workspace tab; its old native tab stays intact.
 
+Tools created by LF retain the destination server when they launch, so a shell
+opened there can use bare `lf open` to return to the same Work. This does not yet
+cover discovering every pre-existing terminal on an arbitrary custom server.
+
 The follower asks a remote Task's recorded Machine whether it has started, even
 when the local plan has no checkout for it. Remote arrivals use the same passive
 Task view and reuse rules. A failed connection leaves the source workspace intact;
-reconciliation retries without creating local replacement shells. Configured
-two-Machine interaction still needs demonstration.
+reconciliation retries without creating local replacement shells. A connected
+fixture covers reconnecting and recovering a lost successful reply without local
+Work changes or duplicate panes. Configured two-Machine interaction still needs
+demonstration.
 
 ## New splits belong to the selected Task
 

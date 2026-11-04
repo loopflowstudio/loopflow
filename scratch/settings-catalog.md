@@ -270,9 +270,8 @@ remain evidence for that unchanged path. Detailed repair and review evidence,
 including the uncommitted reconciliation, is preserved in Git blob
 `d02b6b6595a90788f21de8c7e81b0b6ed1427c91` (this plan).
 
-Remaining: gate's affected suites,
-review's configured demonstration, then review-only publication. Limit recovery
-remains PR2; neither merge nor Task completion is authorized.
+Remaining acceptance is listed below; the definition-profile repair is implemented
+at `579b48dcfa`, not still awaiting design. Limit recovery remains PR2.
 
 Headless acceptance covers:
 
@@ -292,14 +291,15 @@ Headless acceptance covers:
   and deletions, stale/concurrent deliveries, restart, host-only fields, no credential or
   CLI/env persistence, and nonblocking forwarded execution with clear persistence status.
 
-Check: with inherited LF_* unset, `rustup run stable cargo nextest run -p loopflow --lib -E 'test(config::remote::) | test(config::files::) | test(config::settings::) | test(skills::catalog::) | test(graph::tests::)'` — 94 passed, one nextest leak diagnostic on the scoped-thread file-write test (no remaining child); `rustup run stable cargo fmt --check` — passed. Gate owns affected-suite acceptance and leak diagnosis; lint owns current-tree Clippy; review owns configured behavior.
+Check: `git diff --check` — passed; unchanged Rust reuses `579b48dcfa`'s recorded focused nextest run (94 passed) and `cargo fmt --check` pass. One scoped-thread file-write test emitted a nextest leak diagnostic with no remaining child; gate owns diagnosis and affected-suite acceptance, lint owns current-tree Clippy, review owns configured behavior.
 
 ## Concept review — one personal profile across declaration locations
 
-November 3, source reviewed at `aa4f3c75ee`. **Accepted ownership implemented;
-focused tests passed. No open product choice.** Jack Heart's accepted origin-owned
-profile includes portable LF settings wherever authored. The earlier destination
-repair stands. This finding concerns definition metadata, not another edit scope.
+November 3: defect reproduced at `aa4f3c75ee`; repair reconciled against
+`579b48dcfa`. **Accepted ownership implemented; focused results reused. No open
+product choice.** Jack Heart's origin-owned profile includes portable LF settings
+wherever authored. The destination repair stands; definition metadata had escaped
+that ownership boundary.
 
 The review reproduced a carried general `agent: codex` losing to executor
 personal skill `agent: claude`: config replacement left definition metadata
@@ -338,20 +338,13 @@ These counterexamples reject both a blanket removal of definition metadata and
 promotion of the carried profile to CLI authority. Gate, configured acceptance
 and review-only publication remain; recovery is PR2.
 
-### Current deletion cut
+### Implemented ownership and remaining proof
 
 Definition candidate construction and profile selection now belong to
 `config::definitions`; the resolver/transport mutation handoff is removed.
 Metadata normalization, occurrence address lookup and recursive YAML patching
 have one implementation each. Retention matches definition identities through
 one keyed lookup. Destination ownership and the profile/retention contract stand.
-
-Removed config-only profile collection and unconditional personal definition
-candidate insertion. One resolver and one retention compare/write policy remain;
-project definition preferences separately from instruction bodies/topology.
-Preference retention edits existing definitions, never installs a skill bundle.
-Graph metadata keeps defining graph, authored ID (or local position for unnamed
-metadata), locator and choice/fallback key through capture and composition.
 
 The profile now carries portable personal definition declarations with their
 locators. The resolver excludes executor portable metadata before ranking;
@@ -362,6 +355,28 @@ previously absent fallback before builtins. Retention shares compare/write and
 receipt policy across config and definition projections, editing only preferences
 through the existing comment-preserving writer. No body or topology is copied.
 
-Focused boundary: config::remote, config::files, config::settings, graph::tests;
-direct consumers also include prompt::process, skills::catalog/invocation,
-definition, config::api and settings_launch_tests. Gate owns their full acceptance.
+Six `config::remote::definition_tests` fixtures exercise inspection against real
+prompt preparation: competing skill/general choices, transported fallback and docs,
+named/unnamed repeated composition and capture, executor host settings, retention
+updates/deletions/conflicts/adoption, and unavailable definitions/assets. They use
+disposable origin/executor Homes in one process; they establish neither SSH
+transport nor configured provider/Desktop acceptance.
+
+Gate's affected boundary includes config::remote/files/settings/api, graph::tests,
+prompt::process, skills::catalog/invocation, definition and settings_launch_tests.
+The recorded 94-test pass covers only the earlier focused subset. Configured
+demonstration and review-only publication of PR #1805 remain; Auto-Ship stays
+stopped. No code changed during reconciliation. Upstream `ac8e088f5f` is already
+integrated; LOO-720's native/headless distinction requires no settings redesign.
+
+### Current concept-review disposition
+
+Reviewed the docs-first contract, destination API, definition candidate ownership,
+retention path and six definition fixtures at `579b48dcfa`. No further design
+change or unresolved product choice was found. Jack Heart's accepted distinction
+between preferences, instructions and executor-local facts is represented without
+another authority tier. Keep the existing implementation direction and acceptance
+boundaries above. The review page now distinguishes the historical counterexample
+from the implemented repair; no code changed and no tests were rerun for this
+documentation-only review. This is evidence for loop-or-next, not publication or
+whole-Task completion.

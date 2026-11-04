@@ -188,19 +188,16 @@ Jack Heart authorized selective cleanup without retries or a five-minute CI clai
 
 ## Settings authority (LOO-714, revised 2026-11-03)
 
-Jack Heart's November 3 extension replaces DB preferences with one typed catalogue
-and file writer, including machine/account declarations. Linked worktrees share
-root `lf.config.local.yaml`. Remote requests use origin preferences; direct remote
-work uses saved preferences. Retention preserves independent remote edits.
-Runtime identity, observations, secrets and history remain domain-owned.
+Jack Heart replaces DB preferences with one catalogue/file writer, including
+machine/account declarations. Runtime identity,
+observations, secrets and history remain domain-owned.
 
 Every applicable `agent` choice precedes all `default_agent` fallbacks. Within each
 class: CLI > environment > personal files > repository/Wave files > builtins,
 then scope, then occurrence/skill/general. Source, scope and target are independent;
 non-agent merges remain typed.
-No per-skill accounts or builtin agent recommendations.
-Targets retain Graph name/authored ID through composition/export; inspection
-retains choice/default keys. Captures preserve omitted/empty docs.
+No per-skill accounts or builtin agent recommendations. Targets retain Graph
+name/authored ID through composition/export; captures preserve omitted/empty docs.
 
 Session/resume `-a` selects that conversation; Graph selection reaches its steps.
 Same-provider fallback refresh without cross-provider import remains an assumption.
@@ -208,24 +205,30 @@ Earlier inheritance proof and unresolved lock cause:
 `d6d7057d97:.lf/wave/infrastructure/MEMORY.md`, Global agent override.
 
 Jack Heart resolved clone scope November 3: private preferences, including account
-order, belong to independent clones; linked worktrees share. Legacy routes materialize
-after collision checks. Unavailable destinations retain non-executing exports for
-explicit import; future clones inherit nothing. Reads need no checkout registration.
+order, belong to independent clones; linked worktrees share root
+`lf.config.local.yaml`. Legacy routes materialize after collision checks.
+Unavailable destinations retain non-executing exports; future clones inherit
+nothing. Reads need no checkout registration.
 
-File cutover removes SQLite triggers; Git misses ignored configuration. Shared
-observation captures absent paths and worker reads separately from planning.
-Subscription fixtures prove edits/replacement/removal without DB writes, retaining
-coalescing. Adoption receipts describe the written projection.
+Git misses ignored configuration; observation must include absent paths and worker
+reads. One typed edit destination owns path/source/scope/prefix across interfaces.
+Earlier observation and destination-repair proofs:
+`579b48dcfa:.lf/wave/infrastructure/MEMORY.md`, this heading. Mounted Desktop
+remains unproved.
 
-Independent file/scope inputs let Desktop validate repository scope while writing
-global preferences. One typed destination now owns path/source/scope/prefix for
-CLI/FFI read, write, unset and explanation. Save-to-preparation fixtures cover
-linked worktrees, Wave identity and preservation; mounted Desktop remains unproved.
+Config-only forwarding left executor skill metadata able to override an origin
+choice. Select one personal profile across files and definition metadata before
+ranking. Preserve locators, choice/fallback keys and occurrence addresses separately
+from bodies/topology; current executor definitions supply host bindings even for
+captured instructions. Retention edits preferences in existing assets only and
+preserves independent edits; direct executor work uses its saved profile.
+Six fixtures cover preparation/inspection, capture/composition and retention
+(`579b48dcfa`); SSH and installed/configured acceptance remain unproved.
 
-Source fixtures prove no installed/configured acceptance. Exporting declarations
-as CLI flags changes authority. Publication is review only. Limit recovery stays PR2:
+Exporting declarations as CLI flags changes authority. Publication is review only.
+Limit recovery stays PR2:
 routing and retry must agree, and failed preparation cannot reattribute an old
-thread. November 2's weekly rejection demonstrated that split, not recovery.
+thread. November 2's weekly rejection demonstrated that split.
 
 ## Plan ownership (LOO-406/412/449, curated 2026-11-03)
 

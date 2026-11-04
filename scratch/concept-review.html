@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-714 · One personal profile</title>
+<title>LOO-714 · Settings concept review</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf9f5;--ink:#222e2a;--muted:#5d6963;--line:#ccd3cd;--panel:#eaf0e9;--accent:#215f4c}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,sans-serif}main{max-width:780px;margin:auto;padding:40px 24px 64px}header,small{font-size:13px;color:var(--muted)}h1{font-size:clamp(28px,6vw,40px);line-height:1.16;letter-spacing:-.025em;margin:24px 0 18px}h2{font-size:23px;margin:32px 0 12px}p{margin:12px 0}code,pre{font-family:ui-monospace,monospace;font-size:.88em}code{overflow-wrap:anywhere}pre{background:var(--panel);padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}aside{border-left:3px solid var(--accent);padding-left:18px;margin:24px 0}li{margin:10px 0}footer{margin-top:32px;border-top:1px solid var(--line);padding-top:10px}a{color:var(--accent)}dt{font-weight:650;margin-top:18px}dd{margin:4px 0 0}@media(prefers-color-scheme:dark){:root{--bg:#18201d;--ink:#e6ece7;--muted:#a8b7af;--line:#43544a;--panel:#26382e;--accent:#91d4b5}}@media(max-width:480px){main{padding:26px 16px 44px}}
@@ -14,107 +14,94 @@
 Built from <a href="../docs/config.md">docs/config.md</a>,
 <a href="../docs/architecture/settings.md">docs/architecture/settings.md</a>,
 <a href="settings-catalog.md">scratch/settings-catalog.md</a>,
-config/{api,files,remote,settings}.rs, skills/catalog.rs and
-ConfigurationSettingsView.swift. Source: aa4f3c75ee.</header>
-<h1>One personal profile must include settings in definitions.</h1>
-<p><strong>Design refined; implementation direction recorded.</strong> Jack Heart's
-accepted origin-owned profile settles this decision. No new product choice is open.</p>
-<aside><strong>The consequential mismatch</strong>
-<p>Forwarded work replaces the executor's personal config values, but still admits
-its personal skill settings. An executor skill can therefore change the selected
-agent even when the origin supplied a choice.</p></aside>
-<h2>Existing → required interaction</h2>
-<p><strong>Existing, reproduced in isolated inspection:</strong></p>
-<pre>Origin personal config:
-  agent: codex
+config/{api,files,definitions,remote,settings}.rs and
+config/remote/definition_tests.rs. Reviewed source: 579b48dcfa.</header>
+<h1>No further design decision is needed.</h1>
+<p>Jack Heart's accepted contract is represented in the reviewed repair:
+forwarded work uses one initiating personal profile, including preferences
+in skill and Graph definitions. Broader acceptance remains outstanding.</p>
+<aside><strong>The consequential mismatch is repaired.</strong>
+<p>Personal authority previously depended on where a preference was written.
+Executor skill metadata could override the origin even though executor config
+preferences were excluded. Profile ownership now applies before candidate ranking.</p></aside>
+<h2>Before → current implementation</h2>
+<pre>Origin personal config:       agent: codex
+Executor personal probe:      agent: claude
 
-Executor ~/.lf/skills/probe.md:
-  ---
-  agent: claude
-  ---
-  Probe.
+Before, at aa4f3c75ee:
+  Forwarded probe → Claude
 
-Carried origin profile + config show --skill probe --json
-  → Claude selected
-  → executor Personal / Global / Skill beats
-    origin Personal / Global / General</pre>
-<p><strong>Required by the accepted design; repair not implemented:</strong></p>
-<pre>Start on laptop → run probe on executor
-  Personal preferences: laptop's
-  Selected agent:       Codex
-
-Start directly on executor → run probe
-  Personal preferences: executor's saved profile
-  Selected agent:       Claude
-
-Origin default_agent: codex + repository skill agent: claude
-  Selected agent:       Claude (shared choice beats fallback)</pre>
-<p>No extra <code>-a</code> and no duplicated <code>skills.probe.agent</code> should
-be needed to make origin ownership hold.</p>
+Current repair, at 579b48dcfa:
+  Forwarded probe → Codex
+  Direct executor probe → Claude
+  Origin default_agent: codex + repository agent: claude → Claude</pre>
+<p><strong>Implemented, covered by existing focused fixtures.</strong> This review
+inspected the source and fixtures; it did not repeat their recorded test run or
+claim a configured SSH/provider demonstration.</p>
 <h2>Actions → concepts → APIs</h2>
 <dl>
-<dt>Start work from the laptop</dt>
-<dd>One initiating personal profile → <code>remote::outgoing</code> → portable
-LF declarations from config and applicable personal definition metadata. Preserve
-source, scope, target, locator and choice/fallback strength.</dd>
-<dt>Prepare the remote step</dt>
-<dd>Selected profile plus executor-local facts plus repository conventions →
-shared candidate collection and <code>settings::resolve_layers</code> → inspection
-and launch preparation agree. Executor portable metadata cannot enter through a
-second path.</dd>
-<dt>Retain preferences for later</dt>
-<dd>Authored preferences → common writer and existing retention comparison → saved
-file or preserved conflict. Delivery receipts describe the outcome; they do not
-become another preference source.</dd>
-<dt>Recover from a retention conflict</dt>
-<dd>Forwarded work uses the origin profile; the executor keeps independent edits.
-Later direct work reads its saved files. Explicit adoption preserves fallback
-strength and target identity.</dd>
+<dt>Save a project preference</dt>
+<dd><code>lf set skills.implement.agent codex</code> → one typed destination →
+<code>config::api::declaration</code> and <code>files::edit</code>.
+The destination derives file, source, scope and prefix. Linked Task worktrees
+share the main checkout's private file; independent clones keep separate files.</dd>
+<dt>Launch from the laptop on a remote machine</dt>
+<dd>One originating personal profile → <code>remote::outgoing</code> collects
+config and personal definition declarations → <code>definitions::candidates</code>
+selects ownership before <code>settings::resolve_layers</code> ranks candidates.
+Inspection and preparation use that resolver.</dd>
+<dt>Retain preferences for later direct work</dt>
+<dd>Portable declarations → <code>remote::receive</code> and the common retention
+comparison → config files or existing definition preferences. Delivery receipts
+record use and persistence separately; they supply no additional preference authority.</dd>
+<dt>Recover from an independent remote edit</dt>
+<dd><code>lf config retained</code> shows the conflict. Keep the saved remote
+preferences or explicitly adopt the incoming declarations. Forwarded work keeps
+using its origin profile; direct remote work uses its saved files.</dd>
 </dl>
-<h2>Keep the boundaries already accepted</h2>
-<p>The earlier Desktop repair stands: one destination derives file, source, scope
-and prefix for save, unset and explanation. Independent clones retain separate
-private preferences; linked Task worktrees share their main checkout's file.</p>
-<p>Definition instructions and topology remain distinct from preference authority.
-Preserve repository definition selection, native provider-owned fields, host-local
-settings and captured instructions. This repair does not introduce whole-bundle
-synchronization or change which skill body runs.</p>
-<p>Every applicable <code>agent</code> still beats every <code>default_agent</code>;
-within each class, source → scope → target decides. Carrying a profile must never
-promote it to CLI authority.</p>
 <h2>Normal path, failure, recovery</h2>
-<p><strong>Normal:</strong> the origin selects Codex; an executor personal skill
-cannot silently select Claude. Origin-authored skill preferences must travel too.</p>
-<p><strong>Failure:</strong> the executor independently edits or deletes a retained
-preference. Forwarded work continues with the incoming profile while retention
-reports the conflict. Missing referenced assets still report their existing error.</p>
-<p><strong>Recovery:</strong> keep the executor's edits or explicitly adopt the
-incoming declarations. Direct work uses the saved result. Unset reveals lower
-settings without rewriting history or promoting fallbacks.</p>
-<p><strong>Counterexamples to preserve:</strong> direct executor work still uses its
-personal skill choice; a repository choice still beats an origin fallback;
-non-agent portable settings and personal Graph occurrences obey the same ownership.
-Blanket removal of definition metadata would fail these requirements.</p>
-<h2>Evidence and next proof</h2>
-<p>Three isolated CLI inspections exited zero: direct executor selected Claude;
-forwarded origin choice incorrectly selected Claude; repository choice correctly
-beat the origin fallback. Disposable Git/Home fixtures used no provider or real
-remote. The working design records the binary hash and source trace.</p>
-<p>Next proof must compare inspection with real preparation for personal skills,
-Graph occurrences, composition, non-agent settings and retention recovery. No new
-full-suite, mounted Desktop or configured provider acceptance is claimed.</p>
+<p><strong>Normal:</strong> the laptop's choice selects Codex without an extra
+launch override. Origin-authored skill and occurrence preferences travel with
+their targets and choice/fallback meaning. Executor-local bindings stay local.</p>
+<p><strong>Failure:</strong> a remote preference edit or deletion prevents automatic
+retention. Forwarded execution still uses the incoming profile. Missing definitions
+or matching occurrences remain retention conflicts; missing referenced assets
+retain an actionable preparation error.</p>
+<p><strong>Recovery:</strong> explicit adoption edits preferences in an existing
+definition while preserving instructions, topology, comments and native fields.
+It neither installs a skill bundle nor promotes a fallback into a choice.</p>
+<p><strong>Counterexamples retained:</strong> direct executor work must still use
+its own policy; repository choices must still beat origin fallbacks; captured
+instructions must keep executor-local settings; composed and repeated Graphs
+must keep their authored occurrence addresses. Removing all definition metadata
+or elevating the profile to CLI authority would violate these requirements.</p>
+<h2>Model and remaining proof</h2>
+<p><code>ConfigSource</code>, <code>SettingScope</code> and
+<code>SettingTarget</code> remain independent. Definition bodies/topology are
+separate from preference declarations. Retention evidence describes a file update;
+it does not introduce another lifecycle that selects the agent.</p>
+<p>The six definition fixtures compare inspection with real prompt preparation
+in disposable origin/executor Homes. They cover skill and Graph preferences,
+composition/capture, non-agent settings, retention updates/deletions/conflicts,
+explicit adoption and unavailable definitions/assets. The working design records
+the earlier 94-test focused pass and its limits.</p>
+<p><strong>Still pending:</strong> affected-suite acceptance, the recorded nextest
+leak diagnostic, current-tree lint and configured demonstration. These remain
+verification work; this review found no additional product choice or design change.
+No usage-doc or skill-instruction change is needed.</p>
 <footer>
 <h2>Review questions, settled by the accepted contract</h2>
 <ol>
-<li><strong>Does personal authority depend on the file containing a setting?</strong>
-No. LF skill and Graph metadata follow the same origin ownership as config YAML.</li>
-<li><strong>Should all executor definition settings disappear?</strong> No. Preserve
-host-local settings and repository conventions; exclude competing portable personal
-preferences only for forwarded work.</li>
-<li><strong>Is a new product decision needed?</strong> None found. The working design
-records the repair for the next implement pass. Loop-or-next determines navigation.</li>
+<li><strong>Does personal authority depend on the declaration's file?</strong>
+No. Config YAML and LF definition preferences share the same origin ownership.</li>
+<li><strong>Does forwarding replace instructions and all executor settings?</strong>
+No. Preserve selected/captured instructions, topology, repository conventions,
+native provider fields and executor-local bindings.</li>
+<li><strong>Does this require another design iteration?</strong>
+None identified. The repair represents the accepted decision; loop-or-next
+uses this review as evidence for its own navigation decision.</li>
 </ol>
-<p><small>PR #1805 remains review-only, Auto-Ship stopped. No code, publication or
-Task completion in this step. Automatic limit recovery remains PR2.</small></p>
+<p><small>Review-only PR #1805; Auto-Ship remains stopped. No code, publication,
+merge or Task completion in this step. Automatic limit recovery remains PR2.</small></p>
 </footer>
 </main></body></html>

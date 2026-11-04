@@ -2412,15 +2412,17 @@ final class WorkModel {
 
     func commitSessionBinding() async {
         guard let repo = repoPath, let draft = navigation.binding, !draft.submitting,
-              let preview = draft.preview, preview.sessionId == draft.sessionId else { return }
+              let taskId = draft.assignedTaskId ?? draft.preview?.taskId else { return }
         let owner = navigation
         let key = repositoryReadingKey(repo)
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
-            let record = try await query.bindSession(id: preview.sessionId, taskId: preview.taskId, cwd: repo)
+            let record = try await query.bindSession(id: draft.sessionId, taskId: taskId, cwd: repo)
             supersedeSessions()
             replaceSession(record, key: key)
+            // Refresh the Task's other conversations after their primary changes.
+            await refreshSessions()
             if owner.selectedSessionId == record.id { owner.selection = record.work }
             if owner.binding?.id == draft.id { owner.binding = nil }
         } catch {
@@ -2430,15 +2432,14 @@ final class WorkModel {
         }
     }
 
-    func promoteSessionToTask() async {
+    func createTaskFromSession() async {
         guard let repo = repoPath, let draft = navigation.binding, !draft.submitting else { return }
         let owner = navigation
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
-            let task = try await query.promoteSession(
-                id: draft.sessionId, task: draft.assignedTaskId ?? draft.preview?.taskId,
-                title: draft.taskTitle, cwd: repo)
+            let task = try await query.createTaskFromSession(
+                id: draft.sessionId, title: draft.taskTitle, cwd: repo)
             // Keep the selected Session, its retained terminal and composer.
             // Promotion changes its Work address, never its input attachment.
             supersedeSessions()

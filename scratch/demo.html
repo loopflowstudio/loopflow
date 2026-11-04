@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-582 · Continuity demo</title><style>:root{color-scheme:light dark}body{max-width:760px;margin:auto;padding:36px 22px;font:17px/1.6 system-ui}h1{line-height:1.2}h2{margin-top:2em;font-size:1.25em}header,small{opacity:.7}pre{padding:18px;background:#8882;white-space:pre-wrap;overflow-wrap:anywhere}table{border-collapse:collapse;width:100%}td,th{padding:12px 10px;border-bottom:1px solid #8885;text-align:left;vertical-align:top}a{color:inherit}textarea{width:100%;min-height:5em;background:transparent;color:inherit;border:1px solid #8886}blockquote{border-left:3px solid #888;padding-left:18px;margin-left:0}</style><header>LOO-582 · autonomous demo · November 3, 2026<br>Sources: <a href="loo-582-demo.md">observations and receipts</a> · <a href="loo-582.md">accepted design</a></header>
+<h1>The chat stayed put. Binding is ready for its revised demo.</h1>
+<p>Jack Heart chose <code>session bind SESSION --task TASK</code> to always make the chat primary and continue in the Task checkout. This replaces the reviewed <code>task promote</code> command. No further wording decision is pending.</p>
+<p><strong>Operator-observed behavior; not Jack Heart’s acceptance or shipping approval.</strong> Real configured Codex, candidate CLI and isolated Desktop build.</p>
+<table><tr><th>Action / expected result</th><th>Observed</th></tr>
+<tr><td>Create without a source → separate Task.</td><td>725ce5 created; live work stayed unassigned.</td></tr>
+<tr><td>Create --session → same chat and checkout.</td><td>5951ba adopted both; same native thread/process/cwd and file hashes.</td></tr>
+<tr><td>Repeat explicit creation → same Task.</td><td>Returned 5951ba.</td></tr>
+<tr><td>Keep an unsent question during creation and Task progress.</td><td>Draft remained. Submitted afterward; Codex recalled the marker and ran pwd in the original checkout.</td></tr>
+<tr><td>Cmd-T in Rex and cmux → Session's worktree.</td><td>Actual shell pwd matched demo.prototype in both apps.</td></tr>
+<tr><td>Open Task in Desktop → selected conversation.</td><td>Correct Session/checkout; after explicit attachment transfer, retained history rendered.</td></tr>
+<tr><td>Create --run → independent checkout and Session.</td><td>49181d created separate work and paused at the demo graph's first interactive step.</td></tr></table>
+<h2>Concrete continuity evidence</h2>
+<pre>Before creation:
+  Native thread 01a1a473-54b3-7623-9aac-a1273467949c
+  cwd /private/tmp/loo582-demo-w9ra8f85/demo.prototype
+  draft: What marker did I ask you to remember? Run pwd again.
+
+After creation + Task progress + submitting the draft:
+  Marker: LOO582-RIVER-731
+  Ran pwd → /private/tmp/loo582-demo-w9ra8f85/demo.prototype
+  No files edited.</pre>
+<p>Native before/after views were inspected in the conversation. The capture interface supplied no persisted image path; this page does not substitute fabricated screenshots. The receipt directory includes a rendered Rex capture.</p>
+<h2>Failures and remaining checks</h2>
+<p><strong>Warp:</strong> computer-use tool refused app access for safety reasons. Unverified.</p>
+<p><strong>Isolated Desktop:</strong> taskless exact-Session open was unavailable; custom bundle CLI launch failed Launch Services resolution. Native Task palette navigation worked.</p>
+<p><strong>Still to prove:</strong> revised bind → live pending directory → same native history at target cwd; Desktop create-from-chat draft retention; detached idle expiry. Combined gate and installation upgrade remain pending.</p>
+<h2>Review notes</h2>
+<p>1. Command decision: resolved as always-primary bind.</p>
+<p>2. Any observed regression to retain for the next implementation pass:</p><textarea aria-label="Review observations" placeholder="Optional observations; Markdown remains the durable record"></textarea>
+<p>3. Next proof: the revised binding interaction. No Auto-Ship or landing approval.</p>
+</html>

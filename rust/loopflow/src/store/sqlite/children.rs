@@ -290,13 +290,12 @@ impl SqliteStore {
             // prospective ownership, so a concurrent input need not be replayed.
             let current =
                 super::sessions::session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
-            super::sessions::bind_session_in(
-                &tx,
-                &session.id,
-                current.captured,
-                &session.cwd,
-                task_id,
-            )?;
+            if current.cwd != session.cwd {
+                return Err(StoreError::InvalidAuthority(
+                    "Session workspace changed before binding".into(),
+                ));
+            }
+            super::sessions::bind_session_in(&tx, &current, task_id)?;
             super::sessions::choose_task_primary_in(&tx, task_id, &session.id)?;
             if let Some(cwd) = requested_cwd {
                 let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;

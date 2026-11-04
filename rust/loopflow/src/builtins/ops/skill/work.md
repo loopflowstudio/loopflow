@@ -32,11 +32,13 @@ with `lf session list --json`. Shells also select a Session explicitly.
 `--worktree <path>` adopts only that linked checkout. Explicit sources work
 with or without `--run`; retries recover the selected work's Task.
 
-`lf task promote <task> --session <id>` selects the conversation for that Task.
+`lf session bind <id> --task <task>` permanently binds and selects its primary
+conversation. Use an unfinished interactive Session; closed Sessions and headless
+Runs cannot become primary.
 If the Task already owns another worktree, the same conversation continues there
 after its current client exits. Status and Desktop show the pending directory;
-reconnect to continue. Files stay where they are. An explicit `--worktree` never
-replaces the Task's checkout.
+reconnect to continue. Files stay where they are. If the Task has no checkout,
+binding adopts the Session’s unowned linked checkout.
 Promotion keeps files, branch, provider history and live input attachment;
 it starts no Graph and approves no Auto-Ship. Creation keeps main/Wave checkouts
 shared and binds the selected Session in place. A selected repository/Wave primary

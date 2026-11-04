@@ -28,8 +28,7 @@ memory and KRs.
 lf task create --worktree . --title "Finish the prototype"
 lf session list --json                         # find the Loopflow Session ID
 lf task create --session SESSION --title "Finish the prototype"
-lf task promote LOO-12 --session SESSION         # use work for an existing Task
-lf task promote LOO-12 --worktree ../prototype   # select an existing checkout
+lf session bind SESSION --task LOO-12           # select this Task’s conversation
 ```
 
 Promotion preserves the branch, dirty and untracked files, and the Session's
@@ -46,8 +45,7 @@ person's work.
 Plain `lf task create` files new work, including from an owned checkout or
 Session. `--run` starts the created Task; it does not opt into adoption.
 Explicit sources work with or without `--run`. Creation alone starts no Graph
-and approves no Auto-Ship. `lf task promote` retains current-work selection:
-an invoking interactive Session in the selected checkout can make itself primary.
+and approves no Auto-Ship. Binding also requires an explicit Session ID.
 
 Main and Wave checkouts remain shared. A selected Session there can become a
 Task conversation without moving its cwd; an explicit later `lf task checkout`
@@ -55,16 +53,17 @@ gives the Task a separate home. Selecting a repository or Wave primary Session
 transfers that conversation to the Task; its former scope can open a new one.
 A remote command uses the selected Machine's existing paths and Sessions; it does not transfer local live work.
 
-Desktop offers **Create Task from this conversation** in the Session's Task-assignment
-action. Selecting an existing Task also offers **Make primary Task
-conversation**. Already-assigned Sessions offer the same action in the palette
+Desktop offers **Create Task from this conversation** in the Session’s binding
+action. **Bind to Task** makes it the selected Task’s primary conversation.
+Already-assigned Sessions offer **Make primary Task conversation** in the palette
 and Task menu. The current terminal and composer stay in place.
 
-When an existing Task already has a worktree, `lf task promote <task> --session <id>`
+When an existing Task already has a worktree, `lf session bind <id> --task <task>`
 keeps that worktree and schedules the same conversation's next connection there.
 The current client stays in its directory until it exits. Status and Desktop show
 the pending directory; reconnect to continue. Files remain in their original
-checkout. An explicit `--worktree` cannot replace the Task's existing checkout.
+checkout. If the Task has no checkout, binding adopts the Session’s unowned linked
+checkout. Closed Sessions and headless Runs cannot become primary.
 
 ## Steer it while it runs
 

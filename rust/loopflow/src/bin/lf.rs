@@ -1114,27 +1114,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             println!("{issue}: completed");
             Ok(())
         }
-        TaskCommand::Promote {
-            issue,
-            session,
-            worktree,
-            json,
-        } => {
-            let task = loopflow::ops::task::task_promote(
-                repo,
-                issue,
-                loopflow::ops::task::TaskPromotionOptions {
-                    session: session.clone(),
-                    worktree: worktree.clone(),
-                },
-            )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&task)?);
-            } else {
-                println!("{} · {}", task.title, task.identifier);
-            }
-            Ok(())
-        }
         TaskCommand::Create {
             session,
             worktree,
@@ -1162,7 +1141,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 title.clone(),
                 report,
                 regressed_in_arg(regressed_in),
-                loopflow::ops::task::TaskPromotionOptions {
+                loopflow::ops::task::TaskAdoptionOptions {
                     session: session.clone(),
                     worktree: worktree.clone(),
                 },
@@ -2900,13 +2879,6 @@ fn execute_command(
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(cli, &directory, cmd.selector())?;
-            // Promotion's default source is the caller's checkout. Resolving its
-            // target Task must not replace that source with the repository root.
-            let repo = if matches!(cmd, TaskCommand::Promote { .. }) {
-                loopflow::repo::discover_repo_root(&directory)?.unwrap_or(repo)
-            } else {
-                repo
-            };
             with_runtime(&repo, args, || run_task_command(cli, &repo, cmd))
         }
         Some(Commands::Context { json, wave, task }) => {

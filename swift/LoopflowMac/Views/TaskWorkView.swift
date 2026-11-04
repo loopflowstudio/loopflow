@@ -664,7 +664,7 @@ struct TaskActionItems: View {
             if !session.taskPrimary, session.titleSource != .unavailable {
                 Button("Rename \(session.title)…") { model.beginSessionRename(session) }
             }
-            if session.work?.kind != .task {
+            if session.interactive, session.work?.kind != .task {
                 Button("Bind \(session.title) to Task…") { model.beginSessionBinding(session) }
             } else if session.interactive, !session.taskPrimary {
                 Button("Make \(session.title) primary…") { model.beginSessionBinding(session) }

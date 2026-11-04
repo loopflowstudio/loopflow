@@ -1,5 +1,5 @@
-mod promotion;
-pub use promotion::{task_promote, TaskPromotionOptions};
+pub(crate) mod adoption;
+pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 mod workspace;
 pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
@@ -1474,7 +1474,7 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     regressed_in: Option<String>,
-    promotion: TaskPromotionOptions,
+    adoption: TaskAdoptionOptions,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let regression = regressed_in.map(|version| crate::work::task::TaskUpdate {
@@ -1493,11 +1493,7 @@ pub fn task_create(
             tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
         }
 
-        let source = if promotion.session.is_some() || promotion.worktree.is_some() {
-            promotion::resolve_source(&store, repo, &promotion).await?
-        } else {
-            promotion::Source::default()
-        };
+        let source = adoption::resolve_source(&store, repo, &adoption).await?;
         if let Some(task) = source.task.as_ref() {
             if let Some(selected) = select_task_creation_wave(&store, &main, wave).await? {
                 if task.wave_id.as_ref() != Some(selected.id()) {
@@ -1508,7 +1504,7 @@ pub fn task_create(
                 }
             }
             let task =
-                promotion::save(&store, &main, task.id.clone(), None, source, None, false).await?;
+                adoption::save(&store, &main, task.id.clone(), None, source, None, false).await?;
             super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
             return store
                 .get_task(&task.id)
@@ -1549,7 +1545,7 @@ pub fn task_create(
             title: input.title,
             description: input.report,
         };
-        let task = promotion::save(
+        let task = adoption::save(
             &store,
             &main,
             creation.id.clone(),

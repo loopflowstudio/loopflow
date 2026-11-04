@@ -1580,7 +1580,7 @@ fn stable_fixture(
             Some("Sessions lose their name".into()),
             None,
             Some(format!("v{version}")),
-            loopflow::ops::task::TaskPromotionOptions::default(),
+            loopflow::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
         assert_eq!(task.regressed_in, Some(format!("v{version}")));

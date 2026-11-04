@@ -36,6 +36,10 @@ import ViewInspector
         await model.previewSessionBinding()
         #expect(model.sessions.value?.first { $0.id == "interactive" }?.work == nil)
         #expect(model.navigation.binding?.preview?.taskId == "task-exact")
+        let sheet = SessionActionSheet(model: model)
+        _ = try sheet.inspect().find(button: "Bind to Task")
+        #expect(throws: (any Error).self) { try sheet.inspect().find(button: "Assign to Task") }
+        #expect(throws: (any Error).self) { try sheet.inspect().find(button: "Make primary Task conversation") }
         #expect(await source.bindCount == 0)
         await source.holdList()
         let poll = Task { await model.refreshSessions() }
@@ -70,8 +74,8 @@ import ViewInspector
         #expect(model.navigation.binding == nil)
         #expect(model.sessions.value?.first { $0.id == "interactive" }?.work == .task(id: "task-exact"))
     }
-    @Test("Promotion keeps the selected conversation and changes its Work without launching")
-    func promoteExistingConversation() async throws {
+    @Test("Creation and binding keep the selected conversation and change its Work without launching")
+    func createOrBindConversation() async throws {
         for existing in [false, true] {
             let source = try ControlsSource()
             let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
@@ -83,7 +87,8 @@ import ViewInspector
                 model.navigation.binding?.selector = "INF-123"
                 await model.previewSessionBinding()
             }
-            await model.promoteSessionToTask()
+            if existing { await model.commitSessionBinding() }
+            else { await model.createTaskFromSession() }
             #expect(model.navigation.binding == nil)
             #expect(model.navigation.selectedSessionId == session.id)
             #expect(model.selection == .task(id: "task-exact"))
@@ -93,12 +98,12 @@ import ViewInspector
             #expect(promoted.agentProcessId == session.agentProcessId)
             #expect(promoted.taskPrimary)
             #expect(promoted.requestedCwd == (existing ? "/src/delivery" : nil))
-            #expect(await source.bindCount == 0)
+            #expect(await source.bindCount == (existing ? 1 : 0))
         }
     }
 
-    @Test("An assigned non-primary Session offers primary selection without rebinding")
-    func promoteAssignedConversation() async throws {
+    @Test("An assigned non-primary Session offers primary selection through binding")
+    func bindAssignedConversation() async throws {
         let source = try ControlsSource(assigned: true)
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refreshSessions()
@@ -111,8 +116,8 @@ import ViewInspector
         _ = try sheet.inspect().find(button: "Make primary Task conversation")
         #expect(throws: (any Error).self) { try sheet.inspect().find(button: "Create Task from this conversation") }
         #expect(throws: (any Error).self) { try sheet.inspect().find(button: "Assign to Task") }
-        await model.promoteSessionToTask()
-        #expect(await source.bindCount == 0)
+        await model.commitSessionBinding()
+        #expect(await source.bindCount == 1)
         #expect(model.navigation.selectedSessionId == session.id)
         #expect(model.sessions.value?.first?.agentProcessId == session.agentProcessId)
         #expect(model.sessions.value?.first?.cwd == session.cwd)
@@ -175,12 +180,11 @@ private actor ControlsSource {
             }
             return String(decoding: snapshot, as: UTF8.self)
         }
-        if args.starts(with: ["task", "create"]) || args.starts(with: ["task", "promote"]) {
+        if args.starts(with: ["task", "create"]) {
             #expect(args.contains("--session"))
             #expect(!args.contains("--run"))
             record["work"] = ["kind": "task", "id": "task-exact"]
             record["task_primary"] = true
-            if args.starts(with: ["task", "promote"]) { record["requested_cwd"] = "/src/delivery" }
             return #"{"id":"task-exact","identifier":"INF-123","title":"Conversation"}"#
         }
         if args.contains("--dry-run") {
@@ -190,6 +194,8 @@ private actor ControlsSource {
         bindCount += 1
         if reject { reject = false; throw RegistryQueryError("Session changed before binding") }
         record["work"] = ["kind": "task", "id": "task-exact"]
+        record["task_primary"] = true
+        record["requested_cwd"] = "/src/delivery"
         record["wave_id"] = "wave-exact"
         return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
     }

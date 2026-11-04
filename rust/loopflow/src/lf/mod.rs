@@ -1114,8 +1114,7 @@ impl TaskCommand {
             | Self::Delete { .. }
             | Self::Edit { .. }
             | Self::Move { .. }
-            | Self::Interrupt { .. }
-            | Self::Promote { .. } => true,
+            | Self::Interrupt { .. } => true,
         }
     }
 }
@@ -1682,7 +1681,10 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Assign a Task to a Session that has none; the Task never changes after
+    /// Bind a Session as the Task's primary conversation without starting work
+    #[command(
+        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree; continuation there waits until the current client exits. Status shows requested_cwd until the provider confirms its connection. Files and live input stay intact. If the Task has no worktree, its Session's unowned linked checkout is adopted; main and Wave checkouts stay shared. Closed Sessions and headless Runs cannot become primary. Remote calls use the target Machine's Sessions and paths."
+    )]
     Bind {
         /// Session ID or provider conversation ID
         id: String,
@@ -1956,21 +1958,6 @@ pub enum TaskCommand {
         /// Restore a missing Task branch from a deliberately recovered commit; never reset existing work
         #[arg(long, value_name = "COMMIT", conflicts_with_all = ["stack_on", "name", "directive", "design"])]
         recover_from: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Make an existing worktree or Session this Task's home without starting work
-    #[command(
-        after_help = "Defaults to this checkout and the invoking Session, if any. From a shell, --session explicitly selects the primary conversation; find its Loopflow ID with `lf session list --json`. A selected Session supplies its cwd. Shared main/Wave checkouts are never adopted. If the Task already has a checkout, selecting --session schedules continuation there after the current client exits; no live client is stopped. An explicit --worktree never replaces a Task checkout. Status shows requested_cwd until the provider confirms its connection. Remote calls select paths and Sessions on the target Machine; they never transfer live work."
-    )]
-    Promote {
-        issue: String,
-        /// Existing conversation; preserves its provider, input and attachment
-        #[arg(long, id = "promote_session")]
-        session: Option<String>,
-        /// Existing linked worktree; defaults to the Session's cwd or this checkout
-        #[arg(long)]
-        worktree: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -2270,8 +2257,7 @@ impl TaskCommand {
             | Self::Edit { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::Promote { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 
@@ -2299,8 +2285,7 @@ impl TaskCommand {
             | Self::Edit { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::Promote { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 }

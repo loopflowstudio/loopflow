@@ -443,12 +443,17 @@ parent is the Graph process, and shares that Graph's nullable Task. `work_source
 is declared, checkout, inherited or bound when known. Historical unknown membership
 stays Unknown; absence of evidence does not become Independent.
 
-Bind is write-once: null to a Task, validating any explicit Wave against its membership. Same-target bind
-is a no-op; reassignment and clearing are unavailable. Done/landed Tasks remain
-valid without reopening them. CLI states the permanent target and writes the assignment; Desktop confirms
-the exact target before writing. CLI adds no confirmation prompt. The writer compares the selected
-conversation/attachment and ancestry atomically. Binding cannot alter Graph membership
-or bind one member of a taskless Graph inconsistently with its owner.
+A Session's permanent assignment is write-once: null to a Task, validating any
+explicit Wave against its membership. Reassignment and clearing are unavailable.
+Public binding also selects that unfinished interactive Session as primary and
+requests continuation in the Task's worktree; repeating binding reselects it.
+Closed Sessions and headless Runs cannot become primary. Done/landed Tasks remain
+valid without reopening them. CLI states the permanent target; Desktop confirms
+the exact target before writing. CLI adds no confirmation prompt. The writer
+commits assignment, primary choice and pending directory atomically, preserving
+live input and attachment. Binding does not alter Graph membership. A selected
+repository/Wave primary releases its old primary scope; ordinary Wave assignments
+and conflicting permanent Task bindings remain intact.
 
 Jack Heart's 2026-09-30 decision retains prospective usage
 attribution: bind records assignment time; earlier usage retains its owner.
@@ -459,8 +464,8 @@ Project/Task moves preserve immutable historical attribution while
 validating current ancestry.
 
 `lf task run` and `lf task checkout` claim an unowned Task when they allocate its
-checkout; that is actual work reservation. General command observation and bind
-never claim. Completion, abandonment and reopening write no ownership entries, so a
+checkout; explicit adoption and binding also claim when selecting its work or
+primary conversation. General command observation never claims. Completion, abandonment and reopening write no ownership entries, so a
 Done Task shows its last owner as history. The migration recorded one `recorded`
 entry, person unknown, for each Task that had Started, a worktree or an admission.
 Chapter retirement also checks authored work, PRs and

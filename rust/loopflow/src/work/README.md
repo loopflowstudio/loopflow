@@ -134,7 +134,7 @@ revision-checked pane/draft saves. Saved shell intent never authorizes a launch.
 
 ```sh
 lf task create --session SESSION --title "Finish prototype"
-lf task promote LOO-12 --session SESSION
+lf session bind SESSION --task LOO-12
 ```
 
 Select `--session` to keep the chat and linked checkout, or `--worktree` for

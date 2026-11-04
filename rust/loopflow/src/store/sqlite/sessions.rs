@@ -512,24 +512,13 @@ pub(crate) struct PendingInput {
     pub(crate) latest: i64,
 }
 
+/// The caller reads and validates this Session inside the same transaction.
 pub(super) fn bind_session_in(
     conn: &Connection,
-    id: &str,
-    expected_capture: Option<i64>,
-    expected_cwd: &Path,
+    session: &LfSession,
     task: &TaskId,
 ) -> StoreResult<()> {
-    let session = session_in(conn, id)?.ok_or(StoreError::NotFound)?;
-    if session.cwd != expected_cwd {
-        return Err(StoreError::InvalidAuthority(
-            "Session workspace changed before binding".into(),
-        ));
-    }
-    if session.captured != expected_capture {
-        return Err(StoreError::InvalidAuthority(
-            "Session changed before binding".into(),
-        ));
-    }
+    let id = session.id.as_str();
     if let Some(bound) = &session.task_id {
         if bound != task {
             let issue = super::children::short_task_id(conn, bound)?.ok_or(StoreError::NotFound)?;
@@ -1519,7 +1508,13 @@ impl SqliteStore {
         let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        bind_session_in(&tx, id, expected_capture, &before.cwd, task)?;
+        let current = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if current.cwd != before.cwd || current.captured != expected_capture {
+            return Err(StoreError::InvalidAuthority(
+                "Session changed before binding".into(),
+            ));
+        }
+        bind_session_in(&tx, &current, task)?;
         let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(bound)

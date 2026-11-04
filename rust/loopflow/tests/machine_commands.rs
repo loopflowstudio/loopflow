@@ -649,13 +649,7 @@ fn remote_task_promotion_needs_no_provider_account() {
             "--session",
             "remote-session",
         ],
-        vec![
-            "task",
-            "promote",
-            "LOO-12",
-            "--worktree",
-            "/remote/prototype",
-        ],
+        vec!["session", "bind", "remote-session", "--task", "LOO-12"],
     ] {
         let args = [prefix.as_slice(), operation.as_slice()].concat();
         let output = fixture.run(&args);

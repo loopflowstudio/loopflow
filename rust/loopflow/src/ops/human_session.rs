@@ -1398,16 +1398,14 @@ pub(crate) async fn rename(
     surface(store, &session).await
 }
 
-/// Assign a Task to future Session work by its durable ID, including closed Sessions.
+/// Bind and select the Task conversation without changing its live attachment.
 pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
     let (session, task) = binding_target(store, id, task).await?;
+    crate::ops::task::adoption::bind_session(store, &session, &task).await?;
     let session = store
-        .bind_session(&session.id, session.captured, &task.id)
-        .await
-        .map_err(|error| match error {
-            crate::store::StoreError::InvalidAuthority(reason) => anyhow!(reason),
-            error => anyhow!(error),
-        })?;
+        .session(&session.id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
     eprintln!(
         "Binding {} to {} ({}). Permanent.",
         session.id, task.identifier, task.title
@@ -1442,6 +1440,10 @@ async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(Lf
     let session = session_by_id(store, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
+    anyhow::ensure!(
+        session.interactive && session.completed_at.is_none(),
+        "Select an unfinished interactive Session to become the Task conversation"
+    );
     let task = match crate::durable::TaskId::parse(task) {
         Ok(id) => store.get_task(&id).await?,
         Err(_) => store.get_task_by_issue(task).await?,

@@ -30,42 +30,38 @@ struct SessionActionSheet: View {
     private var bindingForm: some View {
         if let draft = model.navigation.binding {
             VStack(alignment: .leading, spacing: 12) {
-                Text(draft.assignedTaskId == nil ? "Assign “\(draft.title)” to a Task" : "Make “\(draft.title)” primary")
+                Text(draft.assignedTaskId == nil ? "Bind “\(draft.title)” to a Task" : "Make “\(draft.title)” primary")
                     .font(Typography.textStrong)
                 if draft.assignedTaskId == nil {
-                    Text("Assignment is permanent. This Session cannot be moved to another Task or unbound. No workflow starts.")
+                    Text("Binding is permanent. This Session cannot be moved to another Task or unbound. No workflow starts.")
                 }
                 if draft.assignedTaskId != nil {
                     Text("Use this conversation when opening its Task. No workflow starts.")
                     Button("Make primary Task conversation") {
-                        Task { await model.promoteSessionToTask() }
+                        Task { await model.commitSessionBinding() }
                     }
                     .disabled(draft.submitting)
-                    .accessibilityIdentifier("session-promote-assigned")
+                    .accessibilityIdentifier("session-bind-assigned")
                 } else if let preview = draft.preview {
                     Text("\(preview.identifier) · \(preview.title)")
                     HStack {
                         Button("Choose another Task") { model.navigation.binding?.preview = nil }
-                        Button("Assign to Task") { Task { await model.commitSessionBinding() } }
+                        Button("Bind to Task") { Task { await model.commitSessionBinding() } }
                             .accessibilityIdentifier("session-bind-confirm")
                     }
                     .disabled(draft.submitting)
-                    Button("Make primary Task conversation") {
-                        Task { await model.promoteSessionToTask() }
-                    }
-                    .disabled(draft.submitting)
-                    .accessibilityIdentifier("session-promote-existing")
+                    Text("This becomes the conversation opened by the Task. Other conversations remain associated.")
                 } else {
                     TextField("New Task title", text: Binding(
                         get: { model.navigation.binding?.taskTitle ?? "" },
                         set: { model.navigation.binding?.taskTitle = $0 }))
                         .disabled(draft.submitting)
-                        .accessibilityIdentifier("session-promote-title")
+                        .accessibilityIdentifier("session-create-title")
                     Button("Create Task from this conversation") {
-                        Task { await model.promoteSessionToTask() }
+                        Task { await model.createTaskFromSession() }
                     }
                     .disabled(draft.submitting || draft.taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("session-promote-create")
+                    .accessibilityIdentifier("session-create-task")
                     Text("Keep this chat, worktree, branch and unfinished edits.")
                     Divider()
                     TextField("Task identifier or stable ID", text: Binding(
@@ -73,7 +69,7 @@ struct SessionActionSheet: View {
                         set: { model.navigation.binding?.selector = $0 }))
                         .disabled(draft.submitting)
                         .accessibilityIdentifier("session-bind-target")
-                    Button("Review assignment") { Task { await model.previewSessionBinding() } }
+                    Button("Review binding") { Task { await model.previewSessionBinding() } }
                         .disabled(draft.submitting || draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("session-bind-preview")
                 }

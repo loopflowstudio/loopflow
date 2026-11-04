@@ -625,6 +625,68 @@ fn automatic_attachment_preserves_an_existing_viewers_control() {
 }
 
 #[test]
+fn prepared_reveal_preserves_a_later_controlling_viewer() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'permission request-17\n'
+read -r answer < /dev/tty
+printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
+"#,
+    );
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "--interactive",
+            "--agent",
+            "claude",
+            ":",
+            "original input",
+        ],
+    );
+    command.env("PATH", path);
+    let owner = fixture.owner(command);
+    let launched = fixture.wait_file("launches");
+    let session = session_of(&fixture.sql(), launched.trim());
+    let prepared = fixture
+        .command(&[
+            "session",
+            "resume",
+            &session,
+            "--reveal-existing",
+            "--prepare",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let argv: Vec<&str> = prepared["open_argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    assert!(argv.contains(&"--reveal-existing"));
+    let mut controller = fixture.viewer(&owner, true);
+    let reveal = fixture.command(&argv[1..]).output().unwrap();
+    assert!(!reveal.status.success(), "reveal stole a competing claim");
+    assert_eq!(fixture.wait_file("launches"), launched);
+    assert!(!fixture.home.path().join("answer").exists());
+    controller.input("original-controller\n");
+    controller.finish();
+    let pid = launched.trim().split(':').next().unwrap();
+    assert_eq!(
+        fixture.wait_file("answer").trim(),
+        format!("{pid}:original-controller")
+    );
+}
+
+#[test]
 fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
     let fixture = Fixture::new();
     let owner = fixture.start(&[

@@ -1,190 +1,146 @@
 # LOO-672 — Ready Task conversations
 
-Re-evaluated November 4, 2026 against merged main `ac8e088f5f`, LOO-717 / #1811
-and LOO-498 / #1814. Jack Heart approved proceeding after this review on November 4:
-“ok, proceed.” Implement the accepted experience through interactive demo and
-review publication; this does not approve shipping or installation. Routine
-implementation choices are delegated to the build. The old plan is archived
-at `research/loo-672-pre-infrastructure-plan.md` and is superseded here.
+Accepted design, reconciled November 4, 2026 against the working diff on
+`a32c385044`, merged infrastructure through `ac8e088f5f`, and fresh LOO-717/498
+Task status. Jack Heart approved the revised November 4 design: “ok, proceed.”
+Implementation and review publication are authorized through interactive demo;
+shipping, merging and installation are not. The pre-infrastructure plan is
+superseded and preserved at
+`a32c385044:scratch/research/loo-672-pre-infrastructure-plan.md`.
 
-## Accepted direction
+## Accepted outcome and constraints
 
-Jack Heart wants automatic conversation opening, fast switching between Tasks,
-and management that saves more machine resources than it consumes. Return lands
-at the bottom; exact old scroll position is not required.
+Task conversations open without an Open click after launch, selection and restart.
+Recent unfinished Tasks stay warm for fast input; returning lands at the bottom.
+Jack selected that memory tradeoff on November 4. Completed Tasks release on
+departure through LOO-717. Close removes warm intent; refresh cannot undo Close,
+but a deliberate later visit may reopen the conversation.
 
-On November 4 Jack selected **keeping recent unfinished Tasks warm**, accepting
-more memory for instant input. Completed Tasks still release on departure under
-LOO-717. This changes that branch's current Desktop implementation, which releases
-unfinished Tasks on departure too; update that owner rather than add another hold.
+Jack selected takeover without Fork on November 4, preserving the last-screen
+and explicit **Take back** interaction. Selection and polling never transfer
+another client's input. The overlay explains the holder using Rust's labels and
+prepared command; without a saved screen it shows the explanation alone. The
+independent CLI fork remains available on the same Task and checkout.
 
-Jack initially selected last-screen + Take back and Fork, considered shared
-input, then chose takeover without Fork. Keep the explicit **Take back** click
-from the selected interaction. Selecting alone does not transfer input from Rex
-or another window. No Fork button or simultaneous-input feature in this delivery.
-The CLI fork remains independently available: it creates another conversation
-on the same Task and checkout from the first conversation's log, not another Task
-or isolated files.
+Viewing, prefetch and restore never start a Graph, submit captured input, create
+a provider thread or replay interrupted input. Explicit Task launch retains its
+authority; navigation observes the resulting conversation. Missing native history
+requires explicit Start/New. Missing checkout, account or Machine evidence stays
+an explicit action or failure, without checkout reconstruction or local fallback.
 
-Viewing never starts a Graph, submits a turn, creates a provider thread, or
-replays interrupted input. Explicit Task launch retains its existing authority;
-navigation observes its resulting conversation.
+The selected Task opens first after relaunch, followed by the bounded saved warm
+set where safe. Saved layout and status are display evidence, not retention or
+readiness. Cold return paints existing history while reconnecting the surviving
+owner or resuming the same provider thread; connecting and failure remain visible.
 
-## Proposed user guide copy
+The initial engineering limits are eight recent unfinished Task conversations
+across repository windows and two concurrent preparations. Visible panes remain
+retained, with exceptions reported. These are provisional values, not a measured
+memory budget or numbers chosen by Jack. No NSView is shared between windows.
+Eviction releases Desktop's viewer and hold; protected work and other hosts may
+keep the provider running. Shells retain their independent lifecycle.
 
-Select a Task to see its conversation. Recent unfinished Tasks stay ready for
-typing when you switch back. Older conversations return automatically through
-their saved screen and provider history, at the bottom, without an Open click.
+## Current implementation
 
-If Rex or another window controls the conversation, Desktop shows its last
-available screen with **Take back**. Click to continue here; the previous terminal
-reports the move. With no saved screen, show the external-holder explanation.
-Display Rust's prepared command alongside the action.
+- Rust's existing Session selection and preparation now accept typed reveal
+  intent. `human_session::reveal` checks native history, current attachment and
+  location under the launch lock, avoids `open_waiting`, and carries a
+  non-replacing claim into transport. A competing viewer receives no automatic
+  takeover. Explicit resume retains its existing behavior.
+- `SessionsWorkspaceRegistry` and `RepositoryWorkspaces` maintain the bounded
+  recent set, visible exceptions, persisted recent/closed intent and preparation
+  concurrency. Session `launchId` invalidates late preparations after release.
+  Completed departure, eviction and Close reuse LOO-717 retention.
+- `WorkModel.revealPrimaryConversation` now includes Tasks; `SessionsStore.select`
+  uses reveal intent. Hidden warm Session panes remain mounted. Linked Task entry
+  and cache restoration share that intent.
+- The last available screen excerpt backs the elsewhere overlay; Rust supplies
+  Take back and holder text. Cold history reuses the existing VT preview/relay,
+  with no second durable screen format. Live relay native-client attachment
+  announces readiness separately from surface creation and saved frames. This
+  signal has not yet established visibly usable Claude/Codex input.
+- Strict Rust/Swift fixtures include reveal actions and opening intent. The old
+  detached-only gate, Task exclusion, unconditional unfinished departure release
+  and blank elsewhere offer are removed. No provider quota, second idle timer,
+  reboot sweep, Fork button or snapshot decoder was added.
 
-Close removes the conversation from Desktop's warm set. Refresh does not reopen
-it; deliberately reopening/selecting that Task later can resume it. Requested
-work, drafts and pending questions keep their shared lifecycle protections.
-Closing a view is not Task completion.
+## November 4 implementation reconciliation
 
-After restarting Desktop, the selected Task opens first. The bounded saved warm
-set of unfinished conversations reconnects in the background where safe. Other
-saved views remain cheap until selected. Saved screens are history, not proof
-of readiness: show a small connecting indication until input works and an honest
-error with Retry if continuation fails. Do not promise instant cold input.
+Linked Task entry now prepares and adopts reveal intent end to end. Explicit
+Start/New and Take back keep their existing authority. Workspace request identity
+is invalidated on Close, eviction and quit, including Close before a Session ID
+arrives. Late results cannot install panes or publish opening errors after release.
+Prepared results are adopted once; they do not cause a second preparation.
+The registry queues preparations separately from `revealConversation`, which
+shares one fresh location read between restored retention and preparation. The
+transport's `record_relay_terminal` records association only after the input claim.
 
-Completed Tasks remain available while selected. Departure releases their
-Desktop hold. Under LOO-717, eligible idle agents end after two minutes and
-eligible shells/checkouts retire at fifteen minutes total; returning cancels
-retirement. History remains afterward. Automatic deleted-checkout reconstruction
-is outside scope.
+WorkCache restores the saved destination. Saved readings cannot schedule reveal;
+fresh planning and Session reads trigger it through their existing model owners.
+The selected workspace is queued first. Restored background Tasks validate their
+recorded Machine/checkout before reporting retention; fresh completion removes
+finished Tasks from the warm set. Explicit Close survives restart. Drafts and
+existing native surfaces continue through their existing owners.
 
-This is proposed guide copy, not a claim about the installed app.
+LOO-717 parent commit `76750bdc55` was integrated with `lf sync --manual`, preserving
+PR #1811 as stack parent. Its single lifecycle owner and existing Task migration
+now supply confirmed-host-exit recovery, per-process Desktop occurrences and
+optional retaining-owner evidence. Parent design/coordination details are preserved
+at that commit. No competing migration or cleanup executor was introduced.
 
-## Delivered foundations and remaining integration
+## Delete — do not maintain
 
-| Work | Observed state | What 672 reuses |
-| --- | --- | --- |
-| 708 / #1802 | Done, merged | Thin viewer, poll-based owner, Claude launcher removal. Codex/OpenCode still retain launchers. |
-| 709 / #1804 | Done, merged | Two-minute idle policy and protections for turns, watches, drafts and pending requests. |
-| 710 / #1801 | Done, merged | libghostty state, persisted `.ghostsnp`, VT repaint while resuming. Replay has bounded history and does not repaint images. |
-| 712 / #1800 | Done, merged | Binary transport, byte-counted reconnect, separate appearance ownership and input control. |
-| 720 / #1809 | Done, merged | Provider-owned status, status replay on attach and repaired Desktop association. |
-| 717 / #1811 | Open PR at demo | Shared host retention and coordinated retirement. Latest confirmed-host-exit refinement is still pending. |
-| 498 / #1814 | Open PR with delivery gaps | Rex native workspace adapter, occurrences and release evidence; not implemented again here. |
+- Removed automatic resume/adopt-open in `prepareLinkedTask` /
+  `connectLinkedOpening`; explicit Start/New and Take back remain.
+- Removed selection-discarding `WorkModel.restore` behavior and its nil-selection
+  expectations in `WorkCacheTests`; Machine-change invalidation remains.
+- Removed cached-reading authorization of background retention/preparation.
+  Saved layout, drafts and history remain display evidence.
+- Removed the duplicate restore-location preflight in `revealConversations`;
+  `revealConversation` checks location and cancellation before adoption.
+- Parent integration removed stable `desktop:<Machine>:<Task>` occurrences and
+  their persisted wall-clock revision keys. Per-process owner evidence now uses
+  LOO-717's sole retirement path and migration.
 
-720's accepted candidate Claude/Rex/Desktop demonstration and CI passed. Its
-machine-wide installation and live Codex/OpenCode behavior were not established.
-719's installed macOS idle-preservation proof remains unstarted. Keep those limits
-visible in combined acceptance; do not duplicate the infrastructure.
+The three reconciled implementation gaps are closed. Close/eviction also settle
+the opening receipt as failed, so a discarded late result leaves no permanent
+opening indicator. Focused checks passed; gate and interactive demo retain the
+boundaries below.
 
-## One concrete interaction
+## Infrastructure and proof boundaries
 
-1. Select A: reuse its existing primary conversation automatically. No resumable
-   history means the existing explicit Start/New action, not an implicit first turn.
-2. Select B, then A: A stays warm, preserves provider/editor identity and accepts
-   input immediately; return scrolls to the bottom.
-3. Visit enough Tasks to evict A: release Desktop's view and hold through 717.
-   Never kill providers to meet a cache count. Work/drafts/questions/other hosts
-   can keep A's owner alive.
-4. Return to cold A: attach the surviving owner or paint the existing saved screen
-   while resuming the same provider thread. No turn replay.
-5. Resume A in Rex: Desktop loses input and shows Take back over its last screen.
-   Polling/navigation cannot take it back; the explicit click can.
-6. Complete A and leave: remove it from the warm set and let 717 own retirement.
-   A cached screen cannot renew retention or recreate the deleted checkout.
+708/#1802, 709/#1804, 710/#1801, 712/#1800 and 720/#1809 are merged. They supply
+thin viewers, protected idle retirement, persisted VT history, separate appearance
+and input ownership, and current provider status. Codex/OpenCode retain launchers;
+VT replay has bounded history and does not repaint images. Reuse those owners.
 
-## Implementation proposal
+LOO-717 owns eligible two-minute idle-agent retirement and fifteen-minute-total
+completed-and-away shell/checkout retirement, cancellation on return, protected
+work and other-host retention. Eligible uncommitted files may be discarded under
+its existing safeguards; LOO-672 adds no deletion policy. LOO-498/#1814 remains
+open and idle with delivery gaps; its latest coordination comment records the
+717 owner-evidence API. Rex still owns native adapter/layout/job settlement.
 
-### One bounded Desktop warm set
+720's candidate Claude/Rex/Desktop demonstration and CI passed, without proving
+machine-wide installation or live Codex/OpenCode behavior. 719's installed macOS
+idle-preservation proof was unstarted at the design review; this pass did not
+refresh it. No installed or cross-host acceptance follows from these foundations.
 
-Reuse the retained repository workspace and terminal pool. Track recent explicit
-Task visits, not status polls or passive arrivals. Start with a target of **eight
-recent unfinished Task conversations**, including selected conversations. This
-is a provisional engineering value, not Jack's chosen budget. Actually visible
-panes remain retained; report any explicit multi-pane exception instead of
-evicting something visible. Never share an NSView across windows.
+Gate retains affected Rust/Swift suites, Clippy, formatting and Linux isolation.
+Coverage must include real Task navigation, cached-to-fresh restart, strict DTOs,
+Session CLI, non-replacing attach races, status across reconnect and eviction,
+protected drafts/requests, Close, and completed departure.
 
-Warm surfaces and host holds must agree. Eviction, Close, completion-and-departure
-and app exit release through the existing lifecycle. A hidden attached viewer
-must not defeat the idle clock after release. Ordinary shells keep their own
-lifetime; no shell LRU or provider termination manager is added.
+Demo retains real Desktop with Claude and Codex: A→B→A with immediate input and
+unchanged provider/editor/draft identity; cold return with history; takeover from
+a named Rex adapter; relaunch and stale-owner/reboot recovery in a disposable
+environment. Measure first paint separately from usable input and Desktop + lf +
+provider private footprint with twenty visited Tasks. Record protected owners and
+visible-pane exceptions, then state the measured budget. Eight remains provisional.
+The rendered interaction and these measurements require demo/review, not a headless
+substitute. No unresolved product decision remains before that evidence.
 
-Save warm intent beside workspace state. Restore selected first, then the bounded
-eligible saved set with limited concurrency (initially two preparations). Recheck
-completion, closure, location and external control. Saved layout is not a live
-host hold. An unavailable remote Machine never becomes a local replacement.
+Product GOAL and full MEMORY were read; no immediate child memory directories
+exist in this checkout. The Wave records durable direction separately from this plan.
 
-### Make automatic opening safe at execution time
-
-Current `SessionsStore.adoptPreparation(.attach)` accepts only a detached record;
-`prepareSession` returns a takeover command. This prevents auto-resuming ended
-conversations and leaves a race between checking availability and attaching.
-Rust's `open_waiting` can also initiate captured input with no provider history.
-A Swift-only `opens_turn` check cannot establish the required behavior.
-
-Extend the existing preparation/launch path with typed **reveal existing** intent.
-Rust resolves: attach a free existing owner, resume existing native history,
-report external control, require explicit initial start, or report unavailable.
-Recheck under current launch/claim boundaries, carrying non-replacing intent into
-the actual attach (`replace: false` already exists in the protocol). Another
-client winning the race produces Take back, not takeover. Unknown liveness does
-not authorize an automatic provider stop.
-
-Explicit Take back uses ordinary resume. Keep the public CLI's simple semantics;
-reuse its machinery rather than build another resolver. Exact wire shape is an
-engineering choice, with strict Rust/Swift fixtures updated together. Rust owns
-holder labels and executable actions; Swift does not invent either.
-
-### Reuse screen and status delivery
-
-Use the existing VT relay for terminal repaint. The elsewhere overlay retains a
-bounded last frame/excerpt; missing preview is an honest text state. Do not add
-another durable screen format or GhosttyKit snapshot-decoder project. Current
-Working/Blocked/Done comes from 720's projection; a saved badge is not live evidence.
-
-Use actual native readiness for input and preserve failures with Retry. Do not
-buffer surprise input for another owner. Screens cannot restore native editors
-or pending requests; 709 protects their running owners.
-
-### Delete replaced behavior
-
-Replace the Task exclusion in `revealPrimaryConversation`, click-only recovery
-for resumable history and blank elsewhere placeholder. Update existing tests.
-Remove the old plan's detached-owner quota, second idle timer, blanket reboot
-sweep, Claude-only Fork work, Fork button and `opens_turn`-only guard. Change
-717's unfinished departure policy at its existing owner; keep completed release,
-explicit first-turn/Graph actions, Close and failures distinct.
-
-## Delivery and proof
-
-The original infrastructure landing prerequisite is satisfied. The revised
-product direction is specific enough to implement after this review. Integrate
-after 717 lands or explicitly stack on its PR; do not recreate its unmerged
-retention contract. 498 need not finish every workspace feature first, but the
-cross-host demo must name the adapter being exercised. Jack's subsequent proceed
-instruction authorizes implementation through demo, not shipping or installation.
-
-Focused checks must cover:
-
-- Selected existing Session opens once; late preparation cannot reopen an evicted
-  or closed view; passive arrivals do not warm unseen Tasks.
-- A→B→A preserves warm surface/provider/draft identity; eviction leaves protected
-  work running; completed Tasks lose background warmth; Close defeats refresh.
-- Another host claims between prepare and attach: auto-open does not displace it,
-  duplicate a provider or start a turn; explicit Take back transfers once.
-- Cold native history resumes; missing history/checkout/auth/location stays an
-  explicit action or failure, without implicit thread creation or local fallback.
-- Restored warm intent is bounded, selected-first, and cannot reclaim externally
-  controlled or explicitly closed conversations in the background.
-- 717's return cancellation, other-host retention and final-work protections win
-  over cache bookkeeping. Completion changes state independently of provider exit.
-- 720's current status survives switch/reconnect/takeover; silence is not idle.
-
-Demonstrate real Desktop with Claude and Codex: warm switching and typing, cold
-return, takeover from Rex, app relaunch and stale-owner/reboot recovery in a
-disposable environment. Measure first paint and input-ready separately, plus
-Desktop + lf + provider private footprint with twenty visited Tasks. Record
-protected owners and visible-pane exceptions. Eight is a starting value, not a
-claimed budget or result.
-
-Review checks: source/design reconciliation only; no runtime acceptance claimed.
+Checks (November 4): `scripts/test_desktop.sh --jobs 4 --filter 'WorkDestinationTests|WorkCacheTests|WorkspaceRetentionTests|DTOFixtureTests.taskHostOwner'` passed 93 tests; after the opening-receipt correction, `--filter WorkDestinationTests.lateSidebarRevealIsDiscarded` passed both Close/eviction cases. After simplification, `scripts/test_desktop.sh --jobs 4 --filter 'WorkCacheTests|WorkspaceSessionLifecycleTests|WorkDestinationTests.lateSidebarRevealIsDiscarded'` passed 24 tests and `cargo test -p loopflow --test transport_tests prepared_reveal_preserves_a_later_controlling_viewer` passed. The unchanged `cargo test -p loopflow --lib reveal_requires_history_and_never_publishes_a_first_turn` and `cargo test -p loopflow --lib retirement_confirmed_host_exit_finishes_without_desktop_and_still_waits_for_shell_jobs` each passed one test; `cargo fmt --all --check`, `git diff --check` and `lf context` passed. Gate owns broader suites/Clippy; configured/rendered usability and memory proof remain with demo.

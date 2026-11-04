@@ -824,10 +824,12 @@ struct SessionPaneView: View {
     @ViewBuilder
     private func openButton(_ item: SessionItem) -> some View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
-            Button(action.kind == .open ? "Resume" : action.label) {
+            let retry = item.error != nil
+            Button(retry ? "Retry" : action.label == "Start conversation" ? action.label : action.kind == .open ? "Resume" : action.label) {
                 sessions.beginPaneLoad(item.id)
                 Task { @MainActor in
-                    if action.kind == .moveHere { await sessions.moveHere(item.id) }
+                    if retry { await sessions.select(item.id) }
+                    else if action.kind == .moveHere { await sessions.moveHere(item.id) }
                     else { await sessions.resume(item.id) }
                 }
             }
@@ -842,29 +844,33 @@ struct SessionPaneView: View {
 
     /// A Session whose provider client lives in another terminal. The pane
     /// explains what that means and makes the takeover explicit: nothing is
-    /// stopped until Move here.
+    /// transferred until Take back.
     private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
         let action = item.record.action(.moveHere)
-        return SessionSlotOffer(
-            title: "Active in another terminal", systemImage: "rectangle.on.rectangle",
-            action: action?.label, actionImage: "arrow.down.forward.square",
-            note: "Moving stops the other client. Unsent text typed there is lost.",
-            unavailable: action?.unavailableReason, help: action?.help ?? "",
-            accessibilityLabel: "Move session here",
-            accessibilityHint: "Stops the other client; unsent text typed there is lost",
-            actionIdentifier: "session-move-here-\(item.id)",
-            perform: {
-                sessions.beginPaneLoad(item.id)
-                Task { @MainActor in await sessions.moveHere(item.id) }
+        return ZStack {
+            if let screen = item.lastScreen {
+                ScrollView {
+                    Text(screen).font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.opacity(0.35).allowsHitTesting(false)
             }
-        ) {
-            Text(
-                """
-                \(item.record.title) is attached to a provider client outside \
-                this window — Warp, another Loopflow window, or an SSH session. \
-                It keeps running there until you move it.
-                """
-            )
+            SessionSlotOffer(
+                title: "Active in another terminal", systemImage: "rectangle.on.rectangle",
+                action: action?.label, actionImage: "arrow.down.forward.square",
+                note: action?.help,
+                unavailable: action?.unavailableReason, help: action?.help ?? "",
+                accessibilityLabel: "Take back session",
+                accessibilityHint: action?.help,
+                actionIdentifier: "session-move-here-\(item.id)",
+                perform: {
+                    sessions.beginPaneLoad(item.id)
+                    Task { @MainActor in await sessions.moveHere(item.id) }
+                }
+            ) {
+                Text(item.record.action(.open)?.unavailableReason ?? "This conversation is controlled by another client.")
+                Text(item.record.openArgv.map(shellEscape).joined(separator: " "))
+                    .font(.caption.monospaced()).textSelection(.enabled)
+            }
         }
         .accessibilityIdentifier("session-elsewhere-\(item.id)")
     }
@@ -881,12 +887,19 @@ struct SessionPaneView: View {
                 isFocused: isFocused,
                 onSurfaceCreated: {
                     Perf.agentInput("surface_created", session: item.id)
-                    sessions.recordPaneLive(item.id)
+                    sessions.beginPaneLoad(item.id)
                 },
                 onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
                 onFocus: focusPane
             )
             .id(item.launchId)
+            .overlay(alignment: .topTrailing) {
+                if item.state == .prepared {
+                    ProgressView("Connecting…").controlSize(.small).padding(8)
+                        .background(theme.terminal.background.color)
+                        .allowsHitTesting(false)
+                }
+            }
         } else {
             Text("Session location unavailable")
         }

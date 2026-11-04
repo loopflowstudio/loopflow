@@ -416,10 +416,10 @@ struct WorkspaceSessionLifecycleTests {
         let calls = AttachmentReads()
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
             await calls.record()
-            guard args == ["session", "resume", args[2], "--prepare", "--json"] else {
+            guard args == ["session", "resume", "--reveal-existing", args[3], "--prepare", "--json"] else {
                 throw RegistryQueryError("unexpected argv: \(args)")
             }
-            return session(id: args[2], state: "detached")
+            return session(id: args[3], state: "detached")
         })
         let ids = (0..<12).map { "session-\($0)" }
         store.reconcile(try records(ids.map { session(id: $0, state: "active") }))
@@ -448,11 +448,12 @@ struct WorkspaceSessionLifecycleTests {
         #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", "primary"])
     }
 
-    @Test("Showing a pane launches only a conversation no terminal shows",
-          arguments: [("detached", SessionItem.State.prepared), ("active", .elsewhere), ("closed", .pending)])
+    @Test("Showing a pane resumes saved history and leaves external input alone",
+          arguments: [("detached", SessionItem.State.prepared), ("active", .elsewhere), ("closed", .prepared)])
     func showingDecidesFromState(state: String, expected: SessionItem.State) async throws {
-        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
-            session(id: "shown", state: state)
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            #expect(args.contains("--reveal-existing"))
+            return session(id: "shown", state: state)
         })
         store.reconcile(try records([session(id: "shown", state: "closed")]))
         await store.select("shown")
@@ -478,39 +479,56 @@ struct WorkspaceSessionLifecycleTests {
         #expect(await calls.count == 1)
     }
 
-    @Test("A pane with nothing running offers one Resume", arguments: [false, true])
-    func recoveryButton(ended: Bool) async throws {
-        let query = RegistryQuery { args, _ in
-            session(id: "retained", state: "closed")
-        }
-        let store = SessionsStore(repoPath: "/tmp/repo", query: query)
+    @Test("Eviction fences a preparation that returns after release")
+    func releaseFencesLatePreparation() async throws {
+        let started = AsyncStream<Void>.makeStream(), response = AsyncStream<Void>.makeStream()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            started.continuation.yield(())
+            for await _ in response.stream { break }
+            return session(id: "retained", state: "closed")
+        })
         store.reconcile(try records([session(id: "retained", state: "closed")]))
-        store.adoptPreparation(try #require(store.sessions.first?.record))
-        if ended {
-            store.recordPaneLive("retained")
-            store.noteSurfaceClosed(.session("retained", machineId: fixtureMachineId), output: "Left “retained”.")
-        } else {
-            store.recordPaneFailure("retained", reason: "Owner unavailable")
-        }
-        await store.select("retained")
+        let selection = Task { await store.select("retained") }
+        for await _ in started.stream { break }
+        store.release("retained")
+        response.continuation.finish()
+        await selection.value
         #expect(store.sessions.first?.state == .pending)
-        let workspace = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-            .workspace(for: WorkWorkspaceKey(repository: "repo", kind: .task, id: "task"), title: "Task", location: nil)
-        workspace.multiplexer.load(sessionId: "retained")
-        let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
-            sessions: store, workspace: workspace, model: WorkModel(query: query, repoPath: "/tmp/repo"),
-            onFocus: { _, _ in })
-        let placeholder = view._sessionPlaceholder(try #require(store.sessions.first))
-        #expect(throws: (any Error).self) { try placeholder.inspect().find(button: "Reconnect") }
-        let resume = try placeholder.inspect().find(button: "Resume")
-        #expect(!resume.isDisabled())
-        try resume.tap()
-        let resumeDeadline = ContinuousClock.now + .seconds(3)
-        while store.sessions.first?.state != .prepared, ContinuousClock.now < resumeDeadline {
-            await Task.yield()
+        #expect(store.sessions.first?.surface == nil)
+    }
+
+    @Test("Automatic preparations start selected first, stay bounded and honor Close")
+    func boundedSelectedFirstPreparation() async throws {
+        let reads = RevealReads()
+        let response = AsyncStream<Void>.makeStream()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            let id = args[3]
+            await reads.record(id)
+            for await _ in response.stream { break }
+            return session(id: id, state: "closed")
+        })
+        store.reconcile(try records(["a", "b", "c", "unseen"].map { session(id: $0, state: "closed") }))
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        var workspaces: [SessionsWorkspace] = []
+        for id in ["a", "b", "c"] {
+            let workspace = registry.open(WorkWorkspaceKey(repository: "repo", kind: .task, id: id), title: id, location: nil)
+            workspace.multiplexer.load(sessionId: id)
+            workspaces.append(workspace)
         }
-        #expect(store.sessions.first?.state == .prepared)
-        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", "retained"])
+        registry.revealConversations(store: store)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while await reads.ids.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(await reads.ids == ["c", "b"])
+        #expect(registry.preparationCount == 2)
+        workspaces[0].closePane(workspaces[0].multiplexer.sessionPane!.id)
+        workspaces[2].closePane(workspaces[2].multiplexer.sessionPane!.id)
+        response.continuation.finish()
+        while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(item(store, "b")?.state == .prepared)
+        #expect(item(store, "c")?.surface == nil)
+        #expect(item(store, "a")?.surface == nil)
+        #expect(item(store, "unseen")?.surface == nil)
+        #expect(await reads.ids == ["c", "b"])
     }
 
     @Test("Cancellation after preparation cannot create a late viewer")
@@ -529,8 +547,13 @@ struct WorkspaceSessionLifecycleTests {
         await selection.value
         started.continuation.finish()
         #expect(store.sessions.first?.surface == nil)
-        #expect(store.sessions.first?.error != nil)
+        #expect(store.sessions.first?.state == .pending)
     }
+}
+
+private actor RevealReads {
+    private(set) var ids: [String] = []
+    func record(_ id: String) { ids.append(id) }
 }
 
 private actor AttachmentReads {
@@ -564,7 +587,7 @@ private func session(id: String, state: String, primary: Bool = false) -> String
       "state": "\(wire)", "availability": \(state == "available" ? "\"available\"" : "null"),
       "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
-      "actions": \(sessionActionFixtureJSON(state: wire)),
+      "actions": \(sessionActionFixtureJSON(state: wire).dropLast()), {"kind":"reveal","label":"Show conversation","help":"Existing history","unavailable_reason":null}],
       "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
       "open_argv": ["lf", "session", "resume", "\(id)"]
     }

@@ -103,9 +103,9 @@ struct RegistryQueryTests {
         #expect(try object(chapter) == object(
             #"{"write":"new_chapter","directory":"/r","name":"October","plan":"{}","preview":true}"#))
         #expect(chapter.input == "{}")
-        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil)
+        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil, intent: .resume)
         #expect(try object(primary) == object(
-            #"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#))
+            #"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#))
         #expect(primary.argv == ["--repo", "/r", "session", "resume", "--prepare", "--json"])
         let restart = ServedWrite.sessionNew(directory: "/r", id: "session_1", agent: "codex")
         #expect(try object(restart) == object(

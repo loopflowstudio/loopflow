@@ -9,7 +9,7 @@ import ViewInspector
 @Suite("Application workspace retention")
 @MainActor
 struct WorkspaceRetentionTests {
-    @Test("Selection retains, departure releases, and Close preserves history with a closed observation")
+    @Test("Recent unfinished Tasks stay warm; Close preserves history and releases retention")
     func hostRetentionFollowsTheNativeWorkspace() {
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         let first = WorkWorkspaceKey(repository: "repo", kind: .task, id: "first")
@@ -19,8 +19,8 @@ struct WorkspaceRetentionTests {
         #expect(a.hostUse == "retained")
         #expect(!a.nativeSettled)
         let b = registry.open(second, title: "Second", location: nil)
-        #expect(a.hostUse == "away")
-        #expect(a.nativeSettled)
+        #expect(a.hostUse == "retained")
+        #expect(!a.nativeSettled)
         #expect(b.hostUse == "retained")
         registry.closePresentation()
         #expect(a.hostUse == "closed")
@@ -30,6 +30,74 @@ struct WorkspaceRetentionTests {
         _ = registry.open(first, title: "First", location: nil)
         #expect(a.hostUse == "retained")
         #expect(!a.nativeSettled)
+    }
+
+    @Test("Warm visits are bounded; completed departure and Close release without refresh reopening")
+    func boundedWarmVisits() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let keys = (0..<10).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
+        for key in keys { registry.open(key, title: key.id, location: nil) }
+        #expect(registry.recentTasks.count == 8)
+        #expect(registry.retained(keys[0])?.hostUse == "away")
+        let latest = registry.retained(keys[9])!
+        registry.updateCompletion(keys[9], completed: true)
+        #expect(latest.hostUse == "retained")
+        registry.open(keys[0], title: "First", location: nil)
+        #expect(latest.hostUse == "away")
+        let first = registry.retained(keys[0])!
+        first.multiplexer.load(sessionId: "conversation")
+        first.closePane(first.multiplexer.sessionPane!.id)
+        #expect(first.conversationClosed)
+        #expect(!registry.recentTasks.contains(keys[0]))
+        #expect(first.hostUse == "away")
+        registry.open(keys[0], title: "First", location: nil)
+        #expect(!first.conversationClosed)
+        #expect(first.hostUse == "retained")
+    }
+
+    @Test("The eight-conversation bound spans repository windows without sharing surfaces")
+    func warmthIsApplicationWide() {
+        let application = RepositoryWorkspaces(localMachineId: "local")
+        let first = application.registry(for: "first")
+        let second = application.registry(for: "second")
+        for index in 0..<8 {
+            first.open(WorkWorkspaceKey(repository: "first", kind: .task, id: "a-\(index)"), title: "A", location: nil)
+        }
+        for index in 0..<8 {
+            second.open(WorkWorkspaceKey(repository: "second", kind: .task, id: "b-\(index)"), title: "B", location: nil)
+        }
+        #expect(first.recentTasks.count + second.recentTasks.count == 8)
+        #expect(first.recentTasks.count == 1) // Its visible pane stays retained.
+        #expect(first.surfaces !== second.surfaces)
+    }
+
+    @Test("Restart restores bounded warm intent and preserves explicit Close")
+    func restoresWarmIntent() {
+        let repository = "repo_" + UUID().uuidString
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        registry.loadWarmIntent(repository: repository)
+        let keys = (0..<10).map { WorkWorkspaceKey(repository: repository, kind: .task, id: "saved-\($0)") }
+        for key in keys { registry.open(key, title: key.id, location: nil) }
+        let last = registry.retained(keys[9])!
+        last.multiplexer.load(sessionId: "closed")
+        last.closePane(last.multiplexer.sessionPane!.id)
+        registry.prepareForQuit()
+        registry.closePresentation() // AppKit window teardown must not erase warm intent.
+        let restored = SessionsWorkspaceRegistry(localMachineId: "local")
+        restored.loadWarmIntent(repository: repository)
+        #expect(restored.restoreCandidates.count == 7)
+        #expect(!restored.restoreCandidates.contains(keys[9]))
+        #expect(restored.recentTasks.isEmpty) // Saved intent alone acquires no hold.
+        let closed = restored.open(keys[9], title: "Closed", location: nil, deliberate: false)
+        #expect(closed.conversationClosed)
+        #expect(closed.hostUse == "away")
+        let interruptedRestore = SessionsWorkspaceRegistry(localMachineId: "local")
+        interruptedRestore.loadWarmIntent(repository: repository)
+        #expect(interruptedRestore.restoreCandidates.count == 7) // No fresh read has settled these yet.
+        restored.open(keys[9], title: "Closed", location: nil)
+        #expect(!closed.conversationClosed)
+        #expect(closed.hostUse == "retained")
+        UserDefaults.standard.removeObject(forKey: "warm-conversations-local-\(repository.lowercased())")
     }
 
     @Test("Quit acknowledges settled presentation as away and preserves an existing deadline")

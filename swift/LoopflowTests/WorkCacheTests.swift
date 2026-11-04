@@ -52,9 +52,102 @@ struct WorkCacheTests {
         #expect(returning.savedMachineId == "home-a")
         #expect(returning.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
-        #expect(returning.selection == nil)
+        #expect(returning.selection == .task(id: "issue-review"))
         #expect(returning.task(id: "issue-now") != nil)
         #expect(try Data(contentsOf: cacheURL) == savedBytes)
+    }
+
+    @Test("Restart keeps the selected Task but does not retain stale completion or location", arguments: [false, true])
+    func restartWaitsForFreshEvidence(machineUnavailable: Bool) async throws {
+        let directory = try temporaryDirectory()
+        let source = try Source()
+        let cache = WorkCache(directory: directory)
+        let first = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        first.confirmMachine("home-a")
+        await first.refresh()
+        first.select(.task(id: "issue-review"))
+        cache.flush()
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let selectedTask = try #require(first.task(id: "issue-review")?.task)
+        let otherTask = try #require(first.task(id: "issue-now")?.task)
+        let selected = WorkWorkspaceKey(repository: repository, kind: .task, id: try #require(selectedTask.runtime?.workId))
+        let other = WorkWorkspaceKey(repository: repository, kind: .task, id: try #require(otherTask.runtime?.workId))
+        let previous = SessionsWorkspaceRegistry(localMachineId: "home-a")
+        previous.loadWarmIntent(repository: repository)
+        previous.open(other, title: "Other", location: otherTask.reference.workspace?.identity)
+        previous.open(selected, title: "Selected", location: selectedTask.reference.workspace?.identity)
+        previous.prepareForQuit()
+
+        try await source.completeTask("issue-now")
+        await source.setLocationFailure(machineUnavailable ? "Machine unavailable" : "Recorded checkout changed")
+        let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
+        returning.confirmMachine("home-a")
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
+        returning.bindWorkspaces(registry, repository: repository)
+        #expect(returning.selection == .task(id: "issue-review"))
+        #expect(registry.selectedWork == selected)
+        #expect(registry.retained(other) == nil)
+        #expect(registry.retained(selected)?.location == nil)
+        #expect(registry.retained(selected)?.hostUse == "away")
+        await source.hold(["desktop", "plan"])
+        let refresh = Task { await returning.refresh() }
+        await source.waitForHeldRead()
+        returning.revealPrimaryConversation()
+        #expect(registry.retained(other) == nil)
+        #expect(registry.preparationCount == 0)
+        await source.release()
+        await refresh.value
+        let deadline = ContinuousClock.now + .seconds(3)
+        while registry.retained(selected)?.conversationError == nil, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(returning.selection == .task(id: "issue-review"))
+        #expect(registry.retained(selected)?.hostUse == "away")
+        #expect(registry.retained(selected)?.conversationError?.contains(machineUnavailable ? "Machine unavailable" : "location changed") == true)
+        #expect(registry.retained(other) == nil)
+        #expect(!registry.recentTasks.contains(other))
+        registry.prepareForQuit()
+    }
+
+    @Test("Fresh restart prepares the selected conversation first and honors saved Close", arguments: [false, true])
+    func restartRevealsSelectedFirst(closed: Bool) async throws {
+        let directory = try temporaryDirectory()
+        let source = try Source()
+        let cache = WorkCache(directory: directory)
+        let first = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        first.confirmMachine("home-a")
+        await first.refresh()
+        first.select(.task(id: "issue-review"))
+        cache.flush()
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let selectedTask = try #require(first.task(id: "issue-review")?.task)
+        let otherTask = try #require(first.task(id: "issue-now")?.task)
+        let selected = WorkWorkspaceKey(repository: repository, kind: .task, id: try #require(selectedTask.runtime?.workId))
+        let other = WorkWorkspaceKey(repository: repository, kind: .task, id: try #require(otherTask.runtime?.workId))
+        let previous = SessionsWorkspaceRegistry(localMachineId: "home-a")
+        previous.loadWarmIntent(repository: repository)
+        previous.open(other, title: "Other", location: otherTask.reference.workspace?.identity)
+        let selectedWorkspace = previous.open(selected, title: "Selected", location: selectedTask.reference.workspace?.identity)
+        if closed { selectedWorkspace.closePane(selectedWorkspace.multiplexer.focusedPaneId) }
+        previous.prepareForQuit()
+        await source.setLocationFailure(nil)
+        let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
+        returning.confirmMachine("home-a")
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
+        returning.bindWorkspaces(registry, repository: repository)
+        await returning.refresh()
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        let deadline = ContinuousClock.now + .seconds(3)
+        let expected = closed ? 1 : 2
+        while store.sessions.filter({ $0.state == .prepared }).count < expected, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(registry.selectedWork == selected)
+        #expect(store.sessions.filter { $0.state == .prepared }.count == expected)
+        #expect(await source.preparedTasks.first == (closed ? other.id : selected.id))
+        #expect(registry.retained(selected)?.conversationClosed == closed)
+        #expect(registry.retained(selected)?.hostUse == (closed ? "away" : "retained"))
+        #expect(registry.retained(other)?.hostUse == "retained")
+        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments.contains("--reveal-existing") })
+        registry.prepareForQuit()
     }
 
     @Test("Saved text never claims a live process or a legal mutation")
@@ -230,7 +323,7 @@ struct WorkCacheTests {
 
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        #expect(returning.selection == nil)
+        #expect(returning.selection == .task(id: "issue-now"))
         await source.hold(["desktop", "plan"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
@@ -326,9 +419,11 @@ struct WorkCacheTests {
 }
 
 private actor Source {
-    private let roadmap: String
+    private var roadmap: String
     private let sessions: String
     private var failed = false
+    private var locationFailure: String? = "Location unavailable"
+    private(set) var preparedTasks: [String] = []
     private var holding: [String]?
     private(set) var reads = 0
     private var held: CheckedContinuation<Void, Never>?
@@ -342,6 +437,26 @@ private actor Source {
     }
 
     nonisolated var query: RegistryQuery { RegistryQuery { args, _ in try await self.read(args) } }
+
+    func setLocationFailure(_ reason: String?) { locationFailure = reason }
+
+    func completeTask(_ id: String) throws {
+        var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
+        func completed(_ inventory: [String: Any]) -> [String: Any] {
+            var inventory = inventory
+            inventory["items"] = (inventory["items"] as! [[String: Any]]).map { item in
+                guard (item["task"] as? [String: Any])?["id"] as? String == id else { return item }
+                var item = item
+                var runtime = item["runtime"] as! [String: Any]
+                runtime["status"] = "done"
+                item["runtime"] = runtime
+                return item
+            }
+            return inventory
+        }
+        wire["tasks"] = completed(wire["tasks"] as! [String: Any])
+        roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+    }
 
     func fail() { failed = true }
     func recover() { failed = false }
@@ -368,7 +483,35 @@ private actor Source {
                 arrived = nil
             }
         }
-        switch args.first {
+        let command = args.first == "--machine" ? Array(args.dropFirst(4)) : args
+        if command.starts(with: ["task", "location"]) {
+            if let locationFailure, locationFailure != "Recorded checkout changed" { throw RegistryQueryError(locationFailure) }
+            let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
+            let task = try #require(snapshot.tasks.items.first { $0.runtime?.workId == command[2] })
+            let location = try #require(task.reference.workspace?.identity)
+            let request = command[try #require(command.firstIndex(of: "--request")) + 1]
+            return String(decoding: try JSONEncoder().encode([TaskLocationObservation(request: request,
+                repositoryID: args[3], taskID: command[2], machineID: location.machineId, observedAt: 1,
+                location: .recorded(taskID: command[2], checkout: location.worktree + (locationFailure == nil ? "" : "/moved")))]), as: UTF8.self)
+        }
+        if command.starts(with: ["session", "resume"]), command.contains("--reveal-existing") {
+            let id = command[try #require(command.firstIndex(of: "--task")) + 1]
+            let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
+            let task = try #require(snapshot.tasks.items.first { $0.runtime?.workId == id })
+            let location = try #require(task.reference.workspace?.identity)
+            let page = try JSONSerialization.jsonObject(with: Data(sessions.utf8)) as! [String: Any]
+            var record = (page["entries"] as! [[String: Any]])[0]
+            record["id"] = "conversation-" + id
+            record["task_ids"] = [id]
+            record["task_primary"] = true
+            record["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree, "task_id": id]
+            record["state"] = "closed"
+            record["actions"] = sessionActionFixture(state: "closed") + [["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": NSNull()]]
+            record["open_argv"] = ["lf", "session", "resume", "conversation-" + id, "--reveal-existing"]
+            preparedTasks.append(id)
+            return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
+        }
+        switch command.first {
         case "desktop" where args.dropFirst().first == "plan": return roadmap
         case "desktop" where args.dropFirst().first == "sessions": return sessions
         case "wave": return "[]"

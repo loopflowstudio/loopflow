@@ -20,6 +20,7 @@ public enum SessionAvailability: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
+    case reveal
     case open
     case moveHere = "move_here"
 }

@@ -11,6 +11,8 @@
 
 import Foundation
 
+public enum SessionOpenIntent: String, Codable, Sendable { case resume, reveal }
+
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.
 /// `stdout` is what a failed command printed before it exited, such as the
 /// receipt of a Task filed before its run failed.
@@ -235,7 +237,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionRename(directory: String, id: String, name: String)
     case sessionBind(directory: String, id: String, task: String)
     /// The repository's conversation when it names no Session, Task or Wave.
-    case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
+    case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
     case sessionNew(directory: String, id: String, agent: String?)
     case waveAdd(directory: String, wave: String, objective: String?)
     case planningRefresh(directory: String, wave: String)
@@ -266,8 +268,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
-        case .sessionResume(let directory, let id, let task, let wave, let agent):
-            Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
+        case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
+            Self.prepared(agent, ["session", "resume"] + (intent == .reveal ? ["--reveal-existing"] : []) + [id].compactMap { $0 }
                 + Self.option("--task", task) + Self.option("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let id, let agent):
@@ -341,9 +343,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("session_rename", ["directory": directory, "id": id, "name": name])
         case .sessionBind(let directory, let id, let task):
             TaggedFields("session_bind", ["directory": directory, "id": id, "task": task])
-        case .sessionResume(let directory, let id, let task, let wave, let agent):
+        case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
             TaggedFields("session_resume", ["directory": directory, "id": id, "task": task, "wave": wave,
-                                            "agent": agent])
+                                            "agent": agent, "intent": intent.rawValue])
         case .sessionNew(let directory, let id, let agent):
             TaggedFields("session_new", ["directory": directory, "id": id, "agent": agent])
         case .waveAdd(let directory, let wave, let objective):
@@ -935,27 +937,26 @@ public struct RegistryQuery: Sendable {
     /// The repository or Wave's retained conversation; explicit opening only.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil)))
+            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil, intent: .resume)))
     }
 
-    /// The Task's one ongoing conversation: the one already chosen, else its
-    /// only or most recently used one, else a new one in its checkout. The
-    /// choice is remembered as the Task's primary. External ownership is returned
-    /// as a Move here action without transferring control.
-    public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
+    /// Select the Task's ongoing conversation. Resume may create it; reveal
+    /// requires existing history. External ownership offers Take back.
+    public func prepareTaskSession(issue: String, cwd: String?, intent: SessionOpenIntent = .resume) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil)))
+            .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil, intent: intent)))
     }
 
     /// Prepare one Session’s terminal command without starting its provider. The
-    /// command takes the conversation over from whatever holds it.
+    /// Resume transfers control; reveal only attaches a free owner or resumes saved history.
     public func prepareSession(
         id: String,
         agent: String? = nil,
-        cwd: String? = nil
+        cwd: String? = nil,
+        intent: SessionOpenIntent = .resume
     ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd ?? "/", id: id, task: nil, wave: nil, agent: agent)))
+            .sessionResume(directory: cwd ?? "/", id: id, task: nil, wave: nil, agent: agent, intent: intent)))
     }
 
     /// Give one Session a human-assigned name and return the authoritative

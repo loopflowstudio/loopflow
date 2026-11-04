@@ -266,8 +266,9 @@ adapter's independent settlement report. Destination shell jobs always settle
 through their own owners. Hosts without verifiable owner evidence omit `--owner`;
 their unavailable observations remain pending until a fresh report.
 
-Desktop reports retained for the selected Task, away on departure, and closed
-when its repository window explicitly closes. Detached Desktop surfaces can
+Desktop retains visible Tasks and a bounded recent set of unfinished conversations.
+Completed departure and eviction report away; explicitly closing a repository
+window reports closed. Detached Desktop surfaces can
 acknowledge native settlement while destination-owned shells still run. Quit
 releases as away and waits up to five seconds for acknowledgements; it preserves
 an existing absence deadline and does not become explicit Close. Acknowledged
@@ -292,3 +293,11 @@ Eligible cleanup discards uncommitted files but preserves primary/persistent
 checkouts and changed committed refs. Failures retain a pending reason and retry
 on the next host report. Task and conversation history survive; reopening a
 retired Task never silently recreates a checkout.
+
+Desktop's automatic reveal uses a non-replacing input claim. If another viewer
+wins before attachment, the owner returns Busy and keeps that viewer's input.
+Only explicit Take back uses ordinary replacing resume. The live relay announces
+native input readiness to Desktop after its owner acknowledges the native client;
+saved screen bytes never provide that announcement. A successful automatic attach
+records its Desktop terminal association after the handshake, preserving current
+provider status without claiming another viewer's input during preparation.

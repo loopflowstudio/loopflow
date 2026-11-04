@@ -15,6 +15,13 @@ struct DTOFixtureTests {
         #expect(value.settlesOnExit)
         #expect(try JSONDecoder().decode(TaskHostOwner.self, from: JSONEncoder().encode(value)) == value)
     }
+    @Test func sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() throws {
+        let data = try loadFixtureData("session_open_intents.json")
+        let intents = try JSONDecoder().decode([SessionOpenIntent].self, from: data)
+        #expect(intents == [.resume, .reveal])
+        #expect(try JSONDecoder().decode([SessionOpenIntent].self, from: JSONEncoder().encode(intents)) == intents)
+    }
+
     @Test func taskRetirementKeepsCompletionDeadlineAndPendingReason() throws {
         let data = try loadFixtureData("task_retirement.json")
         let value = try JSONDecoder().decode(TaskRetirement.self, from: data)

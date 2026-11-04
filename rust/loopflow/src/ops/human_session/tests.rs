@@ -663,3 +663,46 @@ fn session_page_preserves_the_continuation_and_required_entries() {
     );
     assert!(serde_json::from_str::<super::SessionPage>(r#"{"next":null}"#).is_err());
 }
+
+#[test]
+fn reveal_requires_history_and_never_publishes_a_first_turn() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let before = store.session(&record.id).await.unwrap().unwrap();
+        let prepared = super::reveal(&store, &record.id, false, false)
+            .await
+            .unwrap();
+        assert!(prepared.open_argv.ends_with(&["--reveal-existing".into()]));
+        let action = prepared
+            .actions
+            .iter()
+            .find(|action| action.kind == super::SessionActionKind::Reveal)
+            .unwrap();
+        assert!(action
+            .unavailable_reason
+            .as_ref()
+            .unwrap()
+            .contains("No saved provider history"));
+        let error = super::reveal(&store, &record.id, true, false)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("start this conversation explicitly"));
+        let after = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(after.artifact_key, before.artifact_key);
+        assert_eq!(after.captured, before.captured);
+        assert_eq!(after.input_published, before.input_published);
+        assert!(store
+            .sqlite
+            .session_attachment(&record.id)
+            .unwrap()
+            .is_none());
+    });
+}

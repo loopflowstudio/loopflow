@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Loopflow
 import Observation
+import OSLog
 
 /// The initial plan identifies the scene; the path is only its local opening locator.
 /// The router retains that scene key across explicitly associated plan identities.
@@ -20,6 +21,8 @@ struct RepositoryWorkspace: Codable, Hashable, Sendable {
 final class RepositoryWorkspaces {
     private var repositories: [String: SessionsWorkspaceRegistry] = [:]
     private let localMachineId: String?
+    private var reconcilingWarmth = false
+    private var visibleWarmExceptions = 0
 
     init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
 
@@ -50,8 +53,40 @@ final class RepositoryWorkspaces {
         if let retained = repositories[repository] { return retained }
         let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId)
         repositories[repository] = registry
+        registry.onWarmthChanged = { [weak self] in self?.reconcileWarmth() }
+        registry.canPrepare = { [weak self] in
+            self?.repositories.values.reduce(0, { $0 + $1.preparationCount }) ?? 0 < SessionsWorkspaceRegistry.preparationLimit
+        }
+        registry.onPreparationFinished = { [weak self] in
+            guard let self else { return }
+            for registry in self.repositories.values { registry.continueReveals() }
+        }
         return registry
     }
+
+    /// Repository pools own their views. The application bounds their combined
+    /// recent set without copying surfaces or duplicating the membership list.
+    private func reconcileWarmth() {
+        guard !reconcilingWarmth else { return }
+        reconcilingWarmth = true
+        defer { reconcilingWarmth = false }
+        let visible = Set(repositories.values.flatMap { $0.visibleWork.filter { $0.kind == .task } })
+        let exceptions = max(0, visible.count - SessionsWorkspaceRegistry.warmConversationLimit)
+        if visibleWarmExceptions != exceptions {
+            visibleWarmExceptions = exceptions
+            Logger(subsystem: "studio.loopflow", category: "sessions-latency")
+                .info("metric=visible_warm_exceptions count=\(exceptions)")
+        }
+        let candidates = repositories.values.flatMap { registry in
+            registry.recentTasks.map { (registry: registry, key: $0, visited: registry.retained($0)?.lastVisit ?? .distantPast) }
+        }.sorted { $0.visited < $1.visited }
+        var excess = Set(candidates.map(\.key)).union(visible).count - SessionsWorkspaceRegistry.warmConversationLimit
+        for (registry, key, _) in candidates where excess > 0 && !visible.contains(key) {
+            registry.evict(key)
+            excess -= 1
+        }
+    }
+
 }
 
 /// AppKit waits for acknowledged departure, bounded independently of cleanup grace.

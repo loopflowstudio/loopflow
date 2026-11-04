@@ -1509,6 +1509,9 @@ impl SessionMode {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
+    /// Reveal existing history without replacing another terminal or starting a turn
+    #[arg(long, hide = true, conflicts_with = "message")]
+    pub reveal_existing: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]

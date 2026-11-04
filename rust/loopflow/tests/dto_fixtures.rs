@@ -1324,3 +1324,18 @@ fn task_host_owner_identifies_the_retaining_process_and_native_settlement_contra
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
+
+#[test]
+fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
+    use loopflow::lf::commands::write::SessionOpenIntent;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_open_intents.json"
+    ))
+    .unwrap();
+    let intents: Vec<SessionOpenIntent> = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        intents,
+        vec![SessionOpenIntent::Resume, SessionOpenIntent::Reveal]
+    );
+    assert_eq!(serde_json::to_value(intents).unwrap(), wire);
+}

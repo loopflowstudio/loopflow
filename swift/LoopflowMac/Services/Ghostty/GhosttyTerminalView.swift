@@ -323,6 +323,17 @@ final class GhosttySurfacePool {
         views.removeValue(forKey: view.terminal)
     }
 
+    func scrollToBottom(_ id: TerminalIdentity) {
+        guard let surface = views[id]?.surface else { return }
+        let action = "scroll_to_bottom"
+        action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
+    }
+
+    func screen(_ id: TerminalIdentity) -> String? {
+        guard let view = views[id], case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return nil }
+        return text
+    }
+
     func release(_ id: TerminalIdentity) {
         views.removeValue(forKey: id)?.destroySurface()
     }
@@ -1578,6 +1589,8 @@ final class GhosttySurfacePool {
     func associateProgramStatus(_ records: [SessionRecord]) {}
     func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool { false }
     func title(for id: TerminalIdentity) -> String? { nil }
+    func scrollToBottom(_ id: TerminalIdentity) {}
+    func screen(_ id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
     func clearFocus() {}
     func focus(_ id: TerminalIdentity) {}
@@ -1767,7 +1780,7 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
     }
 }
 
-private func shellEscape(_ value: String) -> String {
+func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
 }

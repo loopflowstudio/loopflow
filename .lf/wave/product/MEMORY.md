@@ -274,7 +274,7 @@ Capture models before records, delete replaced mechanisms, and use UPSERT when
 revision triggers matter: `INSERT OR REPLACE` skips update triggers. Focused SQL
 checks do not replace affected suites.
 
-## Native shell lifetimes (LOO-717, accepted 2026-11-03)
+## Native shell lifetimes (LOO-717, accepted November 3–4, 2026)
 
 Jack Heart approved implementation and review publication through interactive demo, not landing
 or installation. Desktop/Rex own native shells/layouts; lf shares Session retention
@@ -291,8 +291,10 @@ Cleanup discards uncommitted files, preserving committed-ref safeguards and hist
 Release policy and native settlement are independent, revisioned host facts.
 Closed selects explicit Close; away+settled preserves grace and permits cleanup
 without relaunch. Desktop detaches presentation before reporting; Rex must settle
-its native jobs. New retention defeats stale settlement. Expired retained leases
-remain unknown; a lost reply cannot revoke a destination-committed release.
+its native jobs. Jack Heart accepted confirmed exit of the exact retaining host
+instance as release evidence on November 4. Expired leases, disconnect and Rex
+client disappearance remain unknown. Newer/other retainers still win; native and
+destination settlement remain independent. A lost reply cannot revoke a committed release.
 Nested lf preserves shell purpose. Evidence and limits:
 `781e5dc5b4:scratch/loo-717-shell-lifetimes.md`. These checks establish
 neither installed Desktop/Rex recovery nor physical remote-Machine acceptance.
@@ -411,19 +413,15 @@ no comparison time; hook review remains in total elapsed time. Neither draw/focu
 nor CPU samples prove readiness or explain waiting. Six native cases, paired
 before/after and stable-hook approval across Tasks/resume/compaction remain open.
 
-## Session working set and Waiting (2026-10-03, revised 2026-10-06)
+## Session working set and status (reconciled 2026-11-04)
 
-Jack Heart requested unfinished interactive participation in ordinary API and
-Desktop Session navigation (LOO-372). Task association still includes all work.
-Filtered absence cannot release native surfaces or clear drafts and selection.
-Explicit completion remains separate from turn completion.
-
-October 7's #1490 (`d8ec7c4fe`) supersedes stream-only Waiting: validated OSC 7501
-reports observed by Desktop override stream inference in Rust. LOO-384 remains
-for non-reporters; reading Claude's transcript is Jack's open choice. Detached
-observation and lf emission remain unfinished (Infrastructure's LOO-398/394).
-Provider adoption and composed native-pane acceptance remain unproven; this does
-not establish status in cmux or herdr.
+Jack Heart requested unfinished interactive participation in navigation (LOO-372).
+Task association includes all work; filtered absence cannot release surfaces or
+clear drafts. Explicit completion differs from turn completion.
+720/#1809 now supplies provider status across reconnects; its candidate Claude/Rex/
+Desktop demo passed, not installed or live Codex/OpenCode acceptance. Earlier
+Waiting mechanisms and deferred allocations remain at
+`a32c385044:.lf/wave/product/MEMORY.md`, **Session working set and Waiting**.
 
 ## Current Tasks and completion history (reconciled 2026-10-17)
 
@@ -966,25 +964,26 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 `ddc009d780:wave/product/MEMORY.md`, this heading; instruments remain under
 `scripts/benchmarks/desktop-performance/`. No configured startup proof is added.
 
-## Sessions projection and native resume (reconciled 2026-10-15)
+## Sessions projection and native resume (reconciled 2026-11-04)
 
 October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
 `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`, this heading.
 
-- `lf session list --json` owns the shared Session projection; Desktop owns no
-  second queue, title store, liveness model or resolution state.
-- LOO-491: Jack Heart requested Task entry expose **Move here**, never a failing
-  Retry loop. `session connect --prepare --json --try` returns external ownership;
-  Desktop installs its pane and treats `.elsewhere` as usable. Fresh preparation
-  can discover ownership absent from the cached record. Only the explicit click
-  prepares `--takeover`; preparation does not stop the client. Resume preserves
-  provider history, not unsent input. Closing a pane resolves nothing.
-- Desktop retains terminals across selection, with explicit splits and reversible
-  Close view/Undo. Viewing, running, elsewhere, opening and retry remain distinct.
-  Canonical Git common-directory identity keeps Task checkouts out of repo roots.
-- LOO-491's headless tests cover Task entry/link placement, warning, click and
-  prepared argv, not native transfer or interactive provider readiness.
-  LOO-251/284/291 retain native, shared-action and planning proof obligations.
+Rust owns Session projection, holder labels and executable actions. Jack Heart's
+November 4 LOO-672 approval selects automatic existing-history reveal, recent
+unfinished Tasks kept warm, bottom-on-return and explicit **Take back** over the
+last available screen. No Fork button or simultaneous input; CLI fork remains.
+Close suppresses refresh reopening; completed departure releases through 717.
+Eight warm conversations and two preparations are provisional engineering values,
+not a measured budget. Visible panes and protected work retain their lifetimes.
+
+Reveal must remain non-replacing through the actual launch/claim boundary.
+Navigation creates no provider thread, turn or Graph. Cached layout/status cannot
+authorize retention; restore selected first from fresh ownership/completion facts.
+Surface creation and live relay attachment do not prove usable provider input.
+Native Claude/Codex/Rex, reboot and twenty-Task footprint proof remain with demo.
+Jack approved publication for review, not landing or installation. LOO-491's earlier action/fixture history:
+`a32c385044:.lf/wave/product/MEMORY.md`, this heading; no native proof follows.
 
 ### Task observation and retired Watch
 
@@ -1015,7 +1014,8 @@ LOO-293's unproved native scope and retired Watch/FlowPosition history:
 - LOO-416's October 16 local foundation retains repository registries across
   window close, not app death; composed native proof remains. Earlier window-owned
   lifetime and global-surface failure: `463c5803a2:.lf/wave/product/MEMORY.md`,
-  this heading. Never share an NSView between windows or evict hidden live surfaces.
+  this heading. Never share an NSView between windows. LOO-672 now permits hidden
+  Session-view eviction through the bounded warm set and shared host release.
 - Session identity, provider process, local opening/error state, terminal view,
   and pane placement have different lifetimes. `.prepared` bridges opening and
   surface creation; failures stay visible until retried or superseded. Task-owned

@@ -22,6 +22,14 @@ use crate::ops::task::{
 };
 use crate::work::task::TaskUpdate;
 
+/// Whether opening may take control or only reveal existing history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOpenIntent {
+    Resume,
+    Reveal,
+}
+
 /// A write an app makes inside its own process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
@@ -85,6 +93,7 @@ pub enum Write {
         task: Option<String>,
         wave: Option<String>,
         agent: Option<String>,
+        intent: SessionOpenIntent,
     },
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
     /// conversation on a fresh provider thread, not yet started.
@@ -220,6 +229,7 @@ impl Write {
                 task,
                 wave,
                 agent,
+                intent,
             } => {
                 let mut words = Vec::new();
                 if id.is_none() && task.is_none() && wave.is_none() {
@@ -230,6 +240,9 @@ impl Write {
                     words.extend(["--agent", agent]);
                 }
                 words.extend(["session", "resume"]);
+                if *intent == SessionOpenIntent::Reveal {
+                    words.push("--reveal-existing");
+                }
                 words.extend(id.as_deref());
                 if let Some(task) = task {
                     words.extend(["--task", task]);
@@ -590,7 +603,7 @@ mod tests {
         assert_eq!(chapter.argv().last().map(String::as_str), Some("--dry-run"));
         assert_eq!(
             write(
-                r#"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
+                r#"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#
             ),
             [
                 "--cwd",
@@ -700,6 +713,7 @@ mod tests {
                 task: Some("FIX-1".into()),
                 wave: None,
                 agent: Some("codex".into()),
+                intent: super::SessionOpenIntent::Resume,
             },
             Write::SessionNew {
                 directory: directory.clone(),

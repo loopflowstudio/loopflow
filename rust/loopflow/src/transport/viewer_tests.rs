@@ -32,7 +32,7 @@ fn snapshot_preview_fixture() {
     bytes.extend(saved.encode().unwrap());
     std::fs::write(screens.join(format!("{SESSION}.ghostsnp")), bytes).unwrap();
 
-    if case == "resume" || case == "provider_failure" {
+    if case == "resume" || case == "reveal" || case == "provider_failure" {
         resume_fixture(&case);
         return;
     }
@@ -109,7 +109,7 @@ fn snapshot_preview_fixture() {
             assert!(matches!(request.request, Request::Leave));
         }
     });
-    attach_with_terminal(&owner, None, preview).unwrap();
+    attach_with_terminal(&owner, None, preview, true).unwrap();
     peer.join().unwrap();
 }
 
@@ -182,14 +182,23 @@ read -r answer < /dev/tty
         )
         .unwrap();
     }
-    let result = command().args(["resume", &session]).status().unwrap();
-    assert_eq!(result.success(), case == "resume");
+    let mut resume = command();
+    resume.args(["resume", &session]);
+    if case == "reveal" {
+        resume.arg("--reveal-existing");
+    }
+    let result = resume.status().unwrap();
+    assert_eq!(result.success(), case != "provider_failure");
     let launches = std::fs::read_to_string(home.join("launches")).unwrap();
     assert_eq!(
         launches.lines().count(),
-        if case == "resume" { 2 } else { 1 }
+        if case == "resume" || case == "reveal" {
+            2
+        } else {
+            1
+        }
     );
-    if case == "resume" {
+    if case == "resume" || case == "reveal" {
         let resumed = launches.lines().nth(1).unwrap();
         assert!(resumed.contains("--resume"), "{resumed}");
         let after_name = resumed
@@ -219,7 +228,7 @@ impl Drop for ViewerProcess {
 
 fn preview_case(case: &str) {
     // Prepare the source CLI before the isolated fixture, outside any Cargo run.
-    let binary = if case == "resume" || case == "provider_failure" {
+    let binary = if case == "resume" || case == "reveal" || case == "provider_failure" {
         loopflow_test_support::lf_binary()
     } else {
         ""
@@ -284,7 +293,7 @@ fn preview_case(case: &str) {
                 .any(|w| w == b"live-ready")
         {
             assert!(!display.alternate_screen());
-            if case == "resume" {
+            if case == "resume" || case == "reveal" {
                 assert!(display.text().unwrap().contains("live primary"));
                 assert!(!display.text().unwrap().contains("saved preview"));
             } else {
@@ -300,7 +309,11 @@ fn preview_case(case: &str) {
             assert_eq!(display.foreground(0, 0), theme);
             assert_eq!(display.foreground(1, 0), theme);
             master
-                .write_all(if case == "resume" { b"done\n" } else { &[0x1d] })
+                .write_all(if case == "resume" || case == "reveal" {
+                    b"done\n"
+                } else {
+                    &[0x1d]
+                })
                 .unwrap();
             inspected = true;
         }
@@ -377,4 +390,9 @@ fn snapshot_preview_resume_uses_live_primary_output() {
 #[test]
 fn snapshot_preview_resume_provider_failure_restores_terminal() {
     preview_case("provider_failure");
+}
+
+#[test]
+fn snapshot_preview_reveal_resumes_history_without_replaying_input() {
+    preview_case("reveal");
 }

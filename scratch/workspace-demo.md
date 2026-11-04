@@ -29,3 +29,26 @@ The raw split API's HOME fallback does not establish the app shortcut/menu's
 behavior. LOO-498 demo/review owns a compatible configured executable/store,
 actual LF opening and reuse, native Split cwd, and LLM-tool invocation.
 No observed-behavior acceptance or native Split result was supplied.
+
+## Parent update — November 4, 2026
+
+Later dependency observations are preserved at
+`b8aac2ef139ff34213685a10137572e1498f5e4f:scratch/workspace-demo.md`;
+its `scratch/demo.html` is the parent runbook. This checkout's `demo.html`
+continues to present LOO-728's docs-first demo.
+
+The parent subsequently demonstrated native Task tools and a shell using a
+private database and synthetic Task `30d671`. Reopening reused the exact native
+layout with zero new shells or LF Sessions. Automatic display selection failed
+with a Rex client 404; native Split, unfinished input and agent routing remained
+unverified. Jack Heart subsequently required real Tasks, Waves and conversations
+for acceptance, so the synthetic demo remains supporting evidence only.
+
+A clean-source rebuild also failed schema preflight; executable age alone did
+not explain the original failure. Jack Heart then authorized switching local LF
+to dev. The CLI installation selected `ac8e088f5`, migrated the shared store to
+`wave_removal`, and passed inventory reads and compatibility preflight. Desktop
+replacement failed because executable identity could not be proved for a helper;
+no helpers were manually stopped. CLI success does not establish Desktop update
+success or acceptance of LOO-498. These are dated parent observations, not new
+installation or delivery instructions for LOO-728.

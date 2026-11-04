@@ -126,6 +126,12 @@ falls back to a labeled summary. Local Machine names stay hidden. Links open
 separately from the Task row; unknown activity and live clients without reports
 show no activity label.
 
+Follow a turn in the pane and Task row: Working during active work, Blocked for
+a question or permission request, and the provider’s Idle or Done on completion.
+Reconnect restores the current report without sending another prompt. Quiet output
+does not change activity; clearing a report removes its label without completing
+the Task.
+
 Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.

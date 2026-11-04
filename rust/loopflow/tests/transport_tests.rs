@@ -9,13 +9,14 @@ mod support;
 mod ghostty_vt;
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use loopflow::program_status;
 use loopflow_test_support::TestRepo;
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
@@ -1235,6 +1236,150 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     assert!(
         remaining.is_empty(),
         "viewer submitted input before acknowledgement"
+    );
+}
+
+#[test]
+fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
+    for valid in [true, false] {
+        let fixture = Fixture::new();
+        let path = fixture.waiting_provider();
+        let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
+        command.env("PATH", path);
+        let terminal = Terminal::spawn_with_placement(command, Some(valid));
+        let launch = fixture.launches(1).pop().unwrap();
+        let session = session_of(&fixture.sql(), &launch);
+        let placement: Option<String> = fixture.sql().query_row(
+            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
+            [&session], |row| row.get(0),
+        ).unwrap();
+        let owner = fixture.owner_of(&session);
+        terminal.stop();
+        fixture.stop(&owner);
+        assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
+    }
+}
+
+#[test]
+fn native_program_status_has_no_stale_launcher_working_record() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf 'native ready\n'
+while read -r state < /dev/tty; do
+    [ "$state" = exit ] && exit 0
+    # Claude's title-disable flag also disables its Program Status reports.
+    if [ -z "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" ]; then
+        printf '\033]7501;state=%s:app=claude-code\033\\' "$state"
+    fi
+    printf 'reported %s\n' "$state"
+done
+"#,
+    );
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "native status"));
+    let mut viewer = fixture.viewer(&owner, true);
+    let mut received = out(&until_out(&mut viewer, "native ready"));
+    let states = [
+        "working", "idle", "blocked", "working", "done", "idle", "clear",
+    ];
+    for state in states {
+        viewer.input(&format!("{state}\n"));
+        received.extend(out(&until_out(&mut viewer, &format!("reported {state}"))));
+        if state == "working" {
+            // No provider output or turn settlement while this read completes.
+            // A quiet stream must not synthesize idle.
+            viewer.request(json!({"kind":"controlled"}));
+            let quiet = until(
+                &mut viewer,
+                |items| matches!(items.last(), Some(Item::Reply(reply)) if reply["kind"] == "controlled"),
+            );
+            received.extend(out(&quiet));
+        }
+        drop(viewer);
+        viewer = fixture.viewer(&owner, true);
+        let snapshot = match viewer.next().unwrap() {
+            Item::Snapshot(bytes) => bytes,
+            other => panic!("expected retained snapshot, got {other:?}"),
+        };
+        let mut terminal = ghostty_vt::Terminal::new(80, 24).unwrap();
+        terminal.write(b"\x1b]7501;id=previous:state=working\x1b\\");
+        terminal.write(&snapshot);
+        let status = terminal.program_status();
+        assert!(status.seen);
+        if state == "clear" {
+            assert!(status.records.is_empty());
+        } else {
+            assert_eq!(status.records.len(), 1);
+            assert_eq!(
+                serde_json::to_value(status.records[0].state).unwrap(),
+                state
+            );
+            assert_eq!(status.records[0].id, None);
+            assert_eq!(status.records[0].app.as_deref(), Some("claude-code"));
+        }
+    }
+    viewer.input("exit\n");
+    viewer.finish();
+
+    let received = String::from_utf8(received).unwrap();
+    let reports: Vec<_> = received
+        .split("\x1b]7501;")
+        .skip(1)
+        .map(|report| report.split("\x1b\\").next().unwrap())
+        .collect();
+    assert_eq!(
+        reports,
+        states.map(|state| format!("state={state}:app=claude-code")),
+        "native reports must pass unchanged without a competing lf record"
+    );
+}
+
+#[test]
+fn native_program_status_detects_support_before_a_viewer_attaches() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "python3",
+        "-c",
+        r#"
+import os, select, tty
+from pathlib import Path
+tty.setraw(0)
+os.write(1, b"\x1b]7501;?\x07")
+reply = b""
+while select.select([0], [], [], 3)[0]:
+    reply += os.read(0, 1024)
+    if reply.endswith(b"\x07"):
+        break
+path = Path(os.environ["HOME"]) / "detection"
+path.with_suffix(".tmp").write_text(reply.hex() or "missing")
+path.with_suffix(".tmp").rename(path)
+os.write(1, b"\x1b]7501;state=blocked:kind=question\x1b\\ready")
+os.read(0, 1)
+"#,
+    ]);
+    let reply = fixture.wait_file("detection");
+    let mut viewer = fixture.viewer(&owner, true);
+    let items = until_out(&mut viewer, "ready");
+    let mut terminal = ghostty_vt::Terminal::new(80, 24).unwrap();
+    for item in items {
+        match item {
+            Item::Snapshot(bytes) | Item::Out(bytes) => terminal.write(&bytes),
+            _ => {}
+        }
+    }
+    viewer.input("x");
+    viewer.finish();
+    assert_eq!(reply, hex::encode(b"\x1b]7501;?\x07"));
+    assert_eq!(
+        terminal.program_status().records[0].state,
+        program_status::State::Blocked
+    );
+    assert_eq!(
+        terminal.program_status().records[0].kind,
+        Some(program_status::Kind::Question)
     );
 }
 
@@ -2643,7 +2788,11 @@ struct Terminal {
     screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 impl Terminal {
-    fn spawn(mut command: Command) -> Self {
+    fn spawn(command: Command) -> Self {
+        Self::spawn_with_placement(command, None)
+    }
+
+    fn spawn_with_placement(mut command: Command, placement: Option<bool>) -> Self {
         let mut master = -1;
         let mut slave = -1;
         // SAFETY: valid output pointers; null selects default PTY settings.
@@ -2663,8 +2812,20 @@ impl Terminal {
         let mut master = unsafe { std::fs::File::from_raw_fd(master) };
         // SAFETY: the fresh slave descriptor is owned only by this File.
         let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        if let Some(valid) = placement {
+            // SAFETY: slave is a live PTY; ttyname returns a terminated name.
+            let tty = unsafe { std::ffi::CStr::from_ptr(libc::ttyname(slave.as_raw_fd())) }
+                .to_str()
+                .unwrap()
+                .to_owned();
+            command
+                .env("LF_TERMINAL_ID", "desktop-shell")
+                .env("LF_TERMINAL_TTY", if valid { &tty } else { "/dev/stale" })
+                .stdin(slave.try_clone().unwrap());
+        } else {
+            command.stdin(Stdio::piped());
+        }
         command
-            .stdin(Stdio::piped())
             .stdout(Stdio::from(slave.try_clone().unwrap()))
             .stderr(Stdio::from(slave));
         let child = command.spawn().unwrap();

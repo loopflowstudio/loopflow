@@ -194,3 +194,19 @@ over the terminal and reports newly recorded diagnostics after returning. Native
 provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
+
+Native providers own their Program Status (OSC 7501) reports, which pass through
+unchanged. Claude's native title updates stay enabled because disabling them also
+disables its status reports. Loopflow reports activity for structured Runs and Graph progress, and
+the command's result when it exits. It does not label an open native conversation
+Working for the lifetime of its process. Quiet output alone changes no status.
+The owner answers status-support queries while detached and retains the latest
+64 records from providers and lf together. Reattaching replaces the viewer's
+records with that current status, including completed work and pending questions.
+Clear removes the named record and its children; a shell prompt retires live
+claims, and a terminal reset removes all records.
+
+Desktop terminal placement is validated on the launching viewer’s PTY, then carried
+across the owner’s private PTY before native admission. Stale inherited placement
+is discarded. The first Session reading can publish reports already restored on
+its surface; replacement providers begin with an empty observation.

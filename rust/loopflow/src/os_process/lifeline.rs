@@ -204,11 +204,11 @@ fn retain_lifeline(group: Option<u32>, writer: File) {
 
 /// Release only this process's retained spawn writer. The already-owned watchdog
 /// performs shutdown; no signal authority is inferred from a dead leader.
-pub(crate) fn release_agent_lifeline(group: u32) -> bool {
-    let mut held = HELD_LIFELINES.lock().expect("lifeline list poisoned");
-    let before = held.len();
-    held.retain(|(owner, _)| *owner != Some(group));
-    held.len() != before
+pub(crate) fn release_agent_lifeline(group: u32) {
+    HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .retain(|(owner, _)| *owner != Some(group));
 }
 
 // Command installs native stdio before pre_exec. An invocation with a closed
@@ -608,8 +608,7 @@ mod tests {
         let group = child.id().unwrap();
         assert_eq!(child.wait().await.unwrap().code(), Some(7));
         assert!(group_alive(group), "watchdog and helper survive the leader");
-        assert!(super::release_agent_lifeline(group));
-        assert!(!super::release_agent_lifeline(group));
+        super::release_agent_lifeline(group);
         let died = wait_until(|| !group_alive(group));
         kill_process_group(group);
         assert!(died, "the owned watchdog must settle its entire group");

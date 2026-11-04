@@ -935,24 +935,28 @@ lfd and resident-cron contracts remain in
 
 ## Swift data path — RegistryQuery is the single reader
 
-RegistryQuery retains domain DTOs while transport changes. LOO-593 (Jack Heart,
-November 3, 2026) selects an installed local Machine service through interactive
-demo, without Auto-Ship. Roadmap read/watch and Session rename now cross its
-private socket without FFI fallback; other Work glue remains for the full cutover.
-The service reuses Rust Read/Subscription, delegates complete CLI commands and
-bridges existing Session owners. Desktop UI automation remains app-owned.
+Jack Heart selected LOO-593's installed local Machine service through demo,
+without Auto-Ship (November 3, 2026). Roadmap read/watch and Session rename cross
+its private socket without FFI fallback; full cutover remains. RegistryQuery keeps
+domain DTOs; Rust reads, CLI commands and Session owners retain authority.
+Desktop UI automation stays app-owned.
 
-Historical lfd already shared engine functions; complete-operation and lifecycle
-ownership still drifted. Sharing a crate alone prevents neither defect. Preserve
-one installation authority and execution owners, with no new scheduler/retention
-policy. Request IDs correlate; uncertain commands and terminal input never replay
-automatically. Same-user Unix trust cannot authenticate a remote proxy.
+Shared functions did not prevent lfd's operation/lifecycle drift. Preserve one
+installation authority and execution owners, no new scheduler/retention.
+Never replay uncertain commands/input. Unix peer
+trust cannot authenticate a remote proxy.
 
-Separate registrar and launchd-restart fixtures establish neither installed-binary
-replacement with active Work nor native continuity or usage-accounting acceptance.
-LOO-718's native iOS client consumes the contract. Roadmap membership cannot pick a
-primary Session: existing ViewPlan contents select it; owner lookup starts nothing.
-Remote carrier, unattended hosting and takeover UX remain open.
+Connection recovery differs from Session resume: retain exact owner and output
+position; deliberate reconnect must preserve newer claims and start no provider.
+A local prompt changes terminal state, requiring a fresh screen; byte streams can
+use owner Resume. Fixtures interrupt a connected relay,
+including takeover, expired output and owner exit. Dropping the viewer first proved
+owner survival only. Separate registrar/restart proofs still do not establish
+installed-binary replacement, native continuity or unchanged usage totals.
+
+LOO-718 consumes the shared contract. ViewPlan selects the primary Session;
+roadmap membership cannot. Owner lookup starts nothing. Remote carrier,
+unattended hosting and phone takeover UX remain open.
 
 LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
 files resurfaced retired Waves. Writes register directories; reads list store

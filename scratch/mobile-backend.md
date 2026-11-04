@@ -91,10 +91,12 @@ or Send. Voice drafts remain on the phone until deliberate submission.
 
 ### Connection recovery is not Session resume
 
-Implemented following the November 3 concept review of Jack Heart's continuity
-requirement. Losing the Machine connection keeps the terminal relay and native
-surface alive. The relay reports “Machine connection lost”; Ctrl+R deliberately
-reconnects and Ctrl+] closes. It retains the exact owner, reconnect token and
+Implemented at `d168ef82e5`, then simplified at `b1029df2dc`, following the
+November 3 concept review of Jack Heart's continuity requirement. The earlier
+fixture dropped its viewer before restart and proved owner survival only; the
+current fixture interrupts a connected relay. Losing the Machine connection keeps
+the terminal relay and native surface alive. The relay reports “Machine connection
+lost”; Ctrl+R deliberately reconnects and Ctrl+] closes. It retains the exact owner, reconnect token and
 received-byte position in memory. There is no persisted viewer registry or new
 Session state. Desktop never enters ordinary `lf resume --prepare` merely because
 the bridge closed. Explicit Open and Move here keep their existing meanings.
@@ -114,12 +116,36 @@ path explicitly without Session preparation or another provider. The owner retai
 its existing lifetime policy. Work subscriptions separately reopen for complete
 current readings; uncertain rename outcomes are inspected, never resubmitted.
 
-The real relay stays connected during the service-restart proof, returns to the
-unfinished draft and lets the same Graph advance. Additional focused proofs cover
+The real relay stays connected during the foreground service-restart proof,
+returns to the unfinished draft and lets the same Graph advance. Additional proofs cover
 another viewer taking input/geometry during the outage, a byte stream exceeding
 the retained spool, and owner exit with no provider relaunch. Native presentation,
 installed-update composition and usage accounting still belong to gate/demo below.
-The historical review page is `scratch/concept-review.html`.
+The review page at `scratch/concept-review.html` compares the earlier gap with
+the current recovery contract. The recovery change needs no new product decision;
+the terminal prompt and deliberate Ctrl+R interaction remain for native review.
+
+### Concept review after recovery implementation · November 3, 2026
+
+No further design change or unresolved product choice blocks this local slice.
+Jack Heart's accepted experience remains: open a Task's recorded primary Session,
+edit it, and recover access after a helper interruption without starting another
+provider. Task → primary Session → existing owner maps directly to `view_plan`,
+`session_owner` and `attach`; a service incarnation identifies a connection boundary,
+not another Work lifecycle. The relay's output state is ephemeral; persistence,
+execution and retention stay with their existing owners. No recovery registry,
+new Session state or gateway command receipt is needed.
+
+The normal path, service interruption and deliberate recovery now follow that
+model. Preserve the counterexamples: another viewer taking control must leave the
+returning viewer passive; expired output requires a fresh view, not input replay;
+an ended owner must remain ended; a lost rename reply remains uncertain. The
+existing service README already describes this experience, so no usage or skill
+rewrite is needed. The remaining acceptance below is still required: especially
+composed installed replacement, native continuity and unchanged usage accounting.
+A failure there requires repair within this contract, not inferred approval to
+restart providers or relax continuity. Remote admission, phone takeover and
+unattended hosting remain later product choices outside this slice.
 
 ## Installation and lifetime
 

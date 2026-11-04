@@ -1,130 +1,110 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LOO-593 · Recover the Machine connection</title>
-  <style>
-    :root { color-scheme: light dark; --ink: #202a31; --paper: #faf9f5; --muted: #56616a; --rule: #c5cbc9; --accent: #126257; }
-    @media (prefers-color-scheme: dark) {
-      :root { --ink: #e8ece8; --paper: #17201f; --muted: #b1bfba; --rule: #475852; --accent: #8ed9c5; }
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 system-ui, sans-serif; }
-    main { max-width: 790px; margin: auto; padding: 48px 26px 72px; }
-    header { color: var(--muted); font-size: 13px; }
-    h1 { font: 600 clamp(29px, 5vw, 41px)/1.15 system-ui, sans-serif; letter-spacing: -.025em; margin: 26px 0 20px; }
-    h2 { font-size: 23px; line-height: 1.3; margin: 42px 0 15px; }
-    h3 { font-size: 17px; margin: 24px 0 8px; }
-    p { margin: 12px 0; }
-    a { color: var(--accent); text-underline-offset: 3px; }
-    code { font: .85em ui-monospace, monospace; overflow-wrap: anywhere; }
-    blockquote { margin: 24px 0; padding: 4px 0 4px 22px; border-left: 3px solid var(--accent); }
-    .path { padding: 16px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
-    .path p { margin: 6px 0; }
-    .muted { color: var(--muted); }
-    li { margin: 14px 0; padding-left: 4px; }
-    ol { padding-left: 24px; }
-    footer { margin-top: 36px; font-size: 14px; color: var(--muted); }
-    @media (max-width: 480px) { main { padding: 28px 20px 48px; } }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-593 · Recover the same Session</title>
+<style>
+:root { color-scheme: light dark; --paper:#faf9f5; --ink:#202a31; --muted:#56616a; --rule:#c5cbc9; --accent:#126257; }
+@media (prefers-color-scheme:dark) { :root { --paper:#17201f; --ink:#e8ece8; --muted:#b1bfba; --rule:#475852; --accent:#8ed9c5; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 system-ui,sans-serif; }
+main { max-width:790px; margin:auto; padding:48px 26px 72px; }
+header, footer, .muted { color:var(--muted); }
+header, footer { font-size:13px; }
+h1 { font-size:clamp(29px,5vw,41px); line-height:1.15; letter-spacing:-.025em; margin:26px 0 20px; }
+h2 { font-size:23px; line-height:1.3; margin:38px 0 14px; }
+p { margin:12px 0; }
+a { color:var(--accent); text-underline-offset:3px; }
+code { font:.85em ui-monospace,monospace; overflow-wrap:anywhere; }
+.path { padding:14px 0; border-block:1px solid var(--rule); }
+.path p { margin:6px 0; }
+blockquote { margin:24px 0; padding-left:20px; border-left:3px solid var(--accent); }
+li { margin:14px 0; }
+ol { padding-left:24px; }
+footer { margin-top:36px; }
+@media (max-width:480px) { main { padding:28px 20px 48px; } }
+</style>
 </head>
-<body>
-<main>
-  <header>
-    LOO-593 · concept-review · November 3, 2026<br>
-    Built from <a href="mobile-backend.md">mobile-backend.md</a>,
-    <code>machine_service/{service,client}.rs</code>, <code>transport.rs</code>,
-    <code>transport_tests.rs</code>, <code>MachineService.swift</code>,
-    <code>SessionsView.swift</code> and <code>GhosttyTerminalView.swift</code>.
-  </header>
+<body><main>
+<header>LOO-593 · concept-review · November 3, 2026<br>
+Built from <a href="mobile-backend.md">mobile-backend.md</a>,
+<code>machine_service/{README.md,service.rs,client.rs}</code>,
+<code>transport.rs</code>, <code>transport_tests.rs</code>,
+<code>MachineService.swift</code> and <code>RegistryQueryLocal.swift</code>.</header>
+<h1>Keep the same Session across a lost connection.</h1>
+<p><strong>No further design decision is needed for the accepted local slice.</strong>
+Jack Heart's continuity requirement now maps to the recovery implementation.
+The remaining obligation is acceptance proof, not another execution owner.</p>
+<p class="muted">Headless review of the implemented change. No new product approval,
+publication or Auto-Ship approval. Native presentation remains for demo.</p>
 
-  <h1>Recover the connection to the same Session.</h1>
-  <p><strong>Design changed:</strong> make a lost Machine connection recoverable
-    without invoking provider resume. Jack Heart's accepted continuity contract
-    settles this direction. Keep the existing deliberate retry policy.</p>
-  <p class="muted">Headless review. No new product approval is inferred.
-    Implementation and proof remain; no code changed in this review.</p>
+<h2>Actions → concepts → APIs</h2>
+<div class="path">
+<p><strong>Open a Task</strong> → recorded primary Session → <code>read(view_plan)</code>.</p>
+<p><strong>Edit its Session</strong> → existing execution owner →
+<code>session_owner(session)</code>, then <code>attach(owner)</code>.</p>
+<p><strong>Reconnect after interruption</strong> → that same owner → fresh terminal
+attachment or byte-stream <code>Resume</code>, without replacing control.</p>
+</div>
+<p>The Machine service carries Work readings, complete CLI commands and owner
+traffic. The owner keeps the provider, draft and claims; the Graph keeps execution.
+Desktop keeps its renderer and app-owned UI automation. No service-side Session
+registry, scheduler or retention policy is introduced.</p>
 
-  <h2>One interaction</h2>
-  <div class="path">
-    <p><strong>Action:</strong> Open a Task → edit its existing Session → the helper restarts → reconnect.</p>
-    <p><strong>Concepts:</strong> Task → recorded primary Session → existing execution owner.</p>
-    <p><strong>APIs:</strong> <code>read(view_plan)</code> → <code>session_owner(session)</code>
-      → <code>attach(owner)</code> → existing binary owner protocol.</p>
-  </div>
-  <p>The Machine service carries requests and output. The Session owner keeps
-    the provider, draft, input claims and lifetime policy. The Graph keeps its
-    execution. Desktop keeps UI automation and terminal rendering.</p>
+<h2>The consequential mismatch is repaired</h2>
+<p><strong>Before:</strong> bridge EOF ended the relay and could send Desktop through
+ordinary Session preparation. The original restart fixture removed its viewer
+before interruption, proving owner survival without proving viewer recovery.</p>
+<blockquote>A failed connection does not establish that the provider ended.</blockquote>
+<p><strong>Implemented now:</strong> the relay stays alive. It retains the exact owner
+and output continuation state in memory. The terminal shows:</p>
+<div class="path">
+<p><strong>Machine connection lost.</strong></p>
+<p>Ctrl+R to reconnect; Ctrl+] to close. Typing while disconnected is discarded.</p>
+<p>After reconnect: the same Session, or a passive view if input remains elsewhere.</p>
+</div>
+<p>A terminal gets a fresh screen because the disconnect prompt changed its display.
+A byte stream resumes retained output; an expired spool falls back to a fresh
+attachment. Current claims override replayed notices. An unavailable exact owner
+ends this recovery path without provider resume.</p>
+<p>Work subscriptions separately reopen with complete current readings. If a rename
+reply is lost, inspect the current name before deciding on another command.
+Request IDs correlate attempts; they do not promise deduplication.</p>
 
-  <h2>The consequential mismatch</h2>
-  <h3>Existing implementation</h3>
-  <p>Bridge EOF exits the terminal relay. Desktop enters its ended/elsewhere
-    view path; ordinary preparation uses <code>lf resume --prepare</code>.
-    The restart fixture closes its viewer <em>before</em> restarting the helper,
-    then creates another fixture viewer. It proves owner survival without
-    exercising recovery of the interrupted Desktop relay.</p>
-  <blockquote>
-    A failed connection does not establish that the provider ended.
-    Recovery must not turn that uncertainty into permission to resume a provider.
-  </blockquote>
+<h2>What would invalidate this design?</h2>
+<ul>
+<li>Reconnect takes input or geometry from a newer viewer. The current recovery
+requests free claims and becomes passive when input is held.</li>
+<li>Outage typing reaches the provider, or an ended owner launches again. The current
+relay discards outage input and refuses replacement-provider recovery.</li>
+<li>Installing a replacement helper kills the live owner or Graph. Separate registrar
+and supervisor-restart fixtures do not settle this; composed replacement must prove it.</li>
+<li>Reconnect creates provider usage again. Existing ownership is preserved in code;
+unchanged usage totals still require acceptance evidence.</li>
+</ul>
 
-  <h3>Proposed experience · not yet implemented</h3>
-  <div class="path">
-    <p><strong>Machine connection lost.</strong></p>
-    <p><strong>Reconnect</strong> → the same owner → continued output or a fresh screen.</p>
-    <p>If another viewer controls this Session, show its output. <strong>Move here</strong>
-      remains a separate deliberate action.</p>
-    <p>If that owner has ended, report it. Opening provider history remains the
-      existing explicit <strong>Open</strong> action.</p>
-  </div>
-  <p>Reconnect refreshes Work and sends no buffered typing or command.
-    A lost rename reply remains “outcome unknown”; read its current name before
-    deciding whether another rename is needed.</p>
+<h2>Remaining proof, within the accepted contract</h2>
+<p>Gate retains installed executable replacement with active Work, bounded-client and
+cancellation acceptance, command attribution/default equivalence and usage accounting.
+Demo retains Desktop quit/reopen, disabled-service presentation and the rendered
+editable draft. This review does not claim those checks passed.</p>
+<p><strong>Later proposals, not approved here:</strong> remote admission, unattended
+hosting and phone takeover gestures. They do not block reviewing this local slice.
+The existing service README already describes the implemented recovery interaction.</p>
 
-  <h2>Follow recovery through the layers</h2>
-  <p>The client retains the exact owner and, while its relay lives, the existing
-    reconnect token and output position. Reopen the Machine bridge and use the
-    owner's <code>Resume</code> protocol. If its output window expired, obtain a
-    fresh screen from that same owner. A reopened Desktop can also request a
-    fresh screen without saving viewer state on disk.</p>
-  <p>The owner alone grants input and geometry. Recovery cannot unconditionally
-    repeat <code>control: true</code> and <code>own: take</code> from the initial
-    attachment. It cannot fall through to a new owner or provider launch.</p>
-  <p>No durable connection record, service-owned viewer registry, scheduler,
-    PTY manager or retention policy is needed. Work subscriptions retain their
-    existing fresh-reading recovery. Migrated operations keep one socket path.</p>
-
-  <h2>Counterexamples the next proof must survive</h2>
-  <ol>
-    <li><strong>Normal recovery:</strong> keep the real terminal relay connected
-      during helper replacement. Reconnect through the client and finish an
-      unsubmitted draft with the same owner, provider and running Graph.</li>
-    <li><strong>Another viewer takes control:</strong> reconnect observes the
-      Session without stealing input or geometry. No uncertain keystroke is resent.</li>
-    <li><strong>The output window expires or the owner ends:</strong> refresh the
-      screen from the same live owner, or report unavailability. Never silently
-      substitute provider history or another conversation.</li>
-  </ol>
-  <p class="muted">Installed executable replacement, actual Desktop quit/reopen,
-    disabled/version states, slow-client cancellation and unchanged usage totals
-    remain acceptance work. Separate registrar and restart fixtures do not replace
-    those proofs.</p>
-
-  <h2>Review questions and disposition</h2>
-  <ol>
-    <li><strong>Does a connection retry authorize provider resume?</strong><br>
-      Resolved: no. Implement recovery of the exact existing owner and preserve
-      separate explicit Open and Move here actions.</li>
-    <li><strong>May recovery displace a newer controller?</strong><br>
-      Resolved: no. The accepted contract already forbids it; use the owner's
-      existing claim rules.</li>
-    <li><strong>Does this select remote admission, phone takeover or unattended hosting?</strong><br>
-      Unresolved later scope: none is needed to settle this local correction,
-      and none is approved here.</li>
-  </ol>
-  <footer>Next implement direction is recorded in <a href="mobile-backend.md">the working design</a>.
-    Loop-or-next decides navigation. No publication, merge or Auto-Ship approval.</footer>
-</main>
-</body>
+<h2>Questions for the scheduled proof</h2>
+<p class="muted">These are acceptance questions, not unanswered product choices or a
+request for input during this headless run.</p>
+<ol>
+<li>Does installed helper replacement preserve the exact live provider, owner,
+unfinished draft and Graph through reconnection?</li>
+<li>Does Desktop quit/reopen preserve usable Session access, with honest unavailable
+and disabled states and no replay of uncertain input?</li>
+<li>Do command defaults and attribution match CLI behavior, and do reconnects leave
+provider-usage totals unchanged?</li>
+</ol>
+<footer>Outcome for loop-or-next: nothing further to change in the design; no open
+product choice within the accepted local scope. Acceptance remains required.</footer>
+</main></body>
 </html>

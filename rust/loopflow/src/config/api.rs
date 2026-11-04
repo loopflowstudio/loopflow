@@ -29,7 +29,7 @@ pub enum Request {
 
 pub fn run(request: Request) -> Result<serde_json::Value> {
     match request {
-        Request::Catalog => Ok(serde_json::to_value(super::catalog::DEFINITIONS)?),
+        Request::Catalog => Ok(serde_json::to_value(super::catalog::definitions())?),
         Request::Declaration {
             destination,
             key,
@@ -130,7 +130,7 @@ fn file_value(
         path: path.to_owned(),
         key: parts.join("."),
         value,
-        lifecycle: super::catalog::definition(super::settings::preference_path(key)?[0])
+        lifecycle: super::catalog::definition(&super::settings::preference_path(key)?.join("."))
             .expect("validated key")
             .lifecycle,
     })
@@ -216,6 +216,16 @@ fn inspect_selection(
 mod tests {
     use super::Request;
     use crate::config::files::Destination;
+
+    #[test]
+    fn catalogue_wire_shape_includes_feature_category() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/configuration_catalog.json"
+        ))
+        .unwrap();
+        let theme = crate::config::catalog::definition("theme").unwrap();
+        assert_eq!(serde_json::to_value([theme]).unwrap(), fixture);
+    }
 
     #[test]
     fn destination_wire_shape_cannot_supply_independent_file_or_scope() {

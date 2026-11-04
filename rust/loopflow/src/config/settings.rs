@@ -111,7 +111,7 @@ pub fn validate_scope(
     scope: SettingScope,
 ) -> Result<(), LoadError> {
     let preference = preference_path(key)?;
-    let definition = super::catalog::definition(preference[0]).expect("validated key");
+    let definition = super::catalog::definition(&preference.join(".")).expect("validated key");
     if !definition.applies(layer, scope, preference.len() != key.split('.').count()) {
         return Err(invalid(format!("{key} does not apply at {layer:?}/{scope:?}; inspect `lf config catalog` for supported destinations")));
     }
@@ -139,7 +139,7 @@ pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b 
         }
         _ => parts,
     };
-    let definition = super::catalog::definition(path[0])
+    let definition = super::catalog::definition(&path.join("."))
         .ok_or_else(|| invalid(format!("unknown setting {key}")))?;
     if !definition.accepts(path)
         || (path.len() != parts.len()
@@ -231,7 +231,7 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             }
         }
     }
-    if path[0] == "context_budgets" {
+    if path[0] == "context" {
         crate::prompt::context_budget::ContextBudgets::resolve(&parsed)
             .map_err(|error| invalid(error.to_string()))?;
     }
@@ -301,19 +301,24 @@ pub(crate) fn insert(root: &mut Value, path: &[&str], value: Value) {
 }
 
 pub(crate) fn metadata(value: &Value) -> Result<BTreeMap<String, Value>, LoadError> {
+    let mut value = value.clone();
+    super::normalize_context(&mut value);
+    if let Some(docs) = value
+        .get_mut("context")
+        .and_then(|context| context.get_mut("docs"))
+    {
+        if docs.is_string() {
+            *docs = Value::Sequence(vec![docs.clone()]);
+        }
+    }
     let mut settings = BTreeMap::new();
     for key in super::catalog::DEFINITIONS
         .iter()
         .filter(|definition| definition.applicability == super::catalog::Applicability::Launch)
         .map(|definition| definition.key)
     {
-        if let Some(value) = value.get(key).filter(|v| key == "docs" || !v.is_null()) {
-            // Skill frontmatter accepts a single docs path as well as a list.
-            let value = if key == "docs" && value.is_string() {
-                Value::Sequence(vec![value.clone()])
-            } else {
-                value.clone()
-            };
+        if let Some(value) = value.get(key).filter(|v| !v.is_null()) {
+            let value = value.clone();
             validate_value(&[key], &value)?;
             settings.insert(key.into(), value);
         }
@@ -327,6 +332,9 @@ pub(crate) fn validate_preferences(
     targeted: bool,
     strict: bool,
 ) -> Result<(), LoadError> {
+    let mut normalized = value.clone();
+    super::normalize_context(&mut normalized);
+    let value = &normalized;
     let Some(map) = value.as_mapping() else {
         if value.is_null() && !strict {
             return Ok(());
@@ -413,6 +421,7 @@ pub(super) fn skill_values(skill: &Skill) -> Value {
             serde_yaml_ng::to_value(docs).expect("docs serialize"),
         );
     }
+    super::normalize_context(&mut values);
     values
 }
 
@@ -420,11 +429,10 @@ fn leaves(value: &Value, path: &mut Vec<String>, result: &mut Vec<(Vec<String>, 
     if value.is_null() {
         return;
     }
-    if path.len() == 1
-        && super::catalog::definition(&path[0]).is_some_and(|definition| {
-            definition.combination == super::catalog::Combination::Replace
-        })
-    {
+    if super::catalog::definition(&path.join(".")).is_some_and(|definition| {
+        definition.key.split('.').count() == path.len()
+            && definition.combination == super::catalog::Combination::Replace
+    }) {
         result.push((path.clone(), value.clone()));
     } else if let Some(map) = value.as_mapping() {
         for (key, value) in map {
@@ -463,7 +471,7 @@ pub fn resolve_layers(
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(
             &mut defaults,
-            &["context_budgets", key.name()],
+            &["context", "budgets", key.name()],
             key.default_limit().into(),
         );
     }
@@ -496,6 +504,8 @@ pub fn resolve_layers(
         },
     ];
     for layer in layers.iter().chain(&invocation) {
+        let mut layer = layer.clone();
+        super::normalize_context(&mut layer.value);
         if layer.value.is_null() {
             continue;
         }
@@ -661,7 +671,7 @@ pub fn resolve_layers(
         serde_yaml_ng::from_value(merged).map_err(|error| invalid(error.to_string()))?;
     config.setting_layers = Some(layers.to_vec());
     for (key, setting) in &explanations {
-        if let Some(key) = key.strip_prefix("context_budgets.") {
+        if let Some(key) = key.strip_prefix("context.budgets.") {
             let key = serde_yaml_ng::from_value(Value::String(key.into()))
                 .map_err(|error| invalid(error.to_string()))?;
             if let Some(winner) = setting.candidates.last() {
@@ -729,13 +739,36 @@ pub fn resolve_layers(
 }
 
 pub fn resolve(config: &Config, skill: Option<&Skill>) -> Result<ResolvedSettings, LoadError> {
+    fn differs(value: &mut Value, defaults: &Value, path: &str) -> bool {
+        if value == defaults {
+            return false;
+        }
+        if super::catalog::definition(path)
+            .is_none_or(|definition| definition.combination == super::catalog::Combination::Merge)
+        {
+            if let Some(map) = value.as_mapping_mut() {
+                map.retain(|key, value| {
+                    let name = key.as_str().expect("configuration keys are strings");
+                    let child = if path.is_empty() {
+                        name.to_owned()
+                    } else {
+                        format!("{path}.{name}")
+                    };
+                    differs(value, defaults.get(key).unwrap_or(&Value::Null), &child)
+                });
+                return !map.is_empty();
+            }
+        }
+        true
+    }
+
     if let Some(layers) = &config.setting_layers {
         return resolve_layers(layers, skill);
     }
     let mut value = serde_yaml_ng::to_value(config).expect("Config serializes");
     let defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    if let Some(map) = value.as_mapping_mut() {
-        map.retain(|key, value| defaults.get(key) != Some(value));
+    if !differs(&mut value, &defaults, "") {
+        value = Value::Mapping(Default::default());
     }
     resolve_layers(
         &[ConfigDeclarations {
@@ -1031,6 +1064,10 @@ mod tests {
             ("", vec!["inherited.md"]),
             (",\"docs\":[]", vec![]),
             (",\"docs\":[\"skill.md\"]", vec!["inherited.md", "skill.md"]),
+            (
+                ",\"docs\":[\"skill.md\"],\"context\":[\"extra.md\"]",
+                vec!["inherited.md", "skill.md", "extra.md"],
+            ),
         ] {
             let skill: Skill = serde_json::from_str(&format!(
                 "{{\"name\":\"implement\",\"default_agent\":\"codex\"{declaration}}}"
@@ -1049,7 +1086,7 @@ mod tests {
                 Some(&skill),
             )
             .unwrap();
-            assert_eq!(resolved.config.docs, expected);
+            assert_eq!(resolved.config.context.docs, expected);
         }
     }
 
@@ -1180,13 +1217,13 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(resolved.config.docs, ["a.md", "b.md"]);
+        assert_eq!(resolved.config.context.docs, ["a.md", "b.md"]);
         assert_eq!(
-            resolved.settings["context_budgets.scratch_tokens"].value,
+            resolved.settings["context.budgets.scratch_tokens"].value,
             Value::from(50)
         );
         assert_eq!(
-            resolved.settings["context_budgets.scratch_bytes"].value,
+            resolved.settings["context.budgets.scratch_bytes"].value,
             Value::from(200)
         );
         let mut layers = resolved.config.setting_layers.unwrap();
@@ -1198,6 +1235,7 @@ mod tests {
         assert!(resolve_layers(&layers, None)
             .unwrap()
             .config
+            .context
             .docs
             .is_empty());
     }
@@ -1205,7 +1243,7 @@ mod tests {
     fn typed_values_reject_unknown_keys_and_wrong_types() {
         for (key, value) in [
             ("graphs.release.steps.write-code.yolo", "false"),
-            ("skills.implement.docs", "[]"),
+            ("skills.implement.context.docs", "[]"),
             ("graphs.release.steps.write-code.default_agent", "codex"),
             ("automation.retries", "3"),
             ("release.targets.cli.verify", "[cargo test]"),
@@ -1219,7 +1257,7 @@ mod tests {
             ("agent", "Explore"),
             ("default_agent", "Explore"),
             ("missing", "false"),
-            ("context_budgets.scratch_tokens", "0"),
+            ("context.budgets.scratch_tokens", "0"),
             ("session", "{unknown: true}"),
         ] {
             assert!(super::parse_value(key, value).is_err(), "{key}");

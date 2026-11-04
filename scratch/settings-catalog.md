@@ -1,5 +1,25 @@
 # File-backed settings, one catalogue, and remote preference authority
 
+## Harness selection without an authored preference — November 4
+
+Jack Heart accepted removing the implicit Codex-first ranking. One installed
+harness is selected automatically; multiple installed harnesses require an
+explicit choice, saved as default_agent during interactive setup. No installed
+harness also leaves selection unresolved. CLI/config/skill/Graph choices keep
+their accepted precedence. Setup never persists an inferred preference.
+
+Inspection must remain available with an unresolved agent and explain the next
+command. New launches fail clearly before provider/capture side effects when
+selection is unresolved. Existing Sessions retain their provider on resume;
+Task/Graph inspection must not invent a provider or reject work whose steps
+choose their own. No personal settings are changed as part of implementing this.
+Verification passed: eight settings/Graph CLI tests, 48 Rust DTO fixtures, 141
+configuration/prompt/Session tests, 51 Swift DTO checks, and the targeted
+resume-after-deleting-default test. The CLI regression also proves Task creation
+and inspection without an agent. Formatting and all-target Clippy passed. Logs:
+/tmp/loo714-agent-choice-tests.log, /tmp/loo714-agent-choice-final.log, and
+/tmp/loo714-agent-choice-swift.log. Automatic usage recovery remains PR2.
+
 LOO-714 · Accepted for implementation by Jack Heart · November 3, 2026
 
 Jack's “ok. lets build.” authorizes this settings extension in the existing Task

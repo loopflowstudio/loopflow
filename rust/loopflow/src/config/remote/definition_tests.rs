@@ -45,7 +45,7 @@ fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
     );
     assert_eq!(prepared.config.skip_permissions, inspection.config.yolo);
     assert_eq!(prepared.config.chrome, inspection.config.chrome);
-    for path in &inspection.config.docs {
+    for path in &inspection.config.context.docs {
         assert!(prepared.components.docs.iter().any(|doc| &doc.path == path));
     }
     inspection
@@ -410,7 +410,7 @@ fn retained_definitions_refresh_and_remove_only_unchanged_preferences() {
     let first = profile.clone();
     profile.revision += 1;
     profile.definitions[0].values =
-        serde_yaml_ng::from_str("default_agent: codex:second\nexclude: []").unwrap();
+        serde_yaml_ng::from_str("default_agent: codex:second\ncontext: {exclude: []}").unwrap();
     receive(&profile);
     receive(&first);
     assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:second");

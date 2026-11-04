@@ -81,9 +81,13 @@ impl SkillSource {
             BTreeMap::new()
         };
         settings.remove("agent");
-        let docs = settings.remove("docs").map(|value| {
-            serde_yaml_ng::from_value(value).expect("metadata validates document paths")
-        });
+        let docs = settings
+            .get_mut("context")
+            .and_then(Value::as_mapping_mut)
+            .and_then(|context| context.remove("docs"))
+            .map(|value| {
+                serde_yaml_ng::from_value(value).expect("metadata validates document paths")
+            });
         Ok(Skill {
             name: self.name.clone(),
             source: self.path.as_ref().map(|path| SkillOrigin {

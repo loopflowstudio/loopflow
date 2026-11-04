@@ -379,14 +379,10 @@ fn assert_launch_settings(launch: &serde_json::Value, inspected: &serde_json::Va
     // Explicit false is observable here through chrome and cleared documents;
     // terminal yolo negation has separate native launch/resume coverage.
     assert!(args.contains(&serde_json::json!("--dangerously-skip-permissions")));
-    let mut expected = settings["docs"]["value"].as_array().unwrap().clone();
-    expected.extend(
-        settings["context"]["value"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .cloned(),
-    );
+    let mut expected = settings["context.docs"]["value"]
+        .as_array()
+        .unwrap()
+        .clone();
     expected.sort_by_key(|value| value.as_str().unwrap().to_owned());
     expected.dedup();
     let mut received = launch["docs"].as_array().unwrap().clone();
@@ -520,7 +516,7 @@ graphs:
         ("skills.probe.agent", "claude:edited-skill"),
         ("graphs.inner.steps.work.agent", "claude:edited-step"),
         ("graphs.inner.steps.work.chrome", "true"),
-        ("graphs.inner.steps.work.docs", "[db.txt]"),
+        ("graphs.inner.steps.work.context.docs", "[db.txt]"),
     ] {
         success(command(
             repo.path(),
@@ -541,7 +537,7 @@ graphs:
         "graphs.inner.steps.work.agent",
         "skills.probe.agent",
         "graphs.inner.steps.work.chrome",
-        "graphs.inner.steps.work.docs",
+        "graphs.inner.steps.work.context.docs",
     ] {
         success(command(
             repo.path(),
@@ -613,7 +609,7 @@ graphs:
                 "--setting",
                 "chrome=false",
                 "--setting",
-                "docs=[]"
+                "context.docs=[]"
             ],
             Some("claude:environment"),
             true
@@ -1115,10 +1111,106 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
 }
 
 #[test]
+fn context_namespace_agrees_across_files_flags_and_preparation() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path());
+    fs::write(
+        home.path().join("config.yaml"),
+        "agent: codex\ncontext:\n  docs: [global.md]\n",
+    )
+    .unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "context:\n  docs: [repo.md]\n  exclude: [skip.md]\n  diff: true\n",
+    );
+    repo.create_file(
+        ".lf/skills/context-proof.md",
+        "---\ncontext:\n  docs: [skill.md]\n---\nRead context.\n",
+    );
+    for name in [
+        "global.md",
+        "repo.md",
+        "skill.md",
+        "private.md",
+        "skip.md",
+        "cli.md",
+    ] {
+        repo.create_file(name, name);
+    }
+    let run = |args: &[&str]| {
+        let result = command(repo.path(), home.path(), args).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result
+    };
+    run(&["set", "context.docs", "[private.md, skip.md]"]);
+    let show = |prefix: &[&str]| {
+        let mut args = prefix.to_vec();
+        args.extend(["config", "show", "--skill", "context-proof", "--json"]);
+        serde_json::from_slice::<serde_json::Value>(&run(&args).stdout).unwrap()
+    };
+    let config = loopflow::config::load_config(Some(repo.path()))
+        .unwrap()
+        .unwrap();
+    let skill = loopflow::graph::load_skill("context-proof", repo.path()).unwrap();
+    let resolved = loopflow::config::settings::resolve(&config, Some(&skill)).unwrap();
+    let prepared = loopflow::prompt::process::prepare_process_prompt(
+        &config,
+        loopflow::prompt::process::ProcessPromptInput {
+            repo_root: repo.path().into(),
+            skill: Some("context-proof".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        show(&[])[0]["settings"]["context.docs"]["value"],
+        serde_json::json!(resolved.config.context.docs)
+    );
+    let paths: Vec<_> = prepared
+        .components
+        .docs
+        .iter()
+        .map(|doc| doc.path.as_str())
+        .collect();
+    for name in ["global.md", "repo.md", "skill.md", "private.md"] {
+        assert!(paths.contains(&name));
+    }
+    assert!(!paths.contains(&"skip.md"));
+    let flags = show(&["--docs", "cli.md", "--diff", "none"]);
+    assert_eq!(flags[0]["settings"]["context.diff"]["value"], false);
+    assert!(flags[0]["settings"]["context.docs"]["value"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("cli.md")));
+    run(&["set", "skills.context-proof.context.docs", "[]"]);
+    assert_eq!(
+        show(&[])[0]["settings"]["context.docs"]["value"],
+        serde_json::json!([])
+    );
+    run(&["unset", "skills.context-proof.context.docs"]);
+    assert!(show(&[])[0]["settings"]["context.docs"]["value"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("private.md")));
+    let saved = fs::read_to_string(repo.path().join("lf.config.local.yaml")).unwrap();
+    assert!(saved.contains("context:") && saved.contains("docs:"));
+}
+
+#[test]
 fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    fs::write(home.path().join("config.yaml"), "default_agent: codex\n").unwrap();
+    fs::write(
+        home.path().join("config.yaml"),
+        "default_agent: codex\nmachine: workstation\naccount:\n  claude: [work]\ntheme: light\nuser:\n  name: Test User\n",
+    )
+    .unwrap();
     repo.create_file(".lf/skills/config-table-proof.md", "Inspect settings.\n");
     repo.create_file(
         ".lf/config.yaml",
@@ -1136,12 +1228,29 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
         String::from_utf8(output.stdout).unwrap()
     };
     let table = show(&[]);
+    let headings = [
+        "Agents and context",
+        "Machines",
+        "Accounts",
+        "Desktop",
+        "Loopflow",
+    ];
+    let positions: Vec<_> = headings
+        .iter()
+        .map(|heading| table.find(&format!("\n  {heading}\n")).unwrap())
+        .collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(!table.contains("\n  Release\n"));
+    let machines = &table[positions[1]..positions[2]];
+    assert!(machines.contains("machine.tasks") && machines.contains("workstation"));
+    let accounts = &table[positions[2]..positions[3]];
+    assert!(accounts.contains("account.claude") && accounts.contains("work"));
     assert!(table.contains("SETTING") && table.contains("VALUE") && table.contains("FROM"));
     assert!(
         table.contains("claude") && table.contains("Shared project · skill config-table-proof")
     );
     assert!(table.contains("false"));
-    assert!(!table.contains("context_budgets.memory_bytes"));
+    assert!(!table.contains("context.budgets.memory_bytes"));
     assert!(!table.contains("\u{1b}[") && !table.contains("{\"kind\""));
     assert!(!table.contains("an applicable agent choice wins"));
     assert!(!table.contains("default_agent"));
@@ -1156,13 +1265,15 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     assert!(explanation.contains("\n      default_agent = codex"));
     assert!(!explanation.contains("\n  default_agent"));
     let all = show(&["--all"]);
-    assert!(all.contains("context_budgets.memory_bytes"));
+    assert!(all.contains("context.budgets.memory_bytes"));
+    assert!(all.contains("context.docs") && all.contains("context.exclude"));
+    assert!(all.contains("context.diff") && all.contains("context.paste"));
     assert!(!all.contains("default_agent") && !all.contains("settings hidden"));
     let json: serde_json::Value = serde_json::from_str(&show(&["--json"])).unwrap();
     assert_eq!(json[0]["settings"]["agent"]["value"], "claude");
     assert_eq!(json[0]["settings"]["default_agent"]["value"], "codex");
     assert_eq!(json[0]["settings"]["chrome"]["value"], false);
-    assert!(json[0]["settings"]["context_budgets.memory_bytes"].is_object());
+    assert!(json[0]["settings"]["context.budgets.memory_bytes"].is_object());
     assert!(json[0]["settings"]["agent"]["candidates"]
         .as_array()
         .unwrap()

@@ -51,12 +51,13 @@ no harness; the application's fallback applies when nothing else selects one.
 
 ```markdown
 ---
-docs: [scripts/testing.md]
+context:
+  docs: [scripts/testing.md]
 ---
 Run the affected suites once for this tree.
 ```
 
-A repository Skill's `docs:` adds files to its context, resolved like `--docs`.
+A repository Skill's `context.docs` adds files to its context, resolved like `--docs`.
 
 ## Run a Graph anywhere
 

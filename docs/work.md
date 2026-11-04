@@ -240,8 +240,9 @@ agent: claude
 skills:
   implement:
     agent: claude:opus
-context_budgets:
-  memory_tokens: 20000
+context:
+  budgets:
+    memory_tokens: 20000
 ```
 
 ```bash

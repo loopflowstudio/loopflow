@@ -2,6 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::config::catalog::{definition, Category};
 use crate::lf::output::{column_width, truncate, Colors};
 
 #[derive(Debug, clap::Args)]
@@ -61,6 +62,12 @@ fn display_value(value: &Value) -> String {
         Some(value) if !value.chars().any(char::is_control) => value.to_owned(),
         _ => value.to_string(),
     }
+}
+
+fn category(key: &str) -> Category {
+    definition(key)
+        .expect("inspected settings come from the catalogue")
+        .category
 }
 
 fn target(candidate: &Value) -> String {
@@ -160,7 +167,7 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
         let Some(settings) = item["settings"].as_object() else {
             continue;
         };
-        let visible: Vec<_> = settings
+        let mut visible: Vec<_> = settings
             .iter()
             .filter(|(key, _)| key.as_str() != "default_agent")
             .filter(|(key, setting)| {
@@ -171,6 +178,7 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
                     })
             })
             .collect();
+        visible.sort_by_key(|(key, _)| (category(key), key.as_str()));
         let rows: Vec<_> = visible
             .iter()
             .map(|(key, setting)| {
@@ -191,11 +199,25 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
             .collect();
         let key_width = column_width("SETTING", rows.iter().map(|row| row.0));
         let value_width = column_width("VALUE", rows.iter().map(|row| &row.1));
-        out.push_str(&format!(
-            "  {}{:<key_width$}  {:<value_width$}  FROM{}\n",
-            colors.dim, "SETTING", "VALUE", colors.reset
-        ));
+        let mut previous_category = None;
         for (key, value, from) in &rows {
+            let category = category(key);
+            if previous_category != Some(category) {
+                if previous_category.is_some() {
+                    out.push('\n');
+                }
+                out.push_str(&format!(
+                    "  {}{}{}\n",
+                    colors.bold,
+                    category.title(),
+                    colors.reset
+                ));
+                out.push_str(&format!(
+                    "  {}{:<key_width$}  {:<value_width$}  FROM{}\n",
+                    colors.dim, "SETTING", "VALUE", colors.reset
+                ));
+                previous_category = Some(category);
+            }
             out.push_str(&format!(
                 "  {}{key:<key_width$}{}  {}{value:<value_width$}{}  {from}\n",
                 colors.cyan, colors.reset, colors.green, colors.reset
@@ -263,10 +285,15 @@ pub fn catalog(json: bool) -> anyhow::Result<()> {
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(crate::config::catalog::DEFINITIONS)?
+            serde_json::to_string_pretty(&crate::config::catalog::definitions())?
         );
     } else {
-        for definition in crate::config::catalog::DEFINITIONS {
+        let mut previous_category = None;
+        for definition in crate::config::catalog::definitions() {
+            if previous_category != Some(definition.category) {
+                println!("\n{}\n", definition.category.title());
+                previous_category = Some(definition.category);
+            }
             println!(
                 "{}: {}{}",
                 definition.key,

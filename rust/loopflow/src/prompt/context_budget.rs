@@ -83,7 +83,8 @@ impl ContextBudgets {
             .into_iter()
             .map(|key| {
                 let value = config
-                    .context_budgets
+                    .context
+                    .budgets
                     .get(&key)
                     .copied()
                     .unwrap_or(key.default_limit());
@@ -92,7 +93,7 @@ impl ContextBudgets {
                     .get(&key)
                     .cloned()
                     .unwrap_or_else(|| {
-                        if config.context_budgets.contains_key(&key) {
+                        if config.context.budgets.contains_key(&key) {
                             "provided config"
                         } else {
                             "default"
@@ -105,7 +106,7 @@ impl ContextBudgets {
         for (key, limit) in &limits {
             if limit.value == 0 {
                 return Err(CoreError::ExecutionFailed(format!(
-                    "context_budgets.{} must be positive ({})",
+                    "context.budgets.{} must be positive ({})",
                     key.name(),
                     limit.source
                 )));
@@ -223,7 +224,10 @@ mod tests {
     fn context_targets_measure_without_changing_sources() {
         let repo = tempfile::tempdir().unwrap();
         let config = Config {
-            context_budgets: [(BudgetKey::ScratchBytes, 1)].into(),
+            context: crate::config::ContextConfig {
+                budgets: [(BudgetKey::ScratchBytes, 1)].into(),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let docs = vec![Document {

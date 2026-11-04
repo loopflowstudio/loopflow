@@ -1,0 +1,20 @@
+[
+  {
+    "key": "theme",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Nullable_string",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default": "null",
+    "applicability": "personal",
+    "combination": "replace",
+    "portability": "referenced_assets",
+    "lifecycle": "next_read",
+    "description": "Appearance theme or light:name,dark:name pair",
+    "category": "Desktop"
+  }
+]

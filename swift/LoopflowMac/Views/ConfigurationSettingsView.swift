@@ -30,12 +30,16 @@ struct ConfigurationSettingsView: View {
             HStack {
                 TextField("Setting key", text: $key)
                 Menu("Browse") {
-                    ForEach(catalogue.map(\.key), id: \.self) { name in
-                        Button(name) { key = name }
+                    ForEach(categories, id: \.self) { category in
+                        Section(category) {
+                            ForEach(catalogue.filter { $0.category == category }.map(\.key), id: \.self) { name in
+                                Button(name) { key = name }
+                            }
+                        }
                     }
                 }
             }
-            if let definition = catalogue.first(where: { $0.key == key.components(separatedBy: ".").first }) {
+            if let definition = catalogue.filter({ key == $0.key || key.hasPrefix($0.key + ".") }).max(by: { $0.key.count < $1.key.count }) {
                 Text(definition.description).font(.callout)
                 Text("\(definition.applicability) · \(definition.combination) · \(definition.portability)")
                     .font(.caption).foregroundStyle(.secondary)
@@ -58,6 +62,12 @@ struct ConfigurationSettingsView: View {
         .onAppear {
             do { catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: LoopflowLibrary.configuration(["action": "catalog"])); load() }
             catch { notice = error.localizedDescription }
+        }
+    }
+
+    private var categories: [String] {
+        catalogue.reduce(into: []) { categories, definition in
+            if !categories.contains(definition.category) { categories.append(definition.category) }
         }
     }
 
@@ -157,6 +167,7 @@ struct ConfigurationExplanation: Decodable {
 
 struct ConfigurationDefinition: Decodable {
     let key: String
+    let category: String
     let schema: JSONValue
     let `default`: String
     let applicability: String

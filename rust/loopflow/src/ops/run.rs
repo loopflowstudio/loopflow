@@ -700,9 +700,6 @@ mod tests {
         ] {
             let prepared = crate::prompt::process::prepare_process_prompt(
                 &crate::config::Config {
-                    diff_files: false,
-                    diff: false,
-                    paste: false,
                     ..Default::default()
                 },
                 crate::prompt::process::ProcessPromptInput {

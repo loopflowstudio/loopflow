@@ -1,0 +1,30 @@
+--- a/.lf/config.yaml
++++ b/.lf/config.yaml
+@@ -1,15 +1,16 @@
+ agent: codex
+-exclude:
+-- '*.lock'
+-- '*-lock.json'
+-- node_modules
+-- __pycache__
+-- .next
+-- .mypy_cache
+-- .pytest_cache
+-- lambda/build
+-- venv
+-- web-app/venv
++context:
++  exclude:
++    - '*.lock'
++    - '*-lock.json'
++    - node_modules
++    - __pycache__
++    - .next
++    - .mypy_cache
++    - .pytest_cache
++    - lambda/build
++    - venv
++    - web-app/venv
+ branch_names:
+   schema: '{user}.{name}.{ts}'
+ planning:

@@ -288,6 +288,7 @@ pub(super) fn validate(definition: &DefinitionPreferences) -> Result<()> {
 }
 
 fn replace_metadata(document: &mut Value, incoming: &Value) -> Result<()> {
+    super::normalize_context(document);
     let previous = super::remote::project(&metadata(document)?);
     super::remote::remove_projection(document, &previous);
     super::files::overlay(document, incoming);

@@ -467,7 +467,7 @@ impl Config {
     }
 }
 
-pub use catalog::Config;
+pub use catalog::{Config, ContextConfig};
 
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -521,6 +521,7 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
         LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
     fold_linear_team(&mut value);
+    normalize_context(&mut value);
     Ok(Some(value))
 }
 
@@ -543,6 +544,63 @@ fn fold_linear_team(value: &mut serde_yaml_ng::Value) {
             && !planning.contains_key("team")
         {
             planning.insert("team".into(), team);
+        }
+    }
+}
+
+/// Temporary reader for preferences shared with the released flat format.
+/// Task 807ef7 removes this after installed readers migrate.
+pub(crate) fn normalize_context(value: &mut serde_yaml_ng::Value) {
+    use serde_yaml_ng::{Mapping, Value};
+    let Some(map) = value.as_mapping_mut() else {
+        return;
+    };
+    let mut context = match map.remove("context") {
+        Some(Value::Mapping(context)) => context,
+        Some(Value::Sequence(paths)) => {
+            let mut docs = map
+                .remove("docs")
+                .unwrap_or_else(|| Value::Sequence(vec![]));
+            if let Some(docs) = docs.as_sequence_mut() {
+                docs.extend(paths);
+            }
+            Mapping::from_iter([("docs".into(), docs)])
+        }
+        Some(other) => {
+            map.insert("context".into(), other);
+            return;
+        }
+        None => Mapping::new(),
+    };
+    for (old, new) in [
+        ("docs", "docs"),
+        ("exclude", "exclude"),
+        ("diff", "diff"),
+        ("diff_files", "diff_files"),
+        ("paste", "paste"),
+        ("context_budgets", "budgets"),
+    ] {
+        if let Some(value) = map.remove(old) {
+            context.entry(new.into()).or_insert(value);
+        }
+    }
+    if !context.is_empty() {
+        map.insert("context".into(), context.into());
+    }
+    for name in ["skills", "waves", "repos"] {
+        if let Some(targets) = map.get_mut(name).and_then(Value::as_mapping_mut) {
+            for value in targets.values_mut() {
+                normalize_context(value);
+            }
+        }
+    }
+    if let Some(graphs) = map.get_mut("graphs").and_then(Value::as_mapping_mut) {
+        for graph in graphs.values_mut() {
+            if let Some(steps) = graph.get_mut("steps").and_then(Value::as_mapping_mut) {
+                for value in steps.values_mut() {
+                    normalize_context(value);
+                }
+            }
         }
     }
 }
@@ -920,14 +978,13 @@ mod tests {
         assert_eq!(config.agent().unwrap(), "codex");
         assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
-        assert!(config.docs.is_empty());
-        assert!(!config.diff_files);
-        assert!(!config.diff);
+        assert!(config.context.docs.is_empty());
+        assert!(!config.context.diff_files);
+        assert!(!config.context.diff);
         assert!(!config.chrome);
         assert!(!config.pr);
         assert_eq!(config.land, "gh");
-        assert!(config.context.is_empty());
-        assert!(config.exclude.is_empty());
+        assert!(config.context.exclude.is_empty());
         assert!(config.release.targets.is_empty());
     }
 
@@ -970,34 +1027,40 @@ supported_harnesses:
     fn config_from_yaml_context_as_list() {
         let yaml = r#"
 context:
-  - src/
-  - tests/
+  docs:
+    - src/
+    - tests/
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.context, vec!["src/", "tests/"]);
+        assert_eq!(config.context.docs, vec!["src/", "tests/"]);
     }
 
     #[test]
     fn config_from_yaml_docs_as_list() {
         let yaml = r#"
-docs:
-  - README.md
-  - docs/
+context:
+  docs:
+    - README.md
+    - docs/
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.docs, vec!["README.md", "docs/"]);
+        assert_eq!(config.context.docs, vec!["README.md", "docs/"]);
     }
 
     #[test]
     fn config_from_yaml_exclude_as_list() {
         let yaml = r#"
-exclude:
-  - "*.log"
-  - build/
-  - node_modules/
+context:
+  exclude:
+    - "*.log"
+    - build/
+    - node_modules/
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.exclude, vec!["*.log", "build/", "node_modules/"]);
+        assert_eq!(
+            config.context.exclude,
+            vec!["*.log", "build/", "node_modules/"]
+        );
     }
 
     #[test]

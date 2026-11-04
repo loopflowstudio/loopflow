@@ -200,3 +200,18 @@ preparation. Include worktree sharing, hand edits, default/choice conflicts,
 false/empty/unset, Wave identity changes, migration interruptions, origin-versus-remote
 profiles and retention conflicts. Avoid tests that merely mirror the catalogue or
 assert mock wiring. Documentation examples and code must agree before publication.
+
+## Context namespace
+
+`Config.context` owns docs, exclude, diff, diff_files, paste and budgets. The
+catalogue defines the parent mapping and each leaf together with its typed
+value, default, applicability, merge policy and portability. Longest-prefix
+lookup selects the leaf policy for validation, resolution, editing and display.
+The mapping merges; docs/exclude append and an empty list clears. Remote
+projection walks declared child settings so context.paste remains host-local.
+
+CLI flags produce canonical context paths. Authored Skill metadata uses the same
+shape; the existing durable Skill.docs capture field projects to context.docs
+without duplicating it in Skill.settings. A temporary normalization boundary
+reads the released flat keys and old context list; Task 807ef7 owns its removal.
+No branch installation or automatic rewriting of shared live files is implied.

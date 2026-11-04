@@ -99,15 +99,16 @@ fn prepare_prompt(
     let effective = crate::config::settings::resolve(config, resolved_skill.as_ref())?;
     let config = &effective.config;
     let agent = config.agent()?.to_owned();
-    let mut docs = config.docs.clone();
-    docs.extend(config.context.iter().cloned());
+    let mut docs = config.context.docs.clone();
     docs.extend(requested_docs);
-    let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
-    let diff = source_overrides.diff.unwrap_or(config.diff);
+    let diff_files = source_overrides
+        .diff_files
+        .unwrap_or(config.context.diff_files);
+    let diff = source_overrides.diff.unwrap_or(config.context.diff);
     let clipboard = match source_overrides.clipboard {
         Some(true) => ClipboardContext::Required,
         Some(false) => ClipboardContext::Off,
-        None if config.paste => ClipboardContext::IfAvailable,
+        None if config.context.paste => ClipboardContext::IfAvailable,
         None => ClipboardContext::Off,
     };
 
@@ -131,9 +132,9 @@ fn prepare_prompt(
     if let Some(skill) = resolved_skill {
         components.skill = Some(skill);
     }
-    if !config.exclude.is_empty() {
+    if !config.context.exclude.is_empty() {
         let mut patterns = ignore::gitignore::GitignoreBuilder::new(&repo_root);
-        for pattern in &config.exclude {
+        for pattern in &config.context.exclude {
             patterns
                 .add_line(None, pattern)
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
@@ -256,9 +257,6 @@ Test skill body.
     fn default_test_config() -> Config {
         Config {
             agent: Some("claude:opus".to_string()),
-            diff_files: false,
-            diff: false,
-            paste: false,
             ..Config::default()
         }
     }
@@ -851,8 +849,13 @@ Test skill body.
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
         fs::write(tmp.path().join("docs/README.md"), "docs content").expect("write docs");
+        fs::write(tmp.path().join("docs/generated.md"), "generated content").unwrap();
         let config = Config {
-            docs: vec!["docs".to_string()],
+            context: crate::config::ContextConfig {
+                docs: vec!["docs".to_string()],
+                exclude: vec!["docs/generated.md".into()],
+                ..Default::default()
+            },
             ..default_test_config()
         };
 
@@ -870,6 +873,11 @@ Test skill body.
             .docs
             .iter()
             .any(|doc| doc.path == "docs/README.md" && doc.content == "docs content"));
+        assert!(!prepared
+            .components
+            .docs
+            .iter()
+            .any(|doc| doc.path == "docs/generated.md"));
     }
 
     #[test]

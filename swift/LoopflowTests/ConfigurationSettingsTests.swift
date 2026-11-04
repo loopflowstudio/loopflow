@@ -5,6 +5,16 @@ import Testing
 
 @Suite("Configuration destinations")
 struct ConfigurationSettingsTests {
+    @Test func catalogueIncludesFeatureCategory() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let fixture = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/configuration_catalog.json"))
+        let catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: fixture)
+        #expect(catalogue.count == 1)
+        #expect(catalogue[0].key == "theme")
+        #expect(catalogue[0].category == "Desktop")
+    }
+
     @Test func destinationsMatchRustWithoutIndependentScopeOrPath() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

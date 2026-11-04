@@ -36,6 +36,29 @@ pub struct Retention {
 }
 
 pub(super) fn project(value: &Value) -> Value {
+    let mut normalized = value.clone();
+    super::normalize_context(&mut normalized);
+    let value = &normalized;
+    fn setting(value: &Value, key: &str) -> Option<Value> {
+        let definition = super::catalog::definition(key)?;
+        let prefix = format!("{key}.");
+        if super::catalog::definitions()
+            .iter()
+            .any(|child| child.key.starts_with(&prefix))
+        {
+            let projected = value
+                .as_mapping()?
+                .iter()
+                .filter_map(|(name, value)| {
+                    setting(value, &format!("{prefix}{}", name.as_str()?))
+                        .map(|value| (name.clone(), value))
+                })
+                .collect::<serde_yaml_ng::Mapping>();
+            return (!projected.is_empty()).then(|| projected.into());
+        }
+        (definition.portability != super::catalog::Portability::HostLocal).then(|| value.clone())
+    }
+
     fn targets(value: &Value) -> Value {
         value
             .as_mapping()
@@ -69,10 +92,8 @@ pub(super) fn project(value: &Value) -> Value {
                     }
                 }
                 graphs.into()
-            } else if super::catalog::definition(key).is_some_and(|definition| {
-                definition.portability != super::catalog::Portability::HostLocal
-            }) {
-                value.clone()
+            } else if let Some(projected) = setting(value, key) {
+                projected
             } else {
                 continue;
             };
@@ -83,6 +104,7 @@ pub(super) fn project(value: &Value) -> Value {
 }
 
 fn replace_projection(document: &mut Value, incoming: &Value) {
+    super::normalize_context(document);
     let previous = project(document);
     remove_projection(document, &previous);
     super::files::overlay(document, incoming);
@@ -511,6 +533,21 @@ mod tests {
             definitions: vec![],
         }
     }
+    #[test]
+    fn context_projection_preserves_resets_and_keeps_clipboard_on_the_host() {
+        let incoming: Value = serde_yaml_ng::from_str("context: {docs: [], diff: false, paste: true}\nskills: {design: {context: {paste: true}}}").unwrap();
+        let portable = super::project(&incoming);
+        assert_eq!(portable["context"]["docs"], Value::Sequence(vec![]));
+        assert_eq!(portable["context"]["diff"], Value::Bool(false));
+        assert!(portable["context"].get("paste").is_none());
+        assert!(portable["skills"]["design"].get("context").is_none());
+        let mut saved: Value = serde_yaml_ng::from_str("docs: [old.md]\npaste: true").unwrap();
+        super::replace_projection(&mut saved, &portable);
+        assert!(saved.get("docs").is_none());
+        assert_eq!(saved["context"]["docs"], Value::Sequence(vec![]));
+        assert_eq!(saved["context"]["paste"], Value::Bool(true));
+    }
+
     #[test]
     fn origin_declarations_drive_launch_without_inspection_writing_files() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();

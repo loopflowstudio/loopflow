@@ -178,7 +178,7 @@ impl Cli {
         }
         for (key, enabled) in [
             ("yolo", self.yolo.then_some(true)),
-            ("paste", self.clipboard.then_some(true)),
+            ("context.paste", self.clipboard.then_some(true)),
             (
                 "isolate",
                 self.shared
@@ -187,18 +187,22 @@ impl Cli {
             ),
             ("chrome", self.chrome.map(|mode| mode == BrowserMode::On)),
             (
-                "diff",
+                "context.diff",
                 self.diff
                     .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both)),
             ),
             (
-                "diff_files",
+                "context.diff_files",
                 self.diff
                     .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both)),
             ),
         ] {
             if let Some(enabled) = enabled {
-                crate::config::settings::insert(&mut value, &[key], enabled.into());
+                crate::config::settings::insert(
+                    &mut value,
+                    &key.split('.').collect::<Vec<_>>(),
+                    enabled.into(),
+                );
             }
         }
         if let Some(agent) = &self.agent {
@@ -207,7 +211,7 @@ impl Cli {
         if !self.docs.is_empty() {
             crate::config::settings::insert(
                 &mut value,
-                &["docs"],
+                &["context", "docs"],
                 serde_yaml_ng::to_value(&self.docs)?,
             );
         }

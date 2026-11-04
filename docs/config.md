@@ -165,12 +165,17 @@ the intended lifetime.
 
 ```yaml
 # .lf/config.yaml
-docs: [README.md]
+context:
+  docs: [README.md]
+  exclude: [docs/generated/**]
+  diff: true
 skills:
   design:
-    docs: [docs/product.md]
+    context:
+      docs: [docs/product.md]
   implement:
-    docs: [scripts/testing.md]
+    context:
+      docs: [scripts/testing.md]
 graphs:
   release:
     steps:
@@ -180,9 +185,20 @@ graphs:
 
 Design gets the README and product notes; implementation gets the README and
 testing instructions. The named release step explicitly disables Chrome.
-Lists such as `docs` add contributions; `[]` clears earlier contributions.
+Lists such as `context.docs` add contributions; `[]` clears earlier contributions.
 `false` is an explicit value, while omitting or unsetting a key reveals the next
 applicable setting.
+
+Use the same paths in setters and invocation overrides:
+
+```bash
+lf set context.exclude '[docs/generated/**]'
+lf set skills.design.context.docs '[docs/product.md]'
+lf --setting context.diff=false design
+```
+
+`context` also holds `diff_files`, `paste` and `budgets`. The existing `--docs`,
+`--diff` and clipboard flags address those same settings.
 
 ## Choose accounts and where work runs
 
@@ -229,6 +245,9 @@ lf context --json
 The table shows effective values and readable sources and targets. Color follows
 the terminal and respects `NO_COLOR`; piped output is plain text. Built-in-only
 settings stay hidden unless you pass `--all`; the effective agent always appears.
+Agents and context appear first, followed by Machines, Accounts, Desktop,
+Planning, Release and Loopflow. Empty sections are hidden. These feature groups
+also organize catalogue browsing; each row keeps its actual configuration path.
 Use `--explain` for each candidate, its authored key, file and winning reason.
 `default_agent` appears within the explanation for `agent`, never as a separate
 table row, including with `--all`.
@@ -294,8 +313,8 @@ each class. A command-line `default_agent` is still a fallback.
 | Personal implement `default_agent: codex`; repository general `agent: claude` | Claude |
 | Explicit `-a codex`; repository occurrence `agent: claude` | Codex |
 
-Lists and compound settings follow their declared merge rules. `docs`, `context`,
-`exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
+Lists and compound settings follow their declared merge rules. `context.docs`,
+`context.exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
 clears earlier contributions. Keyed maps merge by key. Account lists preserve
 order and replace as a unit. `planning` replaces its complete tagged provider
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
@@ -383,11 +402,10 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Agent | `-a claude:opus` | `agent: claude:opus` |
 | [Planning synchronization](work.md#share-the-plan) | — | `planning: {provider: linear, team: "<id>"}`, `planning: {provider: asana, team: "<gid-or-url>"}`, `planning: {provider: notion, team: "<page-url-or-id>"}` or `planning: {provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
-| Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
-| Include branch files | `--diff files` | `diff_files: true` |
-| Include raw diff | `--diff patch` | `diff: true` |
+| Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
+| Include branch files | `--diff files` | `context: {diff_files: true}` |
+| Include raw diff | `--diff patch` | `context: {diff: true}` |
 | Include clipboard | `-c, --clipboard` | — |
-| Context files | — | `context: [FILE]` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
@@ -430,16 +448,18 @@ lf context --task LOO-303 --json    # Task checkout, including Wave memory
 Edit the existing repo `.lf/config.yaml`:
 
 ```yaml
-context_budgets:
-  memory_tokens: 6000
-  scratch_tokens: 8000
+context:
+  budgets:
+    memory_tokens: 6000
+    scratch_tokens: 8000
 ```
 
 Override individual fields for a Wave in `.lf/wave/<name>/config.yaml`:
 
 ```yaml
-context_budgets:
-  memory_tokens: 10000
+context:
+  budgets:
+    memory_tokens: 10000
 ```
 
 Each field follows the same source and scope precedence. `lf context` shows the winning source for every value.
@@ -468,8 +488,8 @@ in a provider request. The harness loads its repo guide natively.
 | Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | Standalone native skills retain their own guidance |
 | Skill and request | First turn | Selected skill and launch message |
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
-| Explicit docs | Complete reference bodies in the submitted turn | `docs:` in config or Loopflow skill frontmatter, or `--docs` |
-| Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
+| Explicit docs | Complete reference bodies in the submitted turn | `context.docs` in config or Loopflow skill frontmatter, or `--docs` |
+| Branch changes | Git inspection commands and changed paths | `--diff patch`, `context: {diff_files: true}` |
 | Captured references | Complete private reference files | Work direction supplied by the caller |
 | Clipboard | Tagged block after the request in the first turn | `-c` |
 
@@ -561,7 +581,7 @@ List specific files, globs, or directories for the agent to read. Not included b
 | | |
 |---|---|
 | **CLI** | `--docs PATH[,PATH...]` |
-| **Config** | `docs: [PATH, PATH]` |
+| **Config** | `context: {docs: [PATH, PATH]}` |
 | **Default** | none (empty) |
 
 Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
@@ -586,7 +606,7 @@ List paths modified on the current branch for the agent to inspect.
 | | |
 |---|---|
 | **CLI** | `--diff files` / `--diff none` |
-| **Config** | `diff_files: true` |
+| **Config** | `context: {diff_files: true}` |
 | **Default** | `false` |
 
 Use `--diff files` to identify changed files. The reference points to Git inspection;
@@ -600,6 +620,7 @@ It counts toward the terminal argument cap.
 | | |
 |---|---|
 | **CLI** | `-c, --clipboard` |
+| **Config** | `context: {paste: true}` (local to the host) |
 | **Default** | not included |
 
 Use `-c` when debugging: copy an error, then `lf debug -c`.
@@ -611,28 +632,20 @@ Point to Git inspection commands rather than inlining a frozen patch.
 | | |
 |---|---|
 | **CLI** | `--diff patch` / `--diff none` |
-| **Config** | `diff: true` |
+| **Config** | `context: {diff: true}` |
 | **Default** | `false` (not included) |
 
 Use when the agent needs to inspect exact changes. `--diff both` also lists changed paths.
 
-### Context Files
-
-Additional file paths listed for every skill.
-
-| | |
-|---|---|
-| **Config** | `context: [src/schema.py, docs/api.md]` |
-
-Config sets baseline files for all skills.
-
 ### Exclude Patterns
 
-Glob patterns to exclude from file listings.
+Git-ignore-style patterns that remove matching documents and changed-file contents
+from the context LF supplies. They do not restrict the agent’s own file access
+or filter its searches or Git commands.
 
 | | |
 |---|---|
-| **Config** | `exclude: ["*.test.ts", node_modules, dist]` |
+| **Config** | `context: {exclude: ["*.test.ts", node_modules, dist]}` |
 
 ---
 
@@ -1061,3 +1074,13 @@ Migration retains before/after files in `settings-cutover.json`. Unavailable leg
 repository destinations remain in `settings-recovery.yaml`, which is never read
 as configuration. Import deliberately selects the destination clone; conflicting
 saved declarations require `--replace`. Future clones inherit nothing automatically.
+
+### Moving from flat context settings
+
+The new namespace requires a release that supports it. Until that release is
+installed everywhere a file is read, keep its released shape. The new reader
+accepts flat `docs`, `exclude`, `diff`, `diff_files`, `paste` and `context_budgets`
+during rollout; setters and inspection use `context.*`. The former `context`
+path list becomes `context.docs`, combined after `docs` when both were authored
+in the same block. Explicit new fields win over old spellings in that block.
+Task 807ef7 removes this transition reader after migration.

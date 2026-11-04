@@ -1,6 +1,6 @@
 # Separate execution destinations, client access and installation
 
-LOO-593 · Implementation selected November 4, 2026 · Pursue → interactive demo
+LOO-593 · Accepted November 4, 2026 · Reconciled November 4, 2026
 
 ## Accepted direction
 
@@ -22,18 +22,19 @@ The canonical boundary and usage are in
 This replaces the earlier Machine-service framing. Jack Heart now authorizes
 implementation and publication of this cutover in the existing Task, followed by
 interactive review. The earlier docs-only boundary is superseded. No merge or
-Auto-Ship approval is given. The existing feature graph runs its pursue
-composition through implementation, compression, sync, realignment, concept
-review and publication, then stops at demo. A bare pursuit reaching end would
-violate this accepted review boundary.
+Auto-Ship approval is given. Publication returns to the existing feature graph’s
+interactive demo boundary.
 
 ## Implementation status and remaining work
 
 The local cutover is implemented in this checkout: `lf server run/status`, hidden
 installation readiness, renamed Rust/Swift protocol clients, environment flags,
 DTO fixtures and packaging. Registration is under `installation/`; no serving or
-setup subcommand remains on Machine. Desktop caches its endpoint after initial
-readiness; retries only reconnect. The protocol wire fields remain revision 1.
+setup subcommand remains on Machine. Desktop consumes initial readiness even when
+it fails; subsequent Work refreshes discover the endpoint through observational
+`server status`. Native Retry only reconnects. Failed-start recovery attaches
+passively so a newer viewer retains its claims. The protocol wire fields remain
+revision 1.
 
 Upgrade retires old OS labels before registering the server. The native bundle
 retains only an old plist migration descriptor; its obsolete argv cannot start a
@@ -45,41 +46,47 @@ No Work or credential state moves. A focused migration check found and fixed the
 old launchctl parser's assumption that overrides print `true`; current macOS
 prints `disabled`.
 
-Remaining through the existing pursue composition:
+Compression and sync are complete at `996f16fabb`; main remains
+`ac8e088f5f`. No upstream integration changed the implementation. Source inspection
+confirms native copy/Find and pointer/scroll handlers remain reachable while
+provider input is paused; rendered behavior still needs demo evidence.
 
-- Compress/sync/realign against overlapping installation work, preserving this
-  boundary and the existing recovery semantics. No wider FFI or remote cutover.
-- Gate the affected command, protocol, relay, Swift and packaging boundaries;
-  repeat the composed signed installed replacement with draft/Graph live, and
-  run formatting/Clippy and the broader Xcode link check. The focused checks
-  below do not replace gate or the combined LOO-718 release proof.
-- Publish to existing PR #1813 and stop at interactive demo. Native rendered
-  recovery, reading/copy/Find/scroll and Move here remain demo evidence. Linux
-  supervisor replacement remains Linux-host acceptance. No merge or Auto-Ship.
+Remaining work:
 
-Current open overlap inventory (November 4):
+- Gate the affected command, protocol, relay, Swift and packaging boundaries,
+  reusing applicable focused passes. Repeat the renamed composed signed installed
+  replacement with an editable draft and Graph live; run the broader Xcode link
+  check. Formatting and Clippy already passed for this code.
+- Publish the cutover to existing PR #1813 and return to interactive demo. Native
+  recovery, quit/reopen, reading/copy/Find/scroll and Move here remain unverified.
+  Linux supervisor replacement remains Linux-host acceptance.
+- Integrate the shared contract with LOO-718 without duplicating remote admission
+  or wider FFI cutover here. Combined-release acceptance remains separate.
 
-- [Native phone client · LOO-718 / PR #1812](https://github.com/loopflowstudio/loopflow/pull/1812)
-  extends the same server modules and wire with remote admission, pairing and
-  create/start. Preserve its shared contract; supply the migration map for its
-  integration. Do not overwrite its checkout or duplicate remote implementation.
-- [Coherent installed build · LOO-723 / PR #1815](https://github.com/loopflowstudio/loopflow/pull/1815)
-  changes install and published-artifact selection. Keep its selection/update
-  authority intact; reconcile new landed code during sync instead of forking it.
-- [Task shell lifetimes · LOO-717 / PR #1811](https://github.com/loopflowstudio/loopflow/pull/1811)
-  touches Machine commands. Preserve its shell lifetime and remote routing work.
-- [Preferences and agent selection · LOO-714 / PR #1805](https://github.com/loopflowstudio/loopflow/pull/1805)
-  touches published installation. Preserve preference/default behavior.
-- [Mac installation · LOO-312 / PR #1656](https://github.com/loopflowstudio/loopflow/pull/1656)
-  changes installation and onboarding. This pursuit changes server registration,
-  not its product choices or first-run account setup.
+### Related work, observed November 4
 
-Re-read overlap state before integrating; this inventory is evidence, not
-permission to change another Task's work. Refresh Wave terminology only through
-the graph's authored realign procedure.
+All five PRs remain open at reconciliation; none supplies landed behavior here.
+
+| Work | Observed head | Integration boundary |
+| --- | --- | --- |
+| [LOO-718 / #1812](https://github.com/loopflowstudio/loopflow/pull/1812) | `983b271695` | Native iOS, remote admission, pairing and create/start; migration map below |
+| [LOO-723 / #1815](https://github.com/loopflowstudio/loopflow/pull/1815) | `c7fff6b143` | Artifact selection/update; retains retired app bundles used by live processes |
+| [LOO-717 / #1811](https://github.com/loopflowstudio/loopflow/pull/1811) | `b81df60579` | Machine shell lifetime and remote routing |
+| [LOO-714 / #1805](https://github.com/loopflowstudio/loopflow/pull/1805) | `3c2a3739d1` | Published installation preferences and provider defaults |
+| [LOO-312 / #1656](https://github.com/loopflowstudio/loopflow/pull/1656) | `eff20d8f32` | Installation/onboarding product choices and first-run accounts |
+
+LOO-723’s retained-bundle behavior complements server replacement: deleting an
+old app is distinct from unregistering its server. The combined installation must
+preserve that process-aware artifact cleanup and this branch’s post-promotion
+registration hook. Its source is evidence, not a composed-release proof.
 
 ## Delete — do not maintain
 
+- Removed readiness from `Status::connect`'s retry loop and replaced
+  `ServerLocation.path()`'s repeatable installation path with one initial attempt
+  and observational endpoint discovery. Failed startup also discards the original
+  replacing Attach intent; the existing passive recovery path preserves newer
+  claims. Initial diagnostics and pane-closure cancellation remain.
 - Removed `MachineCommand::Service` and `MachineServiceCommand`; `ServerCommand`
   owns serving/status and hidden `install server` requests installation readiness.
 - Moved `machine_service/installation.rs` and `registration.m` into
@@ -147,7 +154,7 @@ owns the remote/mobile experience. Both need the accepted naming boundary.
 
 ### LOO-718 integration handoff
 
-Read-only inspection of its current open PR head `983b271695` confirmed
+Read-only inspection of PR head `983b271695` confirmed
 `MachineServiceCommand::{Mobile,Pair,Devices,Revoke}` and
 `Run { remote_port }`. Move those variants to `ServerCommand` and dispatch via
 `lf/commands/server.rs`. Keep the existing verbs/flags as `lf server mobile`,
@@ -159,8 +166,8 @@ route ownership remain unchanged. Rename its additional DTO fixtures and Swift
 protocol references with this foundation; preserve every wire field including
 `machine`/`machine_id`. No namespace-only protocol revision is needed.
 
-This handoff does not modify LOO-718's checkout or import its schema/remote paths.
-LOO-723/PR #1815 was still open at this pass; sync owns integration if it lands.
+This handoff leaves LOO-718’s checkout, schema and remote implementation with that
+Task. No namespace-only wire revision or persisted credential migration is needed.
 
 Do not create compatibility aliases for internal commands or duplicate protocol
 implementations. Persisted state and installed supervisor registrations need an
@@ -239,7 +246,66 @@ Before-login hosting and a separately distributed GUI-less package remain open
 product questions. Removal must preserve Work/credentials and explicitly address
 active execution; deleting Desktop implies no standalone hosting promise.
 
+### Concept review: failed setup must not redefine Retry
+
+November 4 review against `996f16fabb`: the Machine/server/installation split and
+the existing owner model remain accepted. Jack Heart's rule that recovery only
+reconnects also applies when the first installation-readiness request fails.
+This is an implementation direction derived from that rule, not new approval.
+
+The consequential mismatch found at that revision was on the failure path. In
+`transport/connection.rs`, `Status::connect` kept `initial = true` after
+`prepare()` failed. Native Retry returned to that branch and launched
+`install server` again. In `ServerClient.swift`, `ServerLocation.path()` retained
+the socket only after successful readiness and cleared its in-flight task on
+failure; the next read or reopened watch requested installation again.
+Successful-start restart tests did not establish this failed-start boundary.
+
+**Implemented correction (November 4):** initial readiness is one attempt per
+native surface or shared Work client, consumed whether it succeeds or fails.
+Endpoint discovery uses the existing observational `server status` command after
+failed setup; there is no second Swift path resolver. Recovery has no registration
+branch. Initial diagnostics remain available to concurrent Work waiters and
+native Retry; the last screen stays visible while unavailable. Installation or
+explicit OS enablement repairs setup, and Retry observes the result. Automatic
+first-use setup, pane-closure cancellation, bounded recovery, exact owner identity,
+newer claims and no-replay guarantees remain. No wire concept, durable retry
+record or registration authority was added.
+
+The failure diagnostic now clarifies the accepted usage:
+
+> Open Desktop normally; local setup is automatic on first connection. If setup
+> fails, use the reported installation or Background Items repair, then Retry.
+> Retry connects to the existing server and Session; it never installs or
+> re-registers the server. Reading/copying the retained screen remains available.
+
+Existing usage docs and skills already assign these responsibilities correctly.
+Only the failure diagnostic needs clarification; ordinary use gains no setup step.
+
+The regression counterexample is initial setup failing before
+any successful connection, then registration becomes possible. A Work refresh or
+native Retry must leave registration unchanged. Once installation independently
+starts the server, the same client must read Work and attach the exact existing
+owner without reopening the pane, replaying input or taking a newer viewer's
+claims. This failed-start proof complements the existing successful-start restart
+and lost-takeover-acknowledgement cases. It does not replace the composed signed
+replacement or rendered acceptance above.
+
+Review outcome: the working design now specifies the failed-start boundary as
+the implemented correction. No unresolved product choice blocks this local
+correction. GUI-less distribution, before-login hosting, active-work removal and
+phone takeover remain separately scoped choices; this review selects none of them.
+
 ## Evidence and remaining proof
+
+The focused failed-setup relay proof covers terminal and byte-stream clients:
+Retry leaves installation attempts unchanged while setup is possible, then an
+independent server start restores the exact owner. A newer viewer retains input
+and geometry; outage/read-only typing is discarded, the owner/provider identity
+stays fixed, and the retained screen returns. The correction also routes a failed
+first connection through passive recovery instead of the original replacing
+Attach. The Swift proof covers failed subprocess and `ready: false` readiness,
+read refresh and reopened watches, followed by fresh Work on the same client.
 
 The socket contract test now owns read/write parity, watch checkpoints and trace
 isolation once. Restart, installed replacement and Move here each exercise the
@@ -249,15 +315,15 @@ its file inventory in the release and development builders. Server fixtures now
 initialize their disposable Machine store explicitly: the observational entry
 correctly refused bootstrap when the previous fixture started it before any Work.
 
-November 4 focused checks: `cargo test -p loopflow --lib server` (8), the
-`transport_tests` status and opt-in registration migration tests (1 each),
-`scripts/test_desktop.sh --filter 'Server(Connection|Protocol)Tests'` (7),
-`uv run python scripts/test_server_registration.py` and
-`uv run pytest python/tests/test_release_loopflow.py` (13) passed; `cargo fmt`
-and `git diff --check` passed. The migration test was repeated after retaining
-the installed socket address. Compression verification: `cargo test -p loopflow --test transport_tests -- server_reads_commands_and_subscriptions_share_cli_semantics server_invalid_checkpoints_use_shared_watch_errors server_preserves_owner_and_graph_across_restart server_move_here_preserves_draft_provider_and_graph server_status_does_not_install_or_create_work` — 5 passed; `uv run pytest python/tests/test_release_loopflow.py python/tests/test_loopflow_dev.py -q` — 22 passed; formatting, Clippy (`--all-targets -- -D warnings`), Ruff and whitespace checks passed. Gate owns remaining affected suites, broader Xcode link and the renamed
-`installed_server_preserves_owner_and_graph_across_replacement` composition;
-demo owns rendered continuity.
+The cutover/compression evidence saved at `996f16fabb:scratch/mobile-backend.md`
+records passing Rust command/protocol and five transport checks, seven Swift
+connection/protocol tests, custom-home registration migration, the signed
+registration harness and 22 packaging/development Python tests. Formatting,
+Clippy with warnings denied, Ruff and whitespace checks passed. These establish
+read/write and ViewPlan parity, changed/checkpoint/error watch behavior, command
+trace isolation, observational status and owner continuity components. They do
+not establish saturation/cancellation cleanup, all defaults/attribution paths,
+unchanged usage totals or rendered interaction. No code changed in reconciliation.
 
 The composed macOS fixture starts an owner and Graph from an installed helper,
 holds a draft, replaces the executable inode with the same candidate's signed
@@ -267,29 +333,28 @@ precedes editing/submitting the draft; exact owner/provider identity and Graph
 progress survive. This proves installed same-build replacement, not released
 version migration or rendered Desktop continuity.
 
-At `2b9ecd9790`, eleven focused Rust transport tests and three Swift connection
-tests passed; the app built headlessly. They cover newer claims, expired output,
-owner unavailability, cancellation, stale actions and lost takeover replies.
-Publication at `8c54f5e08a` also passed the opt-in installed replacement proof,
-formatting, Clippy with warnings denied, Ruff and whitespace checks. A fixture
-repair replaced `open -W`'s unreliable short-process watch with the updater's
-existing completion result; it does not retry registration or replacement.
-These are previous implementation evidence, not tests of this namespace cutover.
+The pre-cutover evidence at `2b9ecd9790` and `8c54f5e08a` includes eleven Rust
+transport checks, three Swift connection tests, a headless app build and the
+opt-in installed replacement composition. The fixture’s updater completion result
+replaced an unreliable `open -W` short-process watch; no registration retry was
+added. Those passes do not validate the renamed installation path. Gate owns that
+rerun and the broader Xcode link; demo owns rendered continuity.
 
 Gate/demo still own these acceptance checks after the local cutover:
 
 - Install/update through the real selected installation; prove one registered
-  server and one local endpoint. Existing paired credentials/settings survive.
+  server and one local endpoint. LOO-718’s paired credentials/settings must survive
+  the combined integration; this local branch has none to migrate.
   CLI help and every supervisor/client caller use the new command ownership.
 - Repeat composed signed replacement with a draft and Graph live. Prove the
   equivalent Linux supervisor path; preserve normal cgroup cleanup.
 - Demonstrate rendered Desktop quit/reopen, native recovery, local copy/Find/scroll
   and visible Move here. Show disabled background items and version mismatch
   truthfully. Headless model tests do not prove that interaction.
-- Check CLI/socket defaults, state and attribution equivalence, subscription
-  initial/change/error/cancel behavior, saturation, concurrent startup and command
-  isolation. Reconnect must not duplicate provider-usage totals. Broader Xcode
-  link, Linux and telemetry acceptance remains open.
+- Extend the existing parity/checkpoint evidence to defaults/attribution,
+  cancellation cleanup, saturation and concurrent startup. Reconnect must not
+  duplicate provider-usage totals. Broader Xcode link and telemetry acceptance
+  remain open.
 - Join LOO-718's phone path to the migrated server. Lose create/start replies,
   recover one original Task or report uncertainty, and show remote route failure
   makes no local mutation. Revocation/remote disablement preserves local editing.
@@ -299,8 +364,7 @@ Gate/demo still own these acceptance checks after the local cutover:
 Preserve LOO-720/#1809 terminal activity (integrated at `324a0f6dc4`), LOO-582/#1807
 Session identity, LOO-673/#1791 Desktop queries, LOO-312/#1656 installation,
 LOO-714/#1805 defaults and #1808 Wave DTO repair (Task attribution unresolved).
-Recheck integration state before changing shared code. LOO-717 owns shell policy;
-LOO-709/710/712 own retention, snapshots and transport. The server bridges them.
+LOO-717 owns shell policy; LOO-709/710/712 own retention, snapshots and transport. The server bridges them.
 
 [Earlier lfd research](reports/Lessons%20from%20earlier%20lfd%20attempts.md) shows
 shared executors still suffered orchestration drift (#304) and the CLI delegation
@@ -310,3 +374,5 @@ sources; their old naming and proposed timeouts do not override this design or
 current owner policy. [Original Desktop scope](research_notes/desktop-server-original-scope.md)
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
+
+Check: `cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims`, `scripts/test_desktop.sh --filter ServerClientTests --jobs 4 -Xswiftc -gnone` (two failure cases with concurrent refresh/watch), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed. Gate owns composed installed replacement and broader checks; demo owns rendered acceptance.

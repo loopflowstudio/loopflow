@@ -7,10 +7,10 @@ server exposes client access, and installation owns registration and updates.
 hidden client-readiness bridge. Jack authorizes implementation/publication in LOO-593
 and a return to interactive demo, superseding the docs-only restriction. The
 existing feature graph preserves that demo boundary.
-No merge or Auto-Ship approval is given. The working design contains the execution
-plan and current PR overlap inventory.
+No merge or Auto-Ship approval is given. The working design contains remaining
+acceptance and the dated PR overlap inventory.
 
-Keep the earlier accepted recovery interaction: automatic exact-owner reconnect,
+The earlier accepted recovery interaction remains: automatic exact-owner reconnect,
 native status, explicit in-pane Move here, newer control claims preserved and
 no input/command replay. Drafts, active turns, pending requests and running Graphs
 already protect their owners. The split adds no retention policy.
@@ -22,9 +22,9 @@ already protect their owners. The split adds no retention policy.
    accepted; retain that branch's existing semantics when mapping its verbs under
    server. This local pursuit supplies the migration handoff without adding remote
    functionality or editing the other checkout.
-2. Installation migration must replace old supervisor registration once and
-   retain access configuration/credentials without duplicate listeners. Internal
-   command aliases are not needed; persisted/installed state does need migration.
+2. Local supervisor migration is implemented with one stable socket/lock and
+   disabled choices preserved. The renamed composed replacement proof remains
+   with gate; credential/config preservation belongs to LOO-718 integration.
 3. GUI-less distribution, before-login Mac hosting, removal during active work
    and the phone takeover gesture remain separate product choices.
 
@@ -32,12 +32,12 @@ already protect their owners. The split adds no retention policy.
 
 - Native rendered Desktop recovery, quit/reopen, reading/copy/Find/scroll and the
   visible Move here action. Headless mailbox tests do not establish these.
-- Linux installed replacement; broader Xcode, subscription bounds/cancellation,
-  defaults/attribution equivalence and unchanged provider-usage totals.
+- Linux installed replacement; broader Xcode, subscription saturation/cancellation
+  cleanup, defaults/attribution beyond tested parity and unchanged provider-usage totals.
 - Real LOO-718 integration and the composed replacement check after this local
   command/source cutover. The earlier
   signed proof uses the same candidate at a new executable inode, not a released
-  version migration. Re-run that composition after implementation changes.
+  version migration. Gate owns that rerun after the namespace cutover.
 
 The decisive recovery counterexample remains a lost takeover acknowledgement
 followed by a newer viewer's claim. Consume the generation-bound action once;
@@ -48,11 +48,17 @@ checkpoint at `0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/`. Shared execut
 alone did not prevent lfd orchestration drift; `setsid()` alone does not prove
 supervisor isolation; remote proxies cannot borrow Unix peer trust.
 
-Wave memory's existing Machine-service terminology reflects the prior design.
-Reconcile it through the next authored memory-maintenance step using this accepted
-split; the pursuit's realign step can reconcile it within its authored scope.
+The November 4 graph realignment updates Product memory to the accepted split.
+No child Wave directories or memories exist under `.lf/wave/product/` in this checkout.
 
 ## Implementation assumptions (November 4)
+
+Failed first setup consumes readiness for the client lifetime. Work refresh uses
+the existing observational status command to discover the endpoint; no Swift
+path resolver is introduced. Inspection also found the first successful attach
+after failed startup still carried replacing intent. It now uses existing passive
+recovery, preserving claims acquired during the outage. These corrections apply
+Jack Heart's accepted reconnect-only rule without changing installation policy.
 
 Registration migration retains the old bundled plist solely for SMAppService to
 inspect/unregister the installed background item. New code never registers it;

@@ -1842,10 +1842,12 @@ fn attach_with_terminal(
 ) -> Result<()> {
     let server = std::env::var_os("LF_SERVER").is_some();
     let mut status = connection::Status::from_env();
+    let mut recovery = None;
     let mut socket = if let Some(status) = &mut status {
-        let Some(socket) = status.connect(id, true)? else {
+        let Some((socket, recovered)) = status.connect(id, true)? else {
             return Ok(());
         };
+        recovery = recovered.then_some(Recovery::Reconnect);
         socket
     } else if server {
         crate::server::client::bridge(id)?
@@ -1857,8 +1859,10 @@ fn attach_with_terminal(
     socket.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
     let (rows, cols) = size();
-    let initial = send(
-        &mut socket,
+    let mut output = RelayOutput::default();
+    let attachment = if recovery.is_some() {
+        output.recover(terminal.is_some())
+    } else {
         Request::Attach {
             control: true,
             replace: true,
@@ -1867,22 +1871,21 @@ fn attach_with_terminal(
             cols,
             name: tty_name(libc::STDIN_FILENO),
             moved,
-        },
-    );
+        }
+    };
+    let initial = send(&mut socket, attachment);
     let mut interrupted = match initial {
         Ok(()) => None,
         Err(error) if server => Some(error.to_string()),
         Err(error) => return Err(error),
     };
     let mut decoder = Decoder::default();
-    let mut output = RelayOutput::default();
     let mut controlled = false;
     let mut owned = false;
     let mut returning = None;
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = crate::terminal_title::ViewerTitle::new(id);
-    let mut recovery = None;
     'relay: loop {
         if status.as_ref().is_some_and(connection::Status::closed) {
             return Ok(());
@@ -1891,7 +1894,7 @@ fn attach_with_terminal(
             // Close the old bridge before asking the owner for its free claims.
             let _ = socket.shutdown(std::net::Shutdown::Both);
             let next = if let Some(status) = &mut status {
-                status.connect(id, false)?
+                status.connect(id, false)?.map(|(socket, _)| socket)
             } else {
                 reconnect_server(id, &mut terminal, &reason)?
             };

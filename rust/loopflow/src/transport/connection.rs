@@ -85,27 +85,37 @@ impl Status {
         Ok(true)
     }
 
+    /// Returns the bridge and whether connection failure consumed the initial
+    /// intent to replace claims. Recovery may only ask for free claims.
     pub(super) fn connect(
         &mut self,
         owner: &LfProcessId,
-        mut initial: bool,
-    ) -> Result<Option<UnixStream>> {
+        initial: bool,
+    ) -> Result<Option<(UnixStream, bool)>> {
         self.generation += 1;
-        // Each cycle is bounded; a native Retry action starts another cycle.
-        loop {
-            self.publish("reconnecting", false, None)?;
-            super::discard_reconnect_input()?;
-            let mut reason = "The exact owner did not acknowledge its connection".to_owned();
-            if initial {
-                match self.prepare() {
-                    Ok(false) => return Ok(None),
-                    Ok(true) => initial = false,
-                    Err(error) => {
-                        reason = error.to_string();
-                        self.attempts = MAX_ATTEMPTS;
-                    }
+        self.publish("reconnecting", false, None)?;
+        super::discard_reconnect_input()?;
+        let mut recovered = !initial;
+        // Readiness belongs to this first call, never to a Retry cycle. A failed
+        // setup consumes it too; installation must repair availability separately.
+        let setup_error = if initial {
+            match self.prepare() {
+                Ok(false) => return Ok(None),
+                Ok(true) => None,
+                Err(error) => {
+                    recovered = true;
+                    self.attempts = MAX_ATTEMPTS;
+                    Some(error.to_string())
                 }
             }
+        } else {
+            None
+        };
+        // Each cycle is bounded; a native Retry action starts another cycle.
+        loop {
+            self.publish("reconnecting", false, setup_error.as_deref())?;
+            super::discard_reconnect_input()?;
+            let mut reason = "The exact owner did not acknowledge its connection".to_owned();
             while self.attempts < MAX_ATTEMPTS {
                 let attempt = self.attempts;
                 self.attempts += 1;
@@ -126,20 +136,26 @@ impl Status {
                         return Ok(None);
                     }
                     match receive.try_recv() {
-                        Ok(Ok(socket)) => return Ok(Some(socket)),
+                        Ok(Ok(socket)) => return Ok(Some((socket, recovered))),
                         Ok(Err(error)) => {
+                            recovered = true;
                             reason = error.to_string();
                             break;
                         }
                         Err(mpsc::TryRecvError::Empty) => {}
                         Err(mpsc::TryRecvError::Disconnected) => {
+                            recovered = true;
                             reason = "Connection worker stopped".into();
                             break;
                         }
                     }
                 }
             }
-            let message = format!("Session unavailable. Last screen is stale. {reason}. Check the selected Loopflow installation and Background Items, then Retry. No provider was restarted.");
+            let setup = setup_error
+                .as_ref()
+                .map(|error| format!("Initial setup failed: {error}. "))
+                .unwrap_or_default();
+            let message = format!("Session unavailable. Last screen is stale. {setup}{reason}. Check the selected Loopflow installation and Background Items, then Retry. Retry only reconnects. No provider was restarted.");
             self.publish("unavailable", false, Some(&message))?;
             loop {
                 if !self.wait(Duration::from_millis(100))? {

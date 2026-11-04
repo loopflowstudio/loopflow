@@ -4565,6 +4565,92 @@ fn server_reconnect_retries_after_exhaustion_without_sending_retry_to_provider()
 }
 
 #[test]
+fn server_failed_setup_retry_only_reconnects_and_preserves_newer_claims() {
+    for terminal in [false, true] {
+        let fixture = Fixture::new();
+        let owner = fixture.owner(fixture.serve(terminal, &[
+            "/bin/sh", "-c",
+            "printf '%s\\n' \"$$\" >> \"$HOME/launches\"; printf 'retained-owner-screen\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ]));
+        let _cleanup = StopOwner(&fixture, owner.clone());
+        let provider = fixture.launches(1);
+        let owner_pid = pid_of_process(&fixture, &owner);
+        let mut service = ServerProof::start(&fixture, false);
+        service.stop();
+        let installer = fixture.home.path().join("installer");
+        std::fs::write(
+            &installer,
+            r#"#!/bin/sh
+printf 'attempt\n' >> "$HOME/setup-attempts"
+if [ -f "$HOME/setup-allowed" ]; then
+    touch "$HOME/registered-again"
+    exit 0
+fi
+echo 'fixture Background Items disabled' >&2
+exit 1
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (mut command, status) = service.relay_command(&owner);
+        command.env("LF_BIN", installer);
+        let mut relay = if terminal {
+            Terminal::spawn(command)
+        } else {
+            Terminal::stream(command)
+        };
+        wait_server_status(&status, "unavailable", false, 1);
+        assert!(std::fs::read_to_string(&status)
+            .unwrap()
+            .contains("fixture Background Items disabled"));
+
+        // Setup would now succeed, but Retry must not invoke it. Another viewer
+        // takes both claims before this pane has ever connected successfully.
+        std::fs::write(fixture.home.path().join("setup-allowed"), "").unwrap();
+        let mut newer = fixture.attach(
+            &owner,
+            json!({
+                "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+            }),
+        );
+        relay.input(b"discarded during failed setup");
+        std::fs::write(status.with_extension("retry"), "").unwrap();
+        wait_server_status(&status, "reconnecting", false, 1);
+        wait_server_status(&status, "unavailable", false, 1);
+        assert!(std::fs::read_to_string(&status)
+            .unwrap()
+            .contains("fixture Background Items disabled"));
+        assert_eq!(fixture.wait_file("setup-attempts"), "attempt\n");
+        assert!(!fixture.home.path().join("registered-again").exists());
+
+        // An independent installation repair starts the service. The same pane
+        // recovers the exact owner, without repeating setup or taking control.
+        service.child = Some(service.launch());
+        service.ready();
+        std::fs::write(status.with_extension("retry"), "").unwrap();
+        wait_server_status(&status, "connected", false, 1);
+        relay.wait_text("retained-owner-screen");
+        relay.assert_viewing("Failed initial setup recovers read-only");
+        relay.input(b"discarded after recovery\n");
+        let mut observer = fixture.connect(&owner);
+        observer.request(
+            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
+        );
+        let reply = observer.until_reply();
+        assert_eq!(reply["owner"], newer.id);
+        assert!(reply["token"].is_null());
+        assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+        newer.input("newer viewer\n");
+        newer.finish();
+        assert_eq!(fixture.wait_file("answer"), "newer viewer");
+        assert!(relay.wait_exit().success());
+        assert_eq!(fixture.launches(1), provider);
+        assert_eq!(fixture.wait_file("setup-attempts"), "attempt\n");
+        assert!(!fixture.home.path().join("registered-again").exists());
+    }
+}
+
+#[test]
 fn server_startup_cancels_its_pending_installer_when_pane_closes() {
     let fixture = Fixture::new();
     let directory = fixture.home.path().join("native-pane");

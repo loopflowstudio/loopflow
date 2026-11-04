@@ -825,6 +825,7 @@ cargo test -p loopflow --test transport_tests server_registration_migrates_old_j
 cargo test -p loopflow --test transport_tests server_reads_commands_and_subscriptions_share_cli_semantics
 cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
 cargo test -p loopflow --test transport_tests server_reconnect_
+cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
 cargo test -p loopflow --test transport_tests server_move_here_
 cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
 ```
@@ -842,6 +843,10 @@ Separate lifecycle proofs keep the real relay connected through server restart,
 installed replacement and explicit takeover with an editable draft and live Graph.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer
 viewers retaining input/geometry, expired output and owner exit without relaunch.
+Failed-start recovery consumes readiness once, preserves its diagnostic across
+Retry, and observes independent installation repair without replacing newer claims.
+`ServerClientTests` covers the same registration boundary for Work read refresh
+and reopened watches, including failed subprocess and unready status responses.
 Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
 acknowledgement before a newer claim, reject stale actions and cancel a queued
 action on pane closure. Native mailbox tests cover presentation until acknowledgement;

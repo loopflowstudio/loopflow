@@ -5,8 +5,8 @@ import Loopflow
 
 /// Migrated operations have exactly one path; service errors remain visible.
 enum ServerClient {
-    static func read(_ query: ServedRead) async throws -> String {
-        let response = try await request(.read(query))
+    static func read(_ query: ServedRead, location: ServerLocation = .shared) async throws -> String {
+        let response = try await request(.read(query), location: location)
         guard case .read(let output) = response else { throw RegistryQueryError("Unexpected Server reading") }
         return output
     }
@@ -20,8 +20,8 @@ enum ServerClient {
         return output
     }
 
-    private static func request(_ operation: ServerOperation) async throws -> ServerReply {
-        let path = try await ServerLocation.shared.path()
+    private static func request(_ operation: ServerOperation, location: ServerLocation = .shared) async throws -> ServerReply {
+        let path = try await location.path()
         return try await withCheckedThrowingContinuation { continuation in
             Thread.detachNewThread {
                 do {
@@ -35,37 +35,67 @@ enum ServerClient {
         }
     }
 
-    static func watch(_ query: ServedRead) throws -> LineWatch {
-        let watch = ServerWatch(query)
+    static func watch(_ query: ServedRead, location: ServerLocation = .shared) throws -> LineWatch {
+        let watch = ServerWatch(query, location: location)
         return LineWatch(lines: watch.lines, send: watch.send, cancel: watch.cancel)
     }
 }
 
-private actor ServerLocation {
+actor ServerLocation {
     static let shared = ServerLocation()
+    private let query: @Sendable ([String]) async throws -> String
     private var obtaining: Task<String, any Error>?
     private var socketPath: String?
+    private var readinessAttempted = false
+    private var setupError: String?
+
+    init(query: @escaping @Sendable ([String]) async throws -> String = {
+        try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
+    }) {
+        self.query = query
+    }
 
     func path() async throws -> String {
         if let socketPath { return socketPath }
         if let obtaining { return try await obtaining.value }
+        // Consume readiness before suspending, including failed setup. Reopened
+        // watches discover the endpoint through observational status only.
+        let prepare = !readinessAttempted
+        readinessAttempted = true
+        let previousSetupError = setupError
         let task = Task {
-            let result = try await LocalWaveAgentLauncher.queryLf(["install", "server"], cwd: "/")
-            struct Status: Decodable {
-                let socket: String
-                let ready: Bool
-                let instance: String?
-                let error: String?
+            do {
+                let result = try await query(prepare ? ["install", "server"] : ["server", "status"])
+                struct Status: Decodable {
+                    let socket: String
+                    let ready: Bool
+                    let instance: String?
+                    let error: String?
+                }
+                let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
+                guard status.ready else { throw RegistryQueryError(status.error ?? "Loopflow server unavailable") }
+                return status.socket
+            } catch {
+                // Every concurrent waiter gets the same actionable diagnosis.
+                if let previousSetupError {
+                    throw RegistryQueryError("Initial setup failed: \(previousSetupError). Current server: \(error.localizedDescription)")
+                }
+                throw error
             }
-            let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
-            guard status.ready else { throw RegistryQueryError(status.error ?? "Loopflow server unavailable") }
-            return status.socket
         }
         obtaining = task
         defer { obtaining = nil }
-        let path = try await task.value
-        socketPath = path
-        return path
+        do {
+            let path = try await task.value
+            socketPath = path
+            setupError = nil
+            return path
+        } catch {
+            if prepare {
+                setupError = error.localizedDescription
+            }
+            throw error
+        }
     }
 }
 
@@ -167,14 +197,14 @@ private final class ServerWatch: @unchecked Sendable {
     private var queuedWrites = 0
     private let writer = DispatchQueue(label: "studio.loopflow.server-checkpoints")
 
-    init(_ query: ServedRead) {
+    init(_ query: ServedRead, location: ServerLocation) {
         // Never drop a checkpoint silently. A slow consumer reconnects with a
         // fresh reading, using the existing WorkObservation recovery path.
         (lines, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingOldest(8))
         continuation.onTermination = { [weak self] _ in self?.stop() }
         Task {
             do {
-                let path = try await ServerLocation.shared.path()
+                let path = try await location.path()
                 Thread.detachNewThread { self.run(path: path, query: query) }
             } catch { continuation.finish(throwing: error) }
         }

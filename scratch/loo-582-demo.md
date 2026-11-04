@@ -1,5 +1,52 @@
 # LOO-582 autonomous demo — November 3, 2026
 
+## Follow-up binding demonstration — November 3, 2026, 23:11–23:18
+
+Candidate 057f6bc874 published the accepted always-primary bind correction.
+The operator used configured Codex in cmux with a new disposable source checkout
+and the existing placed Task 49181d. Binding preserved the live process and draft,
+selected the Session as primary, and exposed the target as requested_cwd.
+The draft survived a subsequent Task progress message. Retrying bind preserved
+identity, process, current cwd and pending destination. Submitting the draft
+ran pwd in the original source, as expected before the connection boundary.
+
+After exiting the disposable provider at an empty prompt and resuming the same
+Loopflow Session, the same native thread remembered LOO582-BIND-924 and executed
+pwd in demo.49181d-create-and-run. requested_cwd cleared after confirmation.
+The source file binding-draft.txt remained unchanged and was not copied to the
+Task checkout. This establishes the real configured binding transition.
+
+Session: session_4a2b7488715f472ba69b7f5b2f9f8e01.
+Native thread before/after: 01a1a565-b744-77e3-9f0a-b1e6758759a5.
+Receipts in the same disposable root: binding-result.json, binding-retry.json,
+binding-history-before.json, binding-history-after.json, binding-after-exit.json,
+binding-after-resume.json, binding-open.json. Screens were observed through CUA.
+
+**Demo failure, repaired locally:** after reconnecting, cmux Cmd-T opened the
+parent demo repository, not the provider's target checkout. The OS hostname now
+has mixed case (Jacks-MacBook-Pro-2.local). An exact-spelling OSC 7 control report
+updated cmux's directory; Url serialization normalized DNS case. The repair
+preserves the validated OS spelling when only case differs, while retaining
+URL path escaping and normalized authority for other differences. With the
+rebuilt owner and a fresh native connection, cmux reported demo.prototype and
+Cmd-T's actual shell pwd matched it. Earlier lowercase-host results remain
+historical evidence, not coverage for the mixed-case defect.
+
+Eight focused transport output tests, formatting, Clippy and CLI build passed.
+Log: /tmp/loo582-cwd-fix-checks.log. No terminal-wide preferences or application
+settings changed. Warp remains access-blocked.
+
+**Detached draft proof:** with the bound native Session at the target checkout,
+the operator left `UNSENT LOO582-IDLE-438: preserve this draft across the detached
+grace.` in its editor and closed only its cmux viewer. Status confirmed detached.
+After 139 seconds (past the configured default 120-second grace), the same agent
+process remained detached. Reattachment showed the exact unsent draft unchanged.
+Receipts: idle-start.json, idle-after-grace.json. This proves protected editor
+retention, not termination of an eligible settled owner. Ctrl+] via computer
+input did not detach in this run; terminal-tab closure supplied the verified
+detachment boundary. The Session itself was not closed.
+
+
 Jack Heart requested an autonomous demo. The operator exercised the candidate
 CLI and a separately packaged Desktop build with the configured Codex account,
 using a disposable repository and private Loopflow store. These are operator

@@ -186,7 +186,15 @@ fn directory_report(cwd: &std::path::Path, host: &str) -> Option<Vec<u8>> {
     // The execution host owns this path. A remote viewer must never mistake it
     // for a directory on the viewer's Machine.
     uri.set_host(Some(host)).ok()?;
-    Some(format!("\x1b]7;{uri}\x1b\\").into_bytes())
+    // Terminals can compare OSC 7 hosts case-sensitively. Validate the authority
+    // with Url, but retain the OS spelling instead of its lowercase DNS form.
+    let normalized_host = uri.host_str()?;
+    let host = if normalized_host.eq_ignore_ascii_case(host) {
+        host
+    } else {
+        normalized_host
+    };
+    Some(format!("\x1b]7;file://{host}{}\x1b\\", uri.path()).into_bytes())
 }
 
 #[cfg(test)]
@@ -204,6 +212,15 @@ mod tests {
             b"\x1b]7;file://remote.example/work/research%20notes/%E9%9B%AA/\x1b\\"
         );
         assert!(directory_report(Path::new("relative"), "remote.example").is_none());
+        assert_eq!(
+            directory_report(
+                Path::new("/work/research notes"),
+                "Jacks-MacBook-Pro-2.local"
+            )
+            .unwrap(),
+            b"\x1b]7;file://Jacks-MacBook-Pro-2.local/work/research%20notes/\x1b\\"
+        );
+        assert!(directory_report(Path::new("/work"), "host\x1b\\").is_none());
     }
 
     #[test]

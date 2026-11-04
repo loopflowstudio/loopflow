@@ -28,3 +28,16 @@ For a done Task with no checkout, select and bind the unfinished interactive
 Session in place without allocating one. The implementation now skips optional
 placement for terminal Tasks, including a transaction-time completion race.
 No new product decision; remaining proof is in `loo-582.md`.
+
+Autonomous demo follow-up (23:18): configured always-primary bind, retry, native
+history and actual cwd transition passed. cmux Cmd-T still opened the launcher
+repository with a mixed-case OS hostname. Exact-spelling OSC 7 control worked;
+fix and verify directory serialization. This is a bounded repair, not a new
+product choice. See loo-582-demo.md. Earlier Cmd-T evidence is superseded for
+this candidate/hostname.
+
+The mixed-case hostname repair passed eight output tests, fmt, Clippy and CLI
+build; a fresh configured owner now supplies the correct cmux Cmd-T directory.
+The bound Session retained its exact draft and process after 139 seconds truly
+detached. Publication of this bounded repair is authorized; merge remains not
+approved. Desktop create-from-chat draft proof remains separate.

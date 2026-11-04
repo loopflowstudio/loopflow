@@ -346,6 +346,12 @@ final class TaskFilesStore {
         autoSelected = false
     }
 
+    func presentFile(_ path: String) {
+        _ = document(path)
+        observation?.watch(path)
+        follow(path)
+    }
+
     private func follow(_ path: String) {
         let outcome = Self.follow(path, selection: selection, page: page, mode: mode,
             dirty: selectedDocument?.dirty == true, autoSelected: autoSelected,

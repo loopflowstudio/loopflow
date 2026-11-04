@@ -51,6 +51,7 @@ fn lf_with(
     command
         .envs(env.iter().copied())
         .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .current_dir(cwd)
         .args(args)
         .stdin(std::process::Stdio::null())
@@ -91,6 +92,142 @@ fn sessions(home: &Path) -> i64 {
         .unwrap()
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap()
+}
+
+#[test]
+fn files_without_a_host_are_a_noop_even_outside_a_repository() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let result = json(&lf(
+        home.path(),
+        cwd.path(),
+        None,
+        &["open", "--file", "not-created.md", "--json"],
+    ));
+    assert_eq!(result["opening"], false);
+    assert!(result["host"].is_null());
+    assert_eq!(result["paths"], serde_json::json!(["not-created.md"]));
+}
+
+#[test]
+fn opening_a_file_in_tmux_runs_the_configured_editor_on_the_original_file() {
+    let repo = TestRepo::new();
+    let checkout = repo.create_named_worktree("docs-first");
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let path = checkout.join("guide with spaces.md");
+    std::fs::write(&path, "intended behavior").unwrap();
+    let marker = bin.path().join("edited");
+    let script = bin.path().join("tmux");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nfor last do :; done\nexec /bin/sh -c \"$last\"\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let editor = format!("printf '%s\\n' > '{}'", marker.display());
+    let preview = json(&lf_with(
+        home.path(),
+        &checkout,
+        Some(bin.path()),
+        &[
+            ("TMUX", "fixture"),
+            ("TMUX_PANE", "%1"),
+            ("VISUAL", &editor),
+        ],
+        &[
+            "--explain",
+            "open",
+            "--file",
+            "guide with spaces.md",
+            "--json",
+        ],
+    ));
+    assert_eq!(preview["opening"], false);
+    assert!(!marker.exists());
+    let result = json(&lf_with(
+        home.path(),
+        &checkout,
+        Some(bin.path()),
+        &[
+            ("TMUX", "fixture"),
+            ("TMUX_PANE", "%1"),
+            ("VISUAL", &editor),
+        ],
+        &["open", "--file", "guide with spaces.md", "--json"],
+    ));
+    assert_eq!(result["opening"], true);
+    assert_eq!(result["host"], "tmux");
+    assert_eq!(
+        std::fs::read_to_string(marker).unwrap().trim(),
+        path.canonicalize().unwrap().to_str().unwrap()
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "intended behavior");
+    assert!(!repo.path().join("scratch").exists());
+}
+
+#[test]
+fn rex_file_request_opens_the_task_files_tool_beside_its_current_conversation() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let path = repo.path().join("guide.md");
+    std::fs::write(&path, "intended behavior").unwrap();
+    let capture = bin.path().join("split.json");
+    let script = bin.path().join("rex");
+    std::fs::write(&script, format!(r#"#!/bin/sh
+for last do :; done
+case "$*" in
+ *whoami*) echo '{{"endpoint":"unix:///fixture/rex.sock","principal":{{"transport":"unix"}}}}' ;;
+ *session.view*) echo '{{"windows":[{{"window_id":"window:current","layers":[{{"blocks":[{{"block_id":"block:current"}}]}}]}}]}}' ;;
+ *session.new_split*) printf '%s' "$last" > '{}'; echo '{{"revision":2}}' ;;
+ *) echo unexpected >&2; exit 1 ;;
+esac
+"#, capture.display())).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let result = json(&lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[
+            ("REX_SERVER", "unix:///fixture/rex.sock"),
+            ("REX_SESSION", "session:current"),
+            ("REX_BLOCK", "block:current"),
+        ],
+        &["open", "--task", "INF-123", "--file", "guide.md", "--json"],
+    ));
+    assert_eq!(result["host"], "rex");
+    let split: Value = serde_json::from_str(&std::fs::read_to_string(capture).unwrap()).unwrap();
+    assert_eq!(split["window_id"], "window:current");
+    assert_eq!(split["focus"], false);
+    let argv: Vec<&str> = split["layout"]["block"]["options"]["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    let marker = bin.path().join("edited");
+    let editor = format!("printf '%s\\n' > '{}'", marker.display());
+    let output = Command::new(argv[0])
+        .args(&argv[1..])
+        .env("VISUAL", editor)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(marker).unwrap().trim(),
+        path.canonicalize().unwrap().to_str().unwrap()
+    );
+    assert_eq!(sessions(home.path()), 0);
 }
 
 #[test]
@@ -900,6 +1037,22 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
             &["open", &url, "--link", "--json"]));
         assert_eq!(links[0]["route"]["hosts"][0], expected);
     }
+
+    // A headless step opens docs where its Task's conversation is viewed,
+    // even when the worker itself has no terminal-host environment.
+    let bin = tempfile::tempdir().unwrap();
+    host(bin.path(), "cmux", "OK surface:docs", 0);
+    std::fs::write(repo.path().join("usage.md"), "intended behavior").unwrap();
+    let worker = caller(&step);
+    let presented = json(&lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[("LF_AGENT_CALLER", &worker)],
+        &["open", &url, "--file", "usage.md", "--json"],
+    ));
+    assert_eq!(presented["host"], "cmux");
+    assert_eq!(presented["opening"], true);
 }
 
 #[test]

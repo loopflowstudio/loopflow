@@ -793,6 +793,7 @@ fn view_plan(
             return super::open::run(
                 cli,
                 &super::open::OpenArgs {
+                    files: Vec::new(),
                     copy: None,
                     new_shells: false,
                     server: None,
@@ -1025,6 +1026,51 @@ fn saved_intent(
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     dispatch(cli, command).map_err(exit_status)
+}
+
+/// Reuse the Files surface without launching Desktop or changing conversation ownership.
+pub(super) fn present_file(
+    resolution: &crate::ops::context::ContextExplanation,
+    path: &std::path::Path,
+) -> Result<bool> {
+    let mut desktop = match DesktopConnection::open() {
+        Ok(desktop) => desktop,
+        Err(error)
+            if error
+                .downcast_ref::<DesktopError>()
+                .is_some_and(|error| matches!(error, DesktopError::Unreachable(_))) =>
+        {
+            return Ok(false)
+        }
+        Err(error) => return Err(error),
+    };
+    let reading: DesktopInspection = desktop.call("inspect", serde_json::json!({}))?;
+    let scope = Scope {
+        inspection: &reading,
+        resolution,
+        explicit_work: true,
+        caller: std::env::var("LF_TERMINAL_ID")
+            .ok()
+            .filter(|id| !id.is_empty()),
+    };
+    let window = scope.window(None).map_err(DesktopError::target)?;
+    let pane = scope
+        .pane(window, None, PaneNeed::for_action("files"))
+        .map_err(DesktopError::target)?;
+    let _: DesktopActionReceipt = desktop.call(
+        "perform",
+        DesktopActionRequest {
+            repository: window.repository.clone(),
+            window: window.window.clone(),
+            pane: Some(pane.target(window)),
+            action: "files".into(),
+            args: std::collections::BTreeMap::from([(
+                "path".into(),
+                path.to_string_lossy().into_owned(),
+            )]),
+        },
+    )?;
+    Ok(true)
 }
 
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {

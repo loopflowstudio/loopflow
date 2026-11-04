@@ -206,6 +206,24 @@ struct TaskFilesTests {
         #expect(document.text == "draft")
     }
 
+    @Test func presentOrdinaryDocsRetainsEditsAndReusesTheFileTab() async {
+        let store = TaskFilesStore(issue: "task", cwd: "/checkout", query: RegistryQuery { _, _ in "{}" })
+        store.autosave = false
+        store.presentFile("docs/usage.md")
+        #expect(store.selection == "docs/usage.md")
+        #expect(store.mode == .read)
+        let document = store.document("docs/usage.md")
+        await document.reconcile(snapshot("original"))
+        document.editor.insertText("edited", replacementRange: NSRange(location: 0, length: 8))
+        store.selectFile("docs/usage.md", mode: .edit)
+        store.presentFile("README.md")
+        store.presentFile("README.md")
+        #expect(store.selection == "docs/usage.md")
+        #expect(store.mode == .edit)
+        #expect(document.text == "edited")
+        #expect(store.tabs.map(\.path) == ["docs/usage.md", "README.md"])
+    }
+
     @Test func scratchPageWritesTakeOnlyStaleAttention() {
         let now = Date()
         func follow(_ path: String = "scratch/explore.html", selection: String? = "scratch/plan.md",

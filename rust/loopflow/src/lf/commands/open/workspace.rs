@@ -4,6 +4,7 @@ mod herdr;
 mod layout;
 
 pub(super) use herdr::open_herdr;
+pub(super) use herdr::present_file as present_herdr_file;
 use layout::{block, layout};
 
 use std::collections::{BTreeSet, HashMap};
@@ -99,6 +100,10 @@ impl Rex {
                 None => None,
             }
         };
+        Self::located(server, location)
+    }
+
+    fn located(server: Option<&str>, location: Option<RexLocation>) -> Result<Self> {
         let endpoint =
             Self::endpoint(server.or(location.as_ref().map(|place| place.server.as_str())))?;
         let rex = Self {
@@ -848,7 +853,7 @@ fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path) -> Result<(
     Ok(())
 }
 
-fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
+pub(super) fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
     let mut argv = vec![
         crate::os_process::resolve_lf_binary()?
             .to_string_lossy()
@@ -867,6 +872,58 @@ fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
         );
     }
     Ok(argv)
+}
+
+pub(super) fn present_file(
+    args: &OpenArgs,
+    cwd: &Path,
+    path: &Path,
+    argv: Vec<String>,
+    placement: Option<&str>,
+) -> Result<()> {
+    let rex = match placement {
+        Some(placement) => Rex::located(
+            args.server.as_deref(),
+            Some(serde_json::from_str(placement)?),
+        )?,
+        None => Rex::local(args.server.as_deref())?,
+    };
+    let caller = rex
+        .caller
+        .as_ref()
+        .context("File presentation needs an attached Rex workspace")?;
+    let windows = rex.windows(&caller.session)?;
+    let window = windows
+        .iter()
+        .find(|window| {
+            window["layers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
+                .any(|block| block["block_id"] == caller.block)
+        })
+        .context("Current Rex window is unavailable")?;
+    let marker = format!(
+        "Files · {} [lf-file:{}]",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        identity(&path.to_string_lossy())
+    );
+    let already_open = window["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
+        .any(|block| block["label"] == marker);
+    if !already_open {
+        rex.call(
+            "session.new_split",
+            json!({"session_id":caller.session,
+            "window_id":window["window_id"],"direction":"horizontal","side":"after",
+            "focus":false,"layout":block(&marker,cwd,argv)}),
+        )?;
+    }
+    Ok(())
 }
 
 fn follow(id: &str) -> Result<()> {

@@ -1,7 +1,7 @@
 ---
 description: Write the intended user documentation before implementation, ready to read and edit while work continues.
 requires: a chosen direction
-produces: scratch/user-docs.md with draft user documentation and its permanent destinations
+produces: user documentation edited in place and presented in the current host
 action_style: procedural
 ---
 Write the docs someone will use when the change ships.
@@ -12,7 +12,8 @@ Write the docs someone will use when the change ships.
    Graph or Task is required. For a change with no user-facing documentation,
    say so briefly and finish without manufacturing a draft.
 
-2. **Write the user docs.** Create or update `scratch/user-docs.md`. Lead with
+2. **Write the user docs in place.** Edit the actual README, guide, or reference
+   files that will ship. Follow the project's documentation structure. Lead with
    a realistic usage example and its expected result. Explain the concepts,
    prerequisites, options, defaults, failures and recovery needed to use the
    change; include only what matters to this experience. For a library, show
@@ -21,12 +22,11 @@ Write the docs someone will use when the change ships.
    plan or list of promises to document later. Keep the scope proportional to
    the change: one revised paragraph can be enough.
 
-   Mark the document as intended behavior, not a claim that it already works.
-   Name the permanent documentation path and section for each draft excerpt,
-   using the project's existing docs structure. Keep this scratch draft as the
-   working copy until implementation integrates it; do not maintain competing
-   copies. If a draft already exists, preserve saved edits and settled choices.
-   Reuse sufficient documentation rather than rewriting it on every run.
+   The branch's docs describe intended behavior; do not claim it is implemented
+   or released yet. Keep that status in the working plan and conversation,
+   following any established unreleased-docs convention. Preserve saved edits
+   and settled choices. Reuse sufficient documentation rather than rewriting
+   it on every run. Scratch holds design notes, never a second copy of the docs.
 
 3. **Read it as a user.** Can someone follow the example without knowing the
    implementation? Awkward explanations and surprising prerequisites are design
@@ -35,14 +35,19 @@ Write the docs someone will use when the change ships.
    working design and report it; do not invent acceptance. Keep any independent
    documentation useful and distinguish proposals from settled behavior.
 
-4. **Make it available.** Put a short invitation above the draft:
-   “This is what's being built. Edit and save these docs, or discuss changes in
-   the conversation while work continues.” Loopflow Desktop surfaces Markdown
-   under `scratch/` beside the conversation; no HTML wrapper is needed. Outside
-   Desktop, give the same file path. Record the draft's path in the existing
-   implementation plan so the next worker reads it from this checkout.
+4. **Open the relevant files.** Run `lf open --file <path>` for the actual docs;
+   repeat `--file` to present several. The current host supplies its Files view
+   or configured editor. With no host, the command does nothing. Do not create
+   a scratch wrapper, launch another host or open a conversation to show a file.
+   Record the changed documentation paths in the existing implementation plan
+   so the next worker reads them from this checkout.
 
-   Finish with the path and any unresolved product question. Writing the draft
+   In the conversation, link the files with a short invitation: “This is what's
+   being built. Edit these docs or discuss changes while work continues.” Keep
+   that invitation out of the published docs. Report a presentation failure
+   honestly while leaving the edited docs available at their paths.
+
+   Finish with the paths and any unresolved product question. Writing the docs
    adds no approval stop and launches no implementation itself. Do not wait for
    optional review or treat silence as approval. Respect an explicitly requested
    review-before-build boundary; an unresolved choice remains unresolved.

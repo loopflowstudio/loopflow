@@ -136,6 +136,36 @@ fn herdr_layout(native: &Value) -> Result<Value> {
     )
 }
 
+pub(in super::super) fn present_file(
+    cwd: &Path,
+    path: &Path,
+    argv: Vec<String>,
+    placement: Option<&str>,
+) -> Result<()> {
+    let socket =
+        std::env::var("HERDR_SOCKET_PATH").context("Current Herdr server is unavailable")?;
+    let workspace = placement
+        .map(str::to_owned)
+        .or_else(|| std::env::var("HERDR_WORKSPACE_ID").ok())
+        .context("Current Herdr workspace is unavailable")?;
+    let label = format!("Files · {}", path.display());
+    let created = herdr_call(
+        &socket,
+        "tab.create",
+        json!({"workspace_id":workspace,"cwd":cwd,"label":label,"focus":false}),
+    )?;
+    let tab = created["tab"]["tab_id"]
+        .as_str()
+        .context("Herdr omitted the new file tab identity; inspect before retrying")?;
+    herdr_call(
+        &socket,
+        "layout.apply",
+        json!({"tab_id":tab,
+        "root":{"type":"pane","label":label,"cwd":cwd,"command":argv,"env":{}},"focus":false}),
+    )?;
+    Ok(())
+}
+
 fn herdr_call(path: &str, method: &str, params: Value) -> Result<Value> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;

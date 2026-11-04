@@ -9,8 +9,8 @@
 <header>LOO-582 · concept review · November 3, 2026<br>
 Sources: <a href="loo-582.md">working design</a>, <a href="loo-582-demo.md">demo evidence</a>, <code>docs/sessions.md</code>, <code>docs/work.md</code>, <code>rust/loopflow/src/ops/task/adoption.rs</code>, <code>rust/loopflow/src/store/sqlite/children.rs</code>, <code>rust/loopflow/src/ops/human_session/primary.rs</code>, <code>rust/loopflow/tests/session_lifecycle_tests.rs</code>.</header>
 <h1>A done Task can still select its conversation.</h1>
-<p><strong>Review outcome: a bounded design clarification for implementation.</strong> No new product decision is needed. Binding to a done Task without a checkout must keep the selected conversation in place, without allocating a checkout or reopening work.</p>
-<p>Jack Heart accepted explicit adoption and always-primary binding. The documented done/landed binding contract remains. The reviewed implementation made that contract depend on where the conversation lived. The bounded repair below is now implemented; focused CLI and store verification passed, along with formatting and Clippy.</p>
+<p><strong>Review outcome: no further design change and no open product choice.</strong> Binding to a done Task without a checkout keeps the selected conversation in place, without allocating a checkout or reopening work. No decision is needed from Jack Heart.</p>
+<p>Jack Heart accepted explicit adoption and always-primary binding. Review of <code>fd5fb9cf76</code> confirms the earlier mismatch is repaired in source, with focused CLI and store passes recorded in the working design. This review adds no runtime or rendered proof; the configured binding demonstration remains pending.</p>
 
 <h2>The interaction</h2>
 <pre># File separate work, regardless of the current chat or checkout
@@ -32,7 +32,7 @@ lf open --task TASK</pre>
 <dd><code>requested_cwd</code> survives failure and a later primary selection. Matching provider connection confirmation clears it. Files remain in their original checkout.</dd>
 </dl>
 
-<h2>The consequential mismatch</h2>
+<h2>The consequential mismatch — resolved</h2>
 <pre>Task T: done, no checkout
 Session S: unfinished, live in unowned linked checkout B
 
@@ -45,8 +45,8 @@ Implemented correction:
   bind S to T → T selects S; S permanently belongs to T
               → T remains done, with no checkout
               → S continues in B</pre>
-<p><strong>Evidence:</strong> <code>adoption::save</code> prepares placement whenever a source checkout exists and the Task has none. <code>place_task_in</code> rejects terminal Tasks before binding commits. A Session in a shared main checkout avoids placement. This was a source-level finding in the review. Implementation now checks terminal state before preparation and again inside the binding transaction.</p>
-<p>Make optional checkout adoption respect terminal Task state in the atomic operation. Keep ordinary checkout allocation rules. No new command, flag, assignment-only mode or lifecycle is needed.</p>
+<p><strong>Review evidence:</strong> Before the repair, <code>adoption::save</code> prepared placement whenever a source checkout existed and the Task had none. <code>place_task_in</code> rejected terminal Tasks before binding committed. A Session in a shared main checkout avoided placement. Checkpoint <code>fd5fb9cf76</code> checks terminal state before preparation and again inside the binding transaction.</p>
+<p>Optional checkout adoption now respects terminal Task state in the atomic operation. Ordinary checkout allocation rules remain unchanged. No new command, flag, assignment-only mode or lifecycle was added.</p>
 
 <h2>Normal path, failure, recovery</h2>
 <p>An open, unplaced Task still adopts the selected unowned linked checkout. A Task with checkout A still keeps A, even when done: binding Session S in B records A as its next destination. The live client continues in B until it exits.</p>
@@ -54,8 +54,8 @@ Implemented correction:
 <blockquote>Counterexample to an overbroad repair: skipping every directory effect for done Tasks would lose the accepted continuation into a done Task’s existing checkout. Only the absent-checkout case stays in place.</blockquote>
 
 <h2>Updated guidance</h2>
-<p><strong>Usage docs:</strong> Done Tasks can still select an unfinished conversation. If the Task has no checkout, the conversation stays in place and no checkout is adopted.</p>
-<p><strong>Work skill:</strong> Bind to a done Task without reopening it. With no Task checkout, retain the Session’s directory; do not allocate a checkout merely to bind the conversation.</p>
+<p><strong>Existing usage docs:</strong> Done Tasks can still select an unfinished conversation. If the Task has no checkout, the conversation stays in place and no checkout is adopted.</p>
+<p><strong>Existing work skill:</strong> Bind to a done Task without reopening it. With no Task checkout, retain the Session’s directory; do not allocate a checkout merely to bind the conversation.</p>
 
 <h2>Focused proof and remaining demonstration</h2>
 <p>The new CLI fixture exercises bind → repeat → open for a done, unplaced Task and a live Session in a linked checkout. It checks exact identity, primary selection, retained input/history/files, unchanged completion and no checkout, provider launch or Graph. It also covers the shared-checkout case and the done Task’s existing-destination case. A store fixture covers completion arriving after placement preparation. Results are recorded in the working design.</p>
@@ -65,6 +65,6 @@ Implemented correction:
 <ol>
 <li><strong>Should a done Task’s missing checkout prevent binding?</strong> No. Bind and select the unfinished Session in place without allocating a checkout.</li>
 <li><strong>Should the correction remove continuation into an existing Task checkout?</strong> No. Preserve its pending directory and provider confirmation.</li>
-<li><strong>Is another product choice open?</strong> No. The repair follows the working design; remaining demonstrations are proof obligations.</li>
+<li><strong>Is another product choice or implementation direction open?</strong> No. The repair follows the working design; remaining demonstrations are proof obligations.</li>
 </ol>
 </html>

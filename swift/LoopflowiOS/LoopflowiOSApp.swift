@@ -21,8 +21,6 @@ struct LoopflowiOSApp: App {
 
 struct MobileTaskList: View {
     @State private var workspace: MobileWorkspace
-    @State private var destination: WorkViewPlan.Content?
-    @State private var showingTerminal = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
@@ -46,9 +44,8 @@ struct MobileTaskList: View {
                             Text("Couldn’t update · \(error)").foregroundStyle(theme.palette.failure)
                         }
                         ForEach(workspace.tasks, id: \.work) { task in
-                            Button {
-                                destination = task
-                                showingTerminal = true
+                            NavigationLink {
+                                MobileSessionView(task: task, workspace: workspace, theme: theme)
                             } label: {
                                 HStack(spacing: 12) {
                                     RoundedRectangle(cornerRadius: 2)
@@ -60,7 +57,6 @@ struct MobileTaskList: View {
                                             .font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
                                     }
                                     Spacer()
-                                    Image(systemName: "chevron.right").foregroundStyle(theme.palette.textTertiary)
                                 }
                                 .frame(minHeight: 60)
                             }
@@ -78,32 +74,6 @@ struct MobileTaskList: View {
             .background(theme.palette.background)
             .navigationTitle("Tasks")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(isPresented: $showingTerminal) {
-                if let task = destination {
-                    VStack(spacing: 0) {
-                        Text("Offline fixture").font(Typography.caption(12)).padding(.top, 4)
-                        HStack {
-                            Text(workspace.state.label).font(Typography.body(14))
-                            Spacer()
-                            if workspace.state == .viewing {
-                                Button("Use keyboard") { workspace.requestControl() }
-                                    .frame(minHeight: 44)
-                            }
-                            if case .disconnected = workspace.state {
-                                Button("Reconnect") { Task { await workspace.reconnect() } }
-                                    .frame(minHeight: 44)
-                            }
-                        }.padding(.horizontal, 12)
-                        SessionTerminal(workspace: workspace, theme: theme)
-                    }
-                    .background(theme.palette.background)
-                    .foregroundStyle(theme.palette.text)
-                    .navigationTitle(task.title)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .task { await workspace.open(task) }
-                    .onDisappear { workspace.leave() }
-                }
-            }
         }
         .tint(theme.palette.accentInk)
         .environment(\.palette, theme.palette)
@@ -111,5 +81,36 @@ struct MobileTaskList: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { workspace.suspend() }
         }
+    }
+}
+
+private struct MobileSessionView: View {
+    let task: WorkViewPlan.Content
+    let workspace: MobileWorkspace
+    let theme: ThemeDefinition
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Offline fixture").font(Typography.caption(12)).padding(.top, 4)
+            HStack {
+                Text(workspace.state.label).font(Typography.body(14))
+                Spacer()
+                if workspace.state == .viewing {
+                    Button("Use keyboard") { workspace.requestControl() }
+                        .frame(minHeight: 44)
+                }
+                if case .disconnected = workspace.state {
+                    Button("Reconnect") { Task { await workspace.reconnect() } }
+                        .frame(minHeight: 44)
+                }
+            }.padding(.horizontal, 12)
+            SessionTerminal(workspace: workspace, theme: theme)
+        }
+        .background(theme.palette.background)
+        .foregroundStyle(theme.palette.text)
+        .navigationTitle(task.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await workspace.open(task) }
+        .onDisappear { workspace.leave() }
     }
 }

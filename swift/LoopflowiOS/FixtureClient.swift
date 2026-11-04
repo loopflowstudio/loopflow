@@ -122,18 +122,7 @@ final class FixtureTerminal {
                 }
                 pending.removeFirst()
             } else if byte == 13 && !pasted {
-                submissions.append(draft)
-                if asking {
-                    result = draft.lowercased() == "y" ? "Fixture action confirmed." : "Fixture action canceled."
-                    asking = false
-                } else if draft == "permission" {
-                    asking = true
-                    result = "A fixture permission question is open."
-                } else {
-                    result = "Received \(draft.count) characters."
-                }
-                draft = ""
-                cursor = 0
+                submit()
                 pending.removeFirst()
             } else if byte == 3 {
                 asking = false
@@ -144,10 +133,27 @@ final class FixtureTerminal {
                 guard pending.count >= count else { return }
                 let text = String(decoding: pending.prefix(count), as: UTF8.self)
                     .replacingOccurrences(of: "\r", with: "\n")
-                draft.insert(contentsOf: text, at: draft.index(draft.startIndex, offsetBy: cursor))
-                cursor += text.count
+                // Separate UTF-8 chunks can extend the grapheme before the cursor.
+                let prefix = String(draft.prefix(cursor)) + text
+                draft = prefix + draft.dropFirst(cursor)
+                cursor = prefix.count
                 pending.removeFirst(count)
             }
         }
+    }
+
+    private func submit() {
+        submissions.append(draft)
+        if asking {
+            result = draft.lowercased() == "y" ? "Fixture action confirmed." : "Fixture action canceled."
+            asking = false
+        } else if draft == "permission" {
+            asking = true
+            result = "A fixture permission question is open."
+        } else {
+            result = "Received \(draft.count) characters."
+        }
+        draft = ""
+        cursor = 0
     }
 }

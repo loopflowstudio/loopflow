@@ -61,7 +61,7 @@ env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') xcodebuild test \
 Xcode 26.2/iOS 26.2 simulator is the tested toolchain; deployment target is iOS 18.
 The pinned package's build plugin only generates source-control version metadata;
 `-skipPackagePluginValidation` permits that reviewed plugin in headless builds.
-The tests mount the actual UIKit terminal and assert editing, marked-text commit,
+The tests mount the actual UIKit terminal and assert editing, marked-text commit, combining characters,
 multiline paste, native replacement, selection, rendered accessibility text,
 viewport resizing, control loss, identity and no replay. They also consume the
 backend's shared Machine fixtures, without inventing a second codec.

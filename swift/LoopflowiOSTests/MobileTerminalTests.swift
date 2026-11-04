@@ -45,10 +45,15 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(client.terminal.draft, "")
         view.unmarkText()
         XCTAssertEqual(client.terminal.draft, "你")
+        view.insertText("e")
+        view.insertText("\u{301}")
         view.insertText("🌱")
-        XCTAssertEqual(client.terminal.draft, "你🌱")
+        XCTAssertEqual(client.terminal.draft, "你é🌱")
         view.deleteBackward()
-        XCTAssertEqual(client.terminal.draft, "你")
+        XCTAssertEqual(client.terminal.draft, "你é")
+        view.deleteBackward()
+        view.insertText("好")
+        XCTAssertEqual(client.terminal.draft, "你好")
     }
 
     func testNativeTextReplacementEditsThePeerDraft() async throws {
@@ -80,9 +85,7 @@ final class MobileTerminalTests: XCTestCase {
     }
 
     func testBackendOwnedFixturesDecodeWithoutDefaults() throws {
-        let bundle = Bundle(for: Self.self)
-        let url = try XCTUnwrap(bundle.url(forResource: "reading", withExtension: "json", subdirectory: "machine"))
-        let response = try JSONDecoder().decode(MachineResponse.self, from: Data(contentsOf: url))
+        let response: MachineResponse = try machineFixture("reading")
         guard case .reading(let generation, let frame) = response.result else { return XCTFail("Expected reading") }
         XCTAssertEqual(generation, 7)
         guard case .object(let fields) = frame else { return XCTFail("Expected watch frame") }
@@ -93,16 +96,13 @@ final class MobileTerminalTests: XCTestCase {
 
         let request = MachineRequest(version: 1, id: "tasks-1", operation: .subscribe(
             .roadmap(directory: "/", wave: nil, task: nil, all: true), generation: 7))
-        let fixture = try XCTUnwrap(bundle.url(forResource: "subscribe", withExtension: "json", subdirectory: "machine"))
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
-                       try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: fixture)))
+                       try machineFixture("subscribe"))
 
-        let ownerURL = try XCTUnwrap(bundle.url(forResource: "owner", withExtension: "json", subdirectory: "machine"))
-        let ownerResponse = try JSONDecoder().decode(MachineResponse.self, from: Data(contentsOf: ownerURL))
+        let ownerResponse: MachineResponse = try machineFixture("owner")
         guard case .sessionOwner(let owner) = ownerResponse.result else { return XCTFail("Expected Session owner") }
         XCTAssertEqual(owner, "85c31c1e-850c-4821-878d-55527b6dba46")
-        let commandURL = try XCTUnwrap(bundle.url(forResource: "command", withExtension: "json", subdirectory: "machine"))
-        let commandResponse = try JSONDecoder().decode(MachineResponse.self, from: Data(contentsOf: commandURL))
+        let commandResponse: MachineResponse = try machineFixture("command")
         guard case .command(let trace, _, _, let code) = commandResponse.result else { return XCTFail("Expected command result") }
         XCTAssertFalse(trace.isEmpty)
         XCTAssertEqual(code, 0)
@@ -197,6 +197,11 @@ final class MobileTerminalTests: XCTestCase {
         view.pasteUnavailable = { explanation = $0 }
         view.pasteText("one\ntwo")
         XCTAssertEqual(explanation, "This program has not enabled multiline paste.")
+    }
+
+    private func machineFixture<T: Decodable>(_ name: String) throws -> T {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "machine"))
+        return try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
     }
 
     private func connected() async throws -> (MobileWorkspace, TestClient, SessionTerminalController) {

@@ -2,6 +2,9 @@
 
 Research for Jack Heart · 2026-11-03 · Source inspection; no builds or device trials
 
+Historical comparison before implementation. [mobile-ios.md](mobile-ios.md) records
+the subsequent SwiftTerm selection, build/input proof and remaining device work.
+
 Jack selected a terminal as the core mobile experience. **Recommendation:** spike Lakr233/libghostty-spm behind a small Loopflow transport adapter, with native Machine/Session navigation and Task context around it. Compare Termini on the same byte stream. Use SwiftTerm as an accessibility and input baseline, not an automatic replacement. Study Rootshell and gterm for concrete interaction techniques without importing their SSH-centric application architectures.
 
 ## The useful boundary

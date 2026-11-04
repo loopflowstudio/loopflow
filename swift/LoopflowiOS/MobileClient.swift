@@ -166,8 +166,7 @@ final class MobileWorkspace {
 
     func suspend() {
         guard selected != nil else { return }
-        disconnect()
-        state = .disconnected("Paused while the app is away")
+        fail("Paused while the app is away")
     }
 
     func leave() {

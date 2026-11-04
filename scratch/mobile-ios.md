@@ -40,6 +40,8 @@ cannot create them. Multiline paste requires bracketed paste support.
 ## Delete — do not maintain
 
 No production iOS predecessor exists. Keep one renderer and one Machine codec.
+Task rows use direct navigation links; do not maintain a separate destination
+and presentation flag. The Session screen owns opening and leaving its attachment.
 HTML studies remain historical interaction evidence, never an alternate product
 path. Detailed research is preserved at
 `9e4587bb53fc4102e8682a3bba61e9776a6de5c2:scratch/`; current notes summarize it
@@ -66,4 +68,4 @@ Preserve Session identity work #1807/LOO-582, terminal activity #1809/LOO-720,
 Task selection #1791/LOO-673 and DTO revert #1808. LOO-717/709/710/712 retain shell,
 retention, snapshot and transport ownership. No policy changes in this lane.
 
-Check: focused xcodebuild simulator suite passed (11 tests); updated backend codec fixture check also passed. Swift multiplatform boundary check passed. Device/live proof stays with demo and integration.
+Check: `xcodebuild test -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath swift/.build/ios -skipPackagePluginValidation -parallel-testing-enabled NO -only-testing:LoopflowiOSTests/MobileTerminalTests CODE_SIGNING_ALLOWED=NO` — passed, 11 tests; device/live proof stays with demo and integration.

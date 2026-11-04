@@ -1,416 +1,236 @@
-# One settings catalogue
-
-Draft for Jack Heart · LOO-714 / infrastructure · 2026-11-03
-
-Build one executable definition of every LF-owned setting, so its accepted values,
-supported locations, editing path and explanation agree across CLI, files and
-Desktop. This develops the existing settings-portability-review.md audit. It is a
-design for review, separate from the running choice-before-fallback implementation.
-No catalogue implementation or synchronization is approved by this draft.
-
-Jack Heart clarified the design goal on November 3: **close the coverage gaps**,
-not merely catalogue today's exceptions. For every supported setting, implement
-consistent access through appropriate surfaces or document a real domain/lifecycle
-constraint. Existing missing support is not its own justification.
-
-Accepted design direction, confirmed by Jack Heart on November 3: remove the DB configuration
-layer, including machine/account preferences. CLI and Desktop edit the same files
-that hand edits change, with explicit write destinations and source inspection.
-The earlier tentative DB-only meaning of `lf set` is superseded. Machine aliases,
-identity references and connection declarations live in files; each installation's
-own identity remains local durable state. Placement resolves to an ID at origin;
-matching the current ID means local execution. Distribution is still open.
-This accepts the design direction; implementation/migration planning remains separate
-from the active pursue. Paseo research in `paseo-settings-reference.md` and Git inform
-the editing contract; this does not propose using Git's config parser or storage
-format for LF.
-
-Git's `config set` writes a selected file, local settings are private to a clone,
-and conditional includes select personal policies by path or remote URL. LF still
-needs private repo storage that behaves correctly across Task worktrees and
-machines, and a distinct committed team layer. Git's local config is not equivalent
-to LF's committed `.lf/config.yaml`.
-Primary reference: https://git-scm.com/docs/git-config (FILES, OPTIONS and
-Conditional includes), inspected November 3, 2026.
-
-Jack's request: “designing a single settings catalog and explaining and clarifying
-what exists today versus what would need to change.” Preserve the accepted agent
-rule: choice before fallback, then source > scope > target. No built-in skill
-recommendations or per-skill accounts.
-
-## Current system → proposed system
-
-“Current” means the working branch, including the active revision, not the installed
-release. The revision now carries `default_agent` and authored candidate keys;
-its full validation is ongoing. These observations do not claim shipped behavior.
-
-| Concern | Exists today | Change |
-| --- | --- | --- |
-| Types and defaults | `Config`, nested Rust types, serde annotations and `Default` implementations | Attach setting policy to these definitions; derive catalogue/schema from the same declarations. |
-| Eligible locations | `LAUNCH_KEYS`, `REPO_ONLY_KEYS`, `validate_scope`, special path handling | One applicability policy per definition, used by every input surface. |
-| Value validation | CLI/DB share `parse_value`; files/metadata use related validation, partly by serializing `Config::default()` | Parse through the definition's existing typed codec and semantic validator, without using a default value as a schema. |
-| Combining values | One resolver; additive-key list and agent-specific strength handling | Keep the resolver; select merge/resolution behavior from definitions. |
-| CLI convenience flags | `Cli::setting_values` translates flags into preference values | Keep flags; register their bindings to the same definitions, including multi-key flags such as `--diff`. |
-| Set/unset | Generic DB preferences plus separate account/machine parsing and dispatch | Validate through the catalogue and edit the selected file. Keep registration, login and movement as explicit domain operations. |
-| Inspection | Runtime and `config show` share resolution; candidates include source, scope, target, value and authored key | Add catalogue discovery and structured explanations; show contributions, clearing, fallbacks and unavailable sources. |
-| Special settings | Theme, stream, portfolio and logs have other readers/writers; account/machine choices have domain stores | Put declared preferences behind the common file writer, including account order and machine selection. Keep runtime facts and domain operations separately owned. |
-| Portability | No common setting-level classification | Describe portable declarations and machine dependencies; implementing sync remains later work. |
-
-Evidence: [Config](../rust/loopflow/src/config.rs),
-[resolver and validation](../rust/loopflow/src/config/settings.rs),
-[CLI bindings](../rust/loopflow/src/lf/mod.rs),
-[writers](../rust/loopflow/src/lf/commands/setting.rs),
-[inspector](../rust/loopflow/src/lf/commands/config.rs),
-[Wave projection](../rust/loopflow/src/work/wave/setup.rs),
-[appearance owner](../swift/LoopflowMac/Design/AppearanceStore.swift).
-
-## What one definition says
-
-A definition describes a setting, not a configured value. Sources continue to
-hold declarations; resolution continues to produce values for a particular context.
-
-| Definition field | Example: `docs` | Example: `agent` |
-| --- | --- | --- |
-| Value and validation | List of path/glob strings | Harness/model string with existing validation |
-| Default | Empty list | No authored choice; application fallback is separately identified |
-| Applicability | Launch settings at general/skill/occurrence targets | Same targets; LF-owned metadata only |
-| Combination | Append; explicit empty list clears prior contributions | Choice/fallback resolution group with `default_agent` |
-| Persistence binding | Selected config file; invocation values are not persisted | Same |
-| Lifecycle | New context assembly | New launch; resume has an explicit continuity operation |
-| Portability/dependencies | Relative repo paths portable; absolute paths need local mapping | Declaration portable; selected harness/model must be available |
-| Description | Additional documents included in context | Agent to use for applicable work |
-
-Applicability is a rule over **source × scope × target**, not three independent
-checkbox lists whose cross-product accidentally permits invalid combinations.
-For example, session presentation is personal-global; account routes allow
-personal global/repo/Wave scope but no skill target.
-
-Dynamic paths are declared patterns with typed selectors: `release.targets.<name>`
-and its supported fields, or a validated context-budget category. `skills` and
-`graphs` are target selectors around a setting, not independent setting definitions.
-Planning remains a tagged unit; a generic editor cannot splice together fields
-from different planning providers.
-
-## Ownership and data flow
-
-Use Rust as the authority. For core Config fields, a small declarative field list
-can emit the typed fields, defaults and descriptors together. Retain existing
-domain types/codecs; derive value schemas from them rather than hand-writing a
-parallel string/bool/list schema. Settings owned elsewhere register descriptors
-bound to their existing typed domain operations. Export the catalogue as a typed
-DTO for Desktop/help/editor consumers. No separately maintained Swift key list
-or external schema file becomes another authority.
-
-The exact macro spelling is implementation detail. The requirement is that adding
-a Config preference also requires its policy definition, while internal fields
-such as retained source layers never become public settings. Type validators and
-default constructors remain single-owned even when reused by domain code.
-
-Four concepts are sufficient:
-
-- **Definition:** key/pattern, typed codec/default, applicability, resolution policy,
-  adapter, lifecycle, portability and description.
-- **Address:** setting plus scope and optional skill/graph-occurrence target.
-- **Declaration:** address, authored value and source locator. Choice versus fallback
-  comes from the declaration key's definition, not a UI guess.
-- **Resolution:** effective value, each declaration's contribution/status, comparison
-  reason and source diagnostics. This extends current `EffectiveSetting`/candidates.
-
-Core operations, names illustrative:
-
-```text
-describe_settings(filter) -> definitions
-parse_setting(address, input, source) -> validated declaration
-write_setting(declaration) / unset_setting(address, source) -> adapter result
-resolve_settings(context, declarations) -> values + explanation
-```
-
-The resolver owns both the decision and its explanation. Reasons identify the
-actual comparison: explicit choice, higher source, narrower scope, more specific
-target, additive contribution or clearing. A reset can clear earlier items while
-later declarations append; there need not be one winning list declaration.
-
-Read each source as present, absent or unavailable. Preference resolution no longer
-requires the DB. Account/machine availability may still require runtime facts;
-inspection distinguishes an unresolved resource from a missing preference.
-Bootstrap readers request only sources available at that stage; listing settings,
-loading a theme and reporting a store-version problem must not require a working DB.
-
-## Domain settings remain domain settings
-
-The boundary is declaration versus operational state, not account/machine versus
-ordinary preference. Ordered allowed accounts, preferred task/session machines,
-declared machine endpoints/aliases and user-authored capacity limits belong in
-files. Observed account identity, authentication state, usage, cooldowns, machine
-registration/health and execution history retain their runtime owners. Credentials
-retain the existing secret mechanism and are never copied into shareable config.
-Audit each mixed record field by field; do not move whole tables by their names.
-
-Setting a preference changes future resolution. Login, provisioning, moving an
-existing Session and distributing files are explicit domain operations. Inventory
-today's setter side effects and migrate their command paths deliberately. Theme
-keeps its draft/Apply/Cancel behavior. Installation settings retain bootstrap access.
-
-The catalogue advertises whether an entry supports generic assignment or needs
-a domain action. Close missing appropriate CLI/file/UI access; an adapter that
-only labels a current omission does not fulfill Jack's direction. Unsupported
-source/target combinations need an actual domain or lifecycle reason and the
-supported action. No second DB override or bidirectional config mirror is introduced.
-Native provider configuration is identified as delegated, not reimplemented.
-Unknown LF keys are diagnosed after dispatching all known owners; native skill
-frontmatter and recognized non-setting structure are not treated as unknown LF keys.
-
-## Layouts: templates are intent, saved arrangements are state
-
-Jack Heart clarified and confirmed this distinction on November 3. A saved Task
-layout is persisted live state; a layout template is declared intent. Saving state
-or deliberately changing it does not turn it into configuration. This fits the
-file/DB boundary rather than requiring an exception.
-
-- Config owns reusable layout templates and which template a Wave defaults to.
-- The DB owns a Task's actual arrangement, including panes and Session bindings.
-- Applying a template creates or changes live state. Rearranging a Task updates
-  that state without editing its template.
-
-Template selection participates in normal configuration precedence. Changing a
-default should not silently rearrange existing Tasks; applying a template to
-existing work is a separate action. Shared templates must be portable rather than
-depending on private DB-only Session identities. This records the storage model;
-layout syntax and implementation remain separate design work.
-
-## Personal repository file location — accepted
-
-Jack Heart selected `./lf.config.local.yaml` on November 3: a private file at the
-repository root. This supersedes the proposed `.lf/config.local.yaml`, private Git
-metadata path and external repository-keyed storage alternatives. Personal global
-settings remain in `~/.lf/config.yaml`; committed team settings remain in
-`.lf/config.yaml`.
-
-The private repository file must be ignored by Git and available across Task
-worktrees. Implementation must define ignore setup and resolve one shared file
-across those worktrees rather than create diverging per-Task copies. Migration
-must account for existing personal `repos:` declarations without retaining a
-second writable authority for the same preferences.
-
-Forward and retain its authored repository-scoped personal declarations for remote
-work. Physical file placement does not itself implement cross-machine propagation;
-remote editing and conflict handling remain open.
-
-Prior art informing the choice: Claude Code's private project settings and mise's
-local config files. Git conditional includes informed the external alternative.
-
-Sources checked November 3:
-[Claude settings](https://code.claude.com/docs/en/settings),
-[mise configuration](https://mise.jdx.dev/configuration.html),
-[Git conditional includes](https://git-scm.com/docs/git-config#_conditional_includes).
-
-## Remote execution and originating preferences
-
-Accepted by Jack Heart on November 3: the initiating LF instance supplies personal
-preferences; the destination supplies its execution environment. For laptop-origin
-work, the laptop's personal profile wins over the destination's personal profile.
-A phone using the laptop server uses that server's preferences. A shell or phone
-starting work directly on the remote uses the remote's saved preferences, including
-previously retained declarations. Different entry points may therefore produce
-different results. Do not implicitly combine two personal profiles as extra layers.
-
-Repository settings, choice-before-fallback and invocation boundaries retain their
-existing semantics. Credentials, installed tools and local machine identity come
-from the executor; they are not competing personal preferences. Selecting a profile
-for a launch does not authorize overwriting independently edited destination files.
-Using the carried profile and retaining it for future commands have separate results.
-
-November 3 research follow-up: Jack Heart requested simpler alternatives before
-accepting a conflict rule. See [Config distribution research](config-distribution-research.md).
-The recommendation is forwarding plus retention with automatic refresh only while
-the retained portable config is unchanged, preserving remote edits for explicit
-reconciliation. The per-launch authority rule above is now accepted; the exact
-retention/conflict mechanism remains proposed. Automatic multi-writer merging is
-not accepted or required by this decision.
-
-Jack clarified the requirement: personal config authored on the laptop should be
-respected for remote work, including work initiated through a mobile client. Merely
-forwarding settings with commands launched on the laptop is insufficient. The mobile
-client or remote executor needs access to the same personal declarations, preserving
-scope, target, strength and provenance. A setting must not become a stronger CLI
-override simply because it traveled across machines.
-
-Jack is open to Rex's personal-home model if it solves this requirement, but explicitly
-requires a demonstrated problem before introducing that concept. Home is therefore
-an evaluated distribution mechanism, not an accepted prerequisite or assumed owner
-of all preferences. Alternatives include distributing versioned personal config to
-execution machines, or consulting one chosen installation with a cache. File editing,
-identity and placement semantics remain accepted independently of that choice.
-
-Direct remote/mobile work can use saved preferences while the laptop is unreachable;
-it cannot see updates that have not arrived. Define retention freshness and conflict
-handling without adding an unexplained DB override or silently
-let stale copies become competing authorities. Explicit exclusion remains Rex-style
-shared-account servers and multi-user login servers; personal remote authentication
-is still required. Being a settings source does not make a host the default executor.
-
-Further direction from Jack: the initiating LF instance (including a laptop server
-proxying mobile requests) can push personal config with work. The remote should
-retain it so follow-up commands launched there, through mobile or otherwise, use
-the last received preferences without requiring the laptop. Develop this as the
-distribution candidate before introducing home. Persist only portable authored
-config, not command-line or environment overrides. Track origin/version separately
-from setting precedence. Remote editing, conflict handling and update timing remain
-open; do not silently overwrite independent destination declarations.
-
-Machine identity/naming evidence and open decisions:
-[Machine configuration prior art](machine-config-prior-art.md). Herdr's separate
-name/target/permanent identity is the closest file-backed precedent. Rex's shared
-home demonstrates distribution but also declaration overrides; Omnara uses a
-central organization registry. Proposed LF config holds aliases, identity references
-and connection declarations; each installation's own identity remains nonportable
-local state. Resolve aliases at origin and carry the selected ID, so destination
-names cannot silently change placement. File distribution never copies local identity.
-
-Jack clarified that local preferences should generally affect remotely executed
-work, but machine selection must not cause the destination to forward work to
-itself. Proposed contract:
-
-- A request resolves placement at its origin. Once assigned to a destination,
-  remote execution honors that assignment rather than selecting a machine again.
-  Any machine selection resolving to the current machine executes locally, using
-  stable machine identity rather than hostname/string equality.
-- Carry the originating personal declarations with their source/scope/target and
-  agent/default_agent strength, retaining the portable profile for future remote
-  commands. Do not flatten resolved values into CLI overrides or persist invocation
-  flags as preferences. Define migration of any preexisting destination personal
-  declarations explicitly. CLI, explicit environment and repository settings retain
-  their semantics.
-- The destination supplies host facts and local bindings: installed harnesses,
-  credential access, filesystem paths and capacity. A portable account/machine
-  preference refers to those bindings; transporting a preference neither copies
-  credentials nor establishes that the requested resource exists there.
-- A later command started directly on the remote uses the retained personal profile,
-  including when the laptop is unavailable. Avoid an unexplained precedence layer
-  between that profile and separately edited host preferences; writer/conflict policy
-  remains a design decision.
-- Creating genuinely new work can make a new placement decision. An existing
-  Graph's steps execute on its assigned machine. Do not equate new work creation
-  with re-routing an already assigned request.
-
-File distribution and per-request propagation are separate. Inspection should
-show the originating declaration and its resolved destination, plus any missing
-host binding. Remaining design work: define the carried declaration boundary and
-repository identity mapping, and prove same-machine, remote and nested-launch
-behavior. This is proposed follow-on design, not a change to the active pursue.
-
-## Paseo reference: lessons for the writer contract
-
-Paseo's daemon CLI and settings patches write the same `config.json`; its project
-API writes `paseo.json`. Its schema supports validation and editor-schema generation,
-but lifecycle/mutable-field lists remain separate. Client-local remembered model
-choices are another launch input, not daemon configuration. Evidence and limits:
-[Paseo settings reference](paseo-settings-reference.md).
-
-For LF, a write result should identify the saved declaration and report whether
-it applies now, to the next launch, requires an explicit lifecycle action, or is
-shadowed by another declaration. Persist only requested intent; never serialize
-a resolved view back into a preference source. Include UI-carried choices in launch
-provenance rather than letting them become an invisible precedence tier.
-
-This supports the proposed file-editor contract. “Close gaps” requires common
-semantic access through appropriate interfaces. CLI and Desktop write authored
-declarations to the selected file; inspection explains the same resolution.
-
-## The demo
-
-Command spelling is provisional; these are additions to the PR's inspector:
-
-```text
-lf config list
-  agent          launch preference   general / skill / occurrence
-  docs           launch preference   append; [] clears
-  theme          personal file       appearance editor / Apply
-  account.codex  account route        global / repo / Wave; no skill target
-
-lf config show --skill implement --key agent --explain
-  agent = claude
-  selected: repo .lf/config.yaml · agent: claude
-  fallback: ~/.lf/config.yaml · skills.implement.default_agent: codex
-  reason: an explicit agent beats a default, regardless of source or specificity
-```
-
-The same query and structured explanation serve CLI and Desktop. With a personal
-implement `agent: codex`, the result changes to Codex because personal source wins
-among explicit choices. With `docs`, the explanation instead lists contributions
-and resets. A “where can I set this?” view comes directly from applicability policy.
-
-## Delete — do not maintain
-
-- `LAUNCH_KEYS`, `REPO_ONLY_KEYS`, `ADDITIVE_KEYS` and hand-maintained eligibility
-  branches, once their consumers read descriptor policy in the same change.
-- Schema discovery by serializing `Config::default()` in `preference_path` and
-  validation; retain the actual typed parsers and semantic validators.
-- Separate account/machine *key discovery* in `parse_key`; keep their domain APIs,
-  storage, validation and effects behind catalogue bindings.
-- The inspector's assumption that the last candidate alone is selected and all
-  others are merely earlier. Render resolver-provided dispositions instead.
-- Any new duplicated catalogue in Swift, docs or JSON. Generate those projections.
-
-Preserve existing behavioral tests for precedence, identity, native metadata,
-unset, false/empty values, propagation and launched-provider agreement. Adjust
-tests tied solely to deleted discovery helpers; do not retain obsolete helpers
-just to keep their tests green. Dormant summary preferences must be identified as
-inactive rather than advertised as working; removing them needs a consumer audit.
-
-## Delivery shape and acceptance
-
-**Additive series. Keystone:** replace scattered catalogue policy and wire discovery,
-validation, writers and explanation to it in one coherent PR. Include all existing
-LF-owned settings and close appropriate access gaps, with correct adapter
-capabilities. The implementation inventory must identify each gap, its new entry
-points or justified restriction, and its behavioral proof. The proposed removal
-of DB preferences requires an explicit migration: preserve scope, target, strength,
-account order and effective precedence; detect collisions with existing file
-declarations; remove old readers/writers after cutover. Do not simply export a
-resolved snapshot, silently discard overrides, or keep two writable authorities.
-
-Internal sequence: (1) co-locate definitions and cut over validation/eligibility,
-removing the old lists; (2) bind special owners and CLI adapters; (3) expose catalogue
-and resolver explanations through shared DTOs and inspection. These are internal
-slices, not separately maintained old/new implementations.
-
-**Later outcomes:** generated config-editor schema/completion; historical launch
-snapshots; cross-machine comparison and profile distribution. Catalogue metadata
-prepares them but does not implement synchronization, credential distribution or
-new history persistence. Preserve source and strength when exporting declarations;
-a resolved snapshot is not a portable preference profile.
-
-Headless acceptance proves:
-
-- Every LF-owned persisted preference is discoverable, or explicitly classified as
-  delegated/inactive; private Config fields and operational commands are excluded.
-- Applicable file/CLI/env declarations produce the same values and explanations
-  through real launch preparation; restrictions agree across those surfaces.
-- Choice/default precedence, list append/clear and unset explanations match execution.
-- Catalogue and bootstrap reads work with no DB; unavailable sources remain visible.
-- Special-setting adapters preserve existing domain behavior and do not expose secrets.
-- Migrated DB declarations retain their intended scope and effect; old DB preference
-  paths no longer influence resolution. Account registration/history remain intact.
-- Exported DTO fixtures agree across Rust/Swift if the Desktop boundary changes.
-
-Gate: `uv run python scripts/test.py --reuse-passing --rust-filter 'test(config::) | test(settings_launch_tests::) | test(wave_setup_tests::)'`, with inherited LF
-variables cleared as required by scripts/testing.md; add affected adapter suites
-identified by the final diff. Formatting/Clippy and relevant DTO checks are part of
-that gate. No display, live provider or paid launch is required.
-
-## Review decisions
-
-1. File-backed settings and private repository storage are accepted:
-   `./lf.config.local.yaml`, with personal global and committed team files distinct.
-   Implement ignore setup and sharing across Task worktrees. Preserve choice before
-   fallback and personal scope ordering while removing the DB source tier.
-2. Specify profile distribution: Git-style file editing does not itself synchronize
-   files or provision credentials. Define portable account/machine references and
-   per-machine bindings without copying runtime history as configuration.
-3. Complete the field-by-field migration and setting-by-setting gap inventory. Closing
-   appropriate gaps is accepted direction; retaining today's omissions is not a
-   viable implementation boundary. Domain operations need not become plain writes.
-
-Check: source audit only; no catalogue code or new tests executed. The active
-choice-before-fallback pursue continues independently; this draft is not its directive.
+# File-backed settings, one catalogue, and remote preference authority
+
+LOO-714 · Accepted for implementation by Jack Heart · November 3, 2026
+
+Jack's “ok. lets build.” authorizes this settings extension in the existing Task
+and checkout. This is the current implementation plan. It supersedes the DB-backed
+storage and catalogue/portability exclusions in settings-scope.md; preserve that
+file's accepted choice/default, targeting and invocation semantics and its evidence.
+The preceding research was checkpointed before consolidation in Git. Research notes
+remain evidence, not competing designs.
+
+Delivery: continue PR #1805 for review with Auto-Ship stopped. Automatic limit
+recovery remains the later PR; neither merge nor whole-Task completion is authorized.
+The previously requested Codex execution still applies to this run, without making
+Codex a permanent product preference.
+
+## Outcome and scope
+
+Every LF-owned preference has one typed catalogue definition, consistent meaningful
+access through CLI/files/Desktop, one authoritative file writer and an explanation
+of its effective value and source. Close coverage gaps rather than merely documenting
+them. Remove DB preference overrides, including machine/account preference declarations.
+Origin preferences govern remote execution and can be retained for later direct use.
+
+Existing operational state remains in its domain owner: Tasks, Sessions, actual
+saved layouts, local machine identity, account observations, usage, cooldowns and
+execution history. Layout templates and Wave layout defaults are configuration;
+applying one changes live state. This is a classification requirement for existing
+surfaces, not authorization to build a new layout editor or template product.
+
+## Files and editing
+
+- Personal global: ~/.lf/config.yaml.
+- Personal repository: ./lf.config.local.yaml, at the repository root. This exact
+  filename was selected by Jack; it is not .lf/config.local.yaml.
+- Committed team: .lf/config.yaml and existing Wave configuration files.
+- Skill/Graph metadata remains an authored source where the setting applies.
+
+Private repository settings are shared across linked Task worktrees. Implementation
+choice: discover the main checkout through Git's worktree/common-directory APIs and
+resolve one root lf.config.local.yaml there; taskless non-Git use resolves its own
+project root. Do not copy diverging per-Task preference files. Handle relocated/main
+worktrees through Git metadata rather than guessing paths or branch names.
+
+Implementation choice: on first LF write, add /lf.config.local.yaml to the common
+Git info/exclude if needed. Keep existing rules and avoid changing global Git ignores
+or the committed .gitignore. Do not silently untrack an already tracked private file;
+report that condition. Reads should diagnose an existing unignored private file.
+
+CLI and Desktop edits target these same files, with explicit write destinations.
+Ordinary unqualified repo-scoped setters use the private repository file; global
+setters use the personal global file; shared writes require an explicit destination.
+Preserve comments/unrelated keys, validate before writing, use atomic writes and
+protect against concurrent changes. Unset removes a declaration, not its lower-layer
+value. Hand edits and programmatic edits must be visible through the same invalidation
+and inspection path. Preserve existing appearance Apply/Cancel semantics.
+
+Migrate existing personal repos: entries to private repository files deliberately;
+no second writable personal repository authority remains after cutover. Wave-scoped
+personal declarations live in the private repository file. Use one canonical syntax
+for general/skill/graph-occurrence declarations wherever they apply, retaining the
+existing accepted selectors instead of inventing parallel key names.
+
+## Resolution
+
+For agent selection, all applicable agent choices beat all default_agent fallbacks.
+Within a class: CLI > explicit environment > personal files > repository/Wave files
+> builtins. Within personal ownership, narrower scope wins: Wave > repo > global;
+within a scope, occurrence > skill > general. Removing the DB removes a source tier,
+not these distinctions. Other settings retain their typed replace/merge/append/reset
+semantics. No per-skill accounts and no built-in per-skill agent recommendations.
+
+Preserve examples already implemented:
+
+- Personal skill agent Codex beats repository occurrence agent Claude.
+- Personal skill default_agent Codex yields to repository general agent Claude.
+- Session/resume -a selects only that conversation; unrelated Tasks and agent-issued
+  child commands do not inherit an internally exported preference.
+- Explicit Graph/Task execution -a reaches all its steps, composition and routers.
+- Occurrence targets use defining Graph canonical name plus authored local step ID.
+- False, empty, omitted and unset remain distinct.
+
+## One executable catalogue
+
+Rust is authoritative. Co-locate preference types/defaults with descriptors or derive
+policy from one declarative source; do not maintain parallel Swift/help/schema lists.
+A definition contains typed codec/validation, default, applicability over source ×
+scope × target, combination policy, persistence/lifecycle, portability and description.
+Dynamic keyed settings use typed selector patterns. Planning remains a tagged unit.
+Internal bookkeeping and native provider configuration are not generic LF settings.
+
+Keep the existing resolver, making it consume catalogue policy. Definitions own
+eligibility and validation; declarations carry address/value/source locator; resolution
+returns values, candidate contributions and reasons. CLI flags bind to definitions.
+Generic setters use the common writer; domain actions such as login/provisioning or
+moving a Session remain explicit operations. Their preference fields still get normal
+CLI/file/UI access where meaningful.
+
+Catalogue discovery explains where each setting can be set. Inspection explains why
+it wins, contributes, clears, falls back or is inapplicable, with actual file path and
+scope/target. Inspection and launch preparation must agree. Unknown LF keys are
+diagnosed after dispatch to known owners; native skill frontmatter is not misclassified.
+Bootstrap reads and config inspection work without a compatible DB. Resource availability
+may depend on runtime facts, but this is distinct from preference availability.
+
+Inventory all existing fields, including theme, stream, logs, portfolio, launch/context,
+planning/release and machine/account fields. Dormant settings must be identified as
+inactive; invent no runtime behavior to make a parser field appear supported.
+
+## Machine and account declarations
+
+Files own ordered allowed accounts, preferred machines, declared aliases, identity
+references, connection declarations and authored limits. Domain owners retain secrets,
+observed identity/auth state, availability and usage. Audit mixed records field by field.
+Credentials keep the existing secret mechanism and never enter shareable configuration.
+
+A machine alias, durable referenced identity, connection address and this installation's
+own local identity are distinct. Only the last is nonportable runtime identity. Resolve
+placement at origin to a durable ID. Selecting the current ID executes locally; assigned
+work does not select placement again. Keep host routes/bindings that cannot travel in
+host-local configuration or existing SSH configuration, described by catalogue policy.
+
+## Remote authority — accepted
+
+The initiating LF instance supplies the personal profile; the executor supplies its
+environment. Forwarded work uses the origin's portable personal declarations instead
+of implicitly merging origin and destination personal profiles.
+
+| Launch entry | Personal preferences |
+| --- | --- |
+| Laptop launches on remote | Laptop profile |
+| Phone goes through laptop server | Laptop profile |
+| Shell or phone launches directly on remote | Remote's saved profile, including retained preferences |
+
+Keep original source/scope/target/choice strength. Shipping declarations never promotes
+them to CLI overrides. Host-local fields and credentials come from the destination;
+repository/Wave configuration remains its authored source, not copied personal intent.
+CLI and explicit environment retain invocation semantics; no persistence of those values.
+Existing account/thread continuity rules remain enforced even when a new preference
+cannot be applied to a resumed provider conversation.
+
+Use and retention are distinct. A remote request can use the carried profile even when
+saving it would overwrite an independent remote edit. Later direct remote commands use
+the actual saved profile. Inspection must explain the difference and the source.
+
+## Remote retention — conservative implementation choices
+
+The desired behavior is accepted; the following mechanics resolve the remaining routine
+choices for implementation. No multi-writer auto-merge, universal Home or background
+synchronization service is introduced.
+
+- Retain portable authored declarations in ordinary personal config files, preserving
+  machine-local fields. Initial absent/equal destinations can be adopted automatically.
+  Existing differing personal preferences are preserved and exposed for explicit adoption.
+- Record last-applied portable content/revision, origin and destination identity as
+  operational metadata. It can live in the DB; it is not another preference source.
+- Refresh on remote request boundaries only while retained content still matches the
+  last-applied content, or already equals the incoming content. Remote deletions count
+  as changes. Compare coherent documents/projections, not auto-merged leaf values.
+- Serialize compare-and-write; reject stale deliveries from the same origin. Another
+  client cannot silently take ownership of an independently retained profile. Repository
+  identity selects the correct private file across differing filesystem paths.
+- On divergence retain remote edits, expose an inspectable diff and explicit keep/replace
+  or import action. Forwarded work can continue with its carried profile; report that
+  persistence was not applied. Repeated identical divergence must not repeatedly prompt.
+- Offline direct work uses last saved preferences. It cannot observe undelivered edits.
+  Existing running steps are unaffected by delivery. No automatic reverse propagation.
+
+Catalogue portability must distinguish authored paths/connection bindings from portable
+references. Account ordering is atomic, not a union. A snapshot includes removals within
+its declared coverage; partial delivery must not look like deletion. Delivery receipts
+and metadata never become a resolved-settings DB override or a second writable mirror.
+
+## Migration and deletion cut
+
+Reuse this Task's single unreleased settings_authority.sql migration; check its release
+status before editing. Database upgrades and file writes need a recoverable cutover:
+preserve authored values, scopes/targets/strength and account order, not merely an
+effective snapshot. Inventory collisions with existing files before retiring the only
+copy. Preserve rollback/recovery evidence, including values displaced by explicit adoption.
+
+Audit the effect of collapsing DB and file authority: an old DB-global override could
+previously beat a more specific file declaration. Do not silently change that behavior
+or pretend a same-address export preserves it. The migration must make the affected
+choices reviewable and preserve intended effective behavior or require explicit resolution.
+No permanent compatibility reader or dual-writer DB preference layer remains afterward.
+Keep released and branch-readable shared config compatible until supported cutover, per
+AGENTS.md; any necessary temporary compatibility has a named removal outcome.
+
+Delete predecessors in the same coherent change:
+
+- scope_settings preference reads/writes and replaced preference-only scope_defaults /
+  provider_routes paths after migrating their authored fields; preserve runtime facts.
+- LAUNCH_KEYS, REPO_ONLY_KEYS, ADDITIVE_KEYS and duplicate applicability/key discovery.
+- Schema inference from serializing Config::default().
+- Separate preference parsers/writers in special settings and mirrored client key lists.
+- Inspector guesses based only on last candidate; render resolver-owned reasons.
+- Historical DB/file or per-repo duplicate authorities after cutover.
+
+Existing code owners: config.rs, config/settings.rs, lf/mod.rs, lf/commands/setting.rs,
+lf/commands/config.rs, lf/commands/machine.rs, lf/commands/ssh.rs, store/sqlite/durable.rs,
+work/wave/setup.rs and Desktop AppearanceStore. Follow actual call paths before changing.
+
+## Execution and proof
+
+Implement in coherent internal slices without stopping after scaffolding: catalogue and
+file ownership/cutover; all consumer/API/UI writers and provenance; remote authority and
+retention. Preserve previous PR1 tests and close the setting-by-setting gaps. Settings
+coverage is the deliverable, not a small agent-only subset. Resolve routine syntax and
+adapter choices from the existing code; record consequential counterexamples for review.
+
+Headless acceptance covers:
+
+- Real file/set/unset/CLI/Desktop paths resolve identically, including false/empty values,
+  targeted defaults, explanations and invalid settings.
+- Linked worktrees share the exact root private file; it is ignored; concurrent writes
+  and hand edits retain unrelated content.
+- Bootstrap/config discovery survives DB absence/version skew; runtime unavailability is
+  reported separately. DTO fixtures agree across Rust and Swift.
+- Migration fixtures cover collisions, scope/strength/order, interrupted file cutover and
+  removals. No obsolete DB preference can influence later launches.
+- Stand-in remote launches prove origin wins, direct remote uses retained settings,
+  repository precedence remains, local-ID placement executes locally, and nested Graph
+  execution does not leak invocation selection into unrelated work.
+- Retention proves initial absent/equal/different cases, unchanged updates, local edits
+  and deletions, stale/concurrent deliveries, restart, host-only fields, no credential or
+  CLI/env persistence, and nonblocking forwarded execution with clear persistence status.
+
+Focused tests during implementation, affected suites once at gate/publication, cargo fmt
+and cargo clippy --all-targets -- -D warnings before code commits. Clear inherited LF_*
+for Rust tests and close stdin as repository guidance requires. No live paid provider,
+config migration on Jack's installation or remote infrastructure provisioning is needed
+for these proofs. Follow the pursue publication boundary and show remaining demo limits.
+
+Check: plan consolidation only; no new code tests run. Previous implementation evidence
+is in settings-scope.md. Automatic failure recovery remains unimplemented separately.

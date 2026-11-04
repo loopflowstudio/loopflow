@@ -1,47 +1,26 @@
-# Open questions and assumptions
+# Implementation decisions and assumptions
 
-## Settings catalogue design review — 2026-11-03
+## Settings catalogue extension — November 3, 2026
 
-Jack Heart requested a catalogue design while the approved choice-before-fallback
-pursue continues. Draft: `settings-catalog.md`. Jack chose to close appropriate
-coverage gaps, not only describe them. Jack accepted the file-backed direction and
-machine naming model: remove DB configuration, including machine/account preferences,
-using Git-style setters. Machine aliases, identity references and connections are
-config; each installation's own identity stays local. Resolve placement to an ID at
-origin; a matching local ID executes locally. This replaces the earlier DB-only setter.
-Registration, credentials, observations and
-execution history remain separately owned; classify mixed records field by field.
-Jack selected `./lf.config.local.yaml` at the repository root for private repository
-settings. Implement Git ignoring and sharing across Task worktrees. Define portable
-resource references, migration and file distribution explicitly. No live migration or change
-to the active pursue is approved by this design discussion.
+Jack Heart authorized implementation with “ok. lets build.” The current plan is
+settings-catalog.md. This replaces the earlier draft-only exclusions; continue in
+LOO-714 and PR #1805, using Codex, publishing for review with Auto-Ship stopped.
+Automatic failure recovery remains the later PR. Preserve unrelated critique files.
 
-Jack clarified that openness to a personal home is conditional on solving a concrete
-problem; do not introduce it as an assumed concept. The actual requirement is that
-personal config set on the laptop applies to remote work, including work initiated
-from mobile. Decide availability while the laptop sleeps, freshness and which devices
-may edit before choosing distribution (replicated files versus a selected source
-and cache). Keep declarations file-backed and preserve precedence when transported.
-Explicit exclusion: shared-account servers and multi-user login servers. Paseo's
-file-backed host API and identity separation remain supporting evidence.
+Accepted: one catalogue, coverage of every appropriate setting surface, file-backed
+preferences and setters, no DB preference override, root ./lf.config.local.yaml,
+choice-before-fallback, origin personal preferences for remote requests, executor
+host facts, saved remote preferences for directly initiated work, and configuration
+templates versus DB live layouts. No per-skill accounts or built-in agent recommendations.
 
-Latest distribution candidate from Jack: the initiating machine/server pushes
-personal config; the remote retains it for follow-up commands from mobile or remote
-shells. This can satisfy disconnected-laptop use without a home role. Persist
-authored config only, never one-command CLI/env overrides. Resolve remote editing,
-conflicts and freshness next. Personal repository storage is now
-`./lf.config.local.yaml`; this replaces the external repository-keyed alternatives
-discussed earlier. The filename decision does not settle remote update conflicts.
-
-Research follow-up: config-distribution-research.md recommends forwarding and
-retention with refresh of unchanged copies, preserving remote edits rather than
-automatically merging them. The exact retention/conflict mechanism remains proposed.
-Jack accepted the per-launch authority rule: the initiating LF instance supplies
-personal preferences, and the executor supplies its environment. Laptop-origin work
-uses the laptop profile; phone requests through the laptop do too. Work initiated
-directly on the remote uses its saved preferences. Different entry points may differ.
-This neither requires automatic reverse synchronization nor authorizes overwriting
-independent remote edits. Repository and choice/default resolution remain intact.
+Routine choices for the authorized implementation are recorded in the plan: share
+one main-checkout private file across worktrees, ignore it via common info/exclude,
+atomically edit files, retain origin declarations and refresh only unchanged copies.
+Preserve independent remote edits and make persistence status explicit without
+blocking forwarded work. No automatic reverse sync, Home role or multi-writer merge.
+Record any architectural counterexample here rather than silently weakening the
+accepted outcome. Remote profile differences are deliberate per-launch authority;
+existing runtime account/thread continuity still applies.
 
 ## Duplicate implement run stopped (2026-11-02 14:25)
 

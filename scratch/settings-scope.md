@@ -1,10 +1,12 @@
 # Consistent settings and personal graph-step overrides — LOO-714
 
 Accepted by Jack Heart on November 2, revised November 3, 2026. Infrastructure.
-This is PR1's authoritative design; earlier storage/route/tier proposals are
-superseded. Delivery is review-only PR #1805 with Auto-Ship stopped. No merge or
-whole-Task completion: automatic limit recovery remains PR2. Catalogue, portability
-and critique drafts are separate contributions, not scope expansion.
+This records the earlier PR1 implementation and its evidence. Jack Heart has now
+authorized the file-backed catalogue and remote preference extension in
+settings-catalog.md, which is the current implementation plan and supersedes this
+file's DB-storage decisions and scope exclusions. Preserve choice/default, target
+and invocation behavior below. Delivery remains review-only PR #1805 with Auto-Ship
+stopped; automatic limit recovery stays in the later PR. The critique is unrelated.
 
 ## Accepted resolution
 

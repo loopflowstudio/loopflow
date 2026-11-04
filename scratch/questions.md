@@ -68,7 +68,7 @@ overwrite a newer return. Native Rex integration remains owned by LOO-498.
 Clean Desktop quit is departure, not explicit Close: it preserves ordinary
 shells and the completed Task's fifteen-minute grace. This follows Jack Heart's
 accepted quit/Close distinction; it is an engineering interpretation, not new
-approval. The next implementation separates release policy from native-resource
+approval. The implementation separates release policy from native-resource
 settlement in the existing host observation, so acknowledged quit can finish
 cleanup without reopening Desktop. Failed reporting remains unknown. Exact
 direction and counterexamples are in `loo-717-shell-lifetimes.md`, **Concept

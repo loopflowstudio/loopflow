@@ -24,29 +24,31 @@
 <header>LOO-717 · concept-review · November 3, 2026
 <p class="source">Built from <a href="questions.md">questions.md</a>,
 <a href="loo-717-shell-lifetimes.md">loo-717-shell-lifetimes.md</a>,
-SessionsView.swift, WorkDestination.swift, LaunchJournal.swift,
-store/sqlite/task_retirement.rs and ops/task/retirement_tests.rs at 2abcfc28cc.</p></header>
+SessionsView.swift, RepositoryWorkspace.swift, WorkspaceRetentionTests.swift,
+store/sqlite/task_retirement.rs, ops/task/retirement_tests.rs,
+transport/lifetime.rs and the Swift/transport guides at 781e5dc5b4.</p></header>
 <h1>Quit releases the view.<br>Cleanup must not need it back.</h1>
-<p><strong>Design changed; next implement direction.</strong> Separate the reason a
-host releases retention from evidence that its native resources have settled.
-Jack Heart's accepted quit, Close and grace rules already imply this distinction.
-No new product approval is needed; runtime implementation remains pending.</p>
+<p><strong>No design change or open product choice.</strong> The implementation now
+separates release policy from native settlement, as Jack Heart's accepted quit,
+Close and grace rules require. Installed behavior remains for demo; this review
+does not add acceptance evidence.</p>
 
-<h2>The consequential mismatch</h2>
-<p><strong>Existing:</strong> <code>closed</code> both skips the fifteen-minute grace
-and acknowledges native cleanup. <code>away</code> keeps the grace, but retirement
-then waits for that host to report <code>closed</code>.</p>
+<h2>The consequential mismatch, resolved</h2>
+<p><strong>Before, at 2abcfc28cc:</strong> <code>closed</code> both skipped the
+fifteen-minute grace and acknowledged native cleanup. <code>away</code> preserved
+grace but required the host to report again before checkout deletion.</p>
 <blockquote>Leave a completed Task → quit Desktop → grace expires.<br>
-An away report still requires another Desktop acknowledgement. A closed report
-would skip the grace. Neither expresses the accepted interaction.</blockquote>
-<p>Source inspection finds a window-Close hook but no explicit acknowledged
-quit-release path. Installed AppKit ordering has not been demonstrated. Crashes
-and unacknowledged releases must continue to leave cleanup pending.</p>
+<strong>Now implemented:</strong> <code>away</code> plus
+<code>native_settled=true</code> preserves the deadline and lets cleanup finish
+without another Desktop launch.</blockquote>
+<p>AppKit termination defers for a release attempt with one five-second budget.
+Desktop detaches presentation first and fences Close notifications and heartbeats.
+Destination owners still settle Sessions and shell jobs before checkout deletion.</p>
 
 <h2>Actions → concepts → APIs</h2>
 <dl>
 <dt>Leave or quit Desktop</dt>
-<dd><strong>Proposed implementation:</strong> release retention and settle native
+<dd><strong>Implemented:</strong> release retention and settle native
 presentation; preserve destination execution. <code>task presence</code> records
 <code>away</code> plus native settlement in the same revision. The existing deadline
 runs; Desktop need not stay open to acknowledge it later.</dd>
@@ -58,38 +60,50 @@ own execution checks.</dd>
 <dd>A newer <code>retained</code> observation revokes pending retirement. Reconnect
 checks the same shell receipt. Delayed settlement cannot override the return.</dd>
 <dt>Leave a Rex Task with native shells</dt>
-<dd><code>away</code> releases retention but does not prove settlement. LOO-498's
-adapter closes that Task's resources and acknowledges them; other Tasks survive.</dd>
+<dd><strong>Accepted contract; native adapter proof outstanding:</strong>
+<code>away</code> releases retention but does not prove settlement. LOO-498 owns
+closing that Task's native resources and acknowledging them; other Tasks survive.</dd>
 </dl>
 <p>Keep the existing Task, Session, shell receipt, host occurrence and retirement
-intent. Add one settlement fact to the occurrence and presence write. Reuse the
-destination executor and current revision fencing; no new lifecycle service.</p>
+intent. The required settlement fact is part of the same occurrence and
+<code>task presence</code> write. Increasing revisions fence delayed reports;
+one destination executor coordinates cleanup.</p>
 
-<h2>Proposed usage copy</h2>
+<h2>Usage documented in the guides</h2>
 <blockquote>Quit Desktop to leave shells running. Completed Tasks retain their
 shells and checkout through the fifteen-minute absence grace; eligible idle
 agents follow the two-minute policy. Cleanup can finish while Desktop stays quit.
-Explicit Close skips grace after work settles. Failed release leaves cleanup
-pending. Reconnect reuses surviving execution; New Shell starts fresh.</blockquote>
+Explicit Close skips grace after work settles. If release never reaches the
+destination, cleanup stays pending. Reconnect reuses surviving execution;
+New Shell starts fresh.</blockquote>
 
-<h2>Proof before acceptance</h2>
-<p>Use the same PID and jobs through acknowledged quit, then retire the completed
-checkout without relaunching Desktop. Kill the app or lose SSH before acknowledgement:
-retain the checkout. Return after settlement: cancel cleanup. Repeat with active
-work, another retaining occurrence and Rex-owned resources. Existing loopback SSH
-tests do not establish these installed host behaviors.</p>
+<h2>Normal, failure, recovery</h2>
+<p><strong>Normal:</strong> an acknowledged away release preserves the existing
+deadline. After requested work settles, destination owners and native hosts each
+prove their own cleanup. Task and conversation history survive.</p>
+<p><strong>Failure:</strong> a retained lease expiring without a release leaves
+checkout cleanup pending. A lost reply is different: the caller is uncertain,
+but a committed release still counts. Retry the identical revision safely.</p>
+<p><strong>Recovery:</strong> a newer retained observation clears native settlement
+and cancels pending retirement. A delayed old report cannot undo that return.
+Cancellation between cleanup passes cannot roll back effects already performed.</p>
+<p><strong>Next proof:</strong> demonstrate installed quit/relaunch with the same
+shell PID, input, TUI and jobs; cleanup without relaunch; remote loss and recovery;
+and Rex-native settlement. Inspected headless fixtures cover policy and composed
+cleanup, and recorded loopback SSH cycles cover transport. Neither establishes
+installed host behavior. No runtime tests were rerun for this source review.</p>
 
 <h2 class="rule">Review questions and dispositions</h2>
 <ol>
 <li><strong>Does quit mean explicit Close?</strong> No. Jack Heart accepted retaining
-ordinary shells on quit. Implement departure with grace.</li>
+ordinary shells on quit. Departure with grace is implemented.</li>
 <li><strong>Does release prove native cleanup?</strong> No. Record settlement
 separately; Desktop and Rex have different native resources.</li>
-<li><strong>Does missing acknowledgement mean closure?</strong> No. Preserve unknown
-evidence and recover with a fresh observation.</li>
+<li><strong>Does missing acknowledgement mean closure?</strong> No. The caller's
+result is unknown; the destination retains any observation it committed.</li>
 </ol>
-<small>No unresolved product question. This headless review changes the working
-design only. Interactive demo remains the delivery boundary; no merge or
-installation approval was added.</small>
+<small>No unresolved product question or next implementation redesign. The working
+design and this page record the review result. Interactive demo remains the delivery
+boundary; no merge or installation approval was added.</small>
 </main>
 </html>

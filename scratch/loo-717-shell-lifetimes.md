@@ -3,7 +3,7 @@
 Status: **Accepted; implementation present, acceptance incomplete.**
 Jack Heart approved implementation and review publication on November 3, 2026,
 after design review. The delivery boundary is interactive demo; shipping, merging
-and installation are not approved. Reconciled November 3 against `2abcfc28cc`,
+and installation are not approved. Reconciled November 3 against `781e5dc5b4`,
 which includes main through `aef0c0a5cd` and LOO-709's `ed983ac176`.
 
 `scratch/explore.html` is the historical simulation, not the implemented terminal
@@ -315,6 +315,14 @@ inspected the assertions without rerunning unchanged runtime checks.
 ## Concept review — November 3: release and settlement
 
 **Outcome: release/settlement distinction implemented; installed proof remains for demo.**
+Repeat concept review against `781e5dc5b4`: **no design change and no open product
+choice**. The accepted actions map to the existing host observation, shell receipt
+and retirement intent without another lifecycle authority. Normal quit, missing
+release and newer return are represented separately; a lost reply does not undo
+a destination-committed release. Keep the counterexamples and next proof below.
+The review page now describes the implemented contract rather than the superseded
+proposal. This source review adds no runtime or installed acceptance evidence.
+
 This headless review derives the change from Jack Heart's accepted quit/Close,
 two-stage cleanup and host-native ownership requirements. It records no new
 approval and leaves the existing demo boundary intact. The source mismatch below
@@ -325,13 +333,13 @@ explicit Close skips absence grace (`reconcile_task_retirement`), and the same
 value proves native cleanup finished (`retirement_hosts_closed`). Releasing a
 view and settling the resources that only its host can close are independent.
 
-Source evidence: Desktop's `closeWorkspace()` detaches surfaces and asynchronously
-reports closed. Its only window hook is `NSWindow.willCloseNotification` in
-`WorkDestination.swift`. The app termination observer in `LaunchJournal.swift`
-records exit only; there is no explicit, acknowledged quit-release path. An away
-occurrence requires a later closed report before retirement can delete anything.
-`retirement_return_and_reopen_cancel_closing_before_git_deletion` deliberately
-demonstrates that wait. Thus simply reporting away on quit would still leave
+Pre-change evidence at `2abcfc28cc`: Desktop's `closeWorkspace()` detached surfaces
+and asynchronously reported closed. Its window hook was
+`NSWindow.willCloseNotification` in `WorkDestination.swift`; the app termination
+observer in `LaunchJournal.swift` only recorded exit. There was no acknowledged
+quit-release path. An away occurrence required a later closed report before
+retirement could delete anything, as the return/reopen fixture demonstrated.
+Thus simply reporting away on quit would still leave
 cleanup dependent on another Desktop launch. Reporting closed instead would skip
 the accepted grace. This is source evidence, not a claim about installed AppKit
 notification ordering.
@@ -501,4 +509,4 @@ backend, process migration, arbitrary history replay or C-style workload recipes
 The accepted boundary remains interactive demo, without Auto-Ship, merge,
 installation or a separate LOO-498 launch.
 
-Check: November 3 — `cargo test -p loopflow --lib workspace_retirement` passed (6); isolated `cargo test -p loopflow --test integration land_tests::waited_land_retains_intent_on_interrupt_and_finishes_only_after_merge -- --exact` passed (1); `swift build --build-tests --package-path swift` and headless `WorkspaceRetentionTests` passed (11). Formatting, diff checks and context budgets passed. Reused recorded composed-retirement (5), migration validation and CLI help results; earlier local/SSH twenty-cycle and broader Swift evidence remains at `2abcfc28cc:scratch/loo-717-shell-lifetimes.md`. Gate/CI owns affected suites, migration-frontier/DTO checks, Clippy and Linux isolation; demo owns installed Desktop/Rex and physical remote-Machine judgment.
+Check: November 3 — source reconciliation reuses `781e5dc5b4`'s unchanged-code results: `cargo test -p loopflow --lib workspace_retirement` passed (6); isolated `cargo test -p loopflow --test integration land_tests::waited_land_retains_intent_on_interrupt_and_finishes_only_after_merge -- --exact` passed (1); `swift build --build-tests --package-path swift` and headless `WorkspaceRetentionTests` passed (11). Recorded composed-retirement (5), migration validation and CLI help results still apply; earlier local/SSH twenty-cycle and broader Swift evidence remains at `2abcfc28cc:scratch/loo-717-shell-lifetimes.md`. This prose reconciliation uses `git diff --check` and `lf context`; gate/CI owns affected suites, migration-frontier/DTO checks, Clippy and Linux isolation; demo owns installed Desktop/Rex and physical remote-Machine judgment.

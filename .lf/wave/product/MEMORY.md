@@ -175,14 +175,11 @@ selects membership; `--no-wave` equals omission. Repository identity is required
 optional Project supplies the derived Wave. The read projection is validated on
 save, not a second owner. No synthetic inbox or query-owned workspace.
 
-Jack selected **Task → Wave → repository** Workflow precedence and direct Wave
-default ownership, removing Project defaults/history. Repository `workflow:` uses
-strict local config; invalid selection is an error, absence needs selection.
-Captured graphs survive config, chapter and membership changes. Repository-default
-definitions bypass same-named Wave customizations.
+AGENTS.md owns current graph selection. Jack Heart's superseded Workflow defaults
+and commands remain at `781e5dc5b4:.lf/wave/product/MEMORY.md`, this heading.
 
-Jack renamed membership to `task move --wave/--no-wave`; position uses
-`task workflow move`. Same-repository moves may include active work and preserve
+Jack renamed membership to `task move --wave/--no-wave`. Same-repository moves
+may include active work and preserve
 execution, PR, checkout and conversation identity. Current Session membership
 follows the Task; capture/dispatch ownership, including null, remains historical.
 Next capture uses the new home; membership never transfers execution.
@@ -291,13 +288,14 @@ at fifteen total. Return cancels the deadline. Active work, drafts and pending
 requests protect execution; elapsed deadlines need not restart after settlement.
 Cleanup discards uncommitted files, preserving committed-ref safeguards and history.
 
-Nested lf preserves shell purpose. Expired host leases mean unknown;
-checkout cleanup stays pending.
-`2abcfc28cc` adds loopback SSH identity/cleanup and composed retirement checks:
-return cancels between passes; partial Git deletion remains retryable. Recorded
-macOS passes do not prove Linux isolation, physical remote Machines or installed
-Desktop/Rex recovery. macOS ignores SSH tests by default: sshd cannot nest in
-the test sandbox; direct runs pass.
+Release policy and native settlement are independent, revisioned host facts.
+Closed selects explicit Close; away+settled preserves grace and permits cleanup
+without relaunch. Desktop detaches presentation before reporting; Rex must settle
+its native jobs. New retention defeats stale settlement. Expired retained leases
+remain unknown; a lost reply cannot revoke a destination-committed release.
+Nested lf preserves shell purpose. Evidence and limits:
+`781e5dc5b4:scratch/loo-717-shell-lifetimes.md`. These checks establish
+neither installed Desktop/Rex recovery nor physical remote-Machine acceptance.
 
 ## Session and operate pairs (2026-10-05)
 

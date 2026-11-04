@@ -4008,12 +4008,37 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     );
     // A changed Task reading uses the shared invalidation path, with no polling
     // projection or shadow Task store in the service.
-    support::register_task_with_pr(
+    let registered = support::register_task_with_pr(
         fixture.home.path(),
-        fixture.repo.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
         "machine-proof",
         &fixture.repo.head_sha(),
     );
+    let db = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), session],
+    )
+    .unwrap();
+    let (_, view) = service.request(
+        "primary",
+        json!({"kind":"read","query":{"read":"view_plan","directory":fixture.repo.path(),"expression":"task:INF-123"}}),
+    );
+    assert_eq!(view["result"]["kind"], "read", "{view}");
+    let socket_plan: Value =
+        serde_json::from_str(view["result"]["output"].as_str().unwrap()).unwrap();
+    let cli = fixture
+        .command(&["desktop", "view", "task:INF-123", "--plan", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let cli_plan: Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(socket_plan, cli_plan);
+    assert_eq!(socket_plan["contents"][0]["primary_session"], session);
     machine_send(&mut watch, json!({"id":18}));
     loop {
         let changed = machine_receive(&mut watch);

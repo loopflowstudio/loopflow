@@ -102,6 +102,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/machine/subscribe.json"),
             include_str!("../../../../tests/fixtures/dto/machine/attach.json"),
             include_str!("../../../../tests/fixtures/dto/machine/session_owner.json"),
+            include_str!("../../../../tests/fixtures/dto/machine/view_plan.json"),
         ] {
             let request: Request = serde_json::from_str(raw).unwrap();
             let actual = serde_json::to_value(&request).unwrap();
@@ -114,6 +115,7 @@ mod tests {
                 Operation::Subscribe { .. }
                     | Operation::Attach { .. }
                     | Operation::SessionOwner { .. }
+                    | Operation::Read { .. }
             ));
         }
         for raw in [

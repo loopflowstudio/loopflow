@@ -31,6 +31,7 @@ struct MachineProtocolTests {
         #expect(version == 1)
         #expect(executable.count == 64)
         #expect(capabilities.contains("session_owner"))
+        #expect(capabilities.contains("view_plan"))
         #expect(maxFrame == 33554432)
         #expect(maxConnections == 64)
         let command = try JSONDecoder().decode(MachineResponse.self, from: fixture("command"))
@@ -44,6 +45,12 @@ struct MachineProtocolTests {
         #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("session_owner")))
         let attach = MachineRequest(version: 1, id: "terminal-1", operation: .attach(owner: trace))
         #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(attach)) == JSONDecoder().decode(JSONValue.self, from: fixture("attach")))
+    }
+
+    @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
+        let request = MachineRequest(version: 1, id: "view-1", operation: .read(
+            .viewPlan(directory: "/repo", expression: "task:INF-123")))
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("view_plan")))
     }
 
     @Test func missingRequiredReplyDoesNotBecomeAnEmptyReading() {

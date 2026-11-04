@@ -163,6 +163,7 @@ async fn operation(
                     "owner_bridge".into(),
                     "session_owner".into(),
                     "desktop_sessions".into(),
+                    "view_plan".into(),
                 ],
                 max_frame: MAX_FRAME,
                 max_connections: MAX_CONNECTIONS,
@@ -212,6 +213,7 @@ fn supported_read(query: &Read) -> bool {
             | Read::MachineId
             | Read::Portfolio
             | Read::RepositoryPath { .. }
+            | Read::ViewPlan { .. }
     )
 }
 

@@ -78,6 +78,30 @@ ends and resume continues on one new provider, while an answering one is attache
 The matching rollover unit test preserves the named retention reasons and permits
 movement after protected work settles.
 
+Upgrade recovery also needs `transport_tests`: retained hooks must settle through
+ContextBlock, exclude subagents and report real delivery errors. Public resume
+must retain drafts, requests, history and Session/Task/capture identity through
+build replacement and viewer return; only provider replacement changes its fence.
+An unanswering protected owner survives failed attachment and completes continued
+turns after transport returns.
+`session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
+natural helper exit permits continuation, persistent helpers refuse it without
+signals or settlement, and both retain Task/history/steers. These stand-ins use
+candidate wire/schema; released-version, permanently broken transport and
+installed-provider recovery still need separate proof.
+Use published 0.15.1 for the released boundary: its owner speaks newline JSON
+and predates native-input tracking. Prove attachment and retention of an unsent
+draft before allowing its provider to be replaced; an absent input record does
+not establish that an older provider's editor is empty.
+Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
+a shallow checkout orders all slugs as drafts and can reject the released store
+before reaching the interaction under test.
+
+Hook command spelling or Clap declaration changes also run
+`cargo test -p loopflow --test integration cli_discovery::`. Its alias contract
+keeps the exact callback retained by running providers while rejecting other
+command aliases; run it alongside the retained-hook upgrade test.
+
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
 cover startup cost and release retries that share the same Git operations.

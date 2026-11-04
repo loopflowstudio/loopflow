@@ -22,8 +22,7 @@ waits for Move here, and an ended one waits for an explicit open.
 Preparing asks a running owner whether a viewer holds control, so an owner from an
 earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
-but never answers reads `detached` too; reattaching stops its provider and continues
-the same provider thread in a new owner, without replaying input.
+but never answers reads `detached` too.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
@@ -65,20 +64,24 @@ the two-second policy poll; it launches no helper process.
 Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
-`lf resume` also moves an idle owner from an earlier build onto the lf entry.
-Drafts, pending requests, running turns, Graphs and Runs keep their owner even
-when its socket does not answer. Resume attempts attachment; a failed attachment
-leaves that work intact. Saved history cannot restore a native editor or pending
-request. No open Session is unknown, not work: the owner stays on its own and an
-answering one is attached, but `lf resume` ends a superseded one that does not
-answer. Once protected work settles, an owner with this lifetime policy moves;
-an older owner without the policy needs another resume.
+`lf resume` replaces an idle owner that is superseded or unanswering, continuing
+its saved provider thread without replaying input. Drafts, pending requests, running
+turns, Graphs and Runs keep their owner even when its socket does not answer. Resume
+attempts attachment; a failed attachment leaves that work intact. Saved history cannot
+restore a native editor or pending request. No open Session is unknown, not work: the
+owner stays on its own and an answering one is attached, but `lf resume` ends a
+superseded one that does not answer. Once protected work settles, an owner with this
+lifetime policy moves; an older owner without the policy needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
-omit `--dry-run` to move them. The sweep ends owners directly; existing viewers
-may close and need `lf resume` again. Graph runners keep running and launch each
-next step through the entry. Owners and runners whose store has advanced beyond
-their reader floor cannot recover themselves through this policy.
+omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
+ends idle owners directly; existing viewers may close and need `lf resume` again.
+Rollover and lifetime diagnostics name what retains an owner: native input, a
+running Graph, no open Session, a headless Run or a live turn. Resume,
+rollover and lifetime policy use the same judgment, independent of reachability.
+Graph runners keep running and launch each next step through the entry.
+Owners and runners whose store has advanced beyond their reader floor cannot
+recover themselves through this policy.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

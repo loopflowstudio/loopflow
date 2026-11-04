@@ -979,7 +979,9 @@ Jack Heart requested one rollover mechanism and called LOO-709's 2m grace
 sufficient for "move always." His draft/request preservation requirement still
 applies. `installation::superseded` compares the owner with its launch entry,
 not the viewer. Eligible owners end; viewers execute `<entry> session resume <id>`
-without replaying argv. Graph runners stay; steps use the entry.
+without replaying argv. Graph runners stay; steps use the entry. Durable-state
+replacement remains a headless choice; EOF stays unknown. Earlier decisions:
+`cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 LOO-724's repair, integrated in LOO-725, removes socket-dependent forced cutoff.
 Shared `owner_retention` protects drafts, requests, turns, Graphs and Runs before
@@ -995,6 +997,24 @@ variants (`moved` broke 0.15.0). Unreadable stores retry; mismatched app/CLI bui
 restart eligible owners. Mac Session return and a Graph's next step on a newer
 build remain unproved. Prior evidence:
 `89030710c9:.lf/wave/infrastructure/MEMORY.md`, this heading.
+
+Jack Heart requires affected Sessions to complete turns and sustain input with
+identity/history/Work/drafts intact. LOO-582's viewer-write timeout and LOO-718's
+freeze remain unexplained. Interrupted viewers prove no crash; `Uncertain` input
+and same-thread resume prove no draft preservation.
+
+LOO-724 reproduces SQLite contention blocking owner control. Nonblocking writes
+and timed retry retain input before delivery without PTY spinning. Regression:
+control, viewer return, once-only delivery after unlock; no incident attribution.
+
+Dead-leader observation needs no local lifeline; fixtures retain natural-exit
+recovery and persistent-survivor refusal without signaling. Candidate four-turn
+proof covers owner replacement, drafts/history and viewer return without replay,
+not older wire/store or configured recovery. Release's entry-point lesson applies.
+
+The parent's signed `ac8e088f5f` Desktop repair pairs CLI/helper and retains old
+runtimes; it predates LOO-724's repairs and proves no resumed turn. LOO-723 owns
+policy/mini rollout; affected-Session recovery stays coordinated with the parent.
 
 ## Shipped history
 

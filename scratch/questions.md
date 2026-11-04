@@ -39,3 +39,9 @@ The decision pass advanced without running option A. #1818 has since merged, so 
 recommendation is B; A also needs #1820's unmerged cleaner, and landing marks or deletes
 nothing. The cleanup proof stays unowned and is stated as unproved in the PR; no follow-up
 Task was filed.
+
+`resume_takes_over_an_owner_from_another_build` failed "viewer left the conversation" in
+2 of 9 parallel focused runs during the #1818 sync (load average 40-70) and 0 of 3 alone.
+Its logic matches main's; the cause is unknown, and four diagnostic runs did not repeat it.
+Gate or CI should show whether it recurs; a viewer leaving during takeover would be a
+product bug, not only a test race.

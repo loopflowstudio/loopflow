@@ -764,6 +764,12 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &owner.id, false)
             .unwrap();
+        let stays = |reason: &str| {
+            let Disposition::Stays(stayed) = owner_disposition(&store, &owner.id).unwrap() else {
+                panic!("rollover must preserve {reason}");
+            };
+            assert_eq!(stayed, format!("{reason} holds the conversation"));
+        };
         store
             .record_session_activity(
                 &session.id,
@@ -777,10 +783,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(matches!(
-            owner_disposition(&store, &owner.id).unwrap(),
-            Disposition::Stays(_)
-        ));
+        stays("a live turn");
         store
             .conn
             .lock()
@@ -804,10 +807,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(matches!(
-            owner_disposition(&store, &owner.id).unwrap(),
-            Disposition::Stays(_)
-        ));
+        stays("a live turn");
         store
             .conn
             .lock()
@@ -822,10 +822,7 @@ mod tests {
             )
             .unwrap();
         }
-        let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
-            panic!("rollover must preserve a headless Run");
-        };
-        assert_eq!(reason, "a headless Run holds the conversation");
+        stays("a headless Run");
         let graph = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -842,10 +839,7 @@ mod tests {
                 "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')", [&graph],
             ).unwrap();
         }
-        let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
-            panic!("rollover must preserve a running Graph");
-        };
-        assert_eq!(reason, "a running Graph holds the conversation");
+        stays("a running Graph");
         store
             .conn
             .lock()
@@ -859,10 +853,7 @@ mod tests {
         // No active turn is needed to protect either a plain or edited draft.
         for bytes in [b"draft".as_slice(), b"\x7f"] {
             assert!(store.try_record_owner_input(&owner.id, bytes).unwrap());
-            let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
-                panic!("rollover must preserve native editor input");
-            };
-            assert_eq!(reason, "native input holds the conversation");
+            stays("native input");
         }
     }
 }

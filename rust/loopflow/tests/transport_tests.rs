@@ -2520,7 +2520,7 @@ while True:
 }
 
 /// A conversation whose lf executable is deleted, rebuilt or superseded ends
-/// once it waits for a person, even while viewed, and a terminal showing it
+/// once it holds no work or input, even while viewed, and a terminal showing it
 /// follows through its lf entry into the reopened conversation with its
 /// history: a deleted build through the entry that still dispatches, a rebuilt
 /// build through its own path, and one launched through the installed entry

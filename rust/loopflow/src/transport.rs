@@ -1139,7 +1139,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 let bytes = &pending_input.make_contiguous()[recorded_input..];
                 crate::journal::process_ledger()
                     .and_then(|store| {
-                        if store.shell_owner(&id)?.is_some() && !store.shell_holds_work(&id)? {
+                        if shell.is_some() && !store.shell_holds_work(&id)? {
                             store.clear_owner_input(&id)
                         } else { store.record_owner_input(&id, bytes) }
                     })

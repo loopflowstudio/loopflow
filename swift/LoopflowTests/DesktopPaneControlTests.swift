@@ -79,7 +79,7 @@ struct DesktopPaneControlTests {
         #expect(store.browserPane?.content == browser.content)
     }
 
-    @Test("Companion switches retain the shell and file draft; the next close retires a closed shell")
+    @Test("Companion switches retain the shell and file draft; Close releases the shell")
     func companionSwitchRetainsViews() throws {
         let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
         let store = workspace.multiplexer
@@ -111,8 +111,6 @@ struct DesktopPaneControlTests {
         #if canImport(GhosttyKit)
         #expect(workspace.surfaces.view(for: terminal) !== view)
         #expect(workspace.disconnectedShells.contains(try #require(shell.content.selectedShell).id))
-        workspace.closePane(browser.id)
-        #expect(workspace.surfaces.view(for: terminal) !== view)
         #endif
     }
 

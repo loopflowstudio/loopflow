@@ -1,8 +1,8 @@
 # LOO-717 — Accepted implementation scope
 
 Jack Heart approved building this design on November 3, 2026: “ok. lets build it!”
-Continue the existing feature Graph from explore through implementation and
-publication to the interactive demo. No shipping, merging or installation approval.
+Implementation and review publication are approved through interactive demo;
+shipping, merging and installation are not.
 The current design is scratch/loo-717-shell-lifetimes.md; historical exploration
 and the simulated review do not override the accepted scope below.
 
@@ -49,17 +49,12 @@ of Jack's wait-for-final-work direction, not an additional timing choice from Ja
 Keep the existing agent idle clock/protections distinct. Record/test exact races.
 
 LOO-498 owns the Rex-specific adapter and workspace features and is independently
-in design discussion. Do not resume or alter its work. Define and test the shared
-contract plus Desktop path here, share concrete API needs, and carry any unavailable
-Rex end-to-end proof explicitly to demo rather than inventing host evidence.
+in design discussion. The shared contract and Desktop path are implemented here; concrete API needs
+were shared in the coordination note. Rex end-to-end proof remains outstanding.
 
-Sync current main before changing overlapping transport code; LOO-709 merged after
-this checkout's base. Preserve LOO-714 routing and LOO-711 UI changes. Use the existing
-Task checkout and one migration if needed. No competing implementation process.
-
-Demo disconnected/live versus ended/fresh shells, process cleanup, active-work
-protection and two-stage completed-Task cleanup with uncommitted files. Real remote
-proof and process/PTY/socket inventories complement the automated policy checks.
+Main through `aef0c0a5cd`, including LOO-709 and LOO-711, is integrated. LOO-714
+routing remains an overlap constraint. The Task uses one migration. Remaining
+implementation and proof are tracked in `loo-717-shell-lifetimes.md`.
 
 ## Build assumptions — November 3
 
@@ -68,7 +63,3 @@ observation. Desktop releases on departure, including unfinished Tasks; ordinary
 shell execution stays alive and an eligible idle agent uses its existing grace.
 Host observations carry increasing persisted revisions so an old release cannot
 overwrite a newer return. Native Rex integration remains owned by LOO-498.
-
-The compress step's explicit context-budget curation shortened historical Product
-memory without changing accepted direction. Earlier implementation correctly left
-it unchanged; curation is limited to the required size reduction.

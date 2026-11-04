@@ -222,10 +222,7 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
     else {
         return Ok(true);
     };
-    if intent.phase == "retired" {
-        return Ok(true);
-    }
-    if intent.due_at.is_none() {
+    if intent.phase == "retired" || intent.due_at.is_none() {
         return Ok(true);
     }
     if intent.due_at.is_some_and(|due| due > now()) {
@@ -387,3 +384,7 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "retirement_tests.rs"]
+mod tests;

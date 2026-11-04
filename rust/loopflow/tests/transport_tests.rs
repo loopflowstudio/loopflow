@@ -3508,6 +3508,40 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
 
 struct ShellOwnerGuard<'a>(&'a Fixture, String);
 
+impl Fixture {
+    fn shell_task(&self, task: &str) -> loopflow::durable::MachineId {
+        let output = self.command(&["machine", "id"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
+                .unwrap();
+        let repo = store
+            .ensure_repository(self.repo.path().to_str().unwrap())
+            .unwrap();
+        let machine = store.local_machine().unwrap().id;
+        self.sql().execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,checkout_machine_id,branch)
+             VALUES(?1,?2,'SHELL-1',1,?3,?4,'task')",
+            rusqlite::params![task,repo.as_str(),self.repo.path().to_str().unwrap(),machine.as_str()],
+        ).unwrap();
+        machine
+    }
+
+    fn shell_owner(&self, id: &str) -> String {
+        self.sql()
+            .query_row("SELECT owner FROM task_shells WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    }
+
+    fn shell_count(&self) -> u32 {
+        self.sql()
+            .query_row("SELECT count(*) FROM task_shells", [], |r| r.get(0))
+            .unwrap()
+    }
+}
+
 impl Drop for ShellOwnerGuard<'_> {
     fn drop(&mut self) {
         if self.0.running(&self.1) {
@@ -3519,16 +3553,8 @@ impl Drop for ShellOwnerGuard<'_> {
 #[test]
 fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
     let fixture = Fixture::new();
-    let _initialized = fixture.start(&["/bin/sh", "-c", "true"]);
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
-    let repo = store
-        .ensure_repository(fixture.repo.path().to_str().unwrap())
-        .unwrap();
-    let machine = store.local_machine().unwrap().id;
     let task = "task_5e55105e000040008000000000000005";
-    fixture.sql().execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,checkout_machine_id,branch) VALUES(?1,?2,'SHELL-1',1,?3,?4,'task')", rusqlite::params![task,repo.as_str(),fixture.repo.path().to_str().unwrap(),machine.as_str()]).unwrap();
-    drop(store);
+    fixture.shell_task(task);
     std::fs::write(
         fixture.home.path().join("config.yaml"),
         "session:\n  end_detached_after: 1s\n",
@@ -3563,14 +3589,7 @@ fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
         fixture.wait_file("launches").trim(),
         "$(literal); spaced argument"
     );
-    let owner: String = fixture
-        .sql()
-        .query_row(
-            "SELECT owner FROM task_shells WHERE id='desktop-shell'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
+    let owner = fixture.shell_owner("desktop-shell");
     let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut viewer = fixture.viewer(&owner, true);
     launch.wait().unwrap();
@@ -3673,14 +3692,8 @@ fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
 #[test]
 fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
     let fixture = Fixture::new();
-    let _initialized = fixture.start(&["/bin/sh", "-c", "true"]);
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
-    let repo = store
-        .ensure_repository(fixture.repo.path().to_str().unwrap())
-        .unwrap();
     let task = "task_5e55105e000040008000000000000006";
-    fixture.sql().execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,checkout_machine_id,branch) VALUES(?1,?2,'CYCLES-1',1,?3,?4,'task')", rusqlite::params![task,repo.as_str(),fixture.repo.path().to_str().unwrap(),store.local_machine().unwrap().id.as_str()]).unwrap();
+    fixture.shell_task(task);
     for cycle in 0..20 {
         let id = format!("cycle-{cycle}");
         let base = [
@@ -3710,12 +3723,7 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
             .spawn()
             .unwrap();
         fixture.wait_file("cycle-ready");
-        let owner: String = fixture
-            .sql()
-            .query_row("SELECT owner FROM task_shells WHERE id=?1", [&id], |r| {
-                r.get(0)
-            })
-            .unwrap();
+        let owner = fixture.shell_owner(&id);
         let _stop = ShellOwnerGuard(&fixture, owner.clone());
         let mut viewer = fixture.viewer(&owner, true);
         launch.wait().unwrap();
@@ -3773,3 +3781,6 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
         .unwrap();
     assert_eq!((total, settled), (20, 20));
 }
+
+#[path = "transport/ssh_shells.rs"]
+mod ssh_shells;

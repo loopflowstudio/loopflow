@@ -183,8 +183,7 @@ final class SessionsWorkspace {
                 throw RegistryQueryError("Reopen the remote Task before adding a shell; its location is unavailable.")
             }
         }
-        let id = UUID().uuidString
-        return multiplexer.newShell(id: id, command: command ?? [], location: location, execution: execution, focus: focus)
+        return multiplexer.newShell(command: command ?? [], location: location, execution: execution, focus: focus)
     }
 
     func toggleShell() throws {

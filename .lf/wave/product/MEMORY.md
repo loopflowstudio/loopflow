@@ -267,33 +267,36 @@ Jack Heart's LOO-386 approval and superseded Workflow/Flow vocabulary remain at
 `fb382a7d45:.lf/wave/product/MEMORY.md`, **Workflow and Flow alignment**.
 That approval established no native/provider acceptance or chapter KR.
 
-## Task conversation and Workflows (LOO-353, reconciled 2026-10-17)
+## Task conversation and Graphs (reconciled 2026-11-03)
 
-Jack Heart approved the October 6 fixture Task view and landing; no configured
-provider or populated live store was shown. History and evidence limits: `28dc141671:.lf/wave/product/MEMORY.md`, this heading;
-design/demo: `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
-`questions.md`, `task-workflow.md`, `demo-task-workflow.md`).
+Jack Heart approved LOO-353's October 6 fixture Task view and landing, not
+configured-provider or populated-store acceptance. AGENTS.md owns graph semantics; retired Workflow controls and evidence remain at `9ab296eeff:.lf/wave/product/MEMORY.md`, **Task conversation and Workflows**.
+One ongoing Task conversation holds review; additional Sessions are deliberate.
+Association includes checkout and explicit binds, excluding repo/Wave conversations.
+Capture models before records, delete replaced mechanisms, and use UPSERT when
+revision triggers matter: `INSERT OR REPLACE` skips update triggers. Focused SQL
+checks do not replace affected suites.
 
-- One ongoing Task conversation holds review; additional Sessions are deliberate.
-  Interactive Session and headless Run share LfSession continuity. Association
-  includes checkout and explicit binds, excluding repository/Wave conversations.
-- Jack removed Task workers, mutable Flow switching, automatic recovery and the
-  Session ready/complete handshake. Hiding/selecting never terminates or approves.
-  Stopped Flows are history; caller-owned recovery starts authorized remaining work.
-- Workflow is a captured graph with live position. Restart preserves graph/history;
-  October 17's Task → Wave → repository selection replaces Project defaults.
-  Completion remains independent under LOO-418. Each Flow process is equal work;
-  `--steers-after` filters nodes without restarting them.
-- Task pages consume the Work stream; the header owns Workflow presentation beside
-  retained conversations/shells/files/logs. Monitor, Session-sidebar toggle and Flow chip remain retired.
-- Whole failed Flows currently retry three times; held exit 3 stays held. LOO-435
-  owns failed-step retry. Driver death and step-registration gaps retain uncertain
-  liveness; disabled Desktop Start does not exclude another CLI run. Nonreporter
-  Waiting and lone headless-skill visibility remain unresolved as archived.
+## Native shell lifetimes (LOO-717, accepted 2026-11-03)
 
-Lessons: capture the model before records; delete jobs with their replacements.
-Upsert when revisions depend on update triggers (`INSERT OR REPLACE` skips them).
-SQL can compile against removed columns; focused passes do not replace suites.
+Jack Heart approved implementation and review publication through interactive demo,
+not landing or installation. Desktop and Rex own their native shells/layouts;
+lf shares Session retention and completed-Task retirement. No ordinary-shell relay
+into Rex or automatic deleted-checkout restoration. LOO-498 owns its native adapter.
+
+Close ends a Desktop shell and ordinary jobs; Hide/switch/quit retain execution.
+Undo restores identity/history, not processes. Host retention holds Sessions; each
+host owns release policy. Eligible idle agents end at two minutes; completed-and-away
+shells/checkouts retire at fifteen total. Return cancels the deadline. Active requested
+work, drafts and pending requests protect execution; an elapsed workspace deadline
+need not restart after work settles. Eligible cleanup discards uncommitted files,
+preserving committed-ref safeguards and Task/conversation history.
+
+Shell purpose must survive nested lf use. Retained host leases expiring mean unknown
+workspace observation, not confirmed closure; this can leave cleanup pending.
+Stable pane IDs and saved screens prove no process survival. Local shell/policy
+checks do not prove real SSH lifetimes or native Desktop/Rex recovery; those remain
+acceptance gaps in this branch.
 
 ## Session and operate pairs (2026-10-05)
 

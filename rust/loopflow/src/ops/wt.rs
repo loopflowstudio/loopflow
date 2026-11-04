@@ -21,6 +21,22 @@ pub(crate) struct BranchDeletion {
     force: bool,
 }
 
+impl BranchDeletion {
+    fn require_merged_head(&self, merged_head: &str) -> OpsResult<()> {
+        if [&self.local_head, &self.remote_head]
+            .into_iter()
+            .flatten()
+            .any(|head| head != merged_head)
+        {
+            return Err(OpsError::Message(format!(
+                "{} has work beyond its merged head; retained checkout and branches",
+                self.branch
+            )));
+        }
+        Ok(())
+    }
+}
+
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
     run("git", repo, args)
 }
@@ -140,15 +156,7 @@ pub(crate) fn prepare_landed_delete(
     merged_head: &str,
 ) -> OpsResult<BranchDeletion> {
     let deletion = prepare_delete(repo, branch, false)?;
-    if [&deletion.local_head, &deletion.remote_head]
-        .into_iter()
-        .flatten()
-        .any(|head| head != merged_head)
-    {
-        return Err(OpsError::Message(format!(
-            "{branch} has work beyond its merged head; retained checkout and branches"
-        )));
-    }
+    deletion.require_merged_head(merged_head)?;
     Ok(deletion)
 }
 
@@ -161,6 +169,7 @@ pub(crate) fn prepare_task_retirement(
     checkout: &Path,
 ) -> OpsResult<BranchDeletion> {
     let deletion = prepare_delete(repo, branch, true)?;
+    deletion.require_merged_head(merged_head)?;
     let resolved = checkout
         .exists()
         .then(|| checkout.canonicalize())
@@ -169,18 +178,13 @@ pub(crate) fn prepare_task_retirement(
     if checkout.exists() && crate::git::worktrees::is_persistent_worktree(checkout)? {
         return Err(OpsError::Message("Retained persistent checkout".into()));
     }
-    if (checkout.exists() && deletion.worktree.as_deref() != Some(checkout))
-        || deletion
-            .worktree
-            .as_deref()
-            .is_some_and(|path| path != checkout)
-        || [&deletion.local_head, &deletion.remote_head]
-            .into_iter()
-            .flatten()
-            .any(|head| head != merged_head)
-    {
+    let changed_checkout = match deletion.worktree.as_deref() {
+        Some(path) => path != checkout,
+        None => checkout.exists(),
+    };
+    if changed_checkout {
         return Err(OpsError::Message(
-            "Task checkout or committed branch head changed; retained resources".into(),
+            "Task checkout changed; retained resources".into(),
         ));
     }
     Ok(deletion)

@@ -70,10 +70,6 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
     super::recover_switch(None)?;
     let directory = install_dir()?;
     let app = app_destination(&directory.join("lf"));
-    if defer_scheduled_install(&directory.join("lf"), app.as_deref())? {
-        println!("Scheduled update deferred while Desktop is open; retrying next run. Run `lf install` to update now.");
-        return Ok(());
-    }
     if stream == Stream::Dev {
         return main_build(&directory, app.as_deref());
     }
@@ -174,19 +170,6 @@ fn app_destination(cli: &Path) -> Option<PathBuf> {
             || installed.exists()
             || app.exists()))
     .then_some(app)
-}
-
-/// Check both locations when an update moves an existing installation.
-pub(super) fn defer_scheduled_install(cli: &Path, app: Option<&Path>) -> Result<bool> {
-    if std::env::var("LF_INSTALL_SCHEDULED").as_deref() != Ok("1") {
-        return Ok(false);
-    }
-    let installed = super::installed_app(cli);
-    let mut paths = vec![installed.join("Contents/MacOS/Loopflow")];
-    if let Some(app) = app {
-        paths.push(app.join("Contents/MacOS/Loopflow"));
-    }
-    Ok(!super::running_app_processes(&paths)?.is_empty())
 }
 
 /// Succeed only when release `tag` can open this Machine's store; Loopflow.app's
@@ -624,10 +607,6 @@ fn run_verified_installer(
     installer: &[u8],
 ) -> Result<()> {
     verify_asset(manifest, "install.sh", installer)?;
-    // Acquisition can take long enough for Desktop to open in the meantime.
-    if defer_scheduled_install(&directory.join("lf"), app)? {
-        bail!("scheduled update deferred while Desktop is open; retrying next run");
-    }
     let path = temporary.join("install.sh");
     fs::write(&path, installer)?;
     let mut command = Command::new("/bin/sh");
@@ -821,7 +800,7 @@ fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequenc
     };
     let bin = binary.parent().expect("installation binary has a parent");
     format!(
-        "{when} LF_INSTALL_SCHEDULED=1 LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' install >> '{}' 2>&1 {CRON_MARKER}",
+        "{when} LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' install >> '{}' 2>&1 {CRON_MARKER}",
         bin.display(),
         bin.display(),
         home.display(),
@@ -874,7 +853,7 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 <plist version="1.0"><dict>
 <key>Label</key><string>com.loopflow.refresh</string>
 <key>ProgramArguments</key><array><string>{binary_path}</string><string>install</string></array>
-<key>EnvironmentVariables</key><dict><key>LF_INSTALL_SCHEDULED</key><string>1</string><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
 <key>RunAtLoad</key><true/>
 <key>StartCalendarInterval</key>{calendar}
 <key>StandardOutPath</key><string>{log}</string>
@@ -911,7 +890,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn scheduling_preserves_existing_cadence_when_adding_unattended_intent() {
+    fn scheduling_preserves_existing_cadence_when_install_location_changes() {
         let _lock = crate::journal::test_env_lock();
         let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
         let temp = tempfile::tempdir().unwrap();
@@ -934,7 +913,7 @@ mod tests {
         );
         fs::write(
             &path,
-            payload.replace("<key>LF_INSTALL_SCHEDULED</key><string>1</string>", ""),
+            payload.replace(&bin.display().to_string(), "/previous/bin"),
         )
         .unwrap();
         super::launchd_schedule(temp.path(), &bin.join("lf"), temp.path(), None).unwrap();
@@ -988,7 +967,6 @@ mod tests {
             assert!(output.status.success());
             let plist: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(plist["StartCalendarInterval"], expected);
-            assert_eq!(plist["EnvironmentVariables"]["LF_INSTALL_SCHEDULED"], "1");
             assert_eq!(
                 plist["EnvironmentVariables"]["LF_INSTALL_DIR"],
                 binary.parent().unwrap().to_str().unwrap()

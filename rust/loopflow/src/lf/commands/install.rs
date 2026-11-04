@@ -1679,49 +1679,17 @@ mod app_process_tests {
     }
 
     #[test]
-    fn scheduled_install_leaves_open_desktop_and_helpers_alone() {
-        let _lock = crate::journal::test_env_lock();
-        let _restore =
-            crate::test_ambient::EnvGuard::clear(&["LF_INSTALL_SCHEDULED", "LF_APPLICATIONS_DIR"]);
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().canonicalize().unwrap();
-        let app = root.join("Custom Tools/Loopflow.app");
-        let desktop = app.join("Contents/MacOS/Loopflow");
-        let helper = app.join("Contents/MacOS/lf");
-        fs::create_dir_all(desktop.parent().unwrap()).unwrap();
-        fs::copy(std::env::current_exe().unwrap(), &desktop).unwrap();
-        fs::copy(&desktop, &helper).unwrap();
-        let cli = root.join("lf");
-        std::os::unix::fs::symlink(&helper, &cli).unwrap();
-        let mut owner = TestProcess::start(&helper);
-        let mut app_process = TestProcess::start(&desktop);
-        let defer = || {
-            super::published::defer_scheduled_install(&cli, Some(&root.join("New/Loopflow.app")))
-                .unwrap()
-        };
-        assert!(!defer(), "explicit updates may restart Desktop");
-        std::env::set_var("LF_INSTALL_SCHEDULED", "1");
-        assert!(
-            defer(),
-            "scheduled updates retain the current custom location"
-        );
-        assert!(app_process.0.try_wait().unwrap().is_none());
-        assert!(owner.0.try_wait().unwrap().is_none());
-        app_process.0.kill().unwrap();
-        app_process.0.wait().unwrap();
-        assert!(!defer(), "a Session helper alone does not defer an update");
-        assert!(owner.0.try_wait().unwrap().is_none());
-    }
-
-    #[test]
-    fn bundle_replacement_and_cleanup_preserve_a_live_session_helper() {
+    fn bundle_replacement_stops_desktop_and_preserves_a_live_session_helper() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         let app = root.join("Applications/Loopflow.app");
         let helper = app.join("Contents/MacOS/lf");
+        let desktop = app.join("Contents/MacOS/Loopflow");
         fs::create_dir_all(helper.parent().unwrap()).unwrap();
         fs::copy(std::env::current_exe().unwrap(), &helper).unwrap();
+        fs::copy(&helper, &desktop).unwrap();
         let mut child = TestProcess::start(&helper);
+        let mut app_process = TestProcess::start(&desktop);
         let selection = InstallSelection {
             installation_id: "fixture".into(),
             source: InstallSource::Published,
@@ -1737,6 +1705,7 @@ mod app_process_tests {
             },
         };
         quiesce_app_processes(&desktop_executable_paths(&selection, Some(&app))).unwrap();
+        assert!(!app_process.0.wait().unwrap().success());
         assert!(child.0.try_wait().unwrap().is_none());
         let source = root.join("candidate/Loopflow.app");
         fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
@@ -2693,15 +2662,6 @@ fn promote_from_installation(
         .context("acquire the exclusive promotion lock")?;
     let app = installed_app(artifacts.cli_target);
     let artifacts = include_installed_app(artifacts, &app);
-    // Recovery has already finished its pinned switch. A new scheduled switch
-    // must leave the entire installed selection alone while Desktop is open.
-    if !preview_only
-        && published::defer_scheduled_install(artifacts.cli_target, artifacts.app_target)?
-    {
-        return Err(anyhow!(
-            "scheduled update deferred while Desktop is open; retrying next run"
-        ));
-    }
     let root = crate::installation::root()?;
     let mut prior = match crate::installation::read_state(&root)? {
         crate::installation::InstallationState::Settled(active) => Some(*active),

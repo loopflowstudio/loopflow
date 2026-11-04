@@ -44,8 +44,7 @@ The demo writes `.disposable-coding-demo` at the top of the runtime root at rele
 (a person's answer or a headless run's end), never at creation, containing exactly
 `disposable runtime; evidence stored elsewhere`. Writing it restarts the cleaner's
 retention window, so a long review cannot age out while it is live. An unmarked root
-is reported as retained. Reclaiming marked roots belongs to LOO-722's runner;
-`scripts/disk-cleanup.sh` here does not read the marker.
+is reported as retained. Reclaiming marked roots belongs to LOO-722's runner.
 
 ## Never
 

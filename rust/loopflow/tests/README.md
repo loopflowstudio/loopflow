@@ -73,8 +73,10 @@ store and verifies recovery through the real descriptor loop.
 `transport_tests::unanswering_superseded_owners_preserve_work` pauses superseded
 owners while resuming their Sessions. Drafts, pending requests, turns, Graph
 ancestry/steps and Runs retain the same provider, attachment and capture; no new
-provider launches. The matching rollover unit test preserves the named retention
-reasons and permits movement after protected work settles.
+provider launches. A completed Session is unknown, not work: its unanswering owner
+ends and resume continues on one new provider, while an answering one is attached.
+The matching rollover unit test preserves the named retention reasons and permits
+movement after protected work settles.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

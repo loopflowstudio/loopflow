@@ -17,7 +17,9 @@ use super::SqliteStore;
 pub(crate) enum OwnerRetention {
     NativeInput,
     RunningGraph,
-    MissingSession,
+    /// No open Session names the owner. This is unknown, not work: the row may
+    /// be complete or absent, so it cannot show the owner is safe to end.
+    NoOpenSession,
     HeadlessRun,
     LiveTurn,
 }
@@ -27,7 +29,7 @@ impl std::fmt::Display for OwnerRetention {
         f.write_str(match self {
             OwnerRetention::NativeInput => "native input",
             OwnerRetention::RunningGraph => "a running Graph",
-            OwnerRetention::MissingSession => "a missing Session",
+            OwnerRetention::NoOpenSession => "no open Session",
             OwnerRetention::HeadlessRun => "a headless Run",
             OwnerRetention::LiveTurn => "a live turn",
         })
@@ -643,7 +645,7 @@ impl SqliteStore {
                      AS running_graph,
                  NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
-                     AS missing_session,
+                     AS no_open_session,
                  EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.interactive=0)
                      AS headless_run,
@@ -656,8 +658,8 @@ impl SqliteStore {
             |row| {
                 Ok(if row.get("running_graph")? {
                     Some(OwnerRetention::RunningGraph)
-                } else if row.get("missing_session")? {
-                    Some(OwnerRetention::MissingSession)
+                } else if row.get("no_open_session")? {
+                    Some(OwnerRetention::NoOpenSession)
                 } else if row.get("headless_run")? {
                     Some(OwnerRetention::HeadlessRun)
                 } else if row.get("live_turn")? {

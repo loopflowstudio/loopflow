@@ -340,6 +340,15 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
+    /// Retire `session` as its provider's exit does, leaving its owner running.
+    fn complete(&self, session: &str) {
+        self.sql()
+            .execute(
+                "UPDATE agent_sessions SET completed_at=1 WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+    }
     fn ends(&self, owner: &str) {
         let deadline = Instant::now() + Duration::from_secs(20);
         while self.running(owner) {
@@ -3038,6 +3047,75 @@ fn unanswering_superseded_owners_preserve_work() {
             "{protection}: resume launched another provider"
         );
     }
+}
+
+/// A completed Session names no known work, so `lf resume` still gets you back
+/// from a superseded owner that cannot answer.
+#[test]
+fn resume_ends_an_unanswering_superseded_owner_of_a_completed_session() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let (previous, session) = owner_on_another_build(&fixture, &path);
+    fixture.complete(&session);
+    let paused = fixture.pause(&previous);
+    let mut viewer = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .env_remove("RUST_LOG")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // A stopped owner holds SIGTERM until it continues, so it continues once resume
+    // has seen the silence; the signal then ends it whichever arrives first.
+    let log = fixture.home.path().join("logs/lf.log");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !std::fs::read_to_string(&log)
+        .is_ok_and(|text| text.contains("Session owner does not answer"))
+    {
+        assert!(Instant::now() < deadline, "resume never saw the silence");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(paused);
+    let launches = fixture.launches(2);
+    fixture.ends(&previous);
+    let current = fixture.owner_of(&session);
+    viewer.kill().unwrap();
+    let output = viewer.wait_with_output().unwrap();
+    fixture.stop(&current);
+    assert_ne!(current, previous);
+    assert_eq!(launches.len(), 2, "resume launched a second replacement");
+    assert!(launches[1].contains(" --resume "), "{launches:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Moved"), "{stderr}");
+}
+
+/// An answering owner may hold a turn or draft nothing records: a viewer reaches
+/// it, so resume attaches and ends nothing.
+#[test]
+fn resume_attaches_an_answering_superseded_owner_of_a_completed_session() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let (owner, session) = owner_on_another_build(&fixture, &path);
+    fixture.complete(&session);
+    let mut viewer = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    fixture.wait_controlled(&owner);
+    let running = fixture.running(&owner);
+    let launches = fixture.launches(1);
+    viewer.kill().unwrap();
+    viewer.wait().unwrap();
+    fixture.stop(&owner);
+    fixture.ends(&owner);
+    assert!(running, "resume ended an answering owner");
+    assert_eq!(launches.len(), 1, "resume launched another provider");
 }
 
 /// Desktop restarting after an lf upgrade leaves the conversation in an owner

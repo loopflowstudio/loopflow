@@ -58,7 +58,7 @@ command through the lf entry. The viewer restores its terminal before running
 that command and preserves its exit status or launch error. Failed store
 judgments retry at the next poll.
 An owner held past its detached limit or its replaced executable logs why: native
-input, a live turn, running Graph, headless Run, missing Session or, for the
+input, a live turn, running Graph, headless Run, no open Session or, for the
 executable, command output. Repeated unchanged policy errors and retention reasons
 produce one warning until the condition changes. Activity cannot accelerate
 the two-second policy poll; it launches no helper process.
@@ -69,7 +69,9 @@ reopens provider history without starting a turn. Other ended Sessions stay stop
 Drafts, pending requests, running turns, Graphs and Runs keep their owner even
 when its socket does not answer. Resume attempts attachment; a failed attachment
 leaves that work intact. Saved history cannot restore a native editor or pending
-request. Once protected work settles, an owner with this lifetime policy moves;
+request. No open Session is unknown, not work: the owner stays on its own and an
+answering one is attached, but `lf resume` ends a superseded one that does not
+answer. Once protected work settles, an owner with this lifetime policy moves;
 an older owner without the policy needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;

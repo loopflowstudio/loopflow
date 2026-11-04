@@ -104,7 +104,8 @@ Home/binary for children. A durable root keeps history; only the runtime root is
 markable. A person's settled/given-up answer or a headless run's end releases it;
 saved history cannot recreate a dead editor. Jack prefers stopping verified owners
 before reclaiming eligible output; LOO-722 owns cleanup. This reads his brief and
-`2693d72d`; he can overturn it at LOO-722's demo.
+`2693d72d`, unconfirmed: LOO-722's reviewed demo (`05f946d5`) did not cover it, so it
+reaches him through LOO-725's PR, and he can overturn it there.
 
 LOO-724's nonblocking queue fixes store-induced PTY spin/control stalls, retaining
 before delivery. Fixtures prove recovery, not cause. Security pressure stops later
@@ -272,17 +273,12 @@ Home-wide reset cooldown handles HTTP 400 limits as well as rate-limit headers.
 
 #1491's Git exchange remains intact. One foreground connection selects Git exchange
 or watcher-only Linear checks; removing Linear timers must not remove Git lifetime.
-Release's operation-entry lesson applies: generated Stop-hook child processes,
-Flow launches, watcher backoff/shutdown and populated migration fixtures prove their
-boundaries, not installed behavior. Idle providers issue no timed Linear requests.
+Fixtures prove those boundaries, not installed behavior. Idle providers issue no
+timed Linear requests.
 
-October 12 source checks repaired stale acquisition timestamps, slow bulk
-fixture seeding and Linux reconnect peers. Network-isolated Linux proofs cover
-concurrent hooks, no idle-agent requests, watcher backoff, lost replies and
-rate-limit recovery; formatting, Clippy and architecture checks pass. A scheduled
-release child signal did not recur; cause unknown. Hosted candidate CI, live
-request counts and installed acceptance remain unproved. `rust/loopflow/tests/README.md` retains
-Linux HTTPS reconnect as CI's obligation. Exact failures, commands and counts:
+October 12 network-isolated Linux proofs cover concurrent hooks, no idle-agent
+requests, backoff, lost replies and rate-limit recovery. Hosted CI remains unproved;
+`rust/loopflow/tests/README.md` keeps Linux HTTPS reconnect as CI's. Details:
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
 On-demand Linear acquisition.
 
@@ -1023,11 +1019,10 @@ telemetry red; fresh failures join existing work.
   ordinary edits; the rooted glob `[.]lf/tmp/**` avoids it, and a separate
   checkpoint index restores pre-staged telemetry from HEAD. Whitespace-only
   filenames are work: never trim them to detect an empty checkpoint. Installed
-  LOO-661 recovery is unproved by fixture.
-- **Commit failures need both Git streams** (2026-10-11). Shared diagnostics
-  retain stdout and stderr or a silent failure's exit status; scratch exclusion
-  belongs only to persistent workspaces.
-- **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners; `--all` excludes explicit-only `--ui-host`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas.
+  LOO-661 recovery is unproved.
+- **Commit failures need both Git streams** (2026-10-11): diagnostics keep stdout,
+  stderr and exit status. Scratch exclusion is for persistent workspaces only.
+- **Desktop gates are headless.** `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners; `--all` excludes explicit-only `--ui-host`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
@@ -1057,12 +1052,9 @@ telemetry red; fresh failures join existing work.
   installs gui-domain LaunchAgents on macOS; Linux keeps crontab. Real scheduled
   firings remain LOO-645's evidence.
 - **Release orchestration, publication and caller edits are separate evidence**
-  (August 2026): an unpublished v0.12.14 despite cron/workflow success, and a
-  scheduled retry that removed two pre-run memory edits, remain at
-  `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas. Judge product state; keep
-  same-tag recovery singular; LOO-261 owns clean-host candidate validation and
-  LOO-266 preserving caller branch, index and working bytes across every release
-  exit.
+  (August 2026; incidents at `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas).
+  Judge product state; keep same-tag recovery singular. LOO-261 owns clean-host
+  validation, LOO-266 preserving caller bytes across every release exit.
 
 ## Durable model lessons (curated 2026-10-02)
 

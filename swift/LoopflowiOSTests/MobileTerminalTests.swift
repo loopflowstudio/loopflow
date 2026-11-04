@@ -1,5 +1,7 @@
 import Loopflow
 import SwiftTerm
+import SwiftUI
+import UIKit
 import ViewInspector
 import XCTest
 @testable import LoopflowiOS
@@ -7,6 +9,33 @@ import XCTest
 @MainActor
 final class MobileTerminalTests: XCTestCase {
     private var window: UIWindow?
+
+    func testMobileTextColorsRemainReadableInBothThemes() {
+        for theme in [ThemeDefinition.light, .dark] {
+            let text = [theme.palette.text, theme.palette.textSecondary, theme.palette.accentInk,
+                        theme.palette.available, theme.palette.working, theme.palette.warning]
+            for background in [theme.palette.background, theme.palette.surface] {
+                for foreground in text {
+                    let first = luminance(foreground)
+                    let second = luminance(background)
+                    // WCAG's small-text contrast ratio, independent of font rasterization.
+                    let ratio = (max(first, second) + 0.05) / (min(first, second) + 0.05)
+                    XCTAssertGreaterThanOrEqual(ratio, 4.5, "\(theme.id): text contrast is \(ratio)")
+                }
+            }
+        }
+    }
+
+    private func luminance(_ color: SwiftUI.Color) -> Double {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        XCTAssertTrue(UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+        XCTAssertEqual(alpha, 1)
+        let linear = [red, green, blue].map { channel -> Double in
+            let value = Double(channel)
+            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+    }
 
     func testNativeEditingPasteSubmissionAndPermissionResponse() async throws {
         let (workspace, client, controller) = try await connected()
@@ -176,6 +205,37 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(client.link.sizes.count, grantedReports, "Unchanged layout must not send resize traffic")
         XCTAssertTrue(controller.terminal.getTerminal().bracketedPasteMode,
                       "Changing viewport must not soft-reset terminal input modes")
+    }
+
+    func testLargerTextPreservesObserverCellsAndOnlyResizesAfterTakeover() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        client.link.loseControl()
+        client.link.reportGeometry(columns: 120, rows: 40)
+        await settle()
+        controller.update(theme: .light)
+        // Alternate screens do not reflow. A temporary narrower resize would
+        // lose these cells even if the final grid went back to 120 columns.
+        controller.terminal.feed(text: "\u{1b}[?1049h\u{1b}[2J\u{1b}[1;110HRIGHT EDGE\u{1b}[39;1HBOTTOM EDGE")
+        let before = controller.terminal.accessibilityPageContent()
+        let pointSize = controller.terminal.font.pointSize
+        let reports = client.link.sizes.count
+        controller.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraLarge
+        controller.view.layoutIfNeeded()
+        await settle()
+        XCTAssertGreaterThan(controller.terminal.font.pointSize, pointSize)
+        XCTAssertEqual(controller.terminal.getTerminal().cols, 120)
+        XCTAssertEqual(controller.terminal.getTerminal().rows, 40)
+        XCTAssertEqual(controller.terminal.accessibilityPageContent(), before)
+        XCTAssertEqual(client.link.sizes.count, reports)
+        workspace.requestControl()
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertLessThan(controller.terminal.getTerminal().cols, 120)
+        XCTAssertEqual(client.link.sizes.last?.0, controller.terminal.getTerminal().cols)
+        XCTAssertEqual(client.link.sizes.last?.1, controller.terminal.getTerminal().rows)
+        workspace.send(Data("large text".utf8))
+        XCTAssertEqual(client.terminal.draft, "large text")
     }
 
     func testTaskReadingRejectsStaleAndUnavailableReplies() async throws {
@@ -491,6 +551,9 @@ final class MobileTerminalTests: XCTestCase {
         let client = TestClient()
         let workspace = MobileWorkspace(client: client)
         let controller = SessionTerminalController(workspace: workspace)
+        // Fixed viewport/text size for line-selection fixtures; the font-change
+        // test explicitly grows this after the observer screen is populated.
+        controller.traitOverrides.preferredContentSizeCategory = .large
         controller.loadViewIfNeeded()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 700))
         window.rootViewController = controller

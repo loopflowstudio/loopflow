@@ -87,6 +87,7 @@ struct MobileTaskList: View {
                     Label(connectionLabel, systemImage: "iphone")
                         .font(Typography.caption(12))
                         .foregroundStyle(theme.palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 16)
                 }
             }
@@ -186,6 +187,7 @@ private struct MobileTaskRow: View {
                 Label(task.mobileStatus, systemImage: task.mobileStatusSymbol)
                     .font(Typography.caption(13))
                     .foregroundStyle(statusColor)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let location = task.location {
                     Text(location.cwd)
                         .font(Typography.caption(12))
@@ -206,6 +208,7 @@ struct MobileSessionView: View {
     let workspace: MobileWorkspace
     let theme: ThemeDefinition
     var connectionLabel: String = "Offline fixture"
+    @Environment(\.dynamicTypeSize) private var textSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -213,32 +216,7 @@ struct MobileSessionView: View {
                 ContentUnavailableView("Session unavailable", systemImage: "terminal",
                     description: Text(reason))
             } else {
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(workspace.state.label)
-                            .font(Typography.body(14))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(connectionLabel)
-                            .font(Typography.caption(11))
-                            .foregroundStyle(theme.palette.textSecondary)
-                    }
-                    Spacer(minLength: 0)
-                    if workspace.state == .loading || workspace.state == .requestingControl {
-                        ProgressView().accessibilityLabel("Opening Session")
-                    }
-                    if workspace.state == .viewing {
-                        Button("Use keyboard") { workspace.requestControl() }
-                            .font(Typography.strong(14))
-                            .fixedSize()
-                            .frame(minHeight: 44)
-                    }
-                    if case .disconnected = workspace.state {
-                        Button("Reconnect") { Task { await workspace.reconnect() } }
-                            .font(Typography.strong(14))
-                            .fixedSize()
-                            .frame(minHeight: 44)
-                    }
-                }
+                header
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 Divider().overlay(theme.palette.border)
@@ -251,5 +229,43 @@ struct MobileSessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await workspace.open(task) }
         .onDisappear { workspace.leave() }
+    }
+
+    private var header: some View {
+        let layout = textSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(workspace.state.label)
+                    .font(Typography.body(15))
+                    .foregroundStyle(theme.palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(connectionLabel)
+                    .font(Typography.caption(12))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !textSize.isAccessibilitySize { Spacer(minLength: 0) }
+            if workspace.state == .loading || workspace.state == .requestingControl {
+                ProgressView().accessibilityLabel("Opening Session")
+            }
+            if workspace.state == .viewing {
+                Button { workspace.requestControl() } label: { actionLabel("Use keyboard") }
+            }
+            if case .disconnected = workspace.state {
+                Button { Task { await workspace.reconnect() } } label: { actionLabel("Reconnect") }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func actionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(Typography.strong(14))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
     }
 }

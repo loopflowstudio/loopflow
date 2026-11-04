@@ -19,6 +19,10 @@ control fits the terminal to the phone and software keyboard; losing it restores
 the owner's grid. Layout changes send a resize only when the granted size changes.
 A fresh keyboard grant restores the software keyboard even if it was hidden in
 the previous attachment. Theme colors are installed only when the theme changes.
+System text size also enlarges the terminal and its accessory controls. At
+accessibility sizes the Session header stacks vertically. Observing still keeps
+every remote cell; pan to read the wider screen. Only explicit geometry control
+fits the larger text to the phone.
 
 Disable `--fixture` to connect to a Machine. Sign into host Tailscale on both
 devices. In Desktop, open Settings → Mobile → **Pair a phone**. On iPhone, choose
@@ -126,6 +130,11 @@ keyboard control, type through the system keyboard, go Home, return as an observ
 then explicitly take control and continue typing. Captures show the preserved
 draft and software-keyboard layout. The deterministic peer requests a steady
 cursor so XCTest does not wait for a repeating animation to finish.
+Touch-target and accessible-description audits cover the Task list and Session.
+Separate tests check text contrast in both themes and preserve alternate-screen
+cells while changing font size. Enlarged layouts also need screenshot review;
+the simulator's contrast/clipping audit reports false positives on some fully
+visible custom-font labels.
 
 Device demo still owns CJK keyboard/dictation quality, physical key combinations,
 VoiceOver navigation and sustained-output energy use. Simulator software-keyboard

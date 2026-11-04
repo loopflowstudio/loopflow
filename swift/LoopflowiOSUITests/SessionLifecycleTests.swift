@@ -4,6 +4,24 @@ import XCTest
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testTaskAndSessionAccessibility() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        // Contrast/clipping also need rendered review: iOS 26.2 flagged fully
+        // visible custom-font labels and text independently measured at 14:1.
+        let checks: XCUIAccessibilityAuditType = [.hitRegion, .sufficientElementDescription]
+        capture(app, "accessibility-task-list")
+        try app.performAccessibilityAudit(for: checks)
+        task.tap()
+        XCTAssertTrue(app.buttons["Use keyboard"].waitForExistence(timeout: 5))
+        capture(app, "accessibility-session")
+        try app.performAccessibilityAudit(for: checks)
+    }
+
     func testReturningToTheAppObservesTheSameSessionBeforeKeyboardTakeover() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture"]

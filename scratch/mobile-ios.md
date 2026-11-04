@@ -61,6 +61,9 @@ The observer viewport preserves the owner’s grid. Geometry control fits the ph
 loss restores the owner’s geometry. Layout deduplicates resize traffic and theme
 installation. Search filters the compact Task list by title/path. A fresh control
 grant restores the software keyboard even if the earlier attachment hid it.
+System text size scales the terminal and accessory controls. Accessibility sizes
+stack the Session header; observer font changes preserve even alternate-screen
+cells without sending remote geometry changes.
 
 ## Next work and acceptance
 
@@ -349,3 +352,30 @@ This is operated Simulator/software-keyboard evidence, not a physical-phone or
 VoiceOver demonstration. The separate Tailscale proof uses the actual carrier.
 
 Checks: native terminal suite `/tmp/mobile-foreground-final-tests.log` (21 pass); operated app suite `Test-LoopflowiOS-2026.11.04_03-00-21--0800.xcresult` (1 pass); real carrier `/tmp/mobile-foreground-tailscale.log` (pass). Captures: `demo-assets/mobile-foreground-{keyboard-before,observer-return,keyboard-after}.png`.
+
+### Enlarged text and touch targets — November 4, 03:22
+
+The Session header now stacks at accessibility sizes instead of squeezing its
+status into broken words. Keyboard/reconnect labels contain the full 44-point
+touch target. Terminal text and the accessory row scale with the system setting;
+the row grows for wrapped titles. Changing an observer font preserves its exact
+120×40 alternate screen, including far-edge cells, and sends no geometry change.
+Explicit takeover still fits the terminal to the phone.
+
+The Task/Session touch-target and accessible-description audits pass at standard
+and accessibility-extra-extra-large sizes. Keyboard → Home → return → continued
+typing also passes at both sizes. Captures were inspected; enlarged text and
+controls remain visible above the keyboard. Native tests cover font-change cell
+preservation and 4.5:1 minimum text contrast across both default theme surfaces.
+The iOS contrast/clipping audit also flagged fully visible custom-font labels;
+one flagged status measured 14.14:1 from its captured foreground/background.
+Those audit categories are not asserted as passing; palette checks and screenshot
+review supplement the selected audits. This is not VoiceOver navigation evidence.
+
+Checks: `/tmp/mobile-readable-final.log` (23 native terminal tests, 2 operated UI
+tests); enlarged UI `/tmp/mobile-readable-accessory.log` (2 UI tests pass). That
+earlier run exposed two fixture assumptions about the simulator's default font;
+the line-selection fixture now pins its starting size and the final suite passes.
+Simulator text size was restored. Captures:
+`demo-assets/mobile-large-{tasks,session,keyboard}.png`. Physical-phone gestures,
+dictation, VoiceOver and sustained-output energy remain acceptance work above.

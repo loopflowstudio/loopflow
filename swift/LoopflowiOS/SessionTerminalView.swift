@@ -35,6 +35,16 @@ final class SessionTerminalView: TerminalView {
         super.deleteBackward()
     }
 
+    func setFontPreservingGrid(_ font: UIFont) {
+        // SwiftTerm's font setter otherwise reflows the grid against the old
+        // pixel frame. An observer must retain even an alternate screen's cells.
+        let origin = frame.origin
+        frame = .zero
+        self.font = font
+        let size = getOptimalFrameSize().size
+        frame = CGRect(origin: origin, size: CGSize(width: ceil(size.width) + 1, height: ceil(size.height) + 1))
+    }
+
     override func paste(_ sender: Any?) {
         guard let text = UIPasteboard.general.string else { return }
         pasteText(text)
@@ -102,7 +112,11 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     override func viewDidLoad() {
         super.viewDidLoad()
         terminal.terminalDelegate = self
-        terminal.font = UIFont(name: "JetBrainsMono-Regular", size: 14) ?? .monospacedSystemFont(ofSize: 14, weight: .regular)
+        terminal.font = preferredTerminalFont
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: SessionTerminalController, _: UITraitCollection) in
+            controller.updateAccessoryFonts()
+            controller.updateTerminalFont()
+        }
         terminal.inputAccessoryView = nil
         terminal.accessibilityLabel = "Session terminal"
         terminal.accessibilityIdentifier = "session-terminal"
@@ -129,7 +143,9 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         bar.axis = .horizontal
         bar.distribution = .fillEqually
         for button in [pasteButton, newlineButton, keyboardButton] { bar.addArrangedSubview(button) }
+        updateAccessoryFonts()
         message.font = .preferredFont(forTextStyle: .caption1)
+        message.adjustsFontForContentSizeCategory = true
         message.numberOfLines = 0
         viewport.contentInsetAdjustmentBehavior = .never
         viewport.isDirectionalLockEnabled = true
@@ -158,13 +174,49 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             message.bottomAnchor.constraint(equalTo: bar.topAnchor),
             bar.leadingAnchor.constraint(equalTo: viewport.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: viewport.trailingAnchor),
-            bar.heightAnchor.constraint(equalToConstant: 44),
+            bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             bar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
         ])
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        layoutTerminal()
+    }
+
+    private var preferredTerminalFont: UIFont {
+        let base = UIFont(name: "JetBrainsMono-Regular", size: 14) ?? .monospacedSystemFont(ofSize: 14, weight: .regular)
+        return UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traitCollection)
+    }
+
+    private func updateAccessoryFonts() {
+        let base = UIFont(name: "Lato-Regular", size: 15) ?? .systemFont(ofSize: 15)
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traitCollection)
+        for button in [pasteButton, newlineButton, keyboardButton] {
+            var configuration = button.configuration ?? .plain()
+            configuration.title = button.currentTitle
+            configuration.image = button.currentImage
+            configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4)
+            configuration.titleLineBreakMode = .byWordWrapping
+            configuration.titleAlignment = .center
+            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+                var attributes = attributes
+                attributes.font = font
+                return attributes
+            }
+            configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(font: font)
+            button.configuration = configuration
+        }
+    }
+
+    private func updateTerminalFont() {
+        let font = preferredTerminalFont
+        guard terminal.font != font else { return }
+        terminal.setFontPreservingGrid(font)
+        layoutTerminal()
+    }
+
+    private func layoutTerminal() {
         guard viewport.bounds.width > 0, viewport.bounds.height > 0 else { return }
         let grid = terminal.getTerminal()
         let frame = terminal.getOptimalFrameSize()

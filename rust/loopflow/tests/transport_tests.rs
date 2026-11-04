@@ -1160,6 +1160,66 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     );
 }
 
+#[test]
+fn native_program_status_has_no_stale_launcher_working_record() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf 'native ready\n'
+while read -r state < /dev/tty; do
+    [ "$state" = exit ] && exit 0
+    printf '\033]7501;state=%s:app=claude-code\033\\' "$state"
+    printf 'reported %s\n' "$state"
+done
+"#,
+    );
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "native status"));
+    let mut viewer = fixture.viewer(&owner, true);
+    let mut received = out(&until_out(&mut viewer, "native ready"));
+    let states = ["working", "idle", "blocked", "working", "done", "idle"];
+    for state in states {
+        viewer.input(&format!("{state}\n"));
+        received.extend(out(&until_out(&mut viewer, &format!("reported {state}"))));
+        if state == "working" {
+            // No provider output or turn settlement while this read completes.
+            // A quiet stream must not synthesize idle.
+            viewer.request(json!({"kind":"controlled"}));
+            let quiet = until(
+                &mut viewer,
+                |items| matches!(items.last(), Some(Item::Reply(reply)) if reply["kind"] == "controlled"),
+            );
+            received.extend(out(&quiet));
+        }
+    }
+    drop(viewer);
+    let mut replacement = fixture.viewer(&owner, true);
+    let snapshot = match replacement.next().unwrap() {
+        Item::Snapshot(bytes) => bytes,
+        other => panic!("expected retained snapshot, got {other:?}"),
+    };
+    replacement.input("exit\n");
+    replacement.finish();
+
+    let received = String::from_utf8(received).unwrap();
+    let reports: Vec<_> = received
+        .split("\x1b]7501;")
+        .skip(1)
+        .map(|report| report.split("\x1b\\").next().unwrap())
+        .collect();
+    assert_eq!(
+        reports,
+        states.map(|state| format!("state={state}:app=claude-code")),
+        "native reports must pass unchanged without a competing lf record"
+    );
+    assert!(
+        !String::from_utf8_lossy(&snapshot).contains(":state=working"),
+        "reattachment restored a stale launcher record"
+    );
+}
+
 fn native_pending_request(silent_owner: Option<SilentOwner>) {
     let fixture = Fixture::new();
     let path = fixture.provider(

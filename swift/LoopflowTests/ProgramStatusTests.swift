@@ -25,6 +25,41 @@ struct ProgramStatusTests {
         #expect(reducer.snapshot.summary?.kind == nil)
     }
 
+    @Test("Native turn reports reach pane and Session labels without a launcher Working record")
+    @MainActor func nativeTurnPresentation() async throws {
+        let surface = ProgramStatusSurface()
+        defer { surface.close() }
+        let fixture = try renameFixtureRecord("native-status", title: "Native conversation")
+        var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture)) as? [String: Any])
+
+        // Reproduce the old producer's extra record: an idle root cannot retire
+        // another program's Working claim. The repair removes that producer.
+        surface.receive(.report(report(.working, id: "lf/launcher")), incarnation: surface.incarnation)
+        surface.receive(.report(report(.idle)), incarnation: surface.incarnation)
+        try await eventually { surface.snapshot.records.count == 2 }
+        #expect(surface.snapshot.summary?.state == .working)
+        surface.receive(.report(report(.clear, id: "lf/launcher")), incarnation: surface.incarnation)
+        try await eventually { surface.snapshot.summary?.state == .idle }
+
+        for (raw, state) in [(1, ProgramStatusState.working), (2, .done), (0, .idle), (3, .blocked), (1, .working), (5, .clear)] {
+            let event = try #require(copyProgramStatusEvent(event: 0, state: raw, kind: -1, progress: -1,
+                                                           id: nil, app: nil, title: nil, msg: nil))
+            surface.receive(event, incarnation: surface.incarnation)
+            let expected: ProgramStatusState? = state == .clear ? nil : state
+            try await eventually { surface.snapshot.summary?.state == expected }
+            session["program_status"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(surface.snapshot))
+            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: session))
+            #expect(SessionProgramStatus(sessions: [record], unavailable: nil).label == expected?.rawValue.capitalized)
+            if let expected {
+                let view = ProgramStatusLabel(status: surface.snapshot)
+                #expect(try view.inspect().find(text: expected.rawValue.capitalized).string() == expected.rawValue.capitalized)
+            } else {
+                #expect(surface.snapshot.seen)
+                #expect(surface.snapshot.records.isEmpty)
+            }
+        }
+    }
+
     @Test func clearUsesPathComponents() {
         var reducer = ProgramStatusReducer()
         for id in ["a", "a/b", "ab"] { reducer.apply(.report(report(.blocked, id: id))) }

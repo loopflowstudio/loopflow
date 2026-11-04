@@ -190,3 +190,8 @@ over the terminal and reports newly recorded diagnostics after returning. Native
 provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
+
+Native providers own their Program Status (OSC 7501) reports, which pass through
+unchanged. Loopflow reports activity for structured Runs and Graph progress, and
+the command's result when it exits. It does not label an open native conversation
+Working for the lifetime of its process. Quiet output alone changes no status.

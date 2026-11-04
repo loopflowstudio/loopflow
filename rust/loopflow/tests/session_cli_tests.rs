@@ -1068,7 +1068,7 @@ exit 2
                 assert!(args.contains(&format!("--name\n{expected}\n")), "{args}");
                 assert_eq!(
                     fs::read_to_string(home.path().join("title-disabled")).unwrap(),
-                    "1"
+                    ""
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
@@ -1754,7 +1754,7 @@ fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
 #[cfg(unix)]
 #[test]
 fn program_status_cli_observes_available_without_completing_work() {
-    use std::io::Write;
+    use std::io::{BufRead, BufReader, Write};
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
@@ -1795,6 +1795,47 @@ fn program_status_cli_observes_available_without_completing_work() {
         [&lf_process_id],
     )
     .unwrap();
+    let mut watch = Child(
+        command(
+            home.path(),
+            &["desktop", "sessions", "--all", "--json", "--watch"],
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap(),
+    );
+    let stdout = watch.0.stdout.take().unwrap();
+    let (sender, frames) = std::sync::mpsc::channel::<serde_json::Value>();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if sender
+                .send(serde_json::from_str(&line.unwrap()).unwrap())
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    let watch_for = |state: Option<&str>| {
+        let until = Instant::now() + Duration::from_secs(10);
+        let mut last = None;
+        loop {
+            let frame = frames
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|error| panic!("watch missed {state:?}: {error}; last: {last:?}"));
+            assert!(frame["unavailable"].is_null(), "{frame}");
+            if let Some(item) = frame["body"].as_array().unwrap().iter().find(|item| {
+                item["id"] == id
+                    && item["program_status"]["seen"] == true
+                    && item["program_status"]["records"][0]["state"].as_str() == state
+            }) {
+                return item.clone();
+            }
+            last = Some(frame);
+        }
+    };
     let mut observer = Child(
         command(
             home.path(),
@@ -1820,36 +1861,23 @@ fn program_status_cli_observes_available_without_completing_work() {
         "state":state,"id":"worker","kind":if state=="blocked" { Some("question") } else { None },
         "progress":null,"app":"fixture","title":null,"msg":"Use **literal** text?"}]})
     };
-    let wait_for = |state: &str| {
-        let until = Instant::now() + Duration::from_secs(10);
-        loop {
-            let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            if let Some(item) = items
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|s| s["id"] == id && s["program_status"]["records"][0]["state"] == state)
-            {
-                return item.clone();
-            }
-            assert!(
-                Instant::now() < until,
-                "observer did not publish {state}: {items}"
-            );
-            std::thread::sleep(Duration::from_millis(25));
-        }
+    let read_session = || {
+        let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
+        assert!(output.status.success(), "{output:?}");
+        let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap()
+            .clone()
     };
     // The pipe also fragments a JSON frame across reads.
     let blocked = records("blocked").to_string() + "\n";
     input.write_all(&blocked.as_bytes()[..17]).unwrap();
     input.write_all(&blocked.as_bytes()[17..]).unwrap();
-    let item = wait_for("blocked");
+    let item = watch_for(Some("blocked"));
     assert_eq!(item["availability"], "available");
     assert_eq!(
         item["program_status"]["records"][0]["msg"],
@@ -1870,10 +1898,23 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     let page: serde_json::Value = serde_json::from_slice(&page.stdout).unwrap();
     assert_eq!(page["entries"][0]["id"], id);
-    for state in ["working", "done"] {
+    for state in ["working", "idle", "done", "blocked", "working"] {
         writeln!(input, "{}", records(state)).unwrap();
-        assert!(wait_for(state)["availability"].is_null());
+        let item = watch_for(Some(state));
+        if matches!(state, "working" | "done") {
+            assert!(item["availability"].is_null());
+        }
     }
+    writeln!(input, "{}", serde_json::json!({"seen":true,"records":[]})).unwrap();
+    assert_eq!(
+        watch_for(None)["program_status"]["records"],
+        serde_json::json!([])
+    );
+    writeln!(input, "{}", records("done")).unwrap();
+    watch_for(Some("done"));
+    drop(watch.0.stdin.take());
+    assert!(watch.0.wait().unwrap().success());
+    reader.join().unwrap();
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
     assert!(store
         .process(&lf_process_id)
@@ -1887,19 +1928,12 @@ fn program_status_cli_observes_available_without_completing_work() {
     drop(input);
     assert!(!observer.0.wait().unwrap().success());
     assert_eq!(
-        wait_for("done")["program_status"]["records"][0]["state"],
+        read_session()["program_status"]["records"][0]["state"],
         "done"
     );
     provider.0.kill().unwrap();
     provider.0.wait().unwrap();
-    let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
-    let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let ended = items
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["id"] == id)
-        .unwrap();
+    let ended = read_session();
     assert_eq!(ended["state"], "closed");
     assert!(ended["program_status"].is_null());
     assert!(ended["availability"].is_null());
@@ -1919,14 +1953,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));
-    let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
-    let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let item = items
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["id"] == id)
-        .unwrap();
+    let item = read_session();
     assert!(item["program_status"].is_null());
     assert!(item["availability"].is_null());
 }

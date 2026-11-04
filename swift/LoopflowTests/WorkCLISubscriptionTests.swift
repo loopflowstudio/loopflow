@@ -164,7 +164,7 @@ struct WorkCLISubscriptionTests {
         let draft = workspace.files(issue: id, cwd: location.worktree).document("notes.txt")
         draft.editor.string = "Unsent direction"
         let layout = workspace.multiplexer.layout
-        _ = try await fixture.run(["wave", "ensure", "product", "--json"])
+        _ = try await fixture.run(["wave", "add", "product", "--json"])
         let before = try #require(model.task(id: id)?.task)
         await model.moveTask(before, toWave: "product")
         #expect(model.navigation.taskRunDrafts[id]?.error == nil,

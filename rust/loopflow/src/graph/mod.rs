@@ -1708,7 +1708,7 @@ Design the feature.
                 assert!(!step.interactive);
                 assert!(step.returns.is_none());
                 let content = step.skill.content.as_ref().unwrap();
-                assert!(content.contains("lf wave list --current --json"));
+                assert!(content.contains("lf wave list --json"));
                 assert!(content.contains("LF_GRAPH_ID"));
                 step.skill.name.as_str()
             })

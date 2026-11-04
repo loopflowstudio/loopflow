@@ -174,6 +174,9 @@ When editing `*.rs` files:
 - `lf help <path>` renders Clap's short help; text it must show (exit statuses, caveats) goes in `after_help`, not a second doc-comment paragraph.
 - Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
 - Use `thiserror` for library error types callers need to match on
+- Long-lived deadlines (a Session's grace, a limit measured in minutes or hours) use
+  `SystemTime`: `Instant` stops while a Mac sleeps, so an `Instant` limit of 24h can
+  take days of wall time. `Instant` stays for short pauses and throttles.
 - Use `expect("why this is safe")` over `unwrap()` outside tests
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`

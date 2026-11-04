@@ -772,13 +772,14 @@ pub fn connect_wave(
     let progress = &CliProgress;
     let ambient_wave = |explicit| planning_wave(repo_root, explicit);
     let targets = if all {
+        // A clone's authored directories register before the store is listed.
+        tokio::runtime::Runtime::new()?
+            .block_on(crate::ops::wave_lifecycle::register_authored(repo_root))?;
         crate::ops::linear::list_local_waves(repo_root)?
     } else {
         let explicit = wave;
-        // Wave connection is a creation graph: its positional name may select a
-        // wave not yet registered (it links a wave directory to
-        // Linear, not a registry row). Normalize-only for explicit;
-        // ambient still uses the shared validating resolver.
+        // An explicit name the store does not know is added first by `connect`,
+        // so it is only normalized here; ambient uses the validating resolver.
         let name = if let Some(raw) = explicit {
             crate::ops::normalize_wave_name(raw)
                 .ok_or_else(|| anyhow!("wave connect requires a non-empty wave name"))?
@@ -814,6 +815,12 @@ pub fn connect_wave(
             "{}: Linear Initiative {} ({initiative_state}){team_state}",
             result.wave, result.initiative_id
         );
+        if let crate::ops::wave_lifecycle::AuthoredFiles::Uncommitted { reason } = &result.files {
+            println!(
+                ".lf/wave/{} is not committed on the main checkout: {reason}",
+                result.wave
+            );
+        }
     }
     Ok(())
 }

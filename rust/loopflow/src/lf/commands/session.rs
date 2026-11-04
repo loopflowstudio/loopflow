@@ -180,24 +180,9 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         }
         SessionCommand::List(_) => unreachable!("lists return before any runtime"),
         SessionCommand::Resume {
-            all: true,
-            connection,
-            ..
-        } => {
-            let store = open_shared_store().await?;
-            let resumed = crate::ops::human_session::restore::resume_all(&store).await?;
-            if connection.json || cli.json {
-                println!("{}", serde_json::to_string_pretty(&resumed)?);
-            } else {
-                println!("{}", crate::ops::human_session::restore::render(&resumed));
-            }
-            Ok(())
-        }
-        SessionCommand::Resume {
             id,
             connection,
             fork,
-            all: false,
         } => {
             resume(
                 cli,
@@ -731,7 +716,6 @@ pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<Sessio
                 id,
                 connection,
                 fork,
-                all: false,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
                 reopen(&store, directory, target, *fork, false, false).await

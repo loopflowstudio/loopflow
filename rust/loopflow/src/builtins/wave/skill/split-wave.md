@@ -1,6 +1,6 @@
 ---
 requires: .lf/wave/<wave>/GOAL.md
-produces: .lf/wave/<child>/ directories
+produces: .lf/wave/<wave>/<child>/ directories
 ---
 Decompose a wave into smaller, independent waves. Move future responsibility into the children; retain the parent's history and any active delivery until it settles.
 
@@ -54,22 +54,19 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
      active Tasks retain the parent Wave and delivery identity until settled.
 
 4. Create the new waves
-   - `.lf/wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
-   - `.lf/wave/<child>/MEMORY.md` — the decisions and context this child inherits
-   - `.lf/wave/<child>/metrics/*.md` — contracts allocated to that child
-   - `lf wave connect <child>` — create each child's Linear Initiative
-   - Connection does not create a Project. Inspect each child's Linear plans:
-     one In Progress Project is current; Planned and Completed Projects retain
-     future and historical content. Preserve existing Project identities.
-   - If a current Project exists, `lf update-plan --wave <child> --plan <plan.json>`
-     replaces its complete content: `{"metric_targets":[],"krs":[]}`.
-     Supply all KRs and targets; keep the Wave's default graph.
-   - If no current Project exists, arrange its plan through the accepted
-     repository chapter process or a Linear change.
-     Future plan authoring needs an available Linear writer; `update-plan`
-     cannot write a Planned Project. Report missing access rather than inventing
-     a command or starting Tasks without a current plan.
-   - File new Tasks with `lf task create --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in comments; keep current blockers and dependencies in the description even when comments are collapsed.
+   - `lf wave add <wave>/<child>` — register each child and commit its
+     `.lf/wave/<wave>/<child>/` files on the main checkout; then edit them there
+   - `GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
+   - `MEMORY.md` — the decisions and context this child inherits
+   - `metrics/*.md` — contracts allocated to that child
+   - `lf wave connect <wave>/<child>` — link each child's Linear Initiative
+   - Add starts the first Project. Inspect each child's plan after connecting;
+     preserve existing Project identities and Planned/Completed history.
+   - `lf update-plan --wave <wave>/<child> --plan <plan.json>` replaces the current
+     Project's complete content: `{"metric_targets":[],"krs":[]}`. Supply all KRs
+     and targets; keep the Wave's default graph. Future plan authoring needs a
+     Linear writer; `update-plan` cannot write a Planned Project.
+   - File new Tasks with `lf task create --wave <wave>/<child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in comments; keep current blockers and dependencies in the description even when comments are collapsed.
    - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
 5. Retire the parent's future planning

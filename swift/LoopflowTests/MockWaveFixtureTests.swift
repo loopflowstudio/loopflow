@@ -21,7 +21,7 @@ struct MockWaveFixtureTests {
         let byName = Dictionary(uniqueKeysWithValues: MockWaveFixture.waves.map { ($0.name, $0) })
 
         func lens(_ name: String) -> WaveLens {
-            WaveViewModel(api: byName[name]!, isRegistered: true).lens
+            WaveViewModel(api: byName[name]!).lens
         }
 
         #expect(lens("infrastructure").color == .unknown)

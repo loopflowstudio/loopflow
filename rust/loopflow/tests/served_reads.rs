@@ -52,6 +52,14 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         None,
     ))
     .unwrap();
+    // The Wave's authored files, seeded and committed once by `lf`: the add
+    // compared below then changes nothing, in the app and again through `lf`.
+    read(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "task-pr-tests", "--json"],
+        None,
+    );
     // Prepared, not started: a Session a bind preview can name.
     let session: Value = serde_json::from_str(&read(
         repo.path(),
@@ -422,7 +430,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::SessionBind { .. }
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
-        | Write::WaveEnsure { .. }
+        | Write::WaveAdd { .. }
         | Write::PlanningRefresh { .. }
         | Write::NewChapter { .. }
         | Write::GraphCustomize { .. }
@@ -484,9 +492,10 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     directory: directory.clone(),
                     issue: unpublished.clone(),
                 },
-                Write::WaveEnsure {
+                Write::WaveAdd {
                     directory: directory.clone(),
                     wave: "task-pr-tests".into(),
+                    objective: None,
                 },
                 Write::PlanningRefresh {
                     directory: directory.clone(),

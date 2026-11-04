@@ -728,7 +728,7 @@ struct SessionPaneView: View {
                 switch pane.content.selectedBrowserTab {
                 case .graphLog:
                     GraphProcessLog(model: model, taskId: taskId, location: location, execution: execution,
-                        query: sessions.query)
+                        query: sessions.query, openFiles: { workspace.showBrowser(.files, from: pane) })
                         .id(pane.incarnation)
                         .background(PaneFocusTarget(isFocused: isFocused))
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })

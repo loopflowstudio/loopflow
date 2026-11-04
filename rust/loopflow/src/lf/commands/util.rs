@@ -812,9 +812,16 @@ fn run_opencode_native(
                 // The native renderer owns output. Rust still records history and
                 // attention, and drains errors without writing over its screen.
                 tokio::pin!(closed_rx);
+                let mut updates = crate::harness::task_updates::TaskUpdates::default();
+                let mut clock = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     tokio::select! {
                         _ = &mut closed_rx => break,
+                        _ = clock.tick() => {
+                            if let Err(error) = harness.report_task_update(&mut updates).await {
+                                tracing::warn!(%error, "native Task update delivery unavailable");
+                            }
+                        }
                         event = rx.recv() => {
                             if let Some(crate::chat::types::ConversationEvent::Error { message, .. }) = event {
                                 if let Some(path) = observer_diagnostics {

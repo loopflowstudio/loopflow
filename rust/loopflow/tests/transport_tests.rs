@@ -1,4 +1,5 @@
-//! Real detached owner and Session attachment; no provider credentials or display.
+//! Real detached owner and Session attachment. Ordinary tests need no provider
+//! account or display; ignored native acceptance explicitly opts into them.
 #![cfg(unix)]
 
 mod support;
@@ -4294,11 +4295,27 @@ fn simultaneous_session_openers_share_one_retained_owner() {
 }
 
 /// Cross-language acceptance, explicitly opted into an already configured private
-/// Tailscale route and installed Simulator. Ordinary CI never needs either.
+/// Tailscale host and installed Simulator. Ordinary CI never needs either.
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "requires LOOPFLOW_MOBILE_SIMULATOR, ENDPOINT, STATUS_FILE and CERTIFICATE_FILE; host identity is a fixture"]
 fn mobile_machine_native_acceptance() {
+    mobile_native_acceptance(None);
+}
+
+/// Uses the installed Claude account for a new, tool-free test conversation.
+/// No existing conversation is resumed and the Machine registry stays isolated.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires mobile host fixtures plus LOOPFLOW_MOBILE_CLAUDE pointing to the signed-in Claude executable"]
+fn mobile_machine_claude_acceptance() {
+    let claude = PathBuf::from(std::env::var("LOOPFLOW_MOBILE_CLAUDE").unwrap());
+    assert!(claude.is_absolute() && claude.is_file());
+    mobile_native_acceptance(Some(&claude));
+}
+
+#[cfg(target_os = "macos")]
+fn mobile_native_acceptance(claude: Option<&Path>) {
     let simulator = std::env::var("LOOPFLOW_MOBILE_SIMULATOR").unwrap();
     let endpoint = std::env::var("LOOPFLOW_MOBILE_ENDPOINT").unwrap();
     let host_status: Value = serde_json::from_slice(
@@ -4335,6 +4352,14 @@ printf '%s\n' "$answer" >> "$HOME/answers"
 printf '\r\naccepted: %s\r\n' "$answer"
 "#,
     );
+    let path = if let Some(claude) = claude {
+        fixture.provider(&format!(
+            "#!/bin/sh\nif [ \"$1\" != --version ]; then printf '%s\\n' \"$$\" >> \"$LF_HOME/launches\"; fi\nexec {} --safe-mode --strict-mcp-config --tools '' \"$@\"\n",
+            shlex::try_quote(claude.to_str().unwrap()).unwrap()
+        ))
+    } else {
+        path
+    };
     let gh = fixture.home.path().join("bin/gh");
     std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
     std::fs::set_permissions(gh, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -4352,9 +4377,19 @@ printf '\r\naccepted: %s\r\n' "$answer"
     let mut command = fixture.native(
         Path::new(env!("CARGO_BIN_EXE_lf")),
         &path,
-        "Mobile acceptance",
+        if claude.is_some() {
+            "Do not use any tools. Reply only with the concatenation of MOBILE and _READY."
+        } else {
+            "Mobile acceptance"
+        },
     );
     command.env("PATH", &path);
+    if claude.is_some() {
+        // The CLI uses its normal account without copying or inspecting secrets.
+        // LF_HOME still isolates every Loopflow record and process.
+        command.env("HOME", std::env::var_os("HOME").unwrap());
+        command.env_remove("CLAUDECODE");
+    }
     let owner = fixture.owner(command);
     let _cleanup = StopOwner(&fixture, owner.clone());
     let first_launch = fixture.launches(1);
@@ -4374,10 +4409,12 @@ printf '\r\naccepted: %s\r\n' "$answer"
         .unwrap();
 
     let mut desktop = fixture.viewer(&owner, true);
-    desktop.input("desktop draft");
-    // Wait until the PTY has echoed it; attaching too early could snapshot the
-    // screen before input queued by this viewer has reached the child.
-    until_out(&mut desktop, "desktop draft");
+    if claude.is_none() {
+        desktop.input("desktop draft");
+        // Wait for echo before the phone takes its snapshot.
+        until_out(&mut desktop, "desktop draft");
+    }
+
     // Pace 32 MiB with the active phone while a second phone stops reading.
     // The retained owner, not an unbounded phone queue, owns slow-viewer policy.
     std::fs::write(fixture.home.path().join("output-chunk"), vec![b'x'; 65536]).unwrap();
@@ -4472,7 +4509,7 @@ printf 'output-final\r\n'
     std::fs::create_dir(&control).unwrap();
     std::fs::write(
         setup_dir.join("session.json"),
-        json!({"session":session,"outputSession":output_session,"creationRepository":fixture.repo.path().canonicalize().unwrap(),"serviceControl":control_name})
+        json!({"session":session,"outputSession":claude.is_none().then_some(output_session),"creationRepository":claude.is_none().then(|| fixture.repo.path().canonicalize().unwrap()),"serviceControl":control_name,"realProvider":claude.is_some()})
             .to_string(),
     )
     .unwrap();
@@ -4565,6 +4602,16 @@ printf 'output-final\r\n'
         stopped && restarted,
         "Native proof must cross a real service interruption"
     );
+    if claude.is_some() {
+        assert!(fixture.running(&owner));
+        assert_eq!(fixture.session_of_owner(&owner), session);
+        assert_eq!(
+            fixture.launches(1),
+            first_launch,
+            "Recovery must keep the same actual provider"
+        );
+        return;
+    }
     fixture.ends(&owner);
     assert_eq!(
         fixture.launches(3).len(),

@@ -117,8 +117,8 @@ load still need proof. Detailed results and failure logs are recorded below.
    Raw sustained-output acceptance now delivers 32 MiB to an active phone stream,
    disconnects a stalled viewer and restores it passively; see the evidence below.
 2. Finish installed Desktop-to-phone onboarding acceptance. Desktop now delegates
-   automatic host setup and device management to the CLI and displays the existing
-   ticket as a QR code; iOS validates scans before explicit Connect. Verify actual
+   automatic host setup to the CLI and displays the ready HTTPS address as a QR
+   code; iOS validates scans before explicit Connect. Verify actual
    camera scanning, first-certificate provisioning latency and real permission/
    sign-in failures. A running CLI alone does not establish readiness.
 3. Continue Task-list performance and recovery acceptance under sustained Work
@@ -1173,3 +1173,50 @@ Status-component captures are `scratch/demo-assets/task-list-offline-status.png`
 and `task-list-offline-status-large-text.png`. Physical file-protection behavior,
 whole-app cold-launch ergonomics and device network/voice/VoiceOver acceptance
 remain unproven; Simulator model tests do not supply those guarantees.
+
+## Actual provider acceptance — November 4
+
+Jack Heart's sustained improvement goal now has an explicit installed-Claude
+acceptance path. It shares the existing runner's disposable Machine registry,
+Task, host identity fixture and Simulator. Ordinary tests retain their deterministic
+stand-in and need no account. Physical-phone IME, voice, VoiceOver and installed
+update survival remain separate.
+
+The opt-in actual-Claude path now passes with installed Claude Code 2.1.318.
+Native UIKit enters and edits a draft, the isolated Machine service stops/restarts,
+the same draft returns passively, and a later reply uses the preceding answer after
+foreground recovery. Rust confirms the same retained owner, Session and provider
+PID throughout. The provider uses its ordinary account home; LF_HOME isolates the
+registry. Tools/customizations are disabled for this fresh conversation. The test
+transcript remains in normal provider history; no existing conversation is resumed.
+
+Two failed attempts corrected the test rather than production behavior. Claude's
+new-folder menu defaults to No, exit; the test now selects its disposable folder
+with Down before Return. A subsequent test inserted text plus LF together, which
+correctly remained a multiline draft. A separate Return insertion submits it.
+Failure logs are `/tmp/mobile-real-provider-trust-first-xcode.log` and
+`/tmp/mobile-real-provider-newline-first-xcode.log`. Final native proof takes
+5.850 seconds; result `Test-LoopflowiOS-2026.11.04_14-12-46--0800.xcresult`.
+`/tmp/mobile-real-provider-native.log` and
+`/tmp/mobile-real-provider-final-xcode.log` preserve the enclosing/native results.
+No deadlines were increased and no automatic retry was added.
+
+Review finding to address next: provider menus can require arrow navigation with
+no numbered choices. The compact phone accessory exposes Paste, New line and
+keyboard visibility only. This proof sends a test arrow; it does not establish a
+discoverable touch path for those menus. Add compact on-demand navigation without
+restoring the generic shell modifier strip Jack Heart removed. Physical-phone
+IME/dictation/VoiceOver, other real providers, usage-accounting parity and installed
+Desktop update survival remain separate acceptance obligations.
+
+The unchanged stand-in path also passes after the shared-harness extraction:
+`/tmp/mobile-provider-regression.log` and
+`/tmp/mobile-provider-regression-xcode.log`. It still checks exact provider/input
+counts, explicit continuation, recoverable creation and all 33,554,432 bytes with
+512 native edited acknowledgements. This pass does not explain the earlier
+sustained-output timing variability. The dedicated Simulator was shut down and
+deleted; existing Simulators, accounts and active conversations were preserved.
+
+Final checks: `cargo fmt -- --check`, all-target Clippy with warnings denied
+(`/tmp/mobile-provider-clippy.log`) and `git diff --check` pass. The stand-in
+regression result is `Test-LoopflowiOS-2026.11.04_14-13-45--0800.xcresult`.

@@ -13,6 +13,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let creationRepository: String?
         let outputSession: String?
         let serviceControl: String?
+        let realProvider: Bool?
     }
     private var window: UIWindow?
 
@@ -59,7 +60,13 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let replacement = try await readings.next()
         XCTAssertEqual(try XCTUnwrap(replacement).get().map(\.work), tasks.map(\.work))
         observation.close()
-        if let proof { try await exerciseSession(proof, client: reopened, tasks: refreshed) }
+        if let proof {
+            if proof.realProvider == true {
+                try await exerciseRealProvider(proof, client: reopened, tasks: refreshed)
+            } else {
+                try await exerciseSession(proof, client: reopened, tasks: refreshed)
+            }
+        }
         if let directory = proof?.creationRepository { try await exerciseCreation(client: reopened, directory: directory) }
         if let session = proof?.outputSession {
             try await exerciseOutput(client: reopened, session: session, task: try XCTUnwrap(refreshed.first))
@@ -342,6 +349,74 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         try await wait("Created provider did not receive native input") { workspace.state == .ended }
     }
 
+    private func exerciseRealProvider(_ proof: SessionProof, client: RemoteMobileClient,
+                                      tasks: [WorkViewPlan.Content]) async throws {
+        XCTAssertEqual(tasks.count, 1, "Only the isolated test Task may be present")
+        let task = try XCTUnwrap(tasks.first { $0.primarySession == proof.session })
+        let workspace = MobileWorkspace(client: client)
+        let controller = SessionTerminalController(workspace: workspace)
+        controller.loadViewIfNeeded()
+        controller.update(theme: .light)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        defer {
+            workspace.leave()
+            controller.terminal.updateUiClosed()
+            window.isHidden = true
+            previous?.makeKey()
+        }
+        func screen() -> String { controller.terminal.accessibilityPageContent() ?? "" }
+        await workspace.open(task)
+        try await wait("Real provider did not become viewable") { workspace.state == .viewing }
+        workspace.requestControl()
+        try await wait("Real provider did not grant input") { workspace.state == .controlling }
+        controller.update(theme: .light)
+        var acceptedFixtureFolder = false
+        try await wait("Real Claude did not answer the initial prompt", seconds: 60) {
+            // This fresh disposable repository belongs to the acceptance runner.
+            // Leave any login/account dialog to the caller instead of operating it.
+            if !acceptedFixtureFolder && screen().contains("Yes, I trust this folder") {
+                acceptedFixtureFolder = true
+                controller.terminal.send(txt: "\u{1b}[B")
+                controller.terminal.insertText("\n")
+            }
+            return screen().contains("MOBILE_READY")
+        }
+        controller.terminal.insertText("Concatenate MOBILE and _EDITEZ")
+        controller.terminal.deleteBackward()
+        controller.terminal.insertText("D")
+        let draft = "Concatenate MOBILE and _EDITED"
+        try await wait("Real provider did not render the edited draft") { screen().contains(draft) }
+        try await exerciseServiceInterruption(try XCTUnwrap(proof.serviceControl), client: client,
+                                             workspace: workspace, controller: controller,
+                                             draft: draft, expectedActivity: false)
+        XCTAssertEqual(workspace.sessionID, proof.session)
+        workspace.requestControl()
+        try await wait("Real provider did not grant input after service recovery") { workspace.state == .controlling }
+        controller.update(theme: .light)
+        controller.terminal.insertText("\n")
+        try await wait("Real provider did not answer the edited draft", seconds: 60) { screen().contains("MOBILE_EDITED") }
+        workspace.suspend()
+        await workspace.restoreForegroundSession()
+        try await wait("Real provider history did not survive foreground return") {
+            workspace.state == .viewing && screen().contains("MOBILE_EDITED")
+        }
+        workspace.requestControl()
+        try await wait("Real provider did not grant input after foreground return") { workspace.state == .controlling }
+        controller.update(theme: .light)
+        controller.terminal.insertText("Append _AGAIN to your last answer.")
+        controller.terminal.insertText("\n")
+        try await wait("Real provider lost the conversation context", seconds: 60) { screen().contains("MOBILE_EDITED_AGAIN") }
+        XCTAssertEqual(workspace.sessionID, proof.session)
+        print("Real Claude acceptance: initial reply, edited draft, service restart, passive foreground recovery, contextual reply")
+    }
+
     private func exerciseSession(_ proof: SessionProof, client: RemoteMobileClient,
                                  tasks: [WorkViewPlan.Content]) async throws {
         XCTAssertEqual(tasks.count, 1, "Only the isolated fixture Task may be present")
@@ -458,7 +533,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
 
     private func exerciseServiceInterruption(_ control: String, client: RemoteMobileClient,
                                              workspace: MobileWorkspace,
-                                             controller: SessionTerminalController) async throws {
+                                             controller: SessionTerminalController,
+                                             draft: String = "desktop draft + phone",
+                                             expectedActivity: Bool = true) async throws {
         let directory = URL.documentsDirectory.appending(path: "LoopflowIntegration/\(control)")
         // A separate list consumer proves an idle Work watch detects the same
         // outage without requiring a refresh or terminal traffic to expose it.
@@ -488,7 +565,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         XCTAssertEqual(listing.tasks.map(\.work), cached)
         XCTAssertFalse(listing.isLoadingTasks)
         XCTAssertNil(workspace.programStatus, "Connection loss must clear old activity claims")
-        XCTAssertTrue(screen().contains("desktop draft + phone"))
+        XCTAssertTrue(screen().contains(draft))
         controller.update(theme: .light)
         controller.terminal.insertText(" must not survive outage\n")
         await workspace.reconnect()
@@ -517,10 +594,12 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         XCTAssertEqual(listing.tasks.map(\.work), cached)
         await workspace.reconnect()
         try await wait("Service restart did not restore the same unfinished draft") {
-            workspace.state == .viewing && screen().contains("desktop draft + phone")
+            workspace.state == .viewing && screen().contains(draft)
         }
-        try await wait("Service restart did not restore current Session activity") {
-            workspace.programStatus?.summary?.state == .blocked
+        if expectedActivity {
+            try await wait("Service restart did not restore current Session activity") {
+                workspace.programStatus?.summary?.state == .blocked
+            }
         }
         XCTAssertFalse(screen().contains("must not survive outage"))
         controller.update(theme: .light)

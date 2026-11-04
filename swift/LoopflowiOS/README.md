@@ -271,6 +271,17 @@ preserving a separate unsent draft. Rust asserts exactly three provider launches
 (initial, explicit continuation, new Task) and every exact submission. The native
 log is `swift/.build/mobile-acceptance.log`.
 
+For an actual provider, use the same host/Simulator variables, additionally set
+`LOOPFLOW_MOBILE_CLAUDE` to the absolute path of an already signed-in Claude CLI,
+and select `mobile_machine_claude_acceptance`. This explicitly uses the configured
+account for a new conversation in a disposable repository. Tools, MCP servers and
+unmanaged customizations are disabled; no existing conversation is resumed and
+no credential is copied. The provider uses its normal home while all Loopflow
+records stay in the private registry. Its test transcript remains in Claude's
+ordinary history. Native editing, service interruption, passive foreground return
+and a context-dependent reply must keep one provider process. This optional check
+needs network/account availability and is never part of ordinary CI.
+
 The same acceptance includes a 32 MiB output stream paced by an active viewer.
 A second viewer stops reading, disconnects under the owner's bounded policy, then
 reattaches to the current screen without taking control. The active viewer feeds

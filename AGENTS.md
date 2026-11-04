@@ -189,6 +189,9 @@ When editing `*.rs` files:
 - For public APIs, include `# Panics`/`# Errors`/`# Safety` doc sections where non-obvious
 
 When editing Rust tests:
+- External terminal-host tests use an isolated socket, configuration, state directory
+  and process group. Check native identity and command replay separately: stable
+  pane IDs do not prove that the same processes survived a host restart.
 - `unwrap()` is fine in tests
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory

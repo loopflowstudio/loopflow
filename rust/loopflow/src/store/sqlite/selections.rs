@@ -1319,6 +1319,79 @@ mod tests {
     }
 
     #[test]
+    fn wave_task_defaults_only_materialize_unsaved_task_layouts() {
+        use crate::work::selection::{
+            BrowserTab, PaneIntent, PaneTree, ShellTab, TaskLayoutTemplate, WorkWorkspaceKey,
+        };
+        use std::collections::BTreeSet;
+        let (_dir, store, repo) = fixture();
+        let task = WorkWorkspaceKey {
+            repository: repo.to_string(),
+            kind: WorkWorkspaceKind::Task,
+            id: "task_22222222222222222222222222222222".into(),
+        };
+        let wave_id = store
+            .task(&crate::durable::TaskId::parse(&task.id).unwrap())
+            .unwrap()
+            .unwrap()
+            .wave_id
+            .unwrap();
+        let wave = WorkWorkspaceKey {
+            repository: repo.to_string(),
+            kind: WorkWorkspaceKind::Wave,
+            id: wave_id.to_string(),
+        };
+        let tree = PaneTree::Split {
+            axis: crate::work::selection::SplitAxis::Vertical,
+            ratio: 0.6,
+            first: Box::new(PaneTree::Pane {
+                id: "session".into(),
+                content: PaneIntent::Session {
+                    session_id: None,
+                    location: None,
+                },
+            }),
+            second: Box::new(PaneTree::Split {
+                axis: crate::work::selection::SplitAxis::Horizontal,
+                ratio: 0.6,
+                first: Box::new(PaneTree::Pane {
+                    id: "shell".into(),
+                    content: PaneIntent::Shell {
+                        tabs: vec![ShellTab {
+                            id: "shell-one".into(),
+                            location: None,
+                            lf_process_id: None,
+                        }],
+                        selected: Some("shell-one".into()),
+                    },
+                }),
+                second: Box::new(PaneTree::Pane {
+                    id: "browser".into(),
+                    content: PaneIntent::Browser {
+                        location: None,
+                        tabs: vec![BrowserTab::Task { id: "task".into() }],
+                        selected: Some("task".into()),
+                    },
+                }),
+            }),
+        };
+        let template = TaskLayoutTemplate {
+            revision: 0,
+            tree,
+            hidden: BTreeSet::new(),
+        };
+        let mut saved = store.save_wave_task_layout(&wave, &template).unwrap();
+        let inherited = store.pane_layout(&task).unwrap().unwrap();
+        assert_eq!(inherited.revision, 0);
+        assert_eq!(inherited.tree, template.tree);
+        let customized = store.save_pane_layout(&inherited).unwrap();
+        saved.hidden.insert("shell".into());
+        store.save_wave_task_layout(&wave, &saved).unwrap();
+        assert_eq!(store.pane_layout(&task).unwrap().unwrap(), customized);
+        assert!(store.save_wave_task_layout(&wave, &template).is_err());
+    }
+
+    #[test]
     fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
         use crate::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
         let (dir, store, repo) = fixture();

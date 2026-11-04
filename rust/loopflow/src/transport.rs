@@ -1641,7 +1641,7 @@ fn attach_with_preview(
     crate::journal::carry_across_exec(&mut command)?;
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
-    attach_with_terminal(id, moved, terminal)
+    attach_with_terminal(id, moved, terminal, true)
 }
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
@@ -1691,13 +1691,20 @@ pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     } else {
         None
     };
-    attach_with_terminal(id, moved, terminal)
+    attach_with_terminal(id, moved, terminal, true)
+}
+
+/// Observe an existing execution without claiming input, size, or colors.
+/// This never starts an owner or resumes a provider.
+pub(crate) fn observe(id: &LfProcessId) -> Result<()> {
+    attach_with_terminal(id, None, None, false)
 }
 
 fn attach_with_terminal(
     id: &LfProcessId,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
+    take_control: bool,
 ) -> Result<()> {
     let mut preview = terminal.is_some();
     let mut socket = UnixStream::connect(endpoint(id)?).context(
@@ -1709,9 +1716,9 @@ fn attach_with_terminal(
     send(
         &mut socket,
         Request::Attach {
-            control: true,
-            replace: true,
-            own: Some(Own::Take),
+            control: take_control,
+            replace: take_control,
+            own: take_control.then_some(Own::Take),
             rows,
             cols,
             name: tty_name(),

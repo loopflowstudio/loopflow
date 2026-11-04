@@ -1,7 +1,7 @@
 # Surfaces
 
 Your Tasks and conversations live in `lf`, not in a window. Open them wherever
-you already work: Loopflow Desktop, cmux, Herdr, tmux or a plain terminal.
+you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
 
 ## Open Work where you are
 
@@ -12,11 +12,14 @@ lf open --available                            # every conversation available fo
 lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (Desktop)
 ```
 
-From a Herdr pane, `lf open` adds a Herdr workspace; from tmux, a new window
+From Rex, `lf open` opens a native Task workspace on the caller's server. Agent
+tool shells use the conversation's current viewer placement, including after a
+move; unavailable Rex context never falls through to Desktop.
+From a Herdr pane, `lf open --task LOO-12` adds a Herdr workspace; from tmux, a new window
 right after this one; from cmux, a new workspace. Otherwise it opens in Desktop on
 macOS, then a plain terminal. It reads only the host's own environment
-(`HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
-apps. `--host desktop|cmux|herdr|tmux|terminal` picks one explicitly.
+(`REX_*`, `HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
+apps. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one explicitly.
 
 A conversation already live in this host is focused, draft intact. One live in
 another client is reported as `elsewhere`, with the `lf resume` command that
@@ -25,6 +28,68 @@ workspace starts and you get the one workspace.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
+
+## Rex workspaces
+
+```bash
+lf open --host rex                     # started, unfinished Tasks, grouped by Wave
+lf open --host rex --wave product      # the Wave's working set
+lf open --host rex --task LOO-12        # one Task; no sibling arrivals
+lf open --host rex --task LOO-12 --copy review
+lf task view LOO-12                    # brief, workflow, Sessions and step results
+```
+
+Rex owns its splits and ordinary shells. Reopening reuses native windows without
+rerunning their tools or changing input control. Conversation viewers observe
+existing LF Sessions; `lf resume <session>` explicitly takes input or resumes saved
+provider history. An observing copy starts no new ordinary shells. Add
+`--new-shells` when creating a copy to include fresh shells; receipts count them.
+The Task viewer uses `n`/`p` to select a step and `l` to inspect its captured log.
+
+New Task windows use saved Task pane intent, then the Wave's default, then the
+builtin arrangement. Desktop and Rex read the same semantic tools; their active
+layouts remain separate. Only selected, visible tabs materialize. File drafts,
+URL tabs and background tabs remain in the saved source layout. A selected web
+page has no terminal renderer and is reported as unsupported.
+
+The Workspace tab follows shared Work changes. A Task's first start adds a
+passive Task view without taking focus or starting a provider or shell. Closing
+that tab stops following; reopening reconciles missed arrivals. Closing a Task
+tab leaves it closed during following. Missing observations never retire work.
+
+```bash
+lf desktop layout wave-default:<wave-id>             # read the default
+lf desktop layout wave-default:<wave-id> --save < layout.json
+lf task tool LOO-12 files --checkout /recorded/checkout
+lf task tool LOO-12 changes --checkout /recorded/checkout --base parent --difftool
+```
+
+Wave defaults contain `revision`, the existing pane `tree`, and `hidden` pane IDs.
+Templates select tools without capturing Sessions, execution locations or file
+drafts. Changes tabs carry a `comparison`: `working_tree` with `base`, `branch`
+with `base`/`head` SHAs, or `pull_request` with those SHAs and its `number`. Edits affect future Task materialization; saved Task layouts win.
+Files uses `LF_FILE_BROWSER` for directories, then `VISUAL`, `EDITOR`, or `vi`.
+Changes uses Git's pager for the Task's patch against the selected base, including
+untracked files. `--difftool` delegates tracked-file comparisons to Git's configured
+diff tool.
+Branch and PR intents pin both commit SHAs; `--head <sha>` reads that committed
+comparison without mixing in local changes. Editor settings may launch an
+external GUI. Paths remain separate arguments.
+
+`--server` selects a local Rex Unix server explicitly. Remote Tasks open through
+their recorded Machine's LF route and local Rex server, in separate native
+containers. Unavailable Machines stay unavailable; no local shell substitutes.
+`--no-focus` preserves the host's selected window.
+A successful server mutation does not establish app visibility or provider input
+readiness. Rex server restart can retain block IDs while replacing their commands
+with new shells; reopen preserves those blocks and does not replay commands.
+Lifecycle retirement remains owned by the shared retention policy.
+
+Herdr support is bounded to a selected Task on the current local server,
+identified by `HERDR_SOCKET_PATH`: create, reuse and focus a workspace, with direct
+argv layouts and existing Session observation. It does not implement Wave following,
+remote forwarding or live process migration. Native close removes only that
+workspace; an uncertain creation is retained for inspection before retry.
 
 ## Share a link
 

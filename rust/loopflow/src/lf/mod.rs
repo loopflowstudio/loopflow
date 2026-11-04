@@ -807,7 +807,7 @@ pub enum DesktopCommand {
     },
     /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
     Layout {
-        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
+        /// repository, wave:<durable-id>, wave-default:<durable-id>, task:<durable-id> or query:ID
         work: String,
         /// Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default)
         #[arg(long)]
@@ -1094,6 +1094,8 @@ impl TaskCommand {
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
+            | Self::View { .. }
+            | Self::Tool { .. }
             | Self::Diff { .. }
             | Self::Files { .. }
             | Self::File { .. }
@@ -1139,7 +1141,10 @@ impl WaveCommand {
 impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
+            Self::ObserveStatus { .. }
+            | Self::View { .. }
+            | Self::History { .. }
+            | Self::List { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
@@ -1628,6 +1633,8 @@ pub enum SessionCommand {
         #[arg(long)]
         agent_process: Option<String>,
     },
+    /// Observe a conversation without taking input or starting a provider
+    View { id: String },
     /// Read this conversation's native start, usage and completion receipts
     History {
         /// Session ID or provider conversation ID
@@ -2072,6 +2079,31 @@ until `lf ship`."
         #[arg(long)]
         watch: bool,
     },
+    /// Render a workspace tool in the Task's recorded checkout
+    Tool {
+        issue: String,
+        #[arg(value_enum)]
+        tool: crate::lf::commands::task_tool::Tool,
+        #[arg(long)]
+        checkout: std::path::PathBuf,
+        #[arg(long)]
+        path: Option<std::path::PathBuf>,
+        #[arg(long, default_value = "parent")]
+        base: String,
+        /// Compare to this resolved commit instead of the working tree
+        #[arg(long)]
+        head: Option<String>,
+        /// Delegate comparison display to the configured Git difftool
+        #[arg(long)]
+        difftool: bool,
+    },
+    /// Browse the Task brief, workflow and recorded runs without starting work
+    View {
+        issue: Option<String>,
+        /// Print once, including when stdout is a terminal
+        #[arg(long)]
+        once: bool,
+    },
     /// Show this Task's patch or list its changed files
     Diff {
         issue: String,
@@ -2081,6 +2113,9 @@ until `lf ship`."
         files: bool,
         #[arg(long, default_value = "parent")]
         base: String,
+        /// Compare to this resolved commit instead of the working tree
+        #[arg(long)]
+        head: Option<String>,
         /// Compare a UTF-8 draft read from stdin without writing the worktree
         #[arg(long, requires = "path")]
         draft: bool,
@@ -2211,10 +2246,12 @@ impl TaskCommand {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Status { issue, .. }
+            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
             Self::Shell { issue, .. }
+            | Self::Tool { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2239,10 +2276,12 @@ impl TaskCommand {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Status { issue, .. }
+            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
             Self::Shell { issue, .. }
+            | Self::Tool { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }

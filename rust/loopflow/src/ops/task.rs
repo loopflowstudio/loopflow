@@ -1,5 +1,5 @@
 pub(crate) mod remote;
-mod workspace;
+pub(crate) mod workspace;
 pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
@@ -222,6 +222,7 @@ pub struct TaskDiffSnapshot {
     pub issue_identifier: String,
     pub task_id: String,
     pub base_commit: String,
+    pub head_commit: Option<String>,
     pub path: Option<String>,
     pub patch: String,
     pub binary: bool,
@@ -272,6 +273,7 @@ impl<'a> From<&'a TaskCheckout> for TaskWorkspace<'a> {
 struct TaskComparison<'a> {
     checkout: TaskWorkspace<'a>,
     base_commit: &'a str,
+    head_commit: Option<&'a str>,
 }
 
 impl<'a> TaskComparison<'a> {
@@ -283,6 +285,7 @@ impl<'a> TaskComparison<'a> {
                 worktree: task.worktree()?,
             },
             base_commit: &task.base_commit,
+            head_commit: None,
         })
     }
 }

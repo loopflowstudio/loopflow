@@ -2,7 +2,7 @@ use super::{invalid, SqliteStore};
 use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
-    PaneIntent, PaneTree, WorkPaneLayout, WorkWorkspaceKey, WorkWorkspaceKind,
+    PaneIntent, PaneTree, TaskLayoutTemplate, WorkPaneLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
@@ -42,8 +42,21 @@ pub(super) fn layout_in(
         "SELECT layout_json FROM work_pane_layouts WHERE repository_id=?1 AND kind=?2 AND work_id=?3",
         params![work.repository,kind_name(&work.kind),work.id], |row| row.get(0),
     ).optional()?;
-    json.map(|json| serde_json::from_str(&json).map_err(StoreError::from))
-        .transpose()
+    if let Some(json) = json {
+        return Ok(Some(serde_json::from_str(&json)?));
+    }
+    if work.kind == WorkWorkspaceKind::Task {
+        let template: Option<String> = conn.query_row(
+            "SELECT l.layout_json FROM tasks t JOIN projects p ON p.id=t.project_id JOIN wave_task_layouts l ON l.wave_id=p.wave_id AND l.repository_id=t.repository_id WHERE t.id=?1 AND t.repository_id=?2",
+            params![work.id, work.repository], |row| row.get(0),
+        ).optional()?;
+        return template
+            .map(|json| {
+                Ok(serde_json::from_str::<TaskLayoutTemplate>(&json)?.instantiate(work.clone()))
+            })
+            .transpose();
+    }
+    Ok(None)
 }
 
 fn validate_sessions(
@@ -100,6 +113,58 @@ impl SqliteStore {
         saved.revision += 1;
         tx.execute("INSERT INTO work_pane_layouts(repository_id,kind,work_id,layout_json) VALUES(?1,?2,?3,?4) ON CONFLICT(repository_id,kind,work_id) DO UPDATE SET layout_json=excluded.layout_json",
             params![saved.work.repository,kind_name(&saved.work.kind),saved.work.id,serde_json::to_string(&saved)?])?;
+        tx.commit()?;
+        Ok(saved)
+    }
+
+    pub fn wave_task_layout(
+        &self,
+        work: &WorkWorkspaceKey,
+    ) -> StoreResult<Option<TaskLayoutTemplate>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        validate_owner(&snapshot, work)?;
+        let json: Option<String> = snapshot
+            .query_row(
+                "SELECT layout_json FROM wave_task_layouts WHERE repository_id=?1 AND wave_id=?2",
+                params![work.repository, work.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        json.map(|json| serde_json::from_str(&json).map_err(StoreError::from))
+            .transpose()
+    }
+
+    pub fn save_wave_task_layout(
+        &self,
+        work: &WorkWorkspaceKey,
+        template: &TaskLayoutTemplate,
+    ) -> StoreResult<TaskLayoutTemplate> {
+        if work.kind != WorkWorkspaceKind::Wave {
+            return Err(invalid("Task defaults belong to a Wave"));
+        }
+        template.validate().map_err(invalid)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_owner(&tx, work)?;
+        let prior: Option<String> = tx
+            .query_row(
+                "SELECT layout_json FROM wave_task_layouts WHERE repository_id=?1 AND wave_id=?2",
+                params![work.repository, work.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let revision = prior
+            .map(|json| serde_json::from_str::<TaskLayoutTemplate>(&json))
+            .transpose()?
+            .map_or(0, |prior| prior.revision);
+        if revision != template.revision {
+            return Err(invalid("Wave layout changed; read it again before editing"));
+        }
+        let mut saved = template.clone();
+        saved.revision += 1;
+        tx.execute("INSERT INTO wave_task_layouts(repository_id,wave_id,layout_json) VALUES(?1,?2,?3) ON CONFLICT(repository_id,wave_id) DO UPDATE SET layout_json=excluded.layout_json",
+            params![work.repository, work.id, serde_json::to_string(&saved)?])?;
         tx.commit()?;
         Ok(saved)
     }

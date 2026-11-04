@@ -79,6 +79,15 @@ pub enum BrowserTab {
         tabs: Vec<FileTab>,
         selected: Option<String>,
     },
+    /// Task brief and workflow, independent of associated Graph processes.
+    Task {
+        id: String,
+    },
+    /// The exact comparison, independent of its host's renderer.
+    Changes {
+        id: String,
+        comparison: ChangeComparison,
+    },
     GraphLog {
         id: String,
     },
@@ -88,10 +97,61 @@ pub enum BrowserTab {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChangeComparison {
+    WorkingTree {
+        base: String,
+    },
+    Branch {
+        base: String,
+        head: String,
+    },
+    PullRequest {
+        number: u64,
+        base: String,
+        head: String,
+    },
+}
+
+impl ChangeComparison {
+    pub fn base(&self) -> &str {
+        match self {
+            Self::WorkingTree { base }
+            | Self::Branch { base, .. }
+            | Self::PullRequest { base, .. } => base,
+        }
+    }
+    pub fn head(&self) -> Option<&str> {
+        match self {
+            Self::WorkingTree { .. } => None,
+            Self::Branch { head, .. } | Self::PullRequest { head, .. } => Some(head),
+        }
+    }
+    fn validate(&self) -> Result<(), String> {
+        let sha =
+            |value: &str| value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+        let valid = match self {
+            Self::WorkingTree { base } => matches!(base.as_str(), "parent" | "head") || sha(base),
+            Self::Branch { base, head } => sha(base) && sha(head),
+            Self::PullRequest { number, base, head } => *number > 0 && sha(base) && sha(head),
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err("Changes needs a working-tree base or two resolved commit SHAs".into())
+        }
+    }
+}
+
 impl BrowserTab {
     pub fn id(&self) -> &str {
         match self {
-            Self::Files { id, .. } | Self::GraphLog { id } | Self::Url { id, .. } => id,
+            Self::Files { id, .. }
+            | Self::Task { id }
+            | Self::Changes { id, .. }
+            | Self::GraphLog { id }
+            | Self::Url { id, .. } => id,
         }
     }
 }
@@ -236,6 +296,9 @@ impl WorkPaneLayout {
                                     return Err("a browser holds one Graph log tab".into());
                                 }
                             }
+                            BrowserTab::Task { .. } => {}
+                            BrowserTab::Changes { comparison, .. } => comparison.validate()?,
+
                             BrowserTab::Url { url, .. } => validate_url(url)?,
                         }
                     }
@@ -320,4 +383,64 @@ fn validate_tabs<'a>(
         return Err("selected tab must name a retained tab; empty tools have no selection".into());
     }
     Ok(())
+}
+
+/// A Wave's default for new Task workspaces. Targets are resolved for each Task;
+/// a template never captures another Task's Sessions, shells, or unsaved files.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskLayoutTemplate {
+    pub revision: i64,
+    pub tree: PaneTree,
+    pub hidden: BTreeSet<String>,
+}
+
+impl TaskLayoutTemplate {
+    pub fn instantiate(&self, work: WorkWorkspaceKey) -> WorkPaneLayout {
+        WorkPaneLayout {
+            work,
+            revision: 0,
+            tree: self.tree.clone(),
+            focused: None,
+            zoomed: None,
+            hidden: self.hidden.clone(),
+            drafts: Vec::new(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let key = WorkWorkspaceKey {
+            repository: "template".into(),
+            kind: WorkWorkspaceKind::Task,
+            id: "template".into(),
+        };
+        self.instantiate(key).validate()?;
+        for (_, pane) in self.tree.panes() {
+            match pane {
+                PaneIntent::Session {
+                    session_id,
+                    location,
+                } if session_id.is_some() || location.is_some() => {
+                    return Err("Wave templates cannot capture a Session or its location".into())
+                }
+                PaneIntent::Shell { tabs, .. }
+                    if tabs
+                        .iter()
+                        .any(|tab| tab.location.is_some() || tab.lf_process_id.is_some()) =>
+                {
+                    return Err("Wave templates cannot capture shell execution".into())
+                }
+                PaneIntent::Browser { location, tabs, .. }
+                    if location.is_some()
+                        || tabs.iter().any(
+                            |tab| matches!(tab, BrowserTab::Files { tabs, .. } if !tabs.is_empty()),
+                        ) =>
+                {
+                    return Err("Wave templates cannot capture file locations or documents".into());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 }

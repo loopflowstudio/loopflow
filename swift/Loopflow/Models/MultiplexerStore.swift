@@ -302,6 +302,8 @@ public final class MultiplexerStore {
                         switch tab {
                         case .files: files ?? .files(id: tab.id, tabs: [], selected: nil)
                         case .graphLog: .graphLog(id: tab.id)
+                        case .task: .task(id: tab.id)
+                        case .changes(let comparison): .changes(id: tab.id, comparison: comparison)
                         case .url(let id, let url): .url(id: id, url: url.absoluteString)
                         }
                     }, selected: selected)
@@ -336,6 +338,8 @@ public final class MultiplexerStore {
                         switch tab {
                         case .files: .files
                         case .graphLog: .graphLog
+                        case .task: .task
+                        case .changes(_, let comparison): .changes(comparison: comparison)
                         case .url(let id, let url): URL(string: url).flatMap { BrowserTab.page($0, id: id) }
                         }
                     }

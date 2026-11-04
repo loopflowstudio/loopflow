@@ -1081,9 +1081,46 @@ local incarnation survives setup changes.
 Phone source review found the remaining UX cost: changing an address requires
 Forget Machine before scanning again. Keychain stores the endpoint and verified
 Machine ID, and drafts are keyed by Machine ID, but replacement should be possible
-without first discarding the working saved connection. A direct Change address
-flow that verifies the existing Machine ID before replacement is useful next work. No physical-phone
+without first discarding the working saved connection. The next section implements
+Change address with verification of the existing Machine ID before replacement. No physical-phone
 or new native UI acceptance is claimed by these backend tests.
 
 - `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-setup-repair-clippy.log`.
 - `cargo fmt -- --check` and `git diff --check`: pass; no Swift changes or native test rerun for this backend-only repair.
+
+## Change a saved address — November 4
+
+Jack Heart's QR-first flow now offers Machine connection → Change address on the
+Task list. It reuses the onboarding form in a sheet, with scanning first and
+address entry as fallback. The existing client and Keychain entry remain until
+the new endpoint verifies the same Machine ID. Successful replacement rebuilds
+the Task workspace for that endpoint; cancellation or failure keeps the old
+connection. Switching Machines remains the separate Forget Machine flow.
+
+Review caught two UX problems. The first UI run showed an invalid-address message
+below the keyboard; the form now scrolls the message into view, and the test checks
+that it is reachable. Large-text captures put the repair sheet's redundant welcome
+heading ahead of its actions; that heading now belongs only to first connection.
+The final light/dark/large-text captures were inspected. Cancel immediately cancels
+the connection task; interactive dismissal is disabled only while connecting.
+Machine identity is checked before the single Keychain write, and cancellation
+is checked after the network reply. No Task or provider start is part of setup.
+
+The live proof saves an old address, verifies that a different Machine is rejected
+without replacing it, cancels an attempt, then verifies and saves the same Machine
+at its new address. It continues through the existing native editing, service
+restart, Task creation and 32 MiB output proofs with 512 edited acknowledgements.
+The first runner attempt stopped before XCTest because the dedicated Simulator
+had no installed app container; installing the built app resolved the prerequisite.
+These are Simulator results over real HTTPS/WSS with an explicit phone-identity
+fixture and stand-in provider, not physical-phone or provider-specific acceptance.
+
+- `xcodebuild test ... -only-testing:LoopflowiOSTests/MachinePairingTests -only-testing:LoopflowiOSUITests/MachineOnboardingTests`: 5 pass; `/tmp/mobile-address-form-final.log`, `Test-LoopflowiOS-2026.11.04_13-34-09--0800.xcresult`.
+- `mobile_machine_native_acceptance --ignored --exact`: pass; `/tmp/mobile-address-native.log`, `Test-LoopflowiOS-2026.11.04_13-37-13--0800.xcresult`.
+- `git diff --check`: pass; no Rust source changes or redundant Rust lint run in this UI unit.
+- Dedicated Simulator `Loopflow address proof` was shut down and deleted; existing Simulators and saved connections were preserved.
+
+Captures: `scratch/demo-assets/change-machine-address.png`,
+`change-machine-address-large-text.png`, and `machine-address-validation.png`.
+Physical-phone network transitions, voice/VoiceOver judgment, actual-provider
+interaction and installed Desktop update survival remain acceptance work.

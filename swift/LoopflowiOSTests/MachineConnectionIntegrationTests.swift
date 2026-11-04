@@ -39,6 +39,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         }
         let savedMachine = try await RemoteMobileClient.connect(endpoint: endpoint)
         XCTAssertFalse(savedMachine.machineID.isEmpty)
+        try await exerciseAddressReplacement(savedMachine: savedMachine)
         let client = RemoteMobileClient(savedMachine: try XCTUnwrap(MachineKeychain.load()))
         let tasks = try await client.workingTasks()
         if proof == nil { XCTAssertTrue(tasks.isEmpty, "An empty registry is required without a Session fixture") }
@@ -63,6 +64,33 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         if let session = proof?.outputSession {
             try await exerciseOutput(client: reopened, session: session, task: try XCTUnwrap(refreshed.first))
         }
+    }
+
+    private func exerciseAddressReplacement(savedMachine: SavedMachine) async throws {
+        var previousURL = try XCTUnwrap(URLComponents(url: savedMachine.endpoint, resolvingAgainstBaseURL: false))
+        previousURL.port = savedMachine.endpoint.port == 1 ? 2 : 1
+        let previous = SavedMachine(endpoint: try XCTUnwrap(previousURL.url), machineID: savedMachine.machineID)
+        try MachineKeychain.save(previous)
+        let different = SavedMachine(endpoint: previous.endpoint, machineID: "different-machine")
+        do {
+            _ = try await RemoteMobileClient.connect(endpoint: savedMachine.endpoint, replacing: different)
+            XCTFail("Changing an address must not switch Machines")
+        } catch let error as RegistryQueryError {
+            XCTAssertTrue(error.message.contains("different Machine"))
+        }
+        XCTAssertEqual(try MachineKeychain.load()?.endpoint, previous.endpoint)
+        XCTAssertEqual(try MachineKeychain.load()?.machineID, previous.machineID)
+        let canceled = Task { try await RemoteMobileClient.connect(endpoint: savedMachine.endpoint, replacing: previous) }
+        canceled.cancel()
+        do {
+            _ = try await canceled.value
+            XCTFail("Cancel cannot replace the saved address")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(try MachineKeychain.load()?.endpoint, previous.endpoint)
+        let updated = try await RemoteMobileClient.connect(endpoint: savedMachine.endpoint, replacing: previous)
+        XCTAssertEqual(updated.endpoint, savedMachine.endpoint)
+        XCTAssertEqual(updated.machineID, previous.machineID)
+        XCTAssertEqual(try MachineKeychain.load()?.endpoint, updated.endpoint)
     }
 
     private func exerciseConnectionLifecycle(savedMachine: SavedMachine) async throws {

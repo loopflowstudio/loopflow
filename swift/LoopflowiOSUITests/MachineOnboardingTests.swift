@@ -19,7 +19,10 @@ final class MachineOnboardingTests: XCTestCase {
         address.tap()
         address.typeText("example.com")
         app.buttons["Continue"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Connection issue: Enter the Tailscale address shown in Desktop’s Mobile settings."].exists)
+        let issue = app.staticTexts["Connection issue: Enter the Tailscale address shown in Desktop’s Mobile settings."]
+        XCTAssertTrue(issue.waitForExistence(timeout: 5))
+        XCTAssertTrue(issue.isHittable)
+        capture("machine-address-validation")
         XCTAssertFalse(app.buttons["Connect Machine"].exists)
         address.tap()
         address.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "example.com".count))

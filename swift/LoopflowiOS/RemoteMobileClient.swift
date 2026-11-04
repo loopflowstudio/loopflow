@@ -7,7 +7,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     init(savedMachine: SavedMachine) { self.savedMachine = savedMachine }
 
-    static func connect(endpoint: URL) async throws -> SavedMachine {
+    static func connect(endpoint: URL, replacing: SavedMachine? = nil) async throws -> SavedMachine {
         let connection = try MachineConnection(endpoint: endpoint)
         defer { connection.close() }
         let reply = try await connection.request(.bootstrap)
@@ -16,6 +16,9 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
               case .string(let machineID) = fields["id"], !machineID.isEmpty,
               ["all_view_plans", "session_owner", "owner_bridge"].allSatisfy(capabilities.contains) else {
             throw RegistryQueryError("Update the Machine service to connect from this phone.")
+        }
+        if let replacing, replacing.machineID != machineID {
+            throw RegistryQueryError("This address belongs to a different Machine. Scan the code from your original Machine’s Mobile settings.")
         }
         try Task.checkCancellation()
         let saved = SavedMachine(endpoint: endpoint, machineID: machineID)

@@ -28,6 +28,7 @@ struct MobileTaskList: View {
     private let creationClient: (any MobileTaskCreationClient)?
     private let connectionLabel: String
     private let onForget: (() -> Void)?
+    private let onChangeAddress: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
@@ -35,11 +36,13 @@ struct MobileTaskList: View {
         workspace.tasks.filter { $0.matchesMobileSearch(search) }
     }
 
-    init(client: any MobileClient, connectionLabel: String = "Offline fixture", onForget: (() -> Void)? = nil) {
+    init(client: any MobileClient, connectionLabel: String = "Offline fixture", onForget: (() -> Void)? = nil,
+         onChangeAddress: (() -> Void)? = nil) {
         _workspace = State(initialValue: MobileWorkspace(client: client))
         creationClient = client as? any MobileTaskCreationClient
         self.connectionLabel = connectionLabel
         self.onForget = onForget
+        self.onChangeAddress = onChangeAddress
     }
 
     var body: some View {
@@ -136,6 +139,9 @@ struct MobileTaskList: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Text(connectionLabel)
+                            if let onChangeAddress {
+                                Button("Change address", action: onChangeAddress)
+                            }
                             Button("Forget Machine", role: .destructive) {
                                 workspace.stopTaskUpdates()
                                 workspace.leave()

@@ -1,5 +1,8 @@
 import Foundation
 import Loopflow
+import SwiftUI
+import UIKit
+import ViewInspector
 import XCTest
 @testable import LoopflowiOS
 
@@ -30,6 +33,41 @@ final class MachinePairingTests: XCTestCase {
                         String(repeating: "a", count: 2049)] {
             XCTAssertThrowsError(try MachineAddress.decode(invalid), invalid)
         }
+    }
+
+    func testChangeAddressKeepsTheSavedConnectionAndOffersQRFirst() async throws {
+        let previous = try MachineKeychain.load()
+        let saved = SavedMachine(endpoint: try MachineAddress.decode("macbook.example.ts.net:8443"), machineID: "original-machine")
+        let form = MachineAddressView(replacing: saved) { _ in XCTFail("Opening the form cannot change the connection") }
+        XCTAssertNoThrow(try form.inspect().find(text: saved.endpoint.absoluteString))
+        XCTAssertNoThrow(try form.inspect().find(button: "Scan QR code"))
+        XCTAssertNoThrow(try form.inspect().find(button: "Enter address"))
+        XCTAssertThrowsError(try form.inspect().find(button: "Update address"), "Verify an entered address before offering to connect")
+        for (name, style, size) in [("light", ColorScheme.light, DynamicTypeSize.large),
+                                    ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
+            let view = form.environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+            let controller = UIHostingController(rootView: view)
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previousWindow = scene.keyWindow
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            controller.view.frame = window.bounds
+            controller.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(250))
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "change-machine-address-\(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            window.isHidden = true
+            previousWindow?.makeKey()
+        }
+        XCTAssertEqual(try MachineKeychain.load()?.endpoint, previous?.endpoint)
+        XCTAssertEqual(try MachineKeychain.load()?.machineID, previous?.machineID)
     }
 
     func testKeychainPreservesTheVerifiedMachineWithoutACredential() throws {

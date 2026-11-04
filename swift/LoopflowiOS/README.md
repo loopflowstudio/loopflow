@@ -115,6 +115,11 @@ last Tasks visible with an explanation; **Try again** reconnects. This path read
 the Machine’s local Work and does not synchronously refresh an external tracker.
 
 The connected Machine’s hostname replaces the fixture label in both screens.
+Choose **Machine connection → Change address** if Desktop shows a new QR code.
+Scan it or enter the new address, then choose **Update address**. Loopflow verifies
+that it is the same Machine before replacing the saved connection. Cancel or a
+failed connection leaves the old address intact. Tasks and Session drafts stay on
+the same Machine.
 **Forget Machine** removes the saved connection. Manage device access in Tailscale;
 Desktop’s **Turn off mobile access** disconnects all remote clients.
 Backgrounding closes the attachment. Returning to the app automatically restores

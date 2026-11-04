@@ -14,6 +14,50 @@ recovery remains the later PR; neither merge nor whole-Task completion is author
 The previously requested Codex execution still applies to this run, without making
 Codex a permanent product preference.
 
+## Implementation finding — November 3, 2026
+
+Implementation stopped at a repository-scope authority conflict. Jack Heart's
+accepted outcome remains unchanged; no revised scope policy has been accepted.
+
+At `da937b7f5a`, `RepoId::discover` (`repository.rs`) derives `owner/repo` from
+Git origin. `lf/commands/setting.rs::account` writes repository account routes
+using that identity, without registering a checkout. `store/sqlite.rs` stores
+and retrieves the ordered route by that identity alone, and
+`provider_account.rs::nearest_provider_route` selects it by the same identity.
+Two independent clones with the same origin therefore share one account policy.
+A route can also survive removal of its checkout.
+
+The accepted destination is one private file per main checkout, with no global
+`repos:` authority or DB preference fallback. That cannot preserve an
+origin-wide route's scope for two independent clones, future clones, or a route
+with no discoverable checkout. The prototype's lookup through
+`repository_plans` imposed an unaccepted registration requirement and selected
+one matching clone. It is not a valid migration or runtime owner. Copying the
+route into all known clones would lose the single authority and future-clone
+behavior; refusing an unavailable checkout would tie preference availability to
+runtime inventory.
+
+Remaining design decision: either explicitly change repository account policy
+to checkout scope (including a reviewed migration disposition for absent and
+multiple clones), or provide one file owner for origin-scoped policy and define
+its relation to checkout-local declarations. The latter changes the accepted
+file model; the former changes the scope-preservation requirement. Neither is
+selected by this run. This affects migration, account consumers and remote
+repository retention, not just a filename or parser choice.
+
+All 42 source-file changes from this run were archived and byte-verified before
+restoring pre-run code at `da937b7f5a709260afd39430a0be5ba17f8343ed`. The archive
+contains complete changed/new files, a tracked patch, hashes and check logs:
+`/tmp/loo-714-settings-prototype-piyvdr0m/source.tar.gz`
+(SHA256 `f0a6b73c7de4cf532df2741f3467288b8516209f0e41b28e1bdfd31be72095ee`).
+It is unfinished evidence, not a shippable implementation. No installed config
+or database was migrated. Earlier committed PR work and unrelated research remain.
+
+The complete catalogue/file/UI/remote extension remains to deliver. The prototype
+has no CLI/FFI/Swift acceptance proof; consumer migration, file invalidation,
+DTO parity, local-ID dispatch and complete retention/migration coverage remain
+unfinished. The deletion list below still applies after resolving the scope model.
+
 ## Outcome and scope
 
 Every LF-owned preference has one typed catalogue definition, consistent meaningful
@@ -187,7 +231,16 @@ No permanent compatibility reader or dual-writer DB preference layer remains aft
 Keep released and branch-readable shared config compatible until supported cutover, per
 AGENTS.md; any necessary temporary compatibility has a named removal outcome.
 
-Delete predecessors in the same coherent change:
+### Delete — do not maintain
+
+The independent capture reduction removes `graph::StoredSkill` and the duplicate
+`Skill.settings["docs"]` representation. `Skill.docs: Option<Vec<String>>` keeps
+omission, empty-list reset and authored paths on one surviving field, including
+retained JSON captures. Export ownership checks live in `skills::writable_target`;
+the caller no longer repeats them. These changes do not select a repository scope
+policy or perform any of the blocked preference migration.
+
+Remaining predecessors to delete in the same coherent migration cut:
 
 - scope_settings preference reads/writes and replaced preference-only scope_defaults /
   provider_routes paths after migrating their authored fields; preserve runtime facts.
@@ -232,5 +285,9 @@ for Rust tests and close stdin as repository guidance requires. No live paid pro
 config migration on Jack's installation or remote infrastructure provisioning is needed
 for these proofs. Follow the pursue publication boundary and show remaining demo limits.
 
-Check: plan consolidation only; no new code tests run. Previous implementation evidence
-is in settings-scope.md. Automatic failure recovery remains unimplemented separately.
+Check: archived prototype `cargo test -p loopflow --lib config::` passed 53 tests
+with inherited LF_* cleared and stdin closed; this is not acceptance of the restored
+tree or the complete extension. Previous PR evidence is in settings-scope.md;
+automatic failure recovery remains unimplemented separately.
+
+Compression check (LF_* unset, stdin closed): `cargo test -p loopflow --lib captured_docs_preserve_omission_reset_and_addition` (1 passed); `cargo test -p loopflow --lib -- skills:: config::settings:: graph:: prompt::process::tests::prepare_process_prompt --skip captured_docs_preserve_omission_reset_and_addition` (153 passed); `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Gate owns the complete extension acceptance after its scope decision.

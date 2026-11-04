@@ -22,6 +22,14 @@ Record any architectural counterexample here rather than silently weakening the
 accepted outcome. Remote profile differences are deliberate per-launch authority;
 existing runtime account/thread continuity still applies.
 
+Unresolved authority conflict (November 3 implementation): repository account
+routes currently follow Git `owner/repo` across independent and future clones,
+while the accepted private file belongs to one main checkout. Preserving that
+scope and deleting every identity-wide preference owner cannot both hold.
+`settings-catalog.md` records the source evidence, alternative design decisions,
+preserved prototype and remaining work. No scope revision is attributed to Jack
+Heart; dependent implementation stopped and pre-run code was restored.
+
 ## Duplicate implement run stopped (2026-11-02 14:25)
 
 A second `code` Graph (process 768383a6, `lf graph code`) was launched in this

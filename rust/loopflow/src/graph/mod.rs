@@ -17,7 +17,6 @@ use crate::error::LoadError;
 use crate::skills::catalog::{SkillCatalog, SkillOrigin};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(from = "StoredSkill")]
 pub struct Skill {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,47 +29,11 @@ pub struct Skill {
     pub settings: BTreeMap<String, Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_style: Option<String>,
-    /// Docs the skill includes, resolved like `--docs`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub docs: Vec<String>,
+    /// Omitted docs inherit; an explicit empty list resets lower-priority docs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-}
-
-// Retained captures keep authored settings, including default_agent, unchanged.
-// Distinguish omitted docs from an explicit empty-list reset.
-#[derive(Deserialize)]
-struct StoredSkill {
-    name: String,
-    source: Option<SkillOrigin>,
-    agent: Option<String>,
-    occurrence: Option<Box<crate::config::settings::OccurrenceSettings>>,
-    #[serde(default, flatten)]
-    settings: BTreeMap<String, Value>,
-    action_style: Option<String>,
-    #[serde(default)]
-    docs: Option<Vec<String>>,
-    content: Option<String>,
-}
-
-impl From<StoredSkill> for Skill {
-    fn from(mut saved: StoredSkill) -> Self {
-        if saved.docs.as_ref().is_some_and(Vec::is_empty) {
-            saved
-                .settings
-                .insert("docs".into(), Value::Sequence(Vec::new()));
-        }
-        Self {
-            name: saved.name,
-            source: saved.source,
-            agent: saved.agent,
-            occurrence: saved.occurrence,
-            settings: saved.settings,
-            action_style: saved.action_style,
-            docs: saved.docs.unwrap_or_default(),
-            content: saved.content,
-        }
-    }
 }
 
 impl Skill {
@@ -94,7 +57,7 @@ impl Skill {
             occurrence: None,
             settings: BTreeMap::new(),
             action_style: None,
-            docs: Vec::new(),
+            docs: None,
             content: None,
         }
     }

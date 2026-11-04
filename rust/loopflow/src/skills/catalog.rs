@@ -85,10 +85,7 @@ impl SkillSource {
             BTreeMap::new()
         };
         settings.remove("agent");
-        // Nonempty docs live on Skill; retain an explicit empty list as a reset.
-        if docs.as_ref().is_some_and(|docs| !docs.is_empty()) {
-            settings.remove("docs");
-        }
+        settings.remove("docs");
         Ok(Skill {
             name: self.name.clone(),
             source: self.path.as_ref().map(|path| SkillOrigin {
@@ -101,7 +98,7 @@ impl SkillSource {
             occurrence: None,
             settings,
             action_style: field("action_style"),
-            docs: docs.unwrap_or_default(),
+            docs,
             content: Some(body.to_string()),
         })
     }
@@ -550,8 +547,11 @@ mod tests {
             "---\ndocs: {a: b}\n---\nBad.",
         );
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        assert_eq!(catalog.load_skill("one").unwrap().docs, ["a.md"]);
-        assert_eq!(catalog.load_skill("two").unwrap().docs, ["a.md", "docs/"]);
+        assert_eq!(catalog.load_skill("one").unwrap().docs.unwrap(), ["a.md"]);
+        assert_eq!(
+            catalog.load_skill("two").unwrap().docs.unwrap(),
+            ["a.md", "docs/"]
+        );
         assert!(matches!(
             catalog.load_skill("bad"),
             Err(crate::error::LoadError::InvalidSkill(_))

@@ -356,7 +356,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     let mut spec = opts.gather_spec();
     if let Some(skill) = &skill {
-        spec.docs.extend(skill.docs.iter().cloned());
+        spec.docs.extend(skill.docs.iter().flatten().cloned());
     }
 
     // Gather document sources through a single pipeline.
@@ -2157,7 +2157,7 @@ mod tests {
                 occurrence: None,
                 settings: Default::default(),
                 action_style: None,
-                docs: Vec::new(),
+                docs: None,
             }),
             ..Default::default()
         };
@@ -2179,7 +2179,7 @@ mod tests {
                 occurrence: None,
                 settings: Default::default(),
                 action_style: None,
-                docs: Vec::new(),
+                docs: None,
             }),
             ..Default::default()
         };

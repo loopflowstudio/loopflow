@@ -947,7 +947,7 @@ Test skill body.
                     occurrence: None,
                     settings: Default::default(),
                     action_style: Some("procedural".to_string()),
-                    docs: Vec::new(),
+                    docs: None,
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,

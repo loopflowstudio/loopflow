@@ -164,17 +164,9 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             );
         }
         let blocked = exports
-            .keys()
-            .filter(|name| {
-                !writable_target(base, &root, name, &exports[*name].inputs)
-                    || exports[*name].inputs.iter().any(|(file, content)| {
-                        let path = root.join(name).join(file);
-                        path.is_symlink()
-                            || (path.exists()
-                                && fs::read_to_string(path).ok().as_ref() != Some(content))
-                    })
-            })
-            .cloned()
+            .iter()
+            .filter(|(name, export)| !writable_target(base, &root, name, &export.inputs))
+            .map(|(name, _)| name.clone())
             .collect::<BTreeSet<_>>();
         let blocked_sources = blocked.iter().map(|name| sources[name].clone()).collect();
         targets.push((root, exports, blocked, blocked_sources));
@@ -279,6 +271,13 @@ fn writable_target(
     {
         return false;
     }
+    if inputs.iter().any(|(name, content)| {
+        let input = directory.join(name);
+        input.is_symlink()
+            || (input.exists() && fs::read_to_string(input).ok().as_ref() != Some(content))
+    }) {
+        return false;
+    }
     if path.exists() {
         return path.is_file() && is_generated(&path);
     }
@@ -288,13 +287,7 @@ fn writable_target(
         || fs::read_dir(&directory).is_ok_and(|mut entries| {
             entries.all(|entry| {
                 entry.is_ok_and(|entry| {
-                    let path = entry.path();
-                    !path.is_symlink()
-                        && inputs
-                            .get(&entry.file_name().to_string_lossy().into_owned())
-                            .is_some_and(|content| {
-                                fs::read_to_string(path).ok().as_ref() == Some(content)
-                            })
+                    inputs.contains_key(entry.file_name().to_string_lossy().as_ref())
                 })
             })
         })

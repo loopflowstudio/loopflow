@@ -489,7 +489,7 @@ mod tests {
                 occurrence: None,
                 settings: Default::default(),
                 action_style: None,
-                docs: Vec::new(),
+                docs: None,
             }),
             message: Some("Fix this".into()),
             clipboard: Some("🦀 $reference\r\n".repeat(10_000)),

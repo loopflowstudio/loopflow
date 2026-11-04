@@ -357,11 +357,11 @@ fn skill_values(skill: &Skill) -> Value {
     if let Some(agent) = &skill.agent {
         insert(&mut values, &["agent"], agent.clone().into());
     }
-    if !skill.docs.is_empty() {
+    if let Some(docs) = &skill.docs {
         insert(
             &mut values,
             &["docs"],
-            serde_yaml_ng::to_value(&skill.docs).expect("docs serialize"),
+            serde_yaml_ng::to_value(docs).expect("docs serialize"),
         );
     }
     values
@@ -907,11 +907,40 @@ mod tests {
         )
         .unwrap();
         assert_eq!(resolved.config.agent(), "claude");
-        assert_eq!(skill.settings["docs"], Value::Sequence(vec![]));
+        assert_eq!(skill.docs, Some(vec![]));
         assert_eq!(
             resolve_layers(&[], Some(&skill)).unwrap().config.agent(),
             "codex"
         );
+    }
+
+    #[test]
+    fn captured_docs_preserve_omission_reset_and_addition() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        for (declaration, expected) in [
+            ("", vec!["inherited.md"]),
+            (",\"docs\":[]", vec![]),
+            (",\"docs\":[\"skill.md\"]", vec!["inherited.md", "skill.md"]),
+        ] {
+            let skill: Skill = serde_json::from_str(&format!(
+                "{{\"name\":\"implement\",\"default_agent\":\"codex\"{declaration}}}"
+            ))
+            .unwrap();
+            let saved = serde_json::to_string(&skill).unwrap();
+            assert_eq!(serde_json::from_str::<Skill>(&saved).unwrap(), skill);
+            assert_eq!(skill.docs.is_none(), declaration.is_empty());
+            assert!(!skill.settings.contains_key("docs"));
+            let resolved = resolve_layers(
+                &[layer(
+                    ConfigLayer::Builtin,
+                    SettingScope::Global,
+                    "docs: [inherited.md]",
+                )],
+                Some(&skill),
+            )
+            .unwrap();
+            assert_eq!(resolved.config.docs, expected);
+        }
     }
 
     #[test]

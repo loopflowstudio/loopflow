@@ -22,6 +22,8 @@ from resource_envelope import _lock_recovery, load_policy
 LABEL = "com.loopflow.disk-cleanup"
 MARKER = "# loopflow:disk-cleanup"
 BUILD_NAMES = {"target", "node_modules", ".venv", ".build", "DerivedData"}
+XCODE_CACHE_NAMES = {"ModuleCache.noindex", "SDKStatCaches.noindex", "CompilationCache.noindex"}
+DISCOVERY_MAX_ENTRIES = 100_000
 BUILDERS = re.compile(
     r"^(cargo|rustc|rustdoc|swift|xcodebuild|clang|gcc|cc$|c\+\+$|ld$|"
     r"ninja|make|cmake|node|npm|npx|yarn|pnpm|uv$|python|go$|java|gradle|bazel)",
@@ -61,6 +63,10 @@ class Activity:
 
 def _within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
+
+
+def _owning_checkout(path: Path) -> Path | None:
+    return next((parent for parent in (path, *path.parents) if (parent / ".git").exists()), None)
 
 
 def _stop_group(process: subprocess.Popen) -> None:
@@ -195,6 +201,8 @@ class Cleaner:
                 if time.time() >= deadline:
                     raise RuntimeError("content inspection exceeded 30 seconds")
                 path = pending.pop()
+                if path.name == ".git":
+                    raise ValueError("embedded Git checkout")
                 info = path.lstat()
                 if info.st_dev != device:
                     raise ValueError("nested mount")
@@ -218,7 +226,7 @@ class Cleaner:
             return held
         minutes = (
             self._build_minutes()
-            if candidate.checkout
+            if candidate.category == "build"
             else (30 if candidate.category == "trash" else 7) * 1440
         )
         if newest > time.time() - minutes * 60:
@@ -242,28 +250,58 @@ class Cleaner:
                 return "tracked content"
         return None
 
-    def _builds(self, checkout: Path) -> list[Candidate]:
+    def _builds(self) -> list[Candidate]:
         candidates = []
-        pending = [(checkout, 0)]
+        derived = self.home / "Library/Developer/Xcode/DerivedData"
+        pending = [(self.src, True), (derived, False)]
+        deadline = time.time() + 30
+        inspected = 0
         while pending:
-            parent, depth = pending.pop()
+            parent, recursive = pending.pop()
             self._check_time()
-            for path in parent.iterdir():
-                if path.name == ".git" or not path.is_dir():
-                    continue
-                if path.name in BUILD_NAMES:
-                    candidates.append(Candidate(path, "build", checkout))
-                elif not path.is_symlink() and depth < 2:
-                    pending.append((path, depth + 1))
+            if time.time() >= deadline:
+                self._failure("build discovery exceeded 30 seconds")
+                return candidates
+            if parent.is_symlink() or parent.resolve() != parent:
+                continue
+            try:
+                with os.scandir(parent) as entries:
+                    for entry in entries:
+                        self._check_time()
+                        inspected += 1
+                        if inspected > DISCOVERY_MAX_ENTRIES or time.time() >= deadline:
+                            self._failure("build discovery exceeded 30 seconds or 100000 entries")
+                            return candidates
+                        if entry.name == ".git" or not entry.is_dir(follow_symlinks=False):
+                            continue
+                        path = Path(entry.path)
+                        if not recursive:
+                            # Never promote an emptied project to a whole candidate:
+                            # later runs must still preserve its package source.
+                            outputs = (
+                                [path]
+                                if path.name in XCODE_CACHE_NAMES
+                                else [path / "Build", path / "Index.noindex"]
+                            )
+                            candidates.extend(
+                                Candidate(output, "build", _owning_checkout(output))
+                                for output in outputs
+                                if output.is_dir()
+                            )
+                        elif path.name in BUILD_NAMES and not (path / ".git").exists():
+                            checkout = _owning_checkout(path)
+                            if checkout:
+                                candidates.append(Candidate(path, "build", checkout))
+                        else:
+                            pending.append((path, True))
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                self._failure(f"discovery {parent}: {exc}")
         return candidates
 
     def _candidates(self) -> list[Candidate]:
-        candidates = []
-        if self.src.exists():
-            for checkout in sorted(self.src.iterdir()):
-                if checkout.is_symlink() or not (checkout / ".git").exists():
-                    continue
-                candidates.extend(self._builds(checkout))
+        candidates = self._builds()
         for path in self.lf_home.glob("runs/*/*"):
             if path.is_dir():
                 candidates.append(Candidate(path, "captures"))
@@ -452,6 +490,11 @@ class Cleaner:
             self._failure(str(exc))
         signal.setitimer(signal.ITIMER_REAL, 0)
         after = shutil.disk_usage(self.home).free
+        self._note(
+            f"{'incomplete' if self.failures else 'done'}: {after} bytes free, "
+            f"delta {after - before}; removed {self.removed_bytes} allocated bytes; "
+            f"failures={len(self.failures)}"
+        )
         receipt = {
             "started_free_bytes": before,
             "finished_free_bytes": after,
@@ -469,11 +512,6 @@ class Cleaner:
         temp = target.with_suffix(".json.tmp")
         temp.write_text(json.dumps(receipt, indent=2) + "\n")
         temp.replace(target)
-        self._note(
-            f"{'incomplete' if self.failures else 'done'}: {after} bytes free, "
-            f"delta {after - before}; removed {self.removed_bytes} allocated bytes; "
-            f"failures={len(self.failures)}"
-        )
         return receipt["exit_code"]
 
 

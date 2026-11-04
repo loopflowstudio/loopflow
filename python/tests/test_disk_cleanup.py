@@ -432,6 +432,157 @@ def _build_fixture(runner, age_minutes: int, size: int = 4096) -> Path:
 
 
 @pytest.mark.parametrize(
+    "protection", [None, "recent", "open", "builder", "tracked", "not-ignored"]
+)
+def test_nested_worktree_discovery_uses_owning_checkout(cleaner, monkeypatch, protection) -> None:
+    repo = _build_fixture(cleaner, 300)
+    _git(repo, "add", ".gitignore")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+    worktree = repo / "work/teams/tasks/nested/feature"
+    _git(repo, "worktree", "add", "-qb", "feature", str(worktree))
+    source = worktree / "unpublished.rs"
+    source.write_text("unpublished work")
+    _git(worktree, "add", "unpublished.rs")
+    _git(worktree, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "unpublished")
+    head = _git(worktree, "rev-parse", "HEAD")
+    source.write_text("unfinished changes")
+    output = worktree / "packages/one/two/three/target/debug/output"
+    _write(output, 3)
+    _age_tree(output.parent.parent, 3)
+    if protection == "recent":
+        _age(output, 0)
+    elif protection == "open":
+        monkeypatch.setattr(
+            cleaner, "_activity", lambda: cleanup.Activity(frozenset({output}), frozenset())
+        )
+    elif protection == "builder":
+        monkeypatch.setattr(
+            cleaner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset({worktree}))
+        )
+    elif protection == "tracked":
+        _git(worktree, "add", "-f", str(output))
+    elif protection == "not-ignored":
+        (worktree / ".gitignore").write_text("")
+
+    assert cleaner.run() == 0
+    assert output.exists() == (protection is not None)
+    assert source.read_text() == "unfinished changes"
+    assert _git(worktree, "rev-parse", "HEAD") == head
+    assert (repo / "target").exists() == (protection == "builder")
+
+
+@pytest.mark.parametrize("link_ancestor", [False, True])
+def test_nested_discovery_does_not_follow_symlinks(cleaner, link_ancestor: bool) -> None:
+    repo = _build_fixture(cleaner, 300)
+    external = cleaner.home / "outside"
+    output = external / "target/debug/output"
+    _write(output, 3)
+    _age_tree(external, 3)
+    nested = repo / "nested/deep"
+    nested.mkdir(parents=True)
+    (nested / ("alias" if link_ancestor else "target")).symlink_to(
+        external if link_ancestor else external / "target"
+    )
+    assert cleaner.run() == 0
+    assert output.exists()
+    assert not (repo / "target").exists()
+
+
+def test_generated_root_with_embedded_checkout_preserves_unpublished_source(cleaner) -> None:
+    repo = _build_fixture(cleaner, 300)
+    nested = repo / "target/debug/dependency"
+    nested.mkdir()
+    _git(nested, "init", "-q")
+    _write(nested / "unpublished.rs", 3)
+    _age_tree(repo / "target", 3)
+    assert cleaner.run() == 0
+    assert (nested / "unpublished.rs").exists()
+    assert (nested / ".git").exists()
+    assert any(entry.get("reason") == "embedded Git checkout" for entry in cleaner.entries)
+
+
+def test_global_derived_data_reclaims_idle_projects_and_preserves_open_recent_and_symlinks(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    derived = home / "Library/Developer/Xcode/DerivedData"
+    for name in ("idle", "open", "recent"):
+        _write(derived / name / "Build/output", 3, 1024 * 1024)
+        _age_tree(derived / name, 3)
+    _age(derived / "recent/Build/output", 0)
+    external = home / "unpublished/source.swift"
+    _write(external, 3)
+    (derived / "alias").symlink_to(external.parent)
+    with (derived / "open/Build/output").open("rb"):
+        out = _run(tmp_path)
+    assert not (derived / "idle/Build").exists(), out
+    assert (derived / "open/Build/output").exists(), out
+    assert (derived / "recent/Build/output").exists(), out
+    assert external.exists(), out
+    receipt = json.loads((home / "Library/Logs/loopflow-disk-cleanup.json").read_text())
+    assert receipt["removed_allocated_bytes"] >= 1024 * 1024
+
+
+@pytest.mark.parametrize("git_checkout", [False, True])
+def test_global_derived_data_reclaims_build_beside_unpublished_package_source(
+    cleaner, git_checkout: bool
+) -> None:
+    project = cleaner.home / "Library/Developer/Xcode/DerivedData/project"
+    source = project / "SourcePackages/checkouts/package"
+    source.mkdir(parents=True)
+    if git_checkout:
+        _git(source, "init", "-q")
+    _write(source / "unpublished.swift", 3)
+    for name in ("Build", "Index.noindex"):
+        _write(project / name / "output", 3)
+    cache = project.parent / "ModuleCache.noindex"
+    _write(cache / "module", 3)
+    _age_tree(cache, 3)
+    _age_tree(project, 3)
+    assert cleaner.run() == 0
+    assert not (project / "Build").exists()
+    assert not (project / "Index.noindex").exists()
+    assert not cache.exists()
+    # Removing Build updates the project mtime. Age it again to prove that a
+    # later unattended cycle preserves source even without Git metadata.
+    _age_tree(project, 3)
+    assert cleaner.run() == 0
+    assert (source / "unpublished.swift").exists()
+    assert (source / ".git").exists() == git_checkout
+
+
+@pytest.mark.parametrize("protection", ["tracked", "embedded-checkout", "symlink-ancestor"])
+def test_global_derived_data_preserves_source_and_symlink_targets(cleaner, protection) -> None:
+    root = cleaner.home / "Library/Developer/Xcode"
+    output = root / "DerivedData/project/Build/output"
+    _write(output, 3)
+    if protection == "tracked":
+        _git(root, "init", "-q")
+        (root / ".gitignore").write_text("DerivedData/\n")
+        _git(root, "add", "-f", str(output))
+    elif protection == "embedded-checkout":
+        _git(output.parent, "init", "-q")
+        _write(output.parent / "unpublished.swift", 3)
+    else:
+        external = cleaner.home / "external"
+        (root / "DerivedData").rename(external)
+        (root / "DerivedData").symlink_to(external)
+    _age_tree(root, 3)
+    assert cleaner.run() == 0
+    assert output.exists()
+
+
+def test_build_discovery_limit_reports_incomplete_and_retains_uninspected_output(
+    cleaner, monkeypatch
+) -> None:
+    repo = _build_fixture(cleaner, 300)
+    monkeypatch.setattr(cleanup, "DISCOVERY_MAX_ENTRIES", 1)
+    assert cleaner.run() == 1
+    assert (repo / "target/debug/output").exists()
+    assert any("build discovery exceeded" in failure for failure in cleaner.failures)
+
+
+@pytest.mark.parametrize(
     "free_gib,minutes,removed", [(80, 120, False), (50, 120, True), (10, 30, True), (10, 5, False)]
 )
 def test_pressure_changes_retention_without_removing_recent_output(
@@ -758,6 +909,23 @@ def test_failed_log_write_does_not_prevent_reclamation(
     receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
     assert receipt["removed_allocated_bytes"] > 0
     assert any(entry["status"] == "removed" for entry in receipt["candidates"])
+
+
+def test_final_log_failure_is_in_receipt_and_exit_status(cleaner, monkeypatch) -> None:
+    repo = _build_fixture(cleaner, 300)
+
+    def failed_final_output(message, **kwargs):
+        if "done:" in message:
+            raise OSError("final output unavailable")
+        print(message, **kwargs)
+
+    monkeypatch.setattr(cleanup, "print", failed_final_output, raising=False)
+    assert cleaner.run() == 1
+    assert not (repo / "target").exists()
+    receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
+    assert receipt["exit_code"] == 1
+    assert any("final output unavailable" in failure for failure in receipt["failures"])
+    assert receipt["removed_allocated_bytes"] > 0
 
 
 def test_newer_backup_directory_or_symlink_cannot_displace_newest_backup(cleaner) -> None:

@@ -43,9 +43,20 @@ Launchd starts it in a clean environment; it invokes `~/.local/bin/lf` explicitl
 Desktop/helper pairing remains owned by `lf install`.
 
 The cleaner inventories ignored, untracked `target`, `.build`, `DerivedData`,
-`node_modules` and `.venv` roots within three levels of checkouts directly under
-`~/src` (`LOOPFLOW_SRC` overrides it). It removes whole idle roots, or independent
-Cargo debug/release profiles when the target root is retained. Open output and
+`node_modules` and `.venv` roots in checkouts anywhere under `~/src`
+(`LOOPFLOW_SRC` overrides it). Nested worktrees use their own Git index and ignore
+rules. Discovery skips Git metadata, symlinks and generated roots; it stops after
+30 seconds or 100,000 entries and reports incomplete coverage.
+
+Global `~/Library/Developer/Xcode/DerivedData` is included too. Project `Build`
+and `Index.noindex` directories are separate candidates, preserving adjacent
+package source across repeated runs. ModuleCache.noindex, SDKStatCaches.noindex
+and CompilationCache.noindex are whole shared-cache candidates. Output containing
+an embedded Git checkout is retained. Git checks also apply when global output
+belongs to a checkout.
+
+It removes whole idle roots, or independent Cargo debug/release profiles when
+the target root is retained. Open output and
 builders in a checkout retain output; an idle shell in the checkout does not.
 Tracked files, symlink roots/ancestors, recent output and unknown inspection are
 retained. Direct builds starting during cleanup can still race inspection;

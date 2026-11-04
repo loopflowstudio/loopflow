@@ -63,33 +63,19 @@ prompt/stop callbacks from the generated hook settings, preserves silent work
 past the detached grace and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
-`transport_tests::retained_hooks_survive_upgrade` replaces a fixture lf entry
-while its native provider keeps the old `__planning-check` Stop declaration.
-It checks settlement through ContextBlock, subagent exclusion, retained identity
-and real delivery errors.
-`session_record::runtime::tests::resume_*dead_owners*` runs recovery in another
-process after leader death. Natural helper exit permits recovery with Task,
-history and steers retained; persistent helpers refuse it without signaling or
-settling the attachment.
-`transport_tests::resumed_session_completes_turns_after_build_replacement_and_viewer_return`
-submits a retained draft through public resume, follows the replacement build,
-completes a turn, then detaches and returns for another. The provider reloads
-history and rejects seed replay. Session, capture and Task stay fixed; only owner
-replacement changes the AgentProcess and fence. These stand-in fixtures use the
-candidate's wire/schema; released-version and installed-provider recovery need
-separate proof.
-`transport_tests::unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn`
-pauses a superseded owner holding edited input, a pending provider request and
-later queued keystrokes. Failed resume preserves the owner; after transport returns,
-the same provider completes the request, submits the retained draft and accepts
-another turn after viewer return. It checks exact history, Session/Task/capture
-identity and the unchanged attachment fence. It proves no repair of a permanently
-unreachable transport.
 
-`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
-holds a real SQLite writer while input is queued. Control and viewer return
-remain responsive; the provider receives nothing until retention can commit,
-then receives the original request once and accepts continued input.
+Upgrade recovery also needs `transport_tests`: retained hooks must settle through
+ContextBlock, exclude subagents and report real delivery errors. Public resume
+must retain drafts, requests, history and Session/Task/capture identity through
+build replacement and viewer return; only provider replacement changes its fence.
+An unanswering protected owner survives failed attachment and completes continued
+turns after transport returns. Under SQLite contention, control and viewer return
+stay responsive; queued input arrives once, only after retention commits.
+`session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
+natural helper exit permits continuation, persistent helpers refuse it without
+signals or settlement, and both retain Task/history/steers. These stand-ins use
+candidate wire/schema; released-version, permanently broken transport and
+installed-provider recovery still need separate proof.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

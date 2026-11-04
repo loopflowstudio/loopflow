@@ -1219,7 +1219,7 @@ pub(crate) fn end_owner(
 
 /// Whether a running owner answers its socket. This observes reachability,
 /// not whether its provider can safely be replaced.
-pub(crate) fn answering(owner: &crate::id::LfProcessId) -> bool {
+fn answering(owner: &crate::id::LfProcessId) -> bool {
     match crate::transport::controlled(owner) {
         Ok(_) => true,
         Err(error) => {

@@ -1372,19 +1372,11 @@ read -r answer < /dev/tty
 printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
 "#,
     );
-    let mut owner = fixture.serve(
-        true,
-        &[
-            env!("CARGO_BIN_EXE_lf"),
-            "--interactive",
-            "--agent",
-            "claude",
-            ":",
-            "one original input",
-        ],
-    );
-    owner.env("PATH", path);
-    let owner = fixture.owner(owner);
+    let owner = fixture.owner(fixture.native(
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &path,
+        "one original input",
+    ));
     let launched = fixture.wait_file("launches");
     let pid = launched.trim().split(':').next().unwrap();
     let sql = fixture.sql();
@@ -2185,19 +2177,8 @@ fn detached_sessions_end_after_their_limit() {
     for input in [
         "idle", "viewed", "busy", "graph", "step", "stale", "talking",
     ] {
-        let mut owner = fixture.serve(
-            true,
-            &[
-                env!("CARGO_BIN_EXE_lf"),
-                "--interactive",
-                "--agent",
-                "claude",
-                ":",
-                input,
-            ],
-        );
-        owner.env("PATH", &path);
-        let owner = fixture.owner(owner);
+        let owner =
+            fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, input));
         viewers.push(fixture.viewer(&owner, false));
         owners.push(owner);
     }
@@ -3211,30 +3192,21 @@ impl Terminal {
     }
 }
 
-/// A Session whose owner runs another lf build than this test binary, with
-/// that build as its entry: `(owner, session)`.
-fn owner_on_another_build(fixture: &Fixture, path: &str) -> (String, String) {
+/// An idle owner on another build ends; resume continues its saved conversation.
+#[test]
+fn resume_takes_over_an_owner_from_another_build() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
     let other = fixture.home.path().join("bin/lf-other");
     other_build(&other);
-    let lf = other.to_str().unwrap();
-    let mut owner = fixture.command_from(&other, &["session", "serve", "--terminal"]);
-    owner
-        .args(["--", lf, "--interactive", "--agent", "claude", ":", "hello"])
-        .env("LF_BIN", lf)
-        .env("PATH", path);
-    let owner = fixture.owner(owner);
+    let mut command = fixture.native(&other, &path, "hello");
+    command.env("LF_BIN", &other);
+    let previous = fixture.owner(command);
     fixture.launches(1);
-    let session = fixture.session_of_owner(&owner);
-    (owner, session)
-}
-
-/// `lf resume` on `session`, held by `previous` on another build: the owner
-/// ends and the conversation resumes here from its saved history. Returns
-/// what the viewer told the person.
-fn takes_over(fixture: &Fixture, path: &str, previous: &str, session: &str) -> String {
+    let session = fixture.session_of_owner(&previous);
     let mut viewer = fixture
-        .command(&["session", "resume", session])
-        .env("PATH", path)
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -3245,8 +3217,8 @@ fn takes_over(fixture: &Fixture, path: &str, previous: &str, session: &str) -> S
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == session,
         "reopened without history: {line}"
     );
-    fixture.ends(previous);
-    let current = fixture.owner_of(session);
+    fixture.ends(&previous);
+    let current = fixture.owner_of(&session);
     assert_ne!(current, previous);
     assert!(
         viewer.try_wait().unwrap().is_none(),
@@ -3255,18 +3227,7 @@ fn takes_over(fixture: &Fixture, path: &str, previous: &str, session: &str) -> S
     viewer.kill().unwrap();
     let output = viewer.wait_with_output().unwrap();
     fixture.stop(&current);
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-/// `lf resume` on a conversation whose owner runs another lf build never
-/// negotiates with it: the owner ends and the conversation resumes here from
-/// its saved history, as it does for the owners `lf install` leaves behind.
-#[test]
-fn resume_takes_over_an_owner_from_another_build() {
-    let fixture = Fixture::new();
-    let path = fixture.waiting_provider();
-    let (previous, session) = owner_on_another_build(&fixture, &path);
-    let stderr = takes_over(&fixture, &path, &previous, &session);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Moved") && stderr.contains("continuing on "),
         "{stderr}"
@@ -3361,19 +3322,11 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
 fn opening_takes_over_from_an_owner_that_never_answers() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
-    let mut owner = fixture.serve(
-        true,
-        &[
-            env!("CARGO_BIN_EXE_lf"),
-            "--interactive",
-            "--agent",
-            "claude",
-            ":",
-            "one original input",
-        ],
-    );
-    owner.env("PATH", &path);
-    let owner = fixture.owner(owner);
+    let owner = fixture.owner(fixture.native(
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &path,
+        "one original input",
+    ));
     let launched = fixture.launches(1).remove(0);
     let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
     let session = session_of(&fixture.sql(), &launched);

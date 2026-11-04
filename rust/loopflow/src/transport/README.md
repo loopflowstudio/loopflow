@@ -66,7 +66,8 @@ without the policy needs another resume after its turn. An unanswering protected
 owner reports attachment failure without ending its provider or replaying input.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
-omit `--dry-run` to move them. The sweep ends owners directly; existing viewers
+omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
+ends idle owners directly; existing viewers
 may close and need `lf resume` again. Graph runners keep running and launch each
 next step through the entry. Owners and runners whose store has advanced beyond
 their reader floor cannot recover themselves through this policy.

@@ -286,7 +286,17 @@ ordinary history. Native editing, service interruption, passive foreground retur
 and a context-dependent reply must keep one provider process. This optional check
 needs network/account availability and is never part of ordinary CI.
 
-The same acceptance includes a 32 MiB output stream paced by an active viewer.
+For Codex, set `LOOPFLOW_MOBILE_CODEX` to its signed-in executable and select
+`mobile_machine_codex_acceptance` with the same host/Simulator variables. This
+runs a fresh conversation through Loopflow's private app server and native TUI,
+preserving both processes across the same editing/recovery checks. The wrapper
+disables daemon auto-start, hooks, plugins, apps, multi-agent, shell, browser and
+computer-use features; the prompt requests replies without tools. It uses the
+normal account home and retains the test transcript there. Existing conversations
+and the shared Codex daemon are not selected. This is also opt-in, never ordinary CI.
+
+The deterministic stand-in acceptance also includes a 32 MiB output stream paced
+by an active viewer.
 A second viewer stops reading, disconnects under the owner's bounded policy, then
 reattaches to the current screen without taking control. The active viewer feeds
 the mounted native terminal through MobileWorkspace and verifies its final screen.

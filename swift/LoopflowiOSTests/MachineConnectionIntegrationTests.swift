@@ -378,7 +378,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         try await wait("Real provider did not grant input") { workspace.state == .controlling }
         controller.update(theme: .light)
         var acceptedFixtureFolder = false
-        try await wait("Real Claude did not answer the initial prompt", seconds: 60) {
+        try await wait("Real provider did not answer the initial prompt", seconds: 60) {
             // This fresh disposable repository belongs to the acceptance runner.
             // Leave any login/account dialog to the caller instead of operating it.
             if !acceptedFixtureFolder && screen().contains("Yes, I trust this folder") {
@@ -410,11 +410,15 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         workspace.requestControl()
         try await wait("Real provider did not grant input after foreground return") { workspace.state == .controlling }
         controller.update(theme: .light)
-        controller.terminal.insertText("Append _AGAIN to your last answer.")
+        let followup = "Append _AGAIN to your last answer."
+        controller.terminal.insertText(followup)
+        XCTAssertEqual(workspace.state, .controlling)
+        // Confirm the draft is visible before the separate submit action.
+        try await wait("Real provider did not render input after foreground return") { screen().contains(followup) }
         controller.terminal.insertText("\n")
         try await wait("Real provider lost the conversation context", seconds: 60) { screen().contains("MOBILE_EDITED_AGAIN") }
         XCTAssertEqual(workspace.sessionID, proof.session)
-        print("Real Claude acceptance: initial reply, edited draft, service restart, passive foreground recovery, contextual reply")
+        print("Real provider acceptance: initial reply, edited draft, service restart, passive foreground recovery, contextual reply")
     }
 
     private func exerciseSession(_ proof: SessionProof, client: RemoteMobileClient,

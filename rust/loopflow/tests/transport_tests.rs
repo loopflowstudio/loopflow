@@ -232,9 +232,12 @@ impl Fixture {
     }
     /// Install a stand-in first on PATH without invoking a Machine provider.
     fn provider(&self, script: &str) -> String {
+        self.named_provider("claude", script)
+    }
+    fn named_provider(&self, name: &str, script: &str) -> String {
         let bin = self.home.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let provider = bin.join("claude");
+        let provider = bin.join(name);
         std::fs::write(&provider, script).unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
         format!(
@@ -4311,11 +4314,20 @@ fn mobile_machine_native_acceptance() {
 fn mobile_machine_claude_acceptance() {
     let claude = PathBuf::from(std::env::var("LOOPFLOW_MOBILE_CLAUDE").unwrap());
     assert!(claude.is_absolute() && claude.is_file());
-    mobile_native_acceptance(Some(&claude));
+    mobile_native_acceptance(Some(("claude", &claude)));
 }
 
 #[cfg(target_os = "macos")]
-fn mobile_native_acceptance(claude: Option<&Path>) {
+#[test]
+#[ignore = "requires mobile host fixtures plus LOOPFLOW_MOBILE_CODEX pointing to the signed-in Codex executable"]
+fn mobile_machine_codex_acceptance() {
+    let codex = PathBuf::from(std::env::var("LOOPFLOW_MOBILE_CODEX").unwrap());
+    assert!(codex.is_absolute() && codex.is_file());
+    mobile_native_acceptance(Some(("codex", &codex)));
+}
+
+#[cfg(target_os = "macos")]
+fn mobile_native_acceptance(provider: Option<(&str, &Path)>) {
     let simulator = std::env::var("LOOPFLOW_MOBILE_SIMULATOR").unwrap();
     let endpoint = std::env::var("LOOPFLOW_MOBILE_ENDPOINT").unwrap();
     let host_status: Value = serde_json::from_slice(
@@ -4352,10 +4364,17 @@ printf '%s\n' "$answer" >> "$HOME/answers"
 printf '\r\naccepted: %s\r\n' "$answer"
 "#,
     );
-    let path = if let Some(claude) = claude {
-        fixture.provider(&format!(
-            "#!/bin/sh\nif [ \"$1\" != --version ]; then printf '%s\\n' \"$$\" >> \"$LF_HOME/launches\"; fi\nexec {} --safe-mode --strict-mcp-config --tools '' \"$@\"\n",
-            shlex::try_quote(claude.to_str().unwrap()).unwrap()
+    let path = if let Some((name, executable)) = provider {
+        let options = match name {
+            "claude" => "--safe-mode --strict-mcp-config --tools ''",
+            // Both the app-server and its native TUI use this wrapper. Each
+            // remains fixture-owned; neither attaches to the user's daemon.
+            "codex" => "--disable daemon_auto_start --disable hooks --disable plugins --disable apps --disable multi_agent --disable shell_tool --disable browser_use --disable computer_use",
+            _ => unreachable!("the opt-in tests name their provider"),
+        };
+        fixture.named_provider(name, &format!(
+            "#!/bin/sh\nif [ \"$1\" != --version ]; then printf '%s\\n' \"$$\" >> \"$LF_HOME/launches\"; fi\nexec {} {options} \"$@\"\n",
+            shlex::try_quote(executable.to_str().unwrap()).unwrap()
         ))
     } else {
         path
@@ -4374,17 +4393,23 @@ printf '\r\naccepted: %s\r\n' "$answer"
         "{}",
         String::from_utf8_lossy(&portfolio.stderr)
     );
-    let mut command = fixture.native(
-        Path::new(env!("CARGO_BIN_EXE_lf")),
-        &path,
-        if claude.is_some() {
-            "Do not use any tools. Reply only with the concatenation of MOBILE and _READY."
-        } else {
-            "Mobile acceptance"
-        },
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-i",
+            "-a",
+            provider.map_or("claude", |(name, _)| name),
+            ":",
+            if provider.is_some() {
+                "Do not use any tools. Reply only with the concatenation of MOBILE and _READY."
+            } else {
+                "Mobile acceptance"
+            },
+        ],
     );
     command.env("PATH", &path);
-    if claude.is_some() {
+    if provider.is_some() {
         // The CLI uses its normal account without copying or inspecting secrets.
         // LF_HOME still isolates every Loopflow record and process.
         command.env("HOME", std::env::var_os("HOME").unwrap());
@@ -4392,7 +4417,13 @@ printf '\r\naccepted: %s\r\n' "$answer"
     }
     let owner = fixture.owner(command);
     let _cleanup = StopOwner(&fixture, owner.clone());
-    let first_launch = fixture.launches(1);
+    let expected_launches = if provider.is_some_and(|(name, _)| name == "codex") {
+        2
+    } else {
+        1
+    };
+    let first_launch = fixture.launches(expected_launches);
+    assert_eq!(first_launch.len(), expected_launches);
     let session = fixture.session_of_owner(&owner);
     let task = support::register_task_without_pr(
         fixture.home.path(),
@@ -4409,7 +4440,7 @@ printf '\r\naccepted: %s\r\n' "$answer"
         .unwrap();
 
     let mut desktop = fixture.viewer(&owner, true);
-    if claude.is_none() {
+    if provider.is_none() {
         desktop.input("desktop draft");
         // Wait for echo before the phone takes its snapshot.
         until_out(&mut desktop, "desktop draft");
@@ -4509,7 +4540,7 @@ printf 'output-final\r\n'
     std::fs::create_dir(&control).unwrap();
     std::fs::write(
         setup_dir.join("session.json"),
-        json!({"session":session,"outputSession":claude.is_none().then_some(output_session),"creationRepository":claude.is_none().then(|| fixture.repo.path().canonicalize().unwrap()),"serviceControl":control_name,"realProvider":claude.is_some()})
+        json!({"session":session,"outputSession":provider.is_none().then_some(output_session),"creationRepository":provider.is_none().then(|| fixture.repo.path().canonicalize().unwrap()),"serviceControl":control_name,"realProvider":provider.is_some()})
             .to_string(),
     )
     .unwrap();
@@ -4602,11 +4633,11 @@ printf 'output-final\r\n'
         stopped && restarted,
         "Native proof must cross a real service interruption"
     );
-    if claude.is_some() {
+    if provider.is_some() {
         assert!(fixture.running(&owner));
         assert_eq!(fixture.session_of_owner(&owner), session);
         assert_eq!(
-            fixture.launches(1),
+            fixture.launches(expected_launches),
             first_launch,
             "Recovery must keep the same actual provider"
         );

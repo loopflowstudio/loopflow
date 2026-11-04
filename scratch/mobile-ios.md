@@ -1269,3 +1269,50 @@ run; the preceding all-target Clippy pass still covers unchanged Rust. The
 owned Simulator was shut down/deleted. Remaining acceptance includes real Codex,
 physical phone/IME/dictation/VoiceOver, usage-accounting parity and installed
 Desktop update survival.
+
+## Actual Codex acceptance — November 4
+
+Extend the existing opt-in native acceptance to installed Codex using the same
+isolated Task, registry, HTTPS service and UIKit flow. Its app server and native
+TUI are separate processes; preserve both PIDs across service restart and
+foreground recovery. Use an explicit private app-server endpoint, disable daemon
+auto-start and customizations/tools in the test wrapper, and never resume an
+existing conversation. Ordinary tests keep their deterministic stand-in.
+Installed Codex 0.166.0 is signed in; no credential is inspected or copied.
+This proof does not establish physical input, provider usage parity or installed
+Desktop lifetime.
+
+Installed Codex 0.166.0 passes the shared flow with both original process IDs:
+initial reply, edited draft, service interruption, passive foreground return and
+a context-dependent follow-up. The diagnostic run observed Kitty keyboard flags
+7 and bracketed paste enabled after recovery. Result:
+`Test-LoopflowiOS-2026.11.04_14-50-26--0800.xcresult` (7.070 seconds native),
+`/tmp/mobile-codex-visible-draft.log` and
+`/tmp/mobile-codex-visible-draft-xcode.log`.
+
+The first run timed out on the final reply after inserting the entire follow-up
+and Return in immediate succession. The final test additionally requires that
+the follow-up draft render before the separate Return action, then passes.
+No production input code, deadline or retry policy changed. Preserve the original
+failure in `/tmp/mobile-codex-context-first.log` and
+`/tmp/mobile-codex-context-first-xcode.log`; this pass does not explain that failure.
+Codex's [version-matched paste detector](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/tui/src/bottom_pane/paste_burst.rs)
+buffers rapid characters and can interpret nearby Return as a pasted newline.
+That is a candidate explanation, not a reproduced cause. Rapid input/submission,
+physical dictation and software-keyboard timing still need acceptance.
+
+Final shared-runner checks pass with exact initial process counts and unchanged
+PID lists after recovery. Codex's app server and TUI count as two launches; Claude
+counts as one. The stand-in still checks its three intentional launches, exact
+submitted lines, 33,554,432 output bytes and 512 native edited acknowledgements.
+
+- Codex: `/tmp/mobile-codex-native.log`, `/tmp/mobile-codex-acceptance-final-xcode.log`; `Test-LoopflowiOS-2026.11.04_14-54-05--0800.xcresult`, 6.932 seconds native.
+- Claude regression: `/tmp/mobile-codex-claude-regression.log`, `/tmp/mobile-claude-acceptance-final-xcode.log`; `Test-LoopflowiOS-2026.11.04_14-54-56--0800.xcresult`, 7.203 seconds native.
+- Stand-in regression: `/tmp/mobile-codex-regression.log`, `/tmp/mobile-standin-acceptance-final-xcode.log`; `Test-LoopflowiOS-2026.11.04_14-55-31--0800.xcresult`, 73.249 seconds native.
+- Formatting, all-target Clippy with warnings denied (`/tmp/mobile-codex-clippy.log`) and whitespace checks pass.
+
+The dedicated Codex-proof Simulator is removed after verification. Existing
+Simulators, saved connections and active conversations are preserved. These
+changes add repeatable acceptance; no production terminal behavior changed.
+Rapid-submission timing, physical-phone interaction, usage-accounting parity
+and installed Desktop update survival remain open.

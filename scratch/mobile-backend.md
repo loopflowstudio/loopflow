@@ -1,12 +1,45 @@
 # One Machine backend for Desktop and phone
 
-LOO-593 · Accepted local scope; implementation reconciled November 3, 2026 · Product
+LOO-593 · Accepted local scope; implementation reconciled November 4, 2026 · Product
 
-Jack Heart authorized the installed local Machine backend through launch-plan,
-continuing to interactive demo without Auto-Ship approval. LOO-718 builds the
-native iOS client in parallel. The local contract was published at `5b44a394cf`
-and consumed by LOO-718, now at interactive demo with PR #1812. Native continuity
-review remains open.
+## Current implementation direction · November 4, 2026
+
+Jack Heart requested addressing the preceding review before shipping: implement
+automatic exact-owner reconnection with native connection status and prove
+installed-helper replacement while an unfinished draft and Graph remain live.
+This selects the review's recommended automatic option and supersedes its pending
+choice and the earlier deliberate Ctrl+R direction for Desktop. Return to the
+interactive demo with the changes published; no merge or Auto-Ship approval.
+
+Keep connection status outside provider terminal bytes. Disable input during
+recovery, use bounded retry/backoff, cancel on pane closure, preserve another
+viewer's input and geometry claims, and never replay uncertain input or commands.
+Unavailable is not ended: only authoritative execution evidence establishes exit.
+Disabled or incompatible service states need an actionable native explanation.
+The existing owner keeps lifetime policy and execution. Do not add a durable
+viewer registry, Session lifecycle, scheduler or retention authority.
+
+Implement and demonstrate the composed installed path in an isolated signed
+installation: retain exact provider, Session owner, editable draft and live Graph;
+replace the executable through the real installation/registration path; restore
+the view; edit and submit the retained draft; verify continued Graph progress.
+Also prove newer-viewer control, expired output, unavailable owner and cancellation
+without input replay. Separate foreground restart and registrar tests are useful
+but cannot substitute for this composition. Record native presentation and
+Desktop quit/reopen evidence and preserve the existing telemetry/other acceptance
+obligations below. Bring the installed-update proof forward into this revision,
+rather than deferring it to the post-demo gate again.
+
+LOO-718/PR #1812 now incorporates `07a6a184d4` and implements remote mobile
+transport, pairing and client integration in its own checkout. Keep this revision
+focused on the local backend and Desktop recovery. Inspect overlapping fixes in
+LOO-718 before changing shared boundaries; preserve the published contract and
+make any necessary additive consumer changes explicit. Do not import the wider
+mobile feature set into this Task. LOO-593 remains the foundation to land first
+after its checks and demo; the order recommendation itself approves no landing.
+
+The local contract was published at `5b44a394cf` and consumed by LOO-718.
+Native continuity review remains open.
 
 Jack selected native Swift, host Tailscale, terminal Sessions, CLI command
 delegation and the describe-first new-Task sheet. Local revision 1 implements
@@ -89,193 +122,51 @@ Reconnect takes fresh Work readings and resumes bounded terminal output or repla
 its screen. It cannot steal a newer controller claim or replay uncertain raw keys
 or Send. Voice drafts remain on the phone until deliberate submission.
 
-### Connection recovery is not Session resume
+### Automatic exact-owner recovery · November 4, 2026
 
-Implemented at `d168ef82e5`, then simplified at `b1029df2dc`, following the
-November 3 concept review of Jack Heart's continuity requirement. The earlier
-fixture dropped its viewer before restart and proved owner survival only; the
-current fixture interrupts a connected relay. Losing the Machine connection keeps
-the terminal relay and native surface alive. The relay reports “Machine connection
-lost”; Ctrl+R deliberately reconnects and Ctrl+] closes. It retains the exact owner, reconnect token and
-received-byte position in memory. There is no persisted viewer registry or new
-Session state. Desktop never enters ordinary `lf resume --prepare` merely because
-the bridge closed. Explicit Open and Move here keep their existing meanings.
+Jack Heart selected this interaction after the November 3–4 review. Desktop now
+owns a private temporary per-surface status mailbox. The relay sends atomic JSON
+connection readings outside terminal bytes; native chrome shows reconnecting,
+read-only or unavailable, and offers Retry after eight capped-backoff attempts.
+The surface removes its mailbox on closure, cancelling recovery. No database,
+Session state, viewer registry, provider launch or retention policy is added.
+Only the existing owner’s exit event establishes ended; a failed bridge remains
+unavailable with the retained screen marked stale.
 
-Terminal recovery requests a fresh screen from that same owner: the local prompt
-has changed the displayed screen, so replay alone would leave its cursor and modes
-wrong. Byte-stream relays use the existing owner Resume protocol; expired output
-falls back to a fresh attachment. Recovery requests free input without replacement
-and queues geometry behind an existing owner. When another viewer has control,
-it reconnects passively. Replayed claim notices cannot override the acknowledgement's
-current claims or run a historical provider-successor command.
+Input waits for the exact owner’s acknowledgement. Recovery requests free claims
+without replacement; a newer input/geometry controller remains authoritative.
+Fresh terminal snapshots restore screen/parser state; byte streams resume their
+received position, refreshing if the spool expired. Outage input and uncertain
+writes are discarded. Retry is a mailbox signal, never provider input. Native
+read-only mode preserves selection, copy, Find and scrolling. Plain CLI Machine
+relays retain deliberate Ctrl+R; Desktop has no recovery text in provider output.
 
-Typing while disconnected or awaiting acknowledgement is discarded. A failed input
-write is uncertain and never retried. Service unavailability leaves deliberate
-retry available; a service refusal naming an unavailable exact owner ends this
-path explicitly without Session preparation or another provider. The owner retains
-its existing lifetime policy. Work subscriptions separately reopen for complete
-current readings; uncertain rename outcomes are inspected, never resubmitted.
+**Delete — do not maintain:** Desktop’s terminal recovery prompt and Ctrl+R
+dependency, including `Status::closed_or_retry` interpreting raw keys as Retry;
+the installed fixture’s kickstart-only replacement path. These are removed.
+Native Retry reads only the mailbox; one relay owns ordinary mutable retry
+counters. `MachineServiceProof::command` pins owner, Graph, relay and command
+children to the installed executable under test. Preserve ordinary CLI
+attachment, existing owner protocol, claim fencing, app-owned UI automation and
+the shared mobile contract. LOO-718’s overlapping owner-start and program-status
+changes were inspected; this revision neither imports them nor changes that wire.
 
-The real relay stays connected during the foreground service-restart proof,
-returns to the unfinished draft and lets the same Graph advance. Additional proofs cover
-another viewer taking input/geometry during the outage, a byte stream exceeding
-the retained spool, and owner exit with no provider relaunch. Native presentation,
-installed-update composition and usage accounting still belong to gate/demo below.
-The review page at `scratch/concept-review.html` compares the earlier gap with
-the current recovery contract. The recovery change needs no new product decision;
-the terminal prompt and deliberate Ctrl+R interaction remain for native review.
+The composed macOS fixture installs an actual lf helper in an isolated signed app,
+starts the owner and Graph from that installed path, and holds a draft. It replaces
+the executable inode with identically signed bytes, verifies the bundle seal and
+invokes the production registrar’s unregister/register path. LaunchServices
+registers the temporary app container and launches its updater as the app;
+macOS App Management correctly refuses an external test runner’s bundle writes.
+Connection generations prevent a stale connected reading
+from satisfying recovery. It then edits/submits the draft and checks exact
+owner/provider identity and Graph progression. This is executable replacement
+with the same candidate build, not a released-version migration or a rendered
+Desktop demonstration.
 
-### Earlier headless concept review · November 3, 2026
-
-That review found no further design change or unresolved product choice in the
-local slice. The interactive review below reopens recovery presentation; it
-supersedes this earlier conclusion about having no open product choice.
-Jack Heart's accepted experience remains: open a Task's recorded primary Session,
-edit it, and recover access after a helper interruption without starting another
-provider. Task → primary Session → existing owner maps directly to `view_plan`,
-`session_owner` and `attach`; a service incarnation identifies a connection boundary,
-not another Work lifecycle. The relay's output state is ephemeral; persistence,
-execution and retention stay with their existing owners. No recovery registry,
-new Session state or gateway command receipt is needed.
-
-The normal path, service interruption and deliberate recovery now follow that
-model. Preserve the counterexamples: another viewer taking control must leave the
-returning viewer passive; expired output requires a fresh view, not input replay;
-an ended owner must remain ended; a lost rename reply remains uncertain. The
-existing service README already describes this experience, so no usage or skill
-rewrite is needed. The remaining acceptance below is still required: especially
-composed installed replacement, native continuity and unchanged usage accounting.
-A failure there requires repair within this contract, not inferred approval to
-restart providers or relax continuity. Remote admission, phone takeover and
-unattended hosting remain later product choices outside this slice.
-
-### Interactive concept review · November 3, 2026
-
-Jack Heart requested concept-review and an additional review simulating Mitchell
-Hashimoto's perspective. This is an analysis inspired by Hashimoto's public
-writing, not his participation, endorsement or a prediction of his verdict.
-The review is against `07a6a184d4`; no implementation or execution restart is
-authorized by this review alone. The Task remains at `feature/demo`, with
-PR #1813 published and Auto-Ship unapproved. No new native demo was performed.
-
-**Accepted model remains:** a Task selects its recorded primary Session; the
-existing execution owner retains provider, terminal and input claims. The Machine
-service carries reads, complete CLI commands and attachments. Desktop owns native
-presentation and UI automation. Keep the same owner through a connection failure,
-never replay uncertain input, never take a newer viewer's control, and never start
-an ended provider merely to restore a connection. The local scope excludes remote
-admission, create/start recovery, unattended hosting and a second retention policy.
-
-**The consequential mismatch:** a helper restart is currently a terminal
-interaction. `transport.rs::reconnect_machine` writes the connection error into
-the terminal, drains outage input and waits for Ctrl+R. Work subscriptions recover
-through their existing observation path, while the terminal remains interrupted.
-This is implemented behavior; rendered usability is still unverified. Deliberate
-Ctrl+R was earlier derived implementation direction, not an explicit choice Jack
-made between recovery interfaces.
-
-**Proposal, awaiting Jack's judgment:** automatically reconnect the exact live
-owner, show connection state outside terminal content, and keep input disabled
-until the owner acknowledges the attachment and its current claims. Use bounded
-retry/backoff for transient connection loss; an ended owner, disabled service or
-incompatible installation remains an explicit state. Returning to another viewer's
-Session stays passive. Stop retrying when the pane closes. No queued raw keys,
-command resubmission, provider resume, or takeover is implied. A native Reconnect
-button with deliberate retry is the alternative; retaining Ctrl+R is also valid
-if Jack prefers the existing interaction. No option has been accepted yet.
-
-The proposed client state is ephemeral: connected, reconnecting, or unavailable,
-with input capability derived from the existing owner acknowledgement. It adds no
-durable Session state or service registry. The current CLI relay exposes status
-as terminal text; native presentation would need a structured connection-state
-signal from that relay or a native bridge consumer. Keep that signal outside the
-provider's byte stream. Choose the smallest implementation after the interaction
-is selected; the public service operations need no new execution authority.
-
-**Draft usage wording for the automatic option (unimplemented):**
-
-> Open a Task to return to its Session. If the Machine connection drops, the pane
-> shows “Reconnecting…” and pauses input. Once the same owner is reachable, its
-> screen refreshes and input returns if control is free. If another viewer holds
-> control, the pane stays read-only; use Move here to take control deliberately.
-> An ended Session stays ended. Uncertain typing and commands are never resent.
-
-Keep existing operator skill instructions unchanged: recovering a view grants no
-permission to run a Task, resume a provider or approve shipping. The CLI's current
-documented Ctrl+R path remains true until a selected change is implemented.
-
-**Hashimoto-inspired assessment (our application of the sources):**
-
-- Keep the reusable core small and exercised by real clients. Reusing Rust reads,
-  CLI operations and the existing owner protocol is the strongest part of this
-  design. The Swift fixtures are useful consumer feedback; they do not establish
-  a live phone connection. Avoid widening the protocol before the local Desktop
-  experience works. Source: [Libghostty Is Coming](https://mitchellh.com/writing/libghostty-is-coming).
-- Make the next result tangible. Installed helper replacement with an editable
-  draft, quit/reopen and continued Graph progress is the useful demonstration.
-  Separate registrar and foreground-restart tests cannot establish the composed
-  result. Preserve Linux and telemetry acceptance too; this priority does not
-  waive them. Source: [Building Large Technical Projects](https://mitchellh.com/writing/building-large-technical-projects).
-- Review how interruption feels. The terminal prompt is mechanically explicit,
-  but exposes helper recovery to someone editing a Session and changes the screen
-  being recovered. A native status surface could preserve context. Automatic retry
-  versus deliberate retry is Jack's product choice, not a conclusion attributed
-  to Hashimoto. Source: [You Have to Feel It](https://mitchellh.com/writing/feel-it).
-- Exercise actual failure transitions. Retain the existing takeover, expired
-  output and ended-owner fixtures. Add the composed update proof and lost-command
-  reply/usage/cancellation evidence already required by acceptance; passing the
-  happy path cannot settle these. Source: [Testing Error Recovery](https://mitchellh.com/writing/tripwire).
-
-**Lifetime qualification:** the existing two-minute detached quiet grace excludes
-held drafts, active turns, pending requests and running Graphs; headless Runs do
-not expire for lack of viewers. The service does not promise indefinite live
-retention of an empty idle prompt. An initial observation that an unviewed Session
-can expire is incomplete without those holds. Keep the existing policy and prove
-both held-work survival and honest ended-Session presentation. “Standalone” here
-means service lifetime independent of the open UI, not an independently distributed
-Mac host: the selected signed app still supplies its helper and registration.
-
-**Open question:** automatic exact-owner reconnect with native status, deliberate
-native Reconnect, or the existing Ctrl+R prompt? The question is in the current
-conversation. `scratch/concept-review.html` presents the actions, models, API
-boundary and alternatives. No response is not approval. After Jack answers,
-update this design; implement only when requested, then verify the composed
-installed path and record native feedback at demo.
-
-### Review continuation · November 4, 2026
-
-Jack Heart invoked concept-review again. Inspection of the current relay confirms
-the existing Ctrl+R interaction; the recovery-interface question above remains
-unanswered. Task status still places LOO-593 at `feature/demo`. This review changes
-no implementation and supplies no new native or installed-update proof.
-
-Keep **unreachable** distinct from **ended** in the proposed presentation. A
-failed connection or refused attachment proves that this view cannot attach;
-it does not by itself prove provider termination. Show “Session unavailable” when
-the exact owner cannot be reached, preserving the last screen as stale. Show
-“Session ended” only with authoritative execution evidence. Neither state permits
-implicit provider restart. Disabled service and incompatible installation need
-their own actionable explanations. This follows the accepted truthful-state
-requirement and applies to all three recovery-interface options.
-
-The proposed action/API sequence stays small: open Task → `read(view_plan)` →
-recorded primary Session → `session_owner` → `attach` to that owner. On interruption,
-recover only that attachment and its current claims; Work subscriptions separately
-replace their readings. Native connection state is ephemeral client state, sent
-outside terminal bytes. No SQLite migration, new Session lifecycle, provider-usage
-event or durable request receipt follows from this interaction change.
-
-Draft usage addition, **proposed**: “If the Session is unavailable, the pane keeps
-its last screen and marks it stale. An unavailable connection does not mean the
-Session ended. Reconnecting never starts another provider.” Existing operator
-skills remain accurate and unchanged: restoring access does not run a Task,
-resume a provider, take control or approve shipping.
-
-Next proof after the interaction is selected: interrupt the installed helper while
-editing a held draft; recover the same provider and Graph; repeat with another
-viewer holding control and with an unreachable owner whose exit is unknown. The
-last case must stay unavailable, not become “ended.” Preserve all remaining
-acceptance below, including installed replacement and unchanged usage totals.
+Historical review, source links and rejected alternatives remain at
+`82fdb0e928:scratch/mobile-backend.md`; Jack Heart’s accepted November 4 direction
+leads this document. Review feedback also required local reading interactions and
+installed-owner executable retirement, included above.
 
 ## Installation and lifetime
 
@@ -292,14 +183,11 @@ separate supervisor identities; source builds cannot replace the default service
 
 Executable replacement may require unregister/re-register, terminating the helper.
 Graph and Session owners must survive actual supervisor cleanup; setsid alone is
-insufficient evidence. The isolated launchd fixture uses `kickstart -k` and proves
-service restart continuity for existing owners. The signed-container fixture
-separately proves unregister/register, but neither replaces the installed executable
-while Work runs.
-That composed installed-update acceptance remains outstanding. Linux uses a user
+insufficient evidence. The composed signed-container fixture replaces the
+installed executable while its owner and Graph remain live. Linux uses a user
 service with normal control-group cleanup: this slice only renames Sessions and
-bridges existing owners. Execution-start
-operations need an isolation proof before entering that service.
+bridges existing owners. Execution-start operations need an isolation proof
+before entering that service.
 
 Respect disabled Background Items rather than registering around them. Personal
 LaunchAgents end at logout; sleep makes the host unavailable, and reboot preserves
@@ -310,16 +198,14 @@ implementation. Deleting Desktop cannot imply supported standalone hosting.
 ## Remaining acceptance
 
 Gate owns affected suites, the Xcode link path, Linux user-service replacement,
-and composed installed-executable replacement with active Work.
-Demo owns actual Desktop quit/reopen, consent/disablement and rendered editable
-Session continuity. The headless owner fixture proves an unfinished draft, exact
-provider/owner identity and Graph progress; it does not prove native input, phone
-interaction or real-provider usage reporting. The signed-container registrar proof
-and isolated launchd owner/Graph proof are distinct. Slow-consumer bounds and
-cancellation are implemented; dedicated saturation/cancellation acceptance remains
-with gate. Command trace isolation is covered; no fixture yet measures unchanged
-provider-usage totals across reconnect. That telemetry acceptance remains open,
-including attribution/default equivalence beyond the rename result comparison.
+subscription saturation/cancellation and unchanged provider-usage totals across
+reconnect. Attribution/default equivalence beyond the rename result remains open.
+Demo owns actual Desktop quit/reopen, consent/disablement, native input and rendered
+editable Session continuity. The installed headless fixture proves signed
+registration, executable replacement, a held draft, exact owner/provider identity
+and Graph progress. It does not prove native input, phone interaction or
+real-provider usage reporting. Terminal slow-consumer bounds, cancellation and
+command trace isolation are covered.
 
 Preserve these obligations:
 
@@ -335,7 +221,7 @@ Preserve these obligations:
   bounded; do not persist every snapshot or terminal byte. Exact additional
   latency/queue/reconnect metrics and retention remain implementation choices.
 
-Checks: `cargo test -p loopflow --test transport_tests machine_service_` — 5 passed, 1 supervisor test deferred to gate; `cargo test -p loopflow --lib machine_service::` — 3 passed (macOS debug linker warned about unwind-table size); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed. Retained output state now resets together; direct/bridged viewer setup and wire round-trip checks share their existing fixtures. Earlier supervisor/Swift evidence: `d168ef82e570b8950721761f3b0170524298f7ac:scratch/mobile-backend.md`. Gate/demo retain the acceptance above, including the full transport suite and Linux Clippy.
+Checks: `cargo test -p loopflow --test transport_tests machine_service_ -- --include-ignored --test-threads=1` — 9 passed; the installed test binary’s exact replacement case also passed after adding concurrent setup and the LaunchServices-owned updater. `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone` — 1 passed headlessly, app built; formatting, Python lint and diff checks passed. Gate retains affected suites, Xcode/Linux paths and telemetry; demo retains rendered continuity and Desktop quit/reopen.
 
 ## Later work and parallel boundaries
 

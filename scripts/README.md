@@ -55,9 +55,10 @@ installed database.
 
 `uv run python scripts/test_machine_service_registration.py` proves macOS bundled
 service registration headlessly. It signs a temporary helper, uses the production
-SMAppService registrar, checks idempotent setup and replacement, then unregisters
-its unique job. It does not open Desktop or an existing Machine database. The
-separate installed owner/Graph proof is documented in
+SMAppService registrar through a LaunchServices-registered app, checks idempotent
+setup and replacement, then unregisters its unique job and app entry. Bundle
+replacement runs as the app itself, respecting macOS App Management. It does not open Desktop or an existing Machine database. The
+composed installed executable replacement with a held draft and live Graph is documented in
 [Rust tests](../rust/loopflow/tests/README.md#machine-service).
 
 Runner changes also need the command-plan checks in

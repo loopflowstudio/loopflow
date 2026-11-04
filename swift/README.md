@@ -967,9 +967,11 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 Task readings and Session rename use the installed Machine service; Session
 terminals bridge their existing owner through it. A lost Machine bridge leaves the
-relay and native surface alive: Ctrl+R reconnects that exact owner and refreshes its
-screen; Ctrl+] closes. Recovery never prepares or resumes a provider, and a newer
-viewer retains control until an explicit Move here. These operations surface service
+relay and native surface alive. A native status row shows automatic exact-owner
+recovery, with input paused and local copy, Find and scrolling available. Exhausted
+retries show an unavailable explanation and Retry; only authoritative exit means
+ended. Recovery never prepares or resumes a provider, and a newer viewer retains
+control until an explicit Move here. These operations surface service
 errors without a direct FFI fallback. Other Work operations retain FFI until their
 cutover. See the [local protocol](../rust/loopflow/src/machine_service/README.md).
 `scripts/test_desktop.sh --filter MachineProtocolTests` builds the consumer and

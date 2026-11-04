@@ -45,15 +45,25 @@ pub fn receive(socket: &mut UnixStream) -> Result<Response> {
 pub fn bridge(owner: &crate::id::LfProcessId) -> Result<UnixStream> {
     // Restored terminals can open before Desktop's first Work reading obtains
     // the helper. Setup delegates through the same selected installation.
-    let setup = std::process::Command::new(crate::os_process::resolve_lf_binary()?)
-        .args(["machine", "service", "ensure"])
-        .stdin(std::process::Stdio::null())
-        .output()?;
+    let setup = setup_command()?.output()?;
     anyhow::ensure!(
         setup.status.success(),
         "Machine service unavailable: {}",
         String::from_utf8_lossy(&setup.stderr)
     );
+    bridge_existing(owner)
+}
+
+pub(crate) fn setup_command() -> Result<std::process::Command> {
+    let mut command = std::process::Command::new(crate::os_process::resolve_lf_binary()?);
+    command
+        .args(["machine", "service", "ensure"])
+        .stdin(std::process::Stdio::null());
+    Ok(command)
+}
+
+/// Recovery never registers a service or changes installation policy.
+pub(crate) fn bridge_existing(owner: &crate::id::LfProcessId) -> Result<UnixStream> {
     let (socket, response) = connect(Operation::Attach {
         owner: owner.clone(),
     })?;

@@ -25,14 +25,22 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 but never answers reads `detached` too; reattaching stops its provider and continues
 the same provider thread in a new owner, without replaying input.
 
-Desktop's Machine relay stays alive when its service connection drops. The
-terminal reports **Machine connection lost**: press Ctrl+R to reconnect to the
-same owner, or Ctrl+] to close. Terminal recovery refreshes the owner's screen;
-byte streams resume from their received position, or refresh when retained output
-expires. Disconnected typing and uncertain writes are never replayed. If another
-viewer took control, recovery observes it without replacing input or geometry;
-**Move here** remains an explicit action. An unavailable owner ends recovery
-without launching or resuming a provider. Ordinary explicit Open remains separate.
+Desktop's Machine relay stays alive when its service connection drops. Its native
+status row shows **Reconnecting…** and pauses input while local selection, copy,
+Find and scrolling remain available. Recovery refreshes the same owner's screen;
+byte streams resume from their received position or refresh when output expires.
+Disconnected typing and uncertain writes are never replayed. If another viewer
+took control, recovery observes it without replacing input or geometry; **Move
+here** remains explicit. Eight attempts with capped backoff lead to **Session
+unavailable** and a native **Retry** action. Only an owner exit event means ended.
+Closing the surface cancels recovery. Ordinary explicit Open remains separate.
+
+The native surface creates a private temporary mailbox directory and passes
+`LF_MACHINE_STATUS` to its relay only. Atomic JSON readings carry connection
+generation, state, input capability and optional explanation; `status.retry`
+requests another bounded cycle. Surface closure removes the directory. This is
+presentation state, not a durable viewer registry or execution authority. Plain
+CLI Machine relays retain their Ctrl+R/Ctrl+] interaction.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,

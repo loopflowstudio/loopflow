@@ -1,5 +1,14 @@
 # LOO-593 decisions and gaps
 
+November 4 accepted direction: Jack Heart requested addressing the preceding
+review, selecting its recommendation of automatic exact-owner reconnect with
+native status. Implement it and prove installed-helper replacement with a held
+draft and live Graph, then return to demo without Auto-Ship. This supersedes the
+historical pending-choice and Ctrl+R direction. Keep unavailable distinct
+from ended, preserve newer viewer claims, never replay uncertain input, and leave
+retention with existing owners. The detailed current scope leads
+`scratch/mobile-backend.md`.
+
 Jack Heart authorized the installed local slice through demo, without Auto-Ship.
 The simplest existing command is Session rename; no create/start or retry receipt
 is introduced. Request IDs are correlation only and uncertain commands are never
@@ -15,32 +24,21 @@ Mac hosting, create/start recovery and remaining Work cutover remain later work.
 November 3 reconciliation: LOO-718's existing-Task → existing-Session path needs
 `view_plan`; exposing the existing shared read is a bounded contract correction.
 The additive contract was published at `12fbe9102c` on the Task branch. No remote
-transport or takeover decision is inferred. Full installed-executable replacement with active Work and unchanged
-provider-usage totals remain acceptance work; separate registrar/restart fixtures
-do not establish them.
+transport or takeover decision is inferred. The composed installed replacement proof now covers active Work; unchanged
+provider-usage totals remain acceptance work.
 
-November 3 concept review: retain Desktop's deliberate retry policy for a lost
-Machine connection. This is the simpler recovery interaction and preserves the
-existing no-implicit-relaunch rule. The retry must reconnect the exact owner,
-without invoking provider resume or taking a newer viewer's claims. This is a
-derived implementation direction from Jack Heart's accepted continuity contract,
-not a new approval of automatic takeover. Details and counterexamples live in
-`scratch/mobile-backend.md`; no local product question needs an answer here.
+November 4 implementation assumption: connection status uses an atomic temporary
+mailbox owned by each native surface. It carries only presentation and Retry,
+never persisted Work or execution authority; closure removes it. This keeps the
+published service/owner contract unchanged for LOO-718. Ghostty’s existing
+`toggle_readonly` action preserves local reading while suppressing PTY input
+(https://ghostty.org/docs/config/keybind/reference#toggle_readonly).
 
-November 3 implementation: keep the Machine relay alive and put deliberate
-Ctrl+R reconnect / Ctrl+] close in its terminal, so connection loss never reaches
-SessionsStore's ordinary preparation. Terminal recovery asks the exact owner for
-a fresh screen because a local disconnect prompt changes the displayed screen;
-nonterminal relays use retained Resume bytes and fall back to a fresh attachment
-when the spool expires. Both retain the owner, reconnect token and byte position
-in memory only, request free claims without replacement, and discard outage input.
-Native presentation remains for the interactive demo.
+The signed replacement proof uses the same candidate build at a new inode. It
+proves installed executable retirement and supervisor replacement during active
+Work; released-version migration and rendered Desktop quit/reopen remain distinct.
 
-November 4 interactive review: the earlier statement that no local product
-question needs an answer is superseded by the interactive review in
-`scratch/mobile-backend.md`. Jack Heart has not selected automatic native
-reconnect, a deliberate native Reconnect button, or the current Ctrl+R prompt.
-The current implementation remains deliberate Ctrl+R. All options preserve exact
-ownership and uncertain-input handling. An unreachable owner is unavailable;
-only authoritative execution evidence can establish that it ended. The current
-conversation asks the recovery-interface question; no answer is not approval.
+Proposed Product memory update for realign: automatic Desktop recovery now replaces
+the deliberate reconnect wording; the composed signed-helper replacement proof
+replaces the earlier separate-proof gap. Preserve native demo, Linux replacement
+and usage-accounting gaps. Wave memory remains unchanged in this step.

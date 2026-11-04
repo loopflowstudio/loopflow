@@ -826,10 +826,16 @@ authoritative primary-Session selection, concurrent trace isolation and editable
 owner/Graph continuity with the real relay connected during service restart.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer
 viewers retaining input/geometry, expired output and owner exit without relaunch.
-The opt-in macOS variant uses a unique launchd job and disposable Machine, then
-boots it out. Run it outside the runner's network sandbox. A separate signed
-bundle proof runs `uv run python scripts/test_machine_service_registration.py`;
-it exercises the production SMAppService registrar without starting Work. These
-separate proofs do not replace an installed executable while Work is active.
+The opt-in macOS variant creates an isolated signed app bundle, starts the owner
+and Graph from its installed helper, replaces that executable inode with identically
+signed bytes, verifies the bundle seal and invokes the production SMAppService
+replacement registrar while
+the draft remains held. A fresh relay acknowledgement must precede submission;
+the exact owner/provider survives and the Graph advances. Cleanup unregisters the
+unique job and LaunchServices registration. The updater runs as the signed app
+through LaunchServices; no UI or App Management permission changes are needed.
+Run outside the network sandbox. The underlying registrar harness is
+`scripts/test_machine_service_registration.py`; its default mode separately checks
+idempotent registration without Work. Native rendered continuity remains demo.
 Linux supervisor replacement remains a Linux installation check; this service
 starts no providers or Graphs, and keeps systemd's control-group cleanup.

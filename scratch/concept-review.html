@@ -14,9 +14,9 @@
 <header>LOO-593 · concept-review · November 4, 2026<br>
 Sources: <a href="mobile-backend.md">working design</a>, <code>transport.rs::reconnect_machine</code>,
 <code>transport/README.md</code>, <code>MachineService.swift</code>, <code>machine_service/wire.rs</code>.</header>
-<h1>Should a helper restart interrupt editing?</h1>
-<p><strong>Proposal:</strong> reconnect to the same live owner automatically and show connection state outside the terminal. Input stays paused until the owner confirms the connection and current control.</p>
-<p class="muted">Not accepted or implemented. Current behavior waits for Ctrl+R. This page is an interaction sketch, not a native screenshot or a successful demo.</p>
+<h1>Recover automatically without losing the Session</h1>
+<p><strong>Selected November 4:</strong> reconnect to the same live owner automatically and show connection state outside the terminal. Input stays paused until the owner confirms the connection and current control.</p>
+<p class="muted">Jack Heart requested this implementation and the installed-helper replacement proof. Current behavior still waits for Ctrl+R. This page is an interaction sketch, not a native screenshot or a successful demo.</p>
 
 <div class="path">
 <p><strong>Open Task</strong> → primary Session → <code>read(view_plan)</code></p>
@@ -70,10 +70,10 @@ Explain the failing migration before changing…</pre>
 <p>Native quit/reopen, installed-helper replacement, unchanged provider usage, affected suites and Linux acceptance remain open. This review adds no passed checks. “Standalone” means the UI can close; the selected signed app still supplies the Mac helper.</p>
 </details>
 
-<footer><a href="https://github.com/loopflowstudio/loopflow/pull/1813">PR #1813</a> is published; the Task remains at demo. No implementation restart or Auto-Ship approval. Decisions will be recorded in <a href="mobile-backend.md">mobile-backend.md</a>.</footer>
-<h2>Choice for this conversation</h2>
+<footer><a href="https://github.com/loopflowstudio/loopflow/pull/1813">PR #1813</a> is published; the Task remains at demo. Implementation is requested; Auto-Ship remains unapproved. The accepted direction is recorded in <a href="mobile-backend.md">mobile-backend.md</a>.</footer>
+<h2>Selected direction</h2>
 <ol>
-<li>Recovery interaction:<br><strong>1a.</strong> Automatic reconnect with native status (proposed).<br><strong>1b.</strong> Deliberate native Reconnect button.<br><strong>1c.</strong> Keep the Ctrl+R terminal prompt.</li>
+<li>Recovery interaction:<br><strong>1a. Selected:</strong> Automatic reconnect with native status; implement and return to demo.<br><strong>1b. Not selected:</strong> Deliberate native Reconnect button.<br><strong>1c. Superseded for Desktop:</strong> Keep the Ctrl+R terminal prompt.</li>
 </ol>
 </main>
 <script>

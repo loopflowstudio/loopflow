@@ -1,6 +1,7 @@
 //! A detached terminal owns an execution, including its capture and native client.
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
+mod connection;
 mod lifetime;
 #[cfg(test)]
 mod lifetime_tests;
@@ -175,7 +176,9 @@ pub(crate) fn start(
         .open(logs.join("transport.log"))
         .with_context(|| format!("Cannot open execution transport log in {}", logs.display()))?;
     let mut command = Command::new(std::env::current_exe()?);
-    command.args(["session", "serve"]);
+    command
+        .args(["session", "serve"])
+        .env_remove("LF_MACHINE_STATUS");
     if terminal {
         command.arg("--terminal");
     }
@@ -1785,8 +1788,8 @@ struct RelayOutput {
 
 impl RelayOutput {
     fn recover(&mut self, terminal: bool) -> Request {
-        // The local prompt changed a terminal's screen. Replace it with the
-        // owner's current screen; byte streams can continue without repaint.
+        // A fresh terminal screen restores parser state even if the bridge
+        // interrupted an escape sequence; byte streams continue at their offset.
         if !terminal {
             if let Some(reconnect) = &self.reconnect {
                 let (rows, cols) = size();
@@ -1833,7 +1836,13 @@ fn attach_with_terminal(
 ) -> Result<()> {
     let mut preview = terminal.is_some();
     let machine = std::env::var_os("LF_MACHINE_SERVICE").is_some();
-    let mut socket = if machine {
+    let mut status = connection::Status::from_env();
+    let mut socket = if let Some(status) = &mut status {
+        let Some(socket) = status.connect(id, true)? else {
+            return Ok(());
+        };
+        socket
+    } else if machine {
         crate::machine_service::client::bridge(id)?
     } else {
         UnixStream::connect(endpoint(id)?).context(
@@ -1843,7 +1852,7 @@ fn attach_with_terminal(
     socket.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
     let (rows, cols) = size();
-    send(
+    let initial = send(
         &mut socket,
         Request::Attach {
             control: true,
@@ -1854,7 +1863,12 @@ fn attach_with_terminal(
             name: tty_name(libc::STDIN_FILENO),
             moved,
         },
-    )?;
+    );
+    let mut interrupted = match initial {
+        Ok(()) => None,
+        Err(error) if machine => Some(error.to_string()),
+        Err(error) => return Err(error),
+    };
     let mut decoder = Decoder::default();
     let mut output = RelayOutput::default();
     let mut controlled = false;
@@ -1863,13 +1877,17 @@ fn attach_with_terminal(
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = crate::terminal_title::ViewerTitle::new(id);
-    let mut interrupted: Option<String> = None;
     let mut recovering = false;
     'relay: loop {
         if let Some(reason) = interrupted.take() {
             // Close the old bridge before asking the owner for its free claims.
             let _ = socket.shutdown(std::net::Shutdown::Both);
-            let Some(next) = reconnect_machine(id, &mut terminal, &reason)? else {
+            let next = if let Some(status) = &mut status {
+                status.connect(id, false)?
+            } else {
+                reconnect_machine(id, &mut terminal, &reason)?
+            };
+            let Some(next) = next else {
                 return Ok(());
             };
             socket = next;
@@ -1885,15 +1903,14 @@ fn attach_with_terminal(
             acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
         }
         title.tick();
-        if machine && acknowledgement_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            interrupted =
-                Some("Attachment was not acknowledged; its outcome is unknown".to_owned());
-            continue;
+        if acknowledgement_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            if machine {
+                interrupted =
+                    Some("Attachment was not acknowledged; its outcome is unknown".to_owned());
+                continue;
+            }
+            bail!("Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed");
         }
-        anyhow::ensure!(
-            acknowledgement_deadline.is_none_or(|deadline| Instant::now() < deadline),
-            "Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed"
-        );
         let mut fds = [
             libc::pollfd {
                 fd: socket.as_raw_fd(),
@@ -1953,28 +1970,32 @@ fn attach_with_terminal(
                                 controlled = claim.is_some();
                                 owned = owner.as_ref() == Some(&viewer);
                                 output.attached(token, &nonce, reply.seq);
-                                if recovering {
+                                if recovering || status.is_some() {
                                     discard_reconnect_input()?;
                                     fds[1].revents = 0;
+                                }
+                                if recovering && status.is_none() {
                                     write_output(&mut terminal, 2, if controlled {
                                         b"\r\nReconnected to the same Session.\r\n"
                                     } else {
                                         b"\r\nReconnected as a viewer; input remains elsewhere. Use Move here to take control.\r\n"
                                     })?;
+                                }
+                                if preview || recovering {
                                     if let Some(terminal) = &mut terminal {
                                         terminal.handoff()?;
                                     }
-                                    recovering = false;
-                                }
-                                if preview {
-                                    terminal.as_mut().expect("preview owns a terminal").handoff()?;
                                     preview = false;
+                                    recovering = false;
                                 }
                                 if is_terminal {
                                     if terminal.is_none() {
                                         terminal = Some(ViewerTerminal::enter()?);
                                     }
                                     terminal.as_ref().expect("terminal entered").make_raw()?;
+                                }
+                                if let Some(status) = &mut status {
+                                    status.connected(controlled)?;
                                 }
                             }
                             Reply::Busy if recovering => {
@@ -1987,7 +2008,9 @@ fn attach_with_terminal(
                             }
                             Reply::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                             Reply::ReconnectRequired if recovering => {
-                                write_output(&mut terminal, 2, b"\r\nRetained output expired; reading the same owner's current screen.\r\n")?;
+                                if status.is_none() {
+                                    write_output(&mut terminal, 2, b"\r\nRetained output expired; reading the same owner's current screen.\r\n")?;
+                                }
                                 if let Err(error) = send(&mut socket, output.fresh_attachment(true)) {
                                     interrupted = Some(error.to_string());
                                     continue 'relay;
@@ -2029,7 +2052,7 @@ fn attach_with_terminal(
                     match event {
                         Event::Resize { .. } | Event::Theme { .. } => {}
                         Event::Owner { name, viewer, held } => {
-                            if owned && !held {
+                            if status.is_none() && owned && !held {
                                 let who =
                                     name.or(viewer).unwrap_or_else(|| "another viewer".into());
                                 write_output(
@@ -2057,11 +2080,14 @@ fn attach_with_terminal(
                             };
                         }
                         Event::ChildExited { code } => {
+                            if let Some(status) = &status {
+                                status.ended()?;
+                            }
                             return if code == 0 {
                                 Ok(())
                             } else {
                                 Err(crate::process::CommandExit(code).into())
-                            }
+                            };
                         }
                         Event::Detached => return Ok(()),
                         Event::Return { detach } => returning = Some(detach),

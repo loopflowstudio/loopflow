@@ -22,8 +22,9 @@ waits for Move here, and an ended one waits for an explicit open.
 Preparing asks a running owner whether a viewer holds control, so an owner from an
 earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
-but never answers reads `detached` too; reattaching stops its provider and continues
-the same provider thread in a new owner, without replaying input.
+but never answers reads `detached` too. If it holds a turn, draft or pending request,
+reattachment failure leaves that provider intact. Resume again when its transport
+answers; saved history alone cannot restore the native editor.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
@@ -59,11 +60,10 @@ Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
 `lf resume` also moves an idle owner from an earlier build onto the lf entry.
-If that owner is busy and answers its socket, resume shows the running turn;
+If that owner holds work, resume attaches to the running provider;
 an owner with this lifetime policy moves when the turn ends. An older owner
-without the policy needs another resume after its turn. If a superseded owner
-does not answer, resume ends it and reports that its turn was cut off, then
-reopens the saved conversation without replaying input.
+without the policy needs another resume after its turn. An unanswering protected
+owner reports attachment failure without ending its provider or replaying input.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. The sweep ends owners directly; existing viewers

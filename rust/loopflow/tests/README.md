@@ -78,6 +78,13 @@ history and rejects seed replay. Session, capture and Task stay fixed; only owne
 replacement changes the AgentProcess and fence. These stand-in fixtures use the
 candidate's wire/schema; released-version and installed-provider recovery need
 separate proof.
+`transport_tests::unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn`
+pauses a superseded owner holding edited input, a pending provider request and
+later queued keystrokes. Failed resume preserves the owner; after transport returns,
+the same provider completes the request, submits the retained draft and accepts
+another turn after viewer return. It checks exact history, Session/Task/capture
+identity and the unchanged attachment fence. It proves no repair of a permanently
+unreachable transport.
 
 `transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
 holds a real SQLite writer while input is queued. Control and viewer return

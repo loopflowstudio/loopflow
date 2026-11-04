@@ -2514,10 +2514,19 @@ wait("finish-upgrade")
 /// viewer follows the new build and completes more turns in the same history.
 #[test]
 fn resumed_session_completes_turns_after_build_replacement_and_viewer_return() {
+    continue_session_after_upgrade(false);
+}
+
+#[test]
+fn unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn() {
+    continue_session_after_upgrade(true);
+}
+
+fn continue_session_after_upgrade(unanswering: bool) {
     let fixture = Fixture::new();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys, tty
+import json, os, pathlib, subprocess, sys, time, tty
 if sys.argv[1:] == ["--version"]:
     print("2.1.317")
     sys.exit(0)
@@ -2546,6 +2555,12 @@ def hook(event, **extra):
 def turn(prompt):
     prompt_id = "turn-" + str(len(history))
     hook("UserPromptSubmit", prompt_id=prompt_id, prompt=prompt)
+    if prompt == "retained draft" and (home / "hold-turn").exists():
+        mark("pending-turn", prompt)
+        deadline = time.monotonic() + 60
+        while not (home / "release-turn").exists():
+            assert time.monotonic() < deadline, "pending turn was never released"
+            time.sleep(0.02)
     history.append(prompt)
     mark("native-history.json", json.dumps(history))
     hook("Stop", prompt_id=prompt_id, background_tasks=[], session_crons=[])
@@ -2565,8 +2580,11 @@ while True:
     if key == b'\r':
         turn(draft.decode())
         draft.clear()
+    elif key == b'\x7f':
+        del draft[-1:]
     else:
         draft.extend(key)
+    mark("draft", draft.decode())
     os.write(1, b'\r\nEDITOR:' + draft + b'\r\n')
 "#,
     );
@@ -2620,8 +2638,16 @@ while True:
     let attachment = || store.session_attachment(&session).unwrap().unwrap();
     let original = continuity();
     let before = attachment();
-    first.input("retained draft");
-    until_out(&mut first, "EDITOR:retained draft");
+    if unanswering {
+        std::fs::write(fixture.home.path().join("hold-turn"), "").unwrap();
+        // Editing makes the input uncertain. The provider then holds a request
+        // while later input remains queued in its terminal, outside history.
+        first.input("retained drafx\x7ft\rpending draft");
+        assert_eq!(fixture.wait_file("pending-turn"), "retained draft");
+    } else {
+        first.input("retained draft");
+        until_out(&mut first, "EDITOR:retained draft");
+    }
     first.socket.shutdown(std::net::Shutdown::Both).unwrap();
     drop(first);
 
@@ -2635,6 +2661,37 @@ while True:
         command.env("LF_BIN", &entry).env("PATH", &path);
         Terminal::spawn(command)
     };
+    if unanswering {
+        let retained_input = || {
+            fixture
+                .sql()
+                .query_row(
+                    "SELECT native_input FROM processes WHERE id=?1",
+                    [&owner],
+                    |r| r.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        let input_before = retained_input();
+        assert_eq!(
+            serde_json::from_str::<Value>(&input_before).unwrap()["state"],
+            "Uncertain"
+        );
+        let paused = fixture.pause(&owner);
+        let failed = resume();
+        let output = wait_for_viewer(failed.child, Duration::from_secs(20));
+        drop(paused);
+        assert!(!output.status.success(), "{output:?}");
+        assert_eq!(
+            attachment(),
+            before,
+            "failed attachment replaced the provider"
+        );
+        assert_eq!(continuity(), original);
+        assert!(fixture.running(&owner), "failed attachment ended the owner");
+        assert_eq!(retained_input(), input_before);
+        assert!(!fixture.home.path().join("completed-2").exists());
+    }
     let mut terminal = resume();
     fixture.wait_controlled(&owner);
     assert_eq!(
@@ -2643,25 +2700,35 @@ while True:
         "reconnect must retain the draft's provider"
     );
     assert_eq!(continuity(), original);
-    terminal.input(b"\r");
-    assert_eq!(fixture.wait_file("completed-2"), "retained draft");
-    fixture.wait_file("ready-2");
-    fixture.ends(&owner);
-    let replacement = fixture.owner_of(&session);
-    assert_ne!(replacement, owner);
-    fixture.wait_controlled(&replacement);
-    let after = attachment();
+    let (replacement, after, continued) = if unanswering {
+        std::fs::write(fixture.home.path().join("release-turn"), "").unwrap();
+        assert_eq!(fixture.wait_file("completed-2"), "retained draft");
+        // The bytes queued behind the pending request become the next draft.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while fixture.wait_file("draft") != "pending draft" {
+            assert!(Instant::now() < deadline, "queued draft was lost");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        terminal.input(b"\r");
+        assert_eq!(fixture.wait_file("completed-3"), "pending draft");
+        assert_eq!(attachment(), before);
+        (owner.clone(), before, "pending draft")
+    } else {
+        terminal.input(b"\r");
+        assert_eq!(fixture.wait_file("completed-2"), "retained draft");
+        fixture.wait_file("ready-2");
+        fixture.ends(&owner);
+        let replacement = fixture.owner_of(&session);
+        assert_ne!(replacement, owner);
+        fixture.wait_controlled(&replacement);
+        let after = attachment();
+        assert_ne!(after.agent_process_id, before.agent_process_id);
+        assert_ne!(after.token, before.token);
+        terminal.input(b"after upgrade\r");
+        assert_eq!(fixture.wait_file("completed-3"), "after upgrade");
+        (replacement, after, "after upgrade")
+    };
     assert_eq!(continuity(), original);
-    assert_ne!(
-        after.agent_process_id, before.agent_process_id,
-        "replacement needs a new AgentProcess"
-    );
-    assert_ne!(
-        after.token, before.token,
-        "replacement needs a new attachment fence"
-    );
-    terminal.input(b"after upgrade\r");
-    assert_eq!(fixture.wait_file("completed-3"), "after upgrade");
     terminal.input(b"\x1d");
     let output = wait_for_viewer(terminal.child, Duration::from_secs(10));
     assert!(output.status.success(), "{output:?}");
@@ -2682,7 +2749,7 @@ while True:
         json!([
             "original request",
             "retained draft",
-            "after upgrade",
+            continued,
             "after return"
         ])
     );
@@ -3205,29 +3272,6 @@ fn resume_takes_over_an_owner_from_another_build() {
         "{stderr}"
     );
     assert!(!stderr.contains("cut off"), "{stderr}");
-}
-
-/// A superseded owner mid-turn that does not answer its socket cannot be
-/// watched to the turn's end, so `lf resume` ends it, reopens the conversation
-/// from its saved history and says the turn was cut.
-#[test]
-fn resume_ends_a_busy_superseded_owner_that_never_answers() {
-    let fixture = Fixture::new();
-    let path = fixture.waiting_provider();
-    let (previous, session) = owner_on_another_build(&fixture, &path);
-    fixture.mark_working(&session);
-    let endpoint = fixture.endpoint(&previous);
-    std::fs::rename(&endpoint, endpoint.with_extension("retained")).unwrap();
-    let listener = UnixListener::bind(&endpoint).unwrap();
-    std::thread::spawn(move || {
-        let held: Vec<UnixStream> = listener.incoming().map_while(Result::ok).collect();
-        drop(held);
-    });
-    let stderr = takes_over(&fixture, &path, &previous, &session);
-    assert!(
-        stderr.contains("Moved") && stderr.contains("cut off"),
-        "{stderr}"
-    );
 }
 
 /// Desktop restarting after an lf upgrade leaves the conversation in an owner

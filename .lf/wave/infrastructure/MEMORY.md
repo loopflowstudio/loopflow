@@ -968,25 +968,27 @@ MTG-117's unknown exit is not proven upgrade-caused.
 
 ## Moving onto the installed lf (LOO-705/724, reconciled 2026-11-04)
 
-Jack Heart requested one rollover mechanism; durable-state replacement remains
-a headless choice. LOO-712 framing replaces Response variants. Orderly successors
-resume without replay; EOF stays unknown. Earlier decisions/acceptance: `cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart selected one rollover mechanism; durable-state replacement remains a
+headless choice. Successors never replay; EOF stays unknown. Earlier decisions: `cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`,
+this heading.
 
-Jack requires affected Sessions to accept input,
-complete turns and sustain interaction with identity/history/Work/drafts intact.
-LOO-582 reopened, then a viewer write timed out; the cause remains unknown. Interrupted viewers do not establish crashes. `Uncertain` input cannot
-justify discarding drafts. Broad recovery remains unproved.
+Jack Heart requires affected Sessions to complete turns and sustain input with
+identity/history/Work/drafts intact. LOO-582's viewer-write timeout and LOO-718's
+freeze remain unexplained. Interrupted viewers prove no crash; `Uncertain` input
+and same-thread resume prove no draft preservation.
 
-LOO-724's three-second dead-leader observation needs no local lifeline. Fixtures
-prove natural-exit recovery and persistent-survivor refusal without new signal
-authority. Candidate-build coverage proves four turns, draft/history retention,
-owner replacement and viewer return without replay; older wire/store and configured
-recovery remain unproved. Release's entry-point lesson applies.
+LOO-724 reproduces SQLite contention blocking owner control. Nonblocking writes
+and timed retry retain input before delivery without PTY spinning. Regression:
+control, viewer return, once-only delivery after unlock; no incident attribution.
 
-The parent's November 4 signed `ac8e088f5f` Desktop receipt proves matching
-CLI/helper and store access, retaining old runtimes. It predates LOO-724's repairs
-and proves no resumed turn. LOO-723 retains policy/mini rollout; Session recovery
-stays coordinated with the parent.
+Dead-leader observation needs no local lifeline; fixtures retain natural-exit
+recovery and persistent-survivor refusal without signaling. Candidate four-turn
+proof covers owner replacement, drafts/history and viewer return without replay,
+not older wire/store or configured recovery. Release's entry-point lesson applies.
+
+The parent's signed `ac8e088f5f` Desktop repair pairs CLI/helper and retains old
+runtimes; it predates LOO-724's repairs and proves no resumed turn. LOO-723 owns
+policy/mini rollout; affected-Session recovery stays coordinated with the parent.
 
 ## Shipped history
 

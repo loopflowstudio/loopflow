@@ -32,3 +32,13 @@ The input-retention repair reuses the owner's existing queue and retries every
 not new persistence or replay authority. Recorded input still precedes delivery.
 Jack Heart's LOO-718 report remains a separate live reproduction: no automatic
 paused-goal selection, handoff or input is justified by a responsive control probe.
+
+2026-11-04 implementation choice: preserve a live protected owner even when its
+control socket does not answer. `Uncertain` contains no recoverable editor text;
+provider history and a saved screen cannot rebuild queued keys or a pending
+request. Remove forced termination from ordinary resume for protected work.
+A failed attachment must leave the provider intact, and a later successful
+attachment must continue its actual editor/request. This repairs destructive
+recovery but cannot make a permanently broken old transport answer. Such a case
+requires transport repair or an explicit loss decision that Jack Heart has not
+made. Parent coordination steer: `598cfecc-ac66-4836-a65a-d5ad23875412`.

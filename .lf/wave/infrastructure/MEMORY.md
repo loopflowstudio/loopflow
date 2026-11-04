@@ -966,24 +966,26 @@ proof and limits: `38dd8abd09:.lf/wave/infrastructure/MEMORY.md`, this heading;
 design: `4ca3bbe3d7b30b8a4bb05d466ad55f5eeb368201:scratch/loo-502.md`.
 MTG-117's unknown exit is not proven upgrade-caused.
 
-## Moving onto the installed lf (LOO-705, 2026-11-02)
+## Moving onto the installed lf (LOO-705/724, reconciled 2026-11-04)
 
-Jack Heart requested one rollover mechanism after 0.15.0 refused 0.15.1 attaches
-and rollover moved none. Replacement from durable state, without negotiation,
-remains the headless choice pending Jack. `installation::superseded` compares
-the owner's build with its launch entry (`resolve_lf_binary`), shared by owner,
-resume and inventory. Removed/replaced/superseded owners end when waiting and
-send `<entry> session resume <id>`; viewers execute it without replaying argv
-(LOO-708 execs viewers before Clap). Resume watches an answering busy owner;
-an unanswering one ends with a cut-turn report. Rollover sweeps all superseded
-owners; viewed/artifact-set filters are deleted. Graph runners stay; steps use
-the entry. Jack calls LOO-709's 2m grace sufficient for "move always."
+Jack Heart requested one rollover mechanism; durable-state replacement remains
+a headless choice. Supersession compares owner and launch entry. Idle owners send
+`<entry> session resume <id>`; viewers follow without replay. Busy answering
+owners remain viewed; unanswering superseded owners end with a cut-turn report.
+Graph runners stay; steps use the entry. Unreadable stores retry. Earlier decisions
+and unproved Mac/Graph acceptance: `cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`,
+this heading.
+LOO-712's framed stream supersedes the earlier Response-variant guidance.
 
-Cross-build transport adds optional fields to existing Response variants, never
-variants (`moved` broke 0.15.0). Compare against the relaunch entry, not the
-viewer binary. Unreadable advanced stores keep retrying; mismatched app/CLI
-builds restart each other's owners. Fixtures prove neither Mac `lf resume LOO-618`
-nor a Graph's next step on a newer build.
+Jack expanded LOO-724 on November 4 to recovering old Sessions reported permanently
+disconnected, preserving identity/history/Work. LOO-723 owns coherent installation
+and promotion lifetime. Hook and launch entries depend on app/CLI coherence.
+Hook-entry fixtures prove neither owner lifetime nor installed recovery.
+Socket EOF fails with unknown outcome; only an orderly successor
+event follows resume. Jack's LOO-582 reproduction failed on surviving helpers after
+leader death; group confirmation waits only when releasing a locally held lifeline.
+Cross-process recovery needs observation without treating leader death as signal
+authority. The broader disconnect cause and installed recovery remain unproved.
 
 ## Shipped history
 

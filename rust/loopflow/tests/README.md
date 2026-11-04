@@ -69,6 +69,11 @@ It checks settlement, subagent exclusion, retained identity and real delivery
 errors. The alias uses the current ContextBlock handler; no second planning
 callback implementation exists. This fixture does not prove installed app/CLI
 coherence or a released-binary upgrade.
+`session_record::runtime::tests::resume_*dead_owners*` runs recovery in another
+process while a dead headless leader still has a helper. Natural helper exit
+allows the same recovery attempt to retain Task, history and pending steers with a
+fresh attachment fence; a persistent helper leaves the old attachment unsettled.
+Neither case grants permission to signal a helper after its leader has died.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

@@ -305,6 +305,7 @@ final class SessionsWorkspace {
     var retentionError: String?
     @ObservationIgnored private var presenceTask: Task<Void, Never>?
     @ObservationIgnored private var presenceRevision: Int64 = 0
+    private static let hostInstance = UUID().uuidString
 
     func retain(_ retained: Bool) {
         guard key.kind == .task, !quitting else { return }
@@ -359,12 +360,15 @@ final class SessionsWorkspace {
         if hostUse == "away", !nativeSettled {
             setHostUse("away")
         }
-        let occurrence = "desktop:\(localMachineId):\(key.id)"
-        let revisionKey = "workspace-presence-\(occurrence)"
-        let previous = Int64(UserDefaults.standard.double(forKey: revisionKey))
-        let revision = max(previous + 1, Int64(Date().timeIntervalSince1970 * 1000))
-        UserDefaults.standard.set(Double(revision), forKey: revisionKey)
-        presenceRevision = revision
+        let occurrence = "desktop:\(localMachineId):\(Self.hostInstance):\(key.id)"
+        let owner = Perf.processStartedAt.map {
+            TaskHostOwner(machineID: localMachineId, pid: UInt32(ProcessInfo.processInfo.processIdentifier),
+                          startedAt: Int64($0), settlesOnExit: true)
+        }
+        // The occurrence is unique to this app process; its revision needs no
+        // persistence or wall clock. Retained workspaces keep it across reopen.
+        presenceRevision += 1
+        let revision = presenceRevision
         let observedUse = hostUse
         let observedSettlement = nativeSettled
         do {
@@ -375,7 +379,7 @@ final class SessionsWorkspace {
                     case .recorded(let recorded, let checkout) = observed.location, checkout == location.worktree {
                 task = recorded
             } else { throw RegistryQueryError("Task retention is unknown until its remote location is observed.") }
-            let result = try await remote.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision, nativeSettled: observedSettlement)
+            let result = try await remote.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision, nativeSettled: observedSettlement, owner: owner)
             guard !Task.isCancelled, presenceRevision == revision, hostUse == observedUse,
                   nativeSettled == observedSettlement else { return }
             retirement = result

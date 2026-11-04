@@ -57,8 +57,8 @@ implementation and proof are tracked in `loo-717-shell-lifetimes.md`.
 
 ## Build assumptions — November 3
 
-A lost retained-host lease is unknown and keeps cleanup pending until a fresh
-observation. Desktop releases on departure, including unfinished Tasks; ordinary
+A lost retained-host lease is unknown. Cleanup needs fresh release or positive
+evidence that the exact retaining owner exited, per the accepted November 4 choice. Desktop releases on departure, including unfinished Tasks; ordinary
 shell execution stays alive and an eligible idle agent uses its existing grace.
 Host observations carry increasing persisted revisions so an old release cannot
 overwrite a newer return. Native Rex integration remains owned by LOO-498.
@@ -71,8 +71,9 @@ accepted quit/Close distinction; it is an engineering interpretation, not new
 approval. The implementation separates release policy from native-resource
 settlement in the existing host observation, so acknowledged quit can finish
 cleanup without reopening Desktop. Failed reporting remains unknown. Exact
-direction and counterexamples are in `loo-717-shell-lifetimes.md`, **Concept
-review — November 3**. No unresolved product choice was found.
+direction and counterexamples are preserved at
+`e7fd5db44f:scratch/loo-717-shell-lifetimes.md`, **Concept review — November 3**.
+No unresolved product choice was found.
 
 Build choice: quit has one five-second reporting budget across all destinations.
 Desktop fences window Close and heartbeats before detaching surfaces; failed or
@@ -92,7 +93,8 @@ reopening the app. Requested work and independent native/destination settlement
 still precede deletion. Network loss or lease expiry alone remains unknown;
 Rex client disappearance does not establish its retaining server's death.
 
-The choice is resolved; the confirmed-exit path remains to implement and prove.
+The choice is resolved; the confirmed-exit path is implemented with focused local,
+real SSH and headless Swift evidence recorded in the working design.
 The working design records usage copy, layer consequences and counterexamples.
 This review changes no runtime code, restarts no Graph and grants no shipping approval.
 
@@ -108,3 +110,10 @@ This conversation's app-bundled lf cannot read the current wave_removal schema.
 Use the already installed /Users/jack/.local/bin/lf for managed Work operations;
 set LF_BIN and PATH for child commands accordingly. Do not install, migrate or
 change accounts to repair the obsolete caller binary.
+
+Implementation choice — November 4: use the existing retirement executor and OS
+process reader. A host owner names Machine, PID, kernel start time and whether
+native resources die with that process. Remote verification uses an already
+registered route back to that Machine; absent routes/network failure stay unknown.
+No new watcher daemon or reverse connection setup. Desktop process instances get
+independent occurrences; old-instance exit cannot release a newer instance.

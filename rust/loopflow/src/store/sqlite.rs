@@ -61,7 +61,7 @@ mod task_content;
 mod task_details;
 mod task_retirement;
 mod task_shells;
-pub use task_retirement::{HostUse, TaskRetirement};
+pub use task_retirement::{HostUse, TaskHostOwner, TaskRetirement};
 pub use task_shells::TaskShell;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;

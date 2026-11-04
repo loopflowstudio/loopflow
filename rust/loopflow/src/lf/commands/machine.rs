@@ -63,6 +63,16 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
+        MachineCommand::Process { pid, started_at } => {
+            println!(
+                "{}",
+                serde_json::to_string(&crate::journal::process_identity_evidence(
+                    *pid,
+                    *started_at
+                ))?
+            );
+            return Ok(());
+        }
         MachineCommand::Connect {
             target,
             provider,
@@ -253,6 +263,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             println!("Removed {label}");
         }
         MachineCommand::Connect { .. }
+        | MachineCommand::Process { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Id { .. } => {
             unreachable!("credential and identity commands dispatch before opening the store")

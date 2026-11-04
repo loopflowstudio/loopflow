@@ -70,7 +70,7 @@ stores. It requires OpenSSH client/server binaries (`/usr/bin/ssh`,
 `/usr/sbin/sshd`, `ssh-keygen`; Ubuntu also needs `/run/sshd`). CI installs the
 server package. On macOS, run that command directly with `-- --ignored`:
 Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
-two tests are explicitly ignored in its default suite. Linux runs them normally
+tests are explicitly ignored in its default suite. Linux runs them normally
 inside network isolation. No system SSH configuration, keys or installed lf are used.
 Twenty cycles exercise the public Machine route, abrupt transport loss,
 reattachment to the same shell, Close and process/PTY/socket settlement;
@@ -79,6 +79,9 @@ These are real SSH protocol checks on one Machine, not a two-Machine or installe
 Desktop demonstration. `ops::task::retirement::tests` covers native-host
 acknowledgement, cancellation, unconfirmed job cleanup and retry after partial
 Git deletion with disposable worktrees and a bare remote.
+`ssh_shells::retirement_observes_remote_host_exit_after_disconnect_without_a_new_presence_report`
+keeps the existing retirement executor alive through loss of its retaining host's
+Machine connection, then confirms exit after reconnect without another presence report.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

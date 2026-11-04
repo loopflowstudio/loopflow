@@ -99,14 +99,18 @@ enum Perf {
     /// Milliseconds from kernel process start to now: the pre-main share of a
     /// cold start that no in-process interval can contain.
     static func millisecondsSinceProcessStart() -> Double? {
+        guard let started = processStartedAt else { return nil }
+        return (Date().timeIntervalSince1970 - started) * 1000
+    }
+
+    static let processStartedAt: TimeInterval? = {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride
         var name = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
         guard sysctl(&name, UInt32(name.count), &info, &size, nil, 0) == 0 else { return nil }
         let start = info.kp_proc.p_starttime
-        let started = Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
-        return (Date().timeIntervalSince1970 - started) * 1000
-    }
+        return Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
+    }()
 }
 
 extension ContinuousClock.Instant {

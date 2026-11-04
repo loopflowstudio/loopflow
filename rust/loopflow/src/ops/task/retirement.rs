@@ -13,7 +13,7 @@ use crate::durable::{TaskId, WorkStatus};
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
-    sqlite::{HostUse, TaskRetirement},
+    sqlite::{HostUse, TaskHostOwner, TaskRetirement},
     SharedStore,
 };
 use crate::work::task::Task;
@@ -55,14 +55,27 @@ pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> 
         .sqlite
         .reconcile_task_retirement(&task.id, now())
         .map_err(task_error)?;
-    if intent
-        .as_ref()
-        .is_none_or(|i| i.phase == "retired" || i.due_at.is_none())
-    {
+    if !needs_executor(store, &task.id, intent.as_ref())? {
         return Ok(());
     }
     drop(_guard);
     start(&task.id)
+}
+
+fn needs_executor(
+    store: &SharedStore,
+    task: &TaskId,
+    intent: Option<&TaskRetirement>,
+) -> OpsResult<bool> {
+    let Some(intent) = intent.filter(|intent| intent.phase != "retired") else {
+        return Ok(false);
+    };
+    Ok(intent.due_at.is_some()
+        || !store
+            .sqlite
+            .retaining_hosts(task)
+            .map_err(task_error)?
+            .is_empty())
 }
 
 fn start(task: &TaskId) -> OpsResult<()> {
@@ -121,13 +134,14 @@ fn start(task: &TaskId) -> OpsResult<()> {
 }
 
 /// Host state is semantic: each native host decides which occurrences to retain.
-/// Renewal is 30 seconds; lease loss remains unknown until the host observes again.
+/// Lease loss is unknown; only a positive read of the retaining owner's exit releases it.
 pub fn observe(
     issue: &str,
     occurrence: Option<&str>,
     state: Option<HostUse>,
     revision: Option<i64>,
     native_settled: Option<bool>,
+    owner: Option<&TaskHostOwner>,
 ) -> OpsResult<Option<TaskRetirement>> {
     block_on_task(async {
         let store = task_store().await?;
@@ -150,6 +164,7 @@ pub fn observe(
                     now(),
                     revision.ok_or_else(|| task_error("Host revision is required"))?,
                     native_settled.ok_or_else(|| task_error("Native settlement is required"))?,
+                    owner,
                 )
                 .map_err(task_error)?;
         }
@@ -158,10 +173,7 @@ pub fn observe(
             .reconcile_task_retirement(&id, now())
             .map_err(task_error)?;
         drop(_guard);
-        if result
-            .as_ref()
-            .is_some_and(|i| i.phase != "retired" && i.due_at.is_some())
-        {
+        if needs_executor(&store, &id, result.as_ref())? {
             start(&id)?;
         }
         Ok(result)
@@ -193,6 +205,7 @@ pub fn run(issue: &str) -> OpsResult<()> {
             if super::task_work_status(&store, &task).await? != WorkStatus::Done {
                 return Ok(());
             }
+            reconcile_hosts(&store, &id).await?;
             let result = {
                 let _guard = lock(&id, false)?;
                 advance(&store, &task).await
@@ -224,10 +237,11 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
     else {
         return Ok(true);
     };
-    if intent.phase == "retired" || intent.due_at.is_none() {
+    if !needs_executor(store, &task.id, Some(&intent))? {
         return Ok(true);
     }
-    if intent.due_at.is_some_and(|due| due > now()) {
+    // Retention can clear the deadline while an exact owner still needs watching.
+    if intent.due_at.is_none_or(|due| due > now()) {
         return Ok(false);
     }
     if super::task_work_status(store, task).await? != WorkStatus::Done {
@@ -318,6 +332,48 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
         .retirement_progress(&intent, "retired", None)
         .map_err(task_error)?;
     Ok(true)
+}
+
+async fn reconcile_hosts(store: &SharedStore, task: &TaskId) -> OpsResult<()> {
+    for host in store.sqlite.retaining_hosts(task).map_err(task_error)? {
+        if owner_evidence(store, &host.owner).await == ProcessIdentityEvidence::Dead {
+            let _guard = lock(task, false)?;
+            store
+                .sqlite
+                .release_exited_host(task, &host)
+                .map_err(task_error)?;
+        }
+    }
+    Ok(())
+}
+
+async fn owner_evidence(store: &SharedStore, owner: &TaskHostOwner) -> ProcessIdentityEvidence {
+    let Ok(local) = store.sqlite.local_machine() else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    if owner.machine_id == local.id {
+        return crate::journal::process_identity_evidence(owner.pid, owner.started_at);
+    }
+    let read = async {
+        let machine = store
+            .sqlite
+            .machine_by_id(&owner.machine_id)?
+            .ok_or_else(|| anyhow::anyhow!("Retaining Machine is unavailable"))?;
+        let bytes = crate::lf::commands::ssh::request(
+            &machine,
+            &[
+                "machine".into(),
+                "process".into(),
+                owner.pid.to_string(),
+                owner.started_at.to_string(),
+            ],
+            None,
+        )
+        .await?;
+        anyhow::Ok(serde_json::from_slice::<ProcessIdentityEvidence>(&bytes)?)
+    };
+    // The ordinary SSH request is bounded and runs outside the Task lock.
+    read.await.unwrap_or(ProcessIdentityEvidence::Unknown)
 }
 
 fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {

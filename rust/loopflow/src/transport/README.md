@@ -65,11 +65,11 @@ Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
 `lf resume` also moves an idle owner from an earlier build onto the lf entry.
-If that owner is busy and answers its socket, resume shows the running turn;
-an owner with this lifetime policy moves when the turn ends. An older owner
-without the policy needs another resume after its turn. If a superseded owner
-does not answer, resume ends it and reports that its turn was cut off, then
-reopens the saved conversation without replaying input.
+Drafts, pending requests, running turns, Graphs and Runs keep their owner even
+when its socket does not answer. Resume attempts attachment; a failed attachment
+leaves that work intact. Saved history cannot restore a native editor or pending
+request. Once protected work settles, an owner with this lifetime policy moves;
+an older owner without the policy needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. The sweep ends owners directly; existing viewers

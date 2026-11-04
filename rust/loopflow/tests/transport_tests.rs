@@ -2885,27 +2885,115 @@ fn resume_takes_over_an_owner_from_another_build() {
     assert!(!stderr.contains("cut off"), "{stderr}");
 }
 
-/// A superseded owner mid-turn that does not answer its socket cannot be
-/// watched to the turn's end, so `lf resume` ends it, reopens the conversation
-/// from its saved history and says the turn was cut.
+/// Socket silence cannot turn retained work into permission to replace a provider.
 #[test]
-fn resume_ends_a_busy_superseded_owner_that_never_answers() {
-    let fixture = Fixture::new();
-    let path = fixture.waiting_provider();
-    let (previous, session) = owner_on_another_build(&fixture, &path);
-    fixture.mark_working(&session);
-    let endpoint = fixture.endpoint(&previous);
-    std::fs::rename(&endpoint, endpoint.with_extension("retained")).unwrap();
-    let listener = UnixListener::bind(&endpoint).unwrap();
-    std::thread::spawn(move || {
-        let held: Vec<UnixStream> = listener.incoming().map_while(Result::ok).collect();
-        drop(held);
-    });
-    let stderr = takes_over(&fixture, &path, &previous, &session);
-    assert!(
-        stderr.contains("Moved") && stderr.contains("cut off"),
-        "{stderr}"
-    );
+fn unanswering_superseded_owners_preserve_work() {
+    for protection in ["draft", "request", "turn", "graph", "step", "run"] {
+        let fixture = Fixture::new();
+        let path = fixture.waiting_provider();
+        let (owner, session) = owner_on_another_build(&fixture, &path);
+        let mut viewer = fixture.viewer(&owner, true);
+        let sql = fixture.sql();
+        match protection {
+            "draft" => {
+                viewer.input("retained draft");
+                let deadline = Instant::now() + Duration::from_secs(10);
+                loop {
+                    let input: Option<String> = sql
+                        .query_row(
+                            "SELECT native_input FROM processes WHERE id=?1",
+                            [&owner],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    if input.is_some() {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "draft was not retained");
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+            "request" | "turn" => {
+                fixture.mark_working(&session);
+                if protection == "request" {
+                    sql.execute(
+                        "UPDATE session_activity SET open_tools=0,pending_input=1,yielded=1 WHERE session_id=?1",
+                        [&session],
+                    ).unwrap();
+                }
+            }
+            "graph" | "step" => {
+                let graph = loopflow::id::LfProcessId::new();
+                sql.execute(
+                    "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+                    rusqlite::params![graph, (protection == "graph").then_some(&owner)],
+                ).unwrap();
+                sql.execute(
+                    "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+                    [&graph],
+                ).unwrap();
+                if protection == "step" {
+                    sql.execute(
+                        "UPDATE processes SET parent_lf_process_id=?1 WHERE id=(
+                         SELECT e.lf_process_id FROM agent_sessions s
+                         JOIN session_events e ON e.seq=s.current_capture WHERE s.id=?2)",
+                        rusqlite::params![graph, session],
+                    )
+                    .unwrap();
+                    sql.execute(
+                        "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+                         SELECT ?1,e.lf_process_id,0,'[]' FROM agent_sessions s
+                         JOIN session_events e ON e.seq=s.current_capture WHERE s.id=?2",
+                        rusqlite::params![graph, session],
+                    ).unwrap();
+                }
+            }
+            "run" => {
+                sql.execute(
+                    "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+                    [&session],
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let identity = || {
+            sql.query_row(
+                "SELECT s.agent_process_id,p.attachment_token,s.current_capture,s.provider_thread,o.native_input
+                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+                 JOIN processes o ON o.id=s.transport_lf_process_id WHERE s.id=?1",
+                [&session],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?,
+                    r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?)),
+            ).unwrap()
+        };
+        let before = identity();
+        drop(viewer);
+        let paused = fixture.pause(&owner);
+        let resumed = fixture
+            .command(&["session", "resume", &session])
+            .env("PATH", &path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let output = wait_for_viewer(resumed, Duration::from_secs(20));
+        let after = identity();
+        let running = fixture.running(&owner);
+        let launches = fixture.launches(1);
+        drop(paused);
+        // Finish only this fixture after observing the refused replacement.
+        fixture.stop(&owner);
+        fixture.ends(&owner);
+        assert!(!output.status.success(), "{protection}: {output:?}");
+        assert!(running, "{protection}: resume ended the protected owner");
+        assert_eq!(after, before, "{protection}: resume changed retained state");
+        assert_eq!(
+            launches.len(),
+            1,
+            "{protection}: resume launched another provider"
+        );
+    }
 }
 
 /// Desktop restarting after an lf upgrade leaves the conversation in an owner

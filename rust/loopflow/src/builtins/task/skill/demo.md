@@ -55,11 +55,14 @@ exact owner identities, teardown command and private-Machine history reopening
 instructions in the demo note. Keep the root intact through rebuilds while owners
 live; never mark a history-bearing root for automatic cleanup.
 
-After review, stop only verified demo owners through existing Session/process
-controls and confirm exit before removing generated output. Preserve durable
-history. If a draft or pending request is retained, or teardown is incomplete,
-keep the fixture; record remaining owners and the next teardown action. Closing a viewer
-is not teardown. Use no competing cleaner or process-name signaling.
+After review, record whether drafts and pending requests are settled, retained,
+or explicitly disposable before stopping owners. Retained or unresolved input
+keeps its owner and complete fixture; saved history cannot recreate a dead editor.
+For eligible teardown, stop only verified demo owners through existing
+Session/process controls and confirm exit before removing generated output.
+Preserve durable history. If teardown is incomplete, keep the fixture and record
+remaining owners and the next teardown action. Closing a viewer is not teardown.
+Use no competing cleaner or process-name signaling.
 
 On a headless surface, run the same demonstration autonomously. If required
 product judgment or absent-user action prevents the proof, explain the exact

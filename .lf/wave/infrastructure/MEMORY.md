@@ -94,26 +94,23 @@ entry-point lesson separates source/publication from installed behavior.
 
 ## Demo runtime lifetime (LOO-725, 2026-11-04)
 
-Jack Heart requested recurrence prevention after stopping six stale demo owners
-recovered syspolicyd CPU; restarting the service alone failed. The families'
-combined contribution is established, not the exact requesting hook/thread or
-fixture mover. One image was unchanged; a moved-WAL probe still accepted writes.
-Neither executable replacement nor store-path loss alone explains the incident.
+Jack Heart requested recurrence prevention: stopping six demo owners recovered
+syspolicyd CPU; service restart failed. Their combined contribution is established,
+not the requesting hook/thread or fixture mover. One image was unchanged; a
+moved-WAL probe accepted writes. Neither condition explains the incident alone.
 
-Draft protection needs valid runtime/store files until verified teardown.
-Disposable demos copy their complete runtime outside build output, select the
-private Home/binary for children too, and retain durable history. Jack prefers
-stopping verified owners before reclaiming eligible output; LOO-722 owns that
-cleanup. Its laptop-only marker assumes evidence elsewhere, so unmarked demos
-with history inside remain outside its backstop. That boundary is unresolved.
+Demos copy complete runtimes outside build output and select private Home/binary
+for children. Draft/request disposition precedes teardown: saved history cannot
+recreate a dead editor. Retained input needs its owner and valid files. Jack prefers
+stopping verified owners before reclaiming eligible output; LOO-722 owns cleanup.
+Its marker assumes evidence elsewhere; history-bearing roots remain unmarked.
+Separating history from disposable runtime remains a demo/review decision.
 
 Store failure exposed writable-PTY retry spin; contention stalled control.
-LOO-724's nonblocking writer and input queue are integrated: defer write readiness
-during retry, retain before delivery, preserve other writers' timeouts. Fixtures
-prove control and recovery, not the assessment cause.
+LOO-724's integrated nonblocking queue defers write readiness, retains before
+delivery and preserves other writers' timeouts. Fixtures prove recovery, not cause.
 Diagnostics share retirement's judgment. Security pressure stops later suites;
-product failures do not. Release's entry-point lesson applies: combined cleanup,
-rebuild and installed acceptance remain distinct from fixture passes.
+product failures do not. Cleanup, rebuild and installed acceptance remain unproved.
 
 ## Session viewer wire (LOO-712, 2026-11-02)
 
@@ -985,8 +982,10 @@ the entry. Jack calls LOO-709's 2m grace sufficient for "move always."
 
 Cross-build transport adds optional fields to existing Response variants, never
 variants (`moved` broke 0.15.0). Compare against the relaunch entry, not the
-viewer binary. Unreadable advanced stores keep retrying; mismatched app/CLI
-builds restart each other's owners. Fixtures prove neither Mac `lf resume LOO-618`
+viewer binary. LOO-724 identified on November 4 that resume/rollover still cut
+protected unresponsive owners; its repair must precede LOO-723 reopening acceptance.
+Unreadable stores retry; mismatched app/CLI builds restart each other's owners.
+Fixtures prove neither Mac `lf resume LOO-618`
 nor a Graph's next step on a newer build.
 
 ## Shipped history

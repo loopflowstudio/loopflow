@@ -2325,9 +2325,9 @@ pub enum InstallCommand {
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
-        /// The fixed installation switch receipt to continue.
+        /// The fixed receipt to continue; omitted, recover the active switch with its pinned owner.
         #[arg(long)]
-        switch: String,
+        switch: Option<String>,
     },
     /// Preview whether this build may replace the global lf (read-only).
     /// Reads the shared store's migration frontier and validates executable

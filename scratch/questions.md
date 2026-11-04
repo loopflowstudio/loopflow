@@ -14,3 +14,10 @@ recovery during promotion; candidates containing LOO-723 also recover before
 shell destination discovery. Remove this capability check when the bootstrap's
 minimum supported release includes optional-id recovery. This does not add a
 second recovery owner or infer a new decision by Jack Heart.
+
+Gate assumption (2026-11-04): the interactive concept review left unattended
+Desktop restart unresolved. This headless run adopts 1b: defer a new scheduled
+update while Desktop is open, without changing the app, CLI or store. Explicit
+updates remain immediate; receipt recovery finishes first. This is a reversible
+safety choice, not a recorded decision by Jack Heart. Schedules carry their intent
+in LF_INSTALL_SCHEDULED and retain their existing cadence when refreshed.

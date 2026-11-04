@@ -1,118 +1,109 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-723 — coherent installation review</title>
+<title>LOO-723 · When an update reaches an open Desktop</title>
 <style>
-  :root { color-scheme: light dark; font: 17px/1.6 system-ui, sans-serif; }
-  body { max-width: 46rem; margin: auto; padding: 3rem 1.25rem 4rem; }
-  header, small { color: light-dark(#555, #bbb); }
-  h1 { font-size: 2rem; line-height: 1.2; margin: .8rem 0 1.3rem; }
-  h2 { margin-top: 2.3rem; font-size: 1.25rem; }
-  p { margin: 1rem 0; }
-  code { font-size: .88em; overflow-wrap: anywhere; }
-  pre { padding: 1rem; background: light-dark(#f3f3ef, #252724); overflow-x: auto; }
-  pre code { white-space: pre-wrap; }
-  .finding { border-left: 3px solid light-dark(#775019, #dfb66e); padding-left: 1rem; }
-  ol { padding-left: 1.4rem; }
-  li { margin: 1rem 0; }
-  a { color: light-dark(#185c77, #92d5ed); }
+:root { color-scheme: light dark; --paper:#fcfbf7; --ink:#242a2a; --muted:#626967; --line:#d9ded6; --accent:#276553; --wash:#f0f2eb; }
+@media(prefers-color-scheme:dark) { :root { --paper:#191d1c; --ink:#edf0e9; --muted:#b0bab4; --line:#3d4841; --accent:#a2d3b5; --wash:#252e28; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.55 ui-sans-serif,system-ui,sans-serif; }
+main { max-width:760px; margin:auto; padding:38px 24px 60px; }
+header { font-size:13px; color:var(--muted); }
+h1 { font:500 clamp(29px,5vw,42px)/1.12 ui-serif,Georgia,serif; letter-spacing:-.025em; margin:18px 0; }
+h2 { font-size:19px; margin:28px 0 10px; }
+p { margin:10px 0; }
+a { color:var(--accent); }
+code { font-size:.84em; overflow-wrap:anywhere; }
+.flow { margin:20px 0; padding:16px 18px; border-left:3px solid var(--accent); background:var(--wash); }
+.flow p { margin:6px 0; }
+small,.muted { color:var(--muted); }
+blockquote { border-left:2px solid var(--line); margin:14px 0; padding:0 16px; }
+details { border-top:1px solid var(--line); padding:14px 0; margin-top:18px; }
+summary { cursor:pointer; color:var(--accent); }
+ol { padding-left:22px; }
+li { padding-left:3px; }
+.choice { margin:12px 0; }
+.sources { font-size:12px; }
+@media(max-width:480px) { main { padding:26px 18px 40px; } }
 </style>
-<main>
-<header>LOO-723 · concept-review · 2026-11-04<br>
-Source reviewed: <code>5cf97493d9</code> against <code>ac8e088f5</code>.<br>
-Built from <code>scratch/loo-723.md</code>, <code>scratch/questions.md</code>,
+</head>
+<body><main>
+<header>LOO-723 · Concept review with Jack Heart · November 4, 2026<br>
+Source: <code>eb9603b2ee</code>; installed acceptance still outstanding.</header>
+<h1>When an update arrives, may it close your open Desktop?</h1>
+<p><strong>Recommendation: defer scheduled activation while Desktop is open.</strong>
+An explicit <code>lf install</code> can update now and reopen it. This is a proposal:
+updates could wait indefinitely if Desktop stays open.</p>
+<p class="muted">The current branch lets both manual and scheduled installs restart Desktop.
+It preserves running helpers, but usable conversations and pending input still need proof.</p>
+
+<div class="flow" aria-label="Actions, concepts and APIs">
+<p><strong>Your action:</strong> run <code>lf install</code>, or let the schedule run.</p>
+<p><strong>Installation:</strong> one complete app + CLI, in the existing location.</p>
+<p><strong>Update:</strong> recover receipt → choose destination → acquire → promote.</p>
+<p><strong>Running work:</strong> retain Session identities and images; verify continued interaction.</p>
+</div>
+
+<h2>The mismatch: “process survived” is weaker than “work survived”</h2>
+<p><strong>Before:</strong> the public CLI advanced while Desktop kept an incompatible helper.
+<strong>Branch:</strong> the app and CLI update together; Desktop alone is stopped and reopened.
+That stop escalates to a forced quit after five seconds. Keeping helper PIDs alive does not
+prove that the visible workspace, a draft, or the next turn survives.</p>
+
+<details>
+<summary>Walk through failure, recovery and the proposed usage text</summary>
+<p><strong>Normal, proposed:</strong> you are typing when the schedule runs. It keeps the
+whole installed build. A later run updates when Desktop is closed, or you run
+<code>lf install</code> to update immediately. No separate “staged update” record is needed.</p>
+<p><strong>Failure:</strong> download or preflight fails; the prior selection stays usable.
+<strong>Recovery:</strong> if activation already started, finish its recorded destination
+before considering a different request or deferring a new update. Never advance only the CLI.</p>
+<blockquote>Scheduled updates leave an open Desktop alone and retry on the next run.
+Run <code>lf install</code> to update now; it may close and reopen Desktop.
+The app and CLI always update together.</blockquote>
+<p><strong>Proposed skill wording:</strong> preserve an existing conversation and pending input;
+verify reconnect, a completed turn and continued interaction after rollout.
+A surviving PID or reopened window is insufficient.</p>
+<p><strong>API consequences:</strong> current <code>app_destination</code> resolves location;
+<code>PromotionArtifacts</code> carries the pair; <code>promote</code> writes
+<code>SwitchReceipt.activation</code>; <code>recover_switch</code> finishes its pinned paths.
+Deferral would carry scheduled intent to a decision before a new switch or store advancement.
+The same promotion and recovery owner remains.</p>
+</details>
+
+<details>
+<summary>Remaining source finding: Desktop still has a different location rule</summary>
+<p>Rust follows the public CLI into a custom bundle. Swift's <code>AppUpdates.isInstalled</code>
+still checks only <code>/Applications</code> or <code>LF_APPLICATIONS_DIR</code>.
+A custom app launched without that environment skips both updater startup and automatic
+adoption. This source counterexample remains regardless of the restart choice.</p>
+<p><strong>Required direction:</strong> use the same installed-location facts in Desktop,
+while keeping private development builds excluded. Verify a normal custom-location launch;
+the Rust adoption command alone does not fix the Swift gate before it.</p>
+<p>The parent reports the immediate Desktop repair on signed main. That is separate from
+this branch's installation policy, mini rollout and the existing-session recovery owned by LOO-724.</p>
+</details>
+
+<details class="sources">
+<summary>Files and evidence</summary>
+<p>Built from <code>scratch/loo-723.md</code>, <code>scratch/questions.md</code>,
+<code>release/README.md</code>, <code>.lf/skills/hotfix.md</code>,
 <code>rust/loopflow/src/lf/commands/install.rs</code>,
 <code>rust/loopflow/src/lf/commands/install/published.rs</code>,
-<code>release/install.sh</code>, <code>python/tests/test_shell_installer.py</code>,
-<code>release/README.md</code>, <code>.lf/skills/hotfix.md</code>,
-<code>swift/LoopflowMac/AppUpdater.swift</code> and the supplied Task steer.</header>
-<h1>Does the repaired installation model need another design change?</h1>
-<p><strong>Headless outcome: nothing further to change; no open product choice
-identified.</strong> The earlier destination proposal is implemented in this
-branch. Jack Heart's accepted requirements still demand gate and installed
-acceptance; this review supplies neither.</p>
+<code>swift/LoopflowMac/AppUpdater.swift</code>, and Task coordination comments.</p>
+<p>This review changes only its working design and this page. No implementation,
+installation, execution restart or change to shipping approval. The existing auto run was
+publishing when inspected. <a href="loo-723.md">Working design and outstanding proofs</a>.</p>
+</details>
 
-<section class="finding">
-<h2>One installation, with running work preserved</h2>
-<p>The original failure let the public CLI advance while Desktop retained a helper
-that could not read the store. The earlier review also found that a scheduled
-update could abandon a custom app location. Both require one complete installed
-pair and one resolved destination.</p>
-<p>Already-running Sessions and Graphs can retain an older image. Installation
-coherence does not authorize stopping them. A live helper is insufficient evidence
-that a conversation still accepts input and completes work.</p>
-</section>
-
-<h2>Actions → concepts → APIs</h2>
-<pre><code>Before: observed failure / earlier branch mismatch
-  lf install → CLI advances → Desktop helper remains incompatible
-  schedule   → default destination → custom app remains behind
-
-After: implemented source, rollout still unverified
-  lf install / schedule
-    → recover_switch(None): finish the pinned receipt first
-    → app_destination: explicit directory, linked app, initial default
-    → acquire complete signed app + helper
-    → PromotionArtifacts: one pair and destination
-    → promote: validate, stage, advance store, activate
-    → SwitchReceipt.activation: app + public entry + gate recovery
-
-  Desktop update action → Sparkle → bundled adopt → promote
-  Existing Sessions / Graphs → retained images → existing retirement</code></pre>
-<p>The public link supplies location discovery. The existing receipt owns interrupted
-activation. No new destination registry, schema, helper fallback or Session restart
-mechanism is introduced.</p>
-
-<h2>What the person does</h2>
-<pre><code>LF_APPLICATIONS_DIR=/Volumes/Tools lf install --preview
-lf install
-# Later ordinary and scheduled updates follow the linked app.</code></pre>
-<p><strong>Implemented guidance:</strong> CLI-only skips initial Desktop setup;
-an existing app stays paired. Release documentation describes one recoverable
-switch and the distinction between installed files and running images. Hotfix
-instructions require a complete matching signed app wherever Desktop is installed;
-direct promotion can reuse an existing app only when its helper matches.</p>
-<p><strong>Recorded assumption:</strong> the CLI-only first-setup interpretation is
-a headless implementation choice, not a separately attributed approval by
-Jack Heart. No additional proposal is introduced by this review.</p>
-
-<h2>Failure and recovery</h2>
-<p>A failed acquisition or preflight preserves the prior installation. After store
-advancement, retry finishes the receipt's recorded destination before considering
-a new request. Matching files still pass through promotion to reconcile the
-receipt and gate. Desktop alone is quiesced and reopened; live retired bundles
-remain available to their owners.</p>
-<p>The contract fails if a schedule loses the custom location, CLI-only leaves an
-existing app behind, recovery follows a new environment instead of its receipt,
-or cleanup removes a still-needed image. Focused source fixtures cover these
-boundaries; the activation fixture does not prove the full production-store
-recovery transaction.</p>
-
-<h2>Next proof</h2>
-<p>Complete the affected gate and disposable-account recovery checks. Then verify
-the corrected signed build on desktop and mini: app/helper/public CLI/gate identity,
-store access, actual scheduled execution and custom-location retention where
-applicable. Verify an affected existing conversation accepts input, completes a
-turn and sustains interaction, coordinating with LOO-724.</p>
-<p>The parent reports an interim main Desktop repair and an actual rendered Task
-list. That is separate from installing this branch's repair. Desktop promotion
-remains coordinated with the parent; mini rollout remains part of LOO-723.</p>
-<p><small>Decision record: <a href="loo-723.md">scratch/loo-723.md</a>.
-Only review artifacts changed in this step. No build, installation, publication,
-merge or Task completion was performed.</small></p>
-
-<h2>Review questions, resolved against accepted direction</h2>
-<ol>
-<li>Does the previous location mismatch still require implementation?
-<strong>No.</strong> Source now carries the resolved destination through acquisition,
-freshness and promotion, with recovery preceding discovery.</li>
-<li>Can coherent installation require every running process to switch immediately?
-<strong>No.</strong> Preserving running work remains required; retained images are
-intentional, and usable-session continuity needs its own proof.</li>
-<li>Is any new product choice unresolved?
-<strong>None identified.</strong> Gate and both-Machine acceptance are outstanding
-verification obligations, not evidence of a new design decision.</li>
-</ol>
-</main>
-</html>
+<h2>Decision</h2>
+<ol><li><strong>When Desktop is open, what should a scheduled update do?</strong>
+<p class="choice"><strong>1a — Update and reopen Desktop.</strong> Current branch behavior;
+prompt updates, with visible interruption. Continuity must be demonstrated.</p>
+<p class="choice"><strong>1b — Wait for a run when Desktop is closed.</strong> Proposed,
+recommended; avoids unattended interruption, but updates may be delayed.
+Explicit <code>lf install</code> still updates now.</p>
+</li></ol>
+</main></body></html>

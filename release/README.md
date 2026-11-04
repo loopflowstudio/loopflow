@@ -40,7 +40,9 @@ On a Mac with Loopflow.app, `~/.local/bin/lf` links to the app's bundled
 `Contents/MacOS/lf`, so the terminal and Desktop always run one build; elsewhere
 it links to the selected build under `~/.lf/bin`. `lf install` promotes the complete
 signed bundle through one recoverable installation switch, quitting and reopening
-Desktop when necessary. `LF_INSTALL_CLI_ONLY=1` skips initial Desktop setup on an
+Desktop when necessary. Scheduled updates leave an open Desktop alone and retry
+on the next run; run `lf install` to update immediately. An interrupted switch
+finishes recovery before considering another update. `LF_INSTALL_CLI_ONLY=1` skips initial Desktop setup on an
 app-free Machine; an existing app always updates with the CLI. Direct promotion
 can reuse an installed bundle only when its helper matches the candidate.
 Updates follow the app reached by the public `lf` entry, preserving custom

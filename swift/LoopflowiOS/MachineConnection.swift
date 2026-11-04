@@ -57,16 +57,18 @@ final class MachineConnection {
     }
 
     func send(_ bytes: Data) async throws {
-        guard !closed else { throw RegistryQueryError("Machine connection is closed") }
+        guard !closed else { throw connectionError(RegistryQueryError("Machine connection closed")) }
         let timeout = deadline(seconds: 5)
         defer { timeout.cancel() }
-        var index = bytes.startIndex
-        while index < bytes.endIndex {
-            try Task.checkCancellation()
-            let end = min(index + 64 * 1024, bytes.endIndex)
-            try await socket.send(.data(Data(bytes[index..<end])))
-            index = end
-        }
+        do {
+            var index = bytes.startIndex
+            while index < bytes.endIndex {
+                try Task.checkCancellation()
+                let end = min(index + 64 * 1024, bytes.endIndex)
+                try await socket.send(.data(Data(bytes[index..<end])))
+                index = end
+            }
+        } catch { throw connectionError(error) }
     }
 
     func request(_ operation: MachineOperation, id: String = UUID().uuidString) async throws -> MachineResponse {
@@ -112,12 +114,21 @@ final class MachineConnection {
     }
 
     private func nextMessage() async throws -> Data {
-        guard !closed else { throw RegistryQueryError(timedOut ? "The Machine did not respond in time" : "Machine connection closed") }
-        return try await withTaskCancellationHandler {
-            guard case .data(let data) = try await socket.receive() else {
-                throw RegistryQueryError("The Machine sent an unsupported message")
-            }
-            return data
-        } onCancel: { [socket] in socket.cancel(with: .goingAway, reason: nil) }
+        guard !closed else { throw connectionError(RegistryQueryError("Machine connection closed")) }
+        do {
+            return try await withTaskCancellationHandler {
+                guard case .data(let data) = try await socket.receive() else {
+                    throw RegistryQueryError("The Machine sent an unsupported message")
+                }
+                return data
+            } onCancel: { [socket] in socket.cancel(with: .goingAway, reason: nil) }
+        } catch { throw connectionError(error) }
+    }
+
+    private func connectionError(_ error: any Error) -> any Error {
+        if Task.isCancelled { return CancellationError() }
+        if timedOut { return RegistryQueryError("The Machine did not respond in time") }
+        if closed { return RegistryQueryError("Machine connection closed") }
+        return error
     }
 }

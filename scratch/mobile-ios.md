@@ -67,6 +67,14 @@ cells without sending remote geometry changes.
 
 ## Next work and acceptance
 
+The mounted-terminal sustained-output proof now passes; retain its failure-stage
+diagnostics. Two earlier batching experiments failed at output/recovery deadlines
+with misleading socket-error attribution. Later batched and original-decoder runs
+passed. Their cause remains unresolved; do not infer that timeout-message cleanup
+fixed those failures. No batching change remains: it reduced feed calls without
+materially reducing feed time. Physical-phone rendering/energy and typing under
+load still need proof. Detailed results and failure logs are recorded below.
+
 1. Continue live acceptance with actual Desktop and a separate physical phone,
    service/network interruptions and sustained rendered workloads. Native UIKit editing,
    passive reconnect, competing control/geometry and owner exit now pass over
@@ -433,3 +441,40 @@ and its original empty configuration verified. Twenty-six native terminal/decode
 tests passed in `/tmp/mobile-pull-tests.log`; cargo fmt and all-target Clippy passed.
 This sustained load exercises the real adapter and carrier, not SwiftTerm drawing
 32 MiB or physical-phone energy/latency. Those acceptance items remain open.
+
+### Mounted rendering and connection errors — November 4, 04:11
+
+The sustained-output acceptance now mounts SessionTerminalController in a real
+Simulator window, applies actual geometry/snapshot/output callbacks and verifies
+the final rendered text. The current original decoder delivered all 33,554,432
+bytes through 32,769 feeds, taking 6.313 seconds inside feed calls; the longest
+feed was 0.491 ms. A stalled viewer disconnected after 1,060,864 bytes and its
+replacement received the current screen without control. Existing draft handoff,
+saved creation recovery and exact submission/provider counts also passed.
+This measures synchronous feeding, not GPU frame cadence, physical-phone energy
+or keyboard responsiveness under load.
+
+An experiment combining adjacent output up to 16 KiB reduced calls to 17,826 but
+took 6.245 seconds in feeds (1.904 ms longest). The original path's neighboring
+run took 6.314 seconds. The additional buffering code was removed: this evidence
+does not establish a useful improvement. Two earlier experimental runs failed
+after rendered completion or during output, respectively. XCTest attributed raw
+socket errors to nonthrowing reader loops; their actual cause remains unresolved.
+Preserved native logs: `/tmp/mobile-render-batched-native.log` and
+`/tmp/mobile-render-diagnostic-native.log`. The test now records counts and the
+actual error at its output/drain deadlines. Subsequent passing runs do not erase
+these failures or establish that batching caused them.
+
+Separately, MachineConnection now translates a deadline-triggered socket failure
+into “The Machine did not respond in time,” including when the deadline fires
+during an awaited read/write. Explicit task cancellation stays CancellationError;
+other network failures retain their original error. No timeout, retry or input
+delivery policy changed. Live acceptance opens an idle authenticated socket and
+asserts its timeout, rejects a later write, and cancels another pending read.
+
+Checks: host-Tailscale native acceptance passed at
+`Test-LoopflowiOS-2026.11.04_04-10-58--0800.xcresult` (22.400 seconds), log
+`/tmp/mobile-connection-lifecycle-native.log`; diff whitespace passed. Temporary
+Serve configuration was removed and verified empty. The preceding unchanged-
+decoder rendered proof also passed at 04:08:57. No Apple distribution work or
+physical-device acceptance is claimed.

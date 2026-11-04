@@ -155,7 +155,8 @@ and reconnect have also passed through a real retained owner, including a newer
 viewer holding input and 120×40 geometry. The child receives the combined draft
 exactly once and no reconnect starts a provider. These peers use the actual
 protocol; this is not yet a manual Desktop-to-physical-phone demonstration.
-Sustained rendering, real-network outages and physical-phone use remain acceptance work. Contextual approvals/Stop stay absent until the
+Rendering under sustained output is exercised in Simulator; real-network outages
+and physical-phone use remain acceptance work. Contextual approvals/Stop stay absent until the
 backend supplies trustworthy state and action semantics; terminal prompts remain
 answerable through ordinary typing.
 
@@ -191,8 +192,11 @@ only the temporary Serve route afterward; never reset unrelated host routes.
 
 The same acceptance includes a 32 MiB output stream paced by an active viewer.
 A second viewer stops reading, disconnects under the owner's bounded policy, then
-reattaches to the current screen without taking control. This tests native stream
-delivery and recovery; it does not measure rendering throughput or phone energy.
+reattaches to the current screen without taking control. The active viewer feeds
+the mounted native terminal and verifies its final screen, recording feed count
+and synchronous feed duration. This does not measure GPU frame cadence, typing
+latency under load or phone energy. The carrier also checks that an expired read
+reports a timeout and an explicitly canceled read stays cancellation.
 
 `MachineConnectionIntegrationTests` skips unless the installed simulator app’s
 Documents directory contains `LoopflowIntegration/setup.json`. Supply a fresh

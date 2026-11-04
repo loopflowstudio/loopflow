@@ -45,6 +45,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let confirmed = try XCTUnwrap(MachineKeychain.load())
         XCTAssertNotNil(confirmed.machineID)
         XCTAssertTrue(confirmed.token == credential.token, "Bootstrap must preserve the issued grant")
+        try await exerciseConnectionLifecycle(credential: confirmed)
         let reopened = RemoteMobileClient(credential: confirmed)
         let refreshed = try await reopened.workingTasks()
         XCTAssertEqual(refreshed.map(\.work), tasks.map(\.work))
@@ -62,7 +63,62 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         if let session = proof?.outputSession { try await exerciseOutput(client: reopened, session: session) }
     }
 
+    private func exerciseConnectionLifecycle(credential: MachineCredential) async throws {
+        // Admit a real socket but send no operation. The service waits for its
+        // request; our earlier deadline must report a timeout, not URL cancellation.
+        let idle = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
+        defer { idle.close() }
+        let deadline = idle.deadline(seconds: 1)
+        defer { deadline.cancel() }
+        do {
+            _ = try await idle.receiveBytes()
+            XCTFail("An idle connection cannot produce a Machine response")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "The Machine did not respond in time")
+        }
+        do {
+            try await idle.send(Data([0]))
+            XCTFail("An expired connection cannot send more bytes")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "The Machine did not respond in time")
+        }
+
+        let canceled = try MachineConnection(endpoint: credential.endpoint, token: credential.token)
+        defer { canceled.close() }
+        var reading = false
+        let reader = Task {
+            reading = true
+            do {
+                _ = try await canceled.receiveBytes()
+                XCTFail("A canceled read cannot produce a response")
+            } catch {
+                XCTAssertTrue(error is CancellationError, "Cancellation must not appear as a network failure")
+            }
+        }
+        try await wait("Connection reader did not start") { reading }
+        reader.cancel()
+        await reader.value
+    }
+
     private func exerciseOutput(client: RemoteMobileClient, session: String) async throws {
+        let workspace = MobileWorkspace(client: client)
+        let controller = SessionTerminalController(workspace: workspace)
+        controller.loadViewIfNeeded()
+        controller.update(theme: .light)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        defer {
+            workspace.leave()
+            controller.terminal.updateUiClosed()
+            window.isHidden = true
+            previous?.makeKey()
+        }
         let stalled = try await client.attach(sessionID: session)
         defer { stalled.close() }
         let active = try await client.attach(sessionID: session)
@@ -75,11 +131,23 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         var tail = ""
         var ended = false
         var problem: String?
+        var renderSeconds = 0.0
+        var longestRender = 0.0
+        var feeds = 0
         let reader = Task {
             for await event in active.events {
                 switch event {
+                case .geometry(let columns, let rows):
+                    workspace.setGeometry?(TerminalGeometry(columns: columns, rows: rows))
+                case .snapshot(let bytes): workspace.render?(bytes, true)
                 case .control(let held, _): controlled = held
                 case .output(let bytes):
+                    let start = ProcessInfo.processInfo.systemUptime
+                    workspace.render?(bytes, false)
+                    let elapsed = ProcessInfo.processInfo.systemUptime - start
+                    renderSeconds += elapsed
+                    longestRender = max(longestRender, elapsed)
+                    feeds += 1
                     received += bytes.filter { $0 == 120 }.count
                     while acknowledged < received / 65536 {
                         do { try active.send(Data("next\n".utf8)); acknowledged += 1 }
@@ -98,9 +166,16 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         try await wait("Output fixture did not grant control") { controlled || problem != nil }
         XCTAssertNil(problem)
         try active.send(Data("start\n".utf8))
-        try await wait("Sustained output did not complete", seconds: 60) { complete || problem != nil }
+        do {
+            try await wait("Sustained output did not complete", seconds: 60) { complete || problem != nil }
+        } catch {
+            print("Mobile output stopped: received=\(received), acknowledged=\(acknowledged), feeds=\(feeds), ended=\(ended), problem=\(problem ?? "none"); \(error.localizedDescription)")
+            throw error
+        }
         XCTAssertNil(problem)
         XCTAssertEqual(received, expected, "The active phone must receive every output byte")
+        XCTAssertTrue(controller.terminal.accessibilityPageContent()?.contains("output-complete") == true)
+        print("Mobile render proof: \(feeds) feeds, \(renderSeconds) seconds feeding, \(longestRender) seconds longest feed")
 
         var staleBytes = 0
         var stalledFinished = false
@@ -112,10 +187,17 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             stalledFinished = true
         }
         defer { draining.cancel() }
-        try await wait("Stalled phone buffered the entire output instead of disconnecting", seconds: 15) { stalledFinished }
+        do {
+            try await wait("Stalled phone buffered the entire output instead of disconnecting", seconds: 15) { stalledFinished }
+        } catch {
+            print("Mobile stalled reader stopped: bytes=\(staleBytes); \(error.localizedDescription)")
+            throw RegistryQueryError("Stalled-reader drain failed after \(staleBytes) bytes: \(error.localizedDescription)")
+        }
         XCTAssertLessThan(staleBytes, expected / 2, "A stopped reader must not accumulate the entire stream")
         print("Mobile output proof: active \(received) bytes, stalled \(staleBytes) bytes")
-        let returning = try await client.attach(sessionID: session)
+        let returning: any MobileAttachment
+        do { returning = try await client.attach(sessionID: session) }
+        catch { throw RegistryQueryError("Fresh observer attachment failed after the output run: \(error.localizedDescription)") }
         defer { returning.close() }
         var freshScreen = false
         var passive = false

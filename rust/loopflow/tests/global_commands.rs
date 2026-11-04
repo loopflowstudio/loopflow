@@ -382,11 +382,20 @@ fn scheduled_install_preserves_the_account_schedule_from_a_disposable_home() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let cwd = tempfile::tempdir().unwrap();
-    for frequency in [None, Some("daily"), Some("weekly"), Some("hourly"), Some("5min")] {
+    for frequency in [
+        None,
+        Some("daily"),
+        Some("weekly"),
+        Some("hourly"),
+        Some("5min"),
+    ] {
         let mut args = vec!["self", "install", "schedule"];
         args.extend(frequency);
         let output = success(command(home.path(), cwd.path(), &args).output().unwrap());
-        assert!(output.contains("Not scheduling installation: HOME"), "{output}");
+        assert!(
+            output.contains("Not scheduling installation: HOME"),
+            "{output}"
+        );
         assert!(!home.path().join("Library/LaunchAgents").exists());
         assert!(!home.path().join(".lf/logs").exists());
     }

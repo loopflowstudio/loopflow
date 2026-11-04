@@ -417,6 +417,10 @@
     "tiktoken-rs@0.12.1": {
       "path": "third_party/notices/crate-tiktoken-rs.txt",
       "sha256": "f7c6ddf9d84fd7b8ad5917e4074d4c05e4c1dfb752a28a0058f06bd0f5e2edcc"
+    },
+    "yaml-edit@0.3.6": {
+      "path": "third_party/notices/crate-yaml-edit.txt",
+      "sha256": "1f3cca984850863bfa90a00e6f9302808fe2a4c78fe065544a0b26425b4c55f3"
     }
   },
   "notice_provenance": {
@@ -551,6 +555,14 @@
     "glyph-iec": {
       "url": "https://raw.githubusercontent.com/jloughry/Unicode/805536fb6f93604da985d80e0c6b099f98f8b4d9/LICENSE.txt",
       "sha256": "11aef1cdf2d58d822e6857e2574870ccc59d4900052bf5c098e319d750e7ac3d"
+    },
+    "crate-yaml-edit-declaration": {
+      "url": "https://raw.githubusercontent.com/jelmer/yaml-edit/780a686e5b882941b710c0ef19fd8d061d03bcc8/Cargo.toml",
+      "sha256": "3d44ba585064f076cf26e7fda1e18a647da2c53df24a0d17368922b99d0d8a3b"
+    },
+    "apache-2.0": {
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
     }
   }
 }

@@ -35,6 +35,7 @@ use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scan
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
+const TERMINAL_ENV: &str = "LF_TRANSPORT_TERMINAL";
 const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Continuous output tells the lifetime policy once per pause, not per read.
@@ -186,6 +187,12 @@ pub(crate) fn start(
         .stdout(Stdio::piped())
         .stderr(log);
     inherit(&mut command);
+    // Validate placement on the viewer's PTY before handing it to the owner,
+    // whose stdin is deliberately detached.
+    command.env_remove(TERMINAL_ENV);
+    if let Some(terminal) = crate::session_record::current_terminal_id() {
+        command.env(TERMINAL_ENV, terminal);
+    }
     // SAFETY: only an async-signal-safe syscall is used between fork and exec.
     unsafe {
         command.pre_exec(|| {
@@ -645,6 +652,8 @@ impl Ownership {
 
 /// Own a command's transport until it exits; only `start` launches this.
 pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
+    let placement = std::env::var(TERMINAL_ENV).ok();
+    std::env::remove_var(TERMINAL_ENV);
     let id =
         crate::journal::current_lf_process_id().context("Transport needs an admitted Process")?;
     let path = endpoint(&id).context("Prepare transport socket")?;
@@ -663,6 +672,18 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         .env(OWNER_ENV, id.as_str())
         .env(PARENT_ENV, std::process::id().to_string());
     let pair = terminal.then(terminal_pair).transpose()?;
+    command
+        .env_remove("LF_TERMINAL_ID")
+        .env_remove("LF_TERMINAL_TTY");
+    if let (Some(placement), Some((_, slave))) = (placement, &pair) {
+        if let Some(tty) = tty_name(slave.as_raw_fd()) {
+            // This owned PTY continues the validated viewer placement. Native
+            // admission can now associate its first Session with Desktop.
+            command
+                .env("LF_TERMINAL_ID", placement)
+                .env("LF_TERMINAL_TTY", tty);
+        }
+    }
     // A native client that dies raw is returned to these modes.
     let cooked = pair.as_ref().and_then(|(master, _)| {
         // SAFETY: tcgetattr writes into a live termios; the descriptor is borrowed.
@@ -1639,10 +1660,10 @@ fn send_frame(socket: &mut UnixStream, tag: Tag, payload: &[u8]) -> Result<()> {
 }
 
 /// This viewer's terminal device, named to others when it takes ownership.
-fn tty_name() -> Option<String> {
+fn tty_name(fd: RawFd) -> Option<String> {
     // SAFETY: ttyname returns null or a pointer to a static NUL-terminated name.
     unsafe {
-        let name = libc::ttyname(0);
+        let name = libc::ttyname(fd);
         (!name.is_null()).then(|| CStr::from_ptr(name).to_string_lossy().into_owned())
     }
 }
@@ -1775,7 +1796,7 @@ fn attach_with_terminal(
             own: take_control.then_some(Own::Take),
             rows,
             cols,
-            name: tty_name(),
+            name: tty_name(libc::STDIN_FILENO),
             moved,
         },
     )?;

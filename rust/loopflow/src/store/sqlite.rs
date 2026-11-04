@@ -59,6 +59,7 @@ mod machine_devices;
 mod steers;
 mod task_comments;
 mod task_content;
+mod task_create_requests;
 mod task_details;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;

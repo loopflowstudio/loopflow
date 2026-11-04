@@ -419,12 +419,24 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         let saved = layout("repository");
         saved["revision"].as_i64().unwrap_or(0)
     };
+    // Creation delegates complete admission to its CLI; no in-process effects.
+    let create = Write::TaskCreate {
+        directory: directory.clone(),
+        request_id: loopflow::id::TaskCreateRequestId::new(),
+        request: "Create through the shared CLI".into(),
+        wave: None,
+        graph: None,
+    };
+    let before = processes(&database);
+    assert_eq!(create.write().unwrap(), None);
+    assert_eq!(processes(&database), before);
     // A new Write fails to compile here until it is compared too.
     let (writes, arrangement) = match (Write::TaskReopen {
         directory: directory.clone(),
         issue: "INF-123".into(),
     }) {
-        Write::TaskComplete { .. }
+        Write::TaskCreate { .. }
+        | Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
         | Write::TaskNotes { .. }

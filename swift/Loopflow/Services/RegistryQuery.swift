@@ -228,6 +228,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 /// `argv` does in `cwd`, given `input` on stdin. A Work change records its
 /// Process as that `lf` command would.
 public enum ServedWrite: Equatable, Sendable, Encodable {
+    case taskCreate(directory: String, requestID: UUID, request: String, wave: String?, graph: String?)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
@@ -258,6 +259,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
         switch self {
+        case .taskCreate(_, let id, let request, let wave, let graph):
+            ["task", "create", "--run", "--json", "--request-id", id.uuidString.lowercased()]
+                + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
+                + Self.option("--graph", graph) + ["--", request]
         case .taskComplete(_, let issue): ["task", "complete", issue]
         case .taskReopen(_, let issue): ["task", "reopen", issue]
         case .taskAbandon(_, let issue): ["task", "abandon", issue]
@@ -324,6 +329,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
+        case .taskCreate(let directory, let id, let request, let wave, let graph):
+            TaggedFields("task_create", ["directory": directory, "request_id": id.uuidString.lowercased(),
+                                        "request": request, "wave": wave, "graph": graph])
         case .taskComplete(let directory, let issue):
             TaggedFields("task_complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
@@ -1051,6 +1059,24 @@ public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case task, graph
         case sessionId = "session_id"
+    }
+}
+
+/// Shared CLI admission. Retain the same request ID and payload until settled.
+/// `unknown` never means that starting the Graph again is safe.
+public struct TaskCreateOutcome: Decodable, Sendable, Hashable {
+    public enum State: String, Decodable, Sendable {
+        case inProgress = "in_progress"
+        case started, failed, unknown
+    }
+    public let taskId: String
+    public let state: State
+    public let receipt: TaskCreateReceipt?
+    public let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case state, receipt, message
     }
 }
 

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "id": "create-1",
+  "operation": {
+    "kind": "command",
+    "change": {
+      "write": "task_create",
+      "directory": "/repo",
+      "request_id": "00000000-0000-4000-8000-000000000001",
+      "request": "Fix the retry test",
+      "wave": null,
+      "graph": null
+    }
+  }
+}

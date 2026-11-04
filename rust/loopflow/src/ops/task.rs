@@ -1473,6 +1473,24 @@ pub fn task_create(
     report: Option<String>,
     regressed_in: Option<String>,
 ) -> OpsResult<Task> {
+    task_create_with_id(
+        repo,
+        wave,
+        title,
+        report,
+        regressed_in,
+        crate::durable::TaskId::new(),
+    )
+}
+
+pub(crate) fn task_create_with_id(
+    repo: &Path,
+    wave: Option<&str>,
+    title: Option<String>,
+    report: Option<String>,
+    regressed_in: Option<String>,
+    id: crate::durable::TaskId,
+) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let regression = regressed_in.map(|version| crate::work::task::TaskUpdate {
         regressed_in: Some(version),
@@ -1484,6 +1502,24 @@ pub fn task_create(
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = super::planning_sync::planning_store().await?;
+        // A shared command reservation already checked the full request. Keep
+        // its original Task and Project even if defaults changed after filing.
+        if let Some(task) = store.get_task(&id).await.map_err(task_error)? {
+            if let Some(update) = &regression {
+                if task.regressed_in != update.regressed_in {
+                    store
+                        .edit_task(&task.id, task.revision, update)
+                        .await
+                        .map_err(task_error)?;
+                    return store
+                        .get_task(&id)
+                        .await
+                        .map_err(task_error)?
+                        .ok_or_else(|| task_error("Created Task is missing"));
+                }
+            }
+            return Ok(task);
+        }
         if let Err(error) =
             super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
         {
@@ -1519,7 +1555,7 @@ pub fn task_create(
             .create_task(
                 &crate::work::task::NewTask {
                     due_date: None,
-                    id: crate::durable::TaskId::new(),
+                    id,
                     repository_id,
                     project_id: creation_project,
                     title: input.title,

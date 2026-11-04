@@ -115,11 +115,11 @@ setup delegates to the promoted installation; source builds use an explicit
   The shared watch validates them, including its 16 KiB limit; an invalid
   checkpoint ends the watch with an `unavailable` reading.
   Closing cancels. Reconnect opens a fresh subscription; no replay cursor exists.
-- `command {change}` supports `session_rename` using the existing `Write` shape
+- `command {change}` supports `session_rename` and `task_create` using the existing `Write` shape
   and argv mapping. `command {trace_id,output,stderr,code}` reports the real CLI result.
-  The CLI owns mutation, defaults and Process attribution. A lost response means
-  outcome unknown; inspect state before retrying. IDs correlate diagnostics and
-  are **not** durable deduplication receipts. No automatic resubmission.
+  The CLI owns mutation, defaults and Process attribution. Transport IDs correlate
+  diagnostics; they do not deduplicate commands. Session rename has no automatic
+  resubmission. Task creation has its separate durable admission below.
 - `session_owner {session}` resolves a Session ID to `session_owner {owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.
@@ -139,3 +139,31 @@ existing owners; observations and reconnects add no usage or Work records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
 diagnostics. Individual reads and subscription frames are not logged by default.
+
+## Recover Task creation
+
+```sh
+lf task create 'Fix the retry test' --run --json --request-id 00000000-0000-4000-8000-000000000001
+```
+
+Generate a fresh UUID for each intended Task. Keep that UUID and the exact request,
+repository, Wave, Graph and launch options until the result is known. Repeat those
+arguments after a lost reply. The shared CLI reserves one Task ID before filing;
+the existing planning writer keeps external creation on that same Task. It records
+the launch attempt before invoking ordinary `task run`, then saves the outcome.
+The Machine service delegates this command; it owns no separate receipt cache.
+
+The JSON outcome contains `task_id`, `state`, optional `receipt` and optional
+`message`. `started` means the initial run returned successfully and its conversation was admitted;
+it does not mean the Graph finished or that its terminal provider is running.
+`in_progress` means another process holds this request. `failed` preserves the
+filed Task after a start/admission error. `unknown` means a process exited across
+the launch window: inspect the Task before explicitly requesting another run.
+Repeating creation never advances an already attempted Graph. All four outcomes
+exit zero; invalid or conflicting requests fail normally. Stored outcomes describe
+the original operation, not the Task's current status.
+
+The typed `task_create` write carries `directory`, `request_id`, `request`, optional
+`wave` and optional `graph`. It requests ordinary interactive creation, never
+headless execution or Auto-Ship. The iOS creation sheet and explicit initial
+terminal opening remain separate client work.

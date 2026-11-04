@@ -83,6 +83,24 @@ grant restores the software keyboard even if the earlier attachment hid it.
 5. Complete shared recoverable create/start before enabling the selected new-Task
    sheet. A lost reply must recover the original Task or explicit uncertainty;
    preserve a created Task when launch fails. No implicit Auto-Ship or input replay.
+   The shared CLI now has durable request admission: reserve Task identity before
+   filing, mark start before dispatch, keep the exact outcome after completion.
+   A request lock permits concurrent recovery without parallel launches. A crash
+   across launch returns unknown and the original Task; no automatic Graph retry.
+   Machine/Swift use the same typed command and fixtures. Carrier-loss/restart
+   proof passes over the local Machine socket. Connect the describe-first sheet
+   next, retaining its exact request ID/payload and original Machine/repository
+   across backgrounding and app restart. Never retarget an uncertain request to
+   a newly paired Machine or silently change its destination/defaults on retry.
+   Creation admits a primary conversation but does not itself start its terminal
+   provider: explicit Create & start needs the shared initial Session-opening path,
+   distinct from passive attachment to existing Sessions.
+   `human_session::open`/`transport::delegate_prepared_session` already select and
+   launch through the existing retained owner, but ordinary `resume --json` is a
+   viewer and prints after its relay returns. Do not use a long-lived Machine
+   command pipe as the phone's terminal or add another PTY owner. Extend the shared
+   explicit creation/opening operation to acknowledge the existing owner's startup;
+   keep it inside admission so a lost reply cannot launch a second provider.
 6. Preserve useful telemetry: shared command/Process attribution, identity and
    connection diagnostics without duplicate provider usage or persisted terminal
    contents. Full Desktop Work cutover and installed update survival retain their
@@ -261,3 +279,23 @@ All-target Clippy passed. The separate native host-Tailscale proof also passed
 initial/confirmed readings and retained-owner editing/reconnect at
 `Test-LoopflowiOS-2026.11.04_01-48-15--0800.xcresult`; temporary Serve configuration
 was restored. All 21 selection-engine tests and six Desktop protocol tests passed.
+
+### Recoverable creation admission — November 4
+
+`task create --run --json --request-id UUID` now reserves one Task identity in the
+shared store, validates the complete request on reuse, serializes competing callers
+and records whether Graph launch was attempted. Existing planning creation and
+ordinary `task run`/primary-conversation admission still own their effects. A saved
+result survives the CLI and Machine service exiting. Unknown launch outcomes never
+automatically advance the Graph. Failed starts retain their filed Task. This is
+backend support for Jack Heart's selected flow; the iOS creation sheet and explicit
+initial terminal launch remain unfinished.
+
+The real service test exposed macOS ENOTCONN during peer-credential lookup when a
+caller immediately disconnected. That now closes only its connection instead of
+terminating the listener. The same test admits creation, drops the reply, waits for
+the command, restarts the service and recovers through both socket and CLI with one
+Task, Graph process and primary Session. It uses an isolated local socket and
+fixture repository, not a phone or external planning provider.
+
+Checks: six creation/DTO integration tests, shared Rust wire fixtures, app/CLI write parity, seven Swift MachineProtocolTests, all-target Clippy and signed iOS Simulator build passed; logs `/tmp/mobile-create-tests-final.log`, `/tmp/mobile-create-validation.log`, `/tmp/mobile-create-native-build.log`.

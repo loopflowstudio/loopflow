@@ -47,6 +47,13 @@ refresh pass. Real network loss and physical-phone energy/latency remain open.
 Terminal activity #1809 is included through main sync at ac8e088f5f; other
 coordination references below do not assert delivery status.
 
+E now has shared CLI request admission and a Machine/Swift command mirror. Isolated
+socket-loss/service-restart proof recovers one Task, Graph and primary Session;
+interrupted launch reports unknown without replay. F still needs the native sheet,
+durable draft/destination and an explicit initial terminal opening through the
+existing owner. Ordinary `resume --json` stays attached until its relay returns;
+the Machine command pipe must not become a second terminal transport.
+
 Current backend design:
 `/Users/jack/src/loopflow.loo-593-decide-the-desktop/scratch/mobile-backend.md`.
 Current client: [mobile-ios.md](mobile-ios.md). Interaction:

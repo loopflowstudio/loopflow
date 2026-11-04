@@ -74,8 +74,17 @@ async fn local(
     loop {
         let (socket, _) = listener.accept().await?;
         // Unix admission is deliberately unavailable to remote proxies.
+        let credentials = match socket.peer_cred() {
+            Ok(credentials) => credentials,
+            Err(error) => {
+                // A caller can disappear between accept and credential lookup
+                // (ENOTCONN on macOS). Only its connection has ended.
+                tracing::debug!(%error, "Machine caller disconnected before admission");
+                continue;
+            }
+        };
         // SAFETY: geteuid has no preconditions.
-        if socket.peer_cred()?.uid() != unsafe { libc::geteuid() } {
+        if credentials.uid() != unsafe { libc::geteuid() } {
             continue;
         }
         let Ok(permit) = slots.clone().try_acquire_owned() else {
@@ -213,6 +222,7 @@ async fn operation(
                     "portfolio".into(),
                     "repository_path".into(),
                     "session_rename".into(),
+                    "task_create".into(),
                     "owner_bridge".into(),
                     "session_owner".into(),
                     "desktop_sessions".into(),
@@ -231,12 +241,22 @@ async fn operation(
         {
             return subscribe(socket, id, instance, query, generation).await;
         }
-        Operation::Command { change } if matches!(change, Write::SessionRename { .. }) => {
+        Operation::Command { change }
+            if matches!(
+                change,
+                Write::SessionRename { .. } | Write::TaskCreate { .. }
+            ) =>
+        {
+            let recovery = if matches!(change, Write::TaskCreate { .. }) {
+                "retry with the same creation request ID to recover its result"
+            } else {
+                "inspect Session state before retrying"
+            };
             command(change, id, instance)
                 .await
                 .unwrap_or_else(|error| Reply::Error {
                     code: ErrorCode::OutcomeUnknown,
-                    message: format!("{error}; inspect Session state before retrying"),
+                    message: format!("{error}; {recovery}"),
                 })
         }
         Operation::Read { .. } | Operation::Subscribe { .. } | Operation::Command { .. } => {

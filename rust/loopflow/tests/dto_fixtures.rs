@@ -1273,6 +1273,26 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
 }
 
 #[test]
+fn task_create_outcome_preserves_recovery_states() {
+    use loopflow::lf::commands::task_create::{TaskCreateOutcome, TaskCreateState};
+    let json = include_str!("../../../tests/fixtures/dto/task_create_outcome.json");
+    let outcomes: Vec<TaskCreateOutcome> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        outcomes.iter().map(|o| o.state).collect::<Vec<_>>(),
+        [
+            TaskCreateState::InProgress,
+            TaskCreateState::Started,
+            TaskCreateState::Failed,
+            TaskCreateState::Unknown
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(outcomes).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
 fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
     let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =

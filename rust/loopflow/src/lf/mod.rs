@@ -2054,6 +2054,9 @@ until `lf ship`."
         reason: Option<String>,
     },
     /// Create a planning Task; with --run, start it and open its conversation
+    #[command(
+        after_help = "With --request-id, repeat identical arguments to recover the original Task. JSON state is in_progress, started, failed, or unknown; admitted results exit zero. Unknown means launch was interrupted: inspect the Task before explicitly starting it again. Retries never advance its Graph. A changed request must use a new ID."
+    )]
     Create {
         /// What you want, in your words: the Task's notes, its first line the title.
         /// With --run, also the first turn of its conversation
@@ -2080,6 +2083,9 @@ until `lf ship`."
         /// The graph it takes up in place of the default
         #[arg(long, requires = "run")]
         graph: Option<String>,
+        /// Recover the same create/start request after a lost reply; reuse with identical arguments
+        #[arg(long, requires_all = ["run", "json"])]
+        request_id: Option<crate::id::TaskCreateRequestId>,
         #[arg(long)]
         json: bool,
     },

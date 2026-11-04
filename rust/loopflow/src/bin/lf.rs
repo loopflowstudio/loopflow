@@ -1123,16 +1123,22 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             regressed_in,
             run,
             graph,
+            request_id,
             json,
         } => {
-            if let Some(graph) = graph {
-                loopflow::lf::commands::task_create::check_graph(repo, graph)?;
-            }
-
             let report = match request.as_ref().or(notes.as_ref()) {
                 Some(text) => Some(text.clone()),
                 None => piped_task_report()?,
             };
+            if let Some(id) = request_id {
+                let outcome =
+                    loopflow::lf::commands::task_create::recoverable(cli, repo, id, report)?;
+                println!("{}", serde_json::to_string_pretty(&outcome)?);
+                return Ok(());
+            }
+            if let Some(graph) = graph {
+                loopflow::lf::commands::task_create::check_graph(repo, graph)?;
+            }
             let issue = loopflow::ops::task::task_create(
                 repo,
                 if *no_wave { None } else { wave.as_deref() },

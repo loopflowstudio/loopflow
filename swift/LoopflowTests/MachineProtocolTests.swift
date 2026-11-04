@@ -3,6 +3,20 @@ import Testing
 @testable import Loopflow
 
 struct MachineProtocolTests {
+    @Test func creationRetainsItsIdentityAndOutcomeAcrossCarriers() throws {
+        let id = try #require(UUID(uuidString: "00000000-0000-4000-8000-000000000001"))
+        let change = ServedWrite.taskCreate(directory: "/repo", requestID: id, request: "Fix the retry test", wave: nil, graph: nil)
+        let request = MachineRequest(version: 1, id: "create-1", operation: .command(change))
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("task_create")))
+        #expect(change.argv == ["task", "create", "--run", "--json", "--request-id", id.uuidString.lowercased(), "--no-wave", "--", "Fix the retry test"])
+        #expect(change.cwd == "/repo")
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let outcomes = try JSONDecoder().decode([TaskCreateOutcome].self, from: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_create_outcome.json")))
+        #expect(outcomes.map(\.state) == [.inProgress, .started, .failed, .unknown])
+        #expect(outcomes[1].receipt?.task.id == outcomes[1].taskId)
+        #expect(outcomes[2].receipt != nil)
+        #expect(outcomes[3].message != nil)
+    }
     @Test func allRepositorySelectionUsesTheSharedWatch() throws {
         let query = ServedRead.allViewPlans(expression: "kind:task state:open")
         let request = MachineRequest(version: 1, id: "tasks-1", operation: .subscribe(query, generation: 1))

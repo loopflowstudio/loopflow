@@ -27,6 +27,15 @@ use crate::work::task::TaskUpdate;
 #[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Write {
+    /// `lf task create --run --json --request-id <id> -- <request>`.
+    /// Execution delegates to the CLI; admission survives a lost carrier reply.
+    TaskCreate {
+        directory: PathBuf,
+        request_id: crate::id::TaskCreateRequestId,
+        request: String,
+        wave: Option<String>,
+        graph: Option<String>,
+    },
     /// `lf task complete <issue>`.
     TaskComplete { directory: PathBuf, issue: String },
     /// `lf task reopen <issue>`.
@@ -172,8 +181,35 @@ impl Write {
     /// The `lf` command this write equals, without the binary.
     pub fn argv(&self) -> Vec<String> {
         let mut argv = vec!["--cwd".to_owned(), self.directory().display().to_string()];
+        if let Self::TaskCreate {
+            request_id,
+            request,
+            wave,
+            graph,
+            ..
+        } = self
+        {
+            argv.extend([
+                "task".into(),
+                "create".into(),
+                "--run".into(),
+                "--json".into(),
+                "--request-id".into(),
+                request_id.to_string(),
+            ]);
+            match wave {
+                Some(wave) => argv.extend(["--wave".into(), wave.clone()]),
+                None => argv.push("--no-wave".into()),
+            }
+            if let Some(graph) = graph {
+                argv.extend(["--graph".into(), graph.clone()]);
+            }
+            argv.extend(["--".into(), request.clone()]);
+            return argv;
+        }
         let (notes_flag, revision_flag, query, path);
         let words: Vec<&str> = match self {
+            Self::TaskCreate { .. } => unreachable!("creation argv returned above"),
             Self::TaskComplete { issue, .. } => vec!["task", "complete", issue],
             Self::TaskReopen { issue, .. } => vec!["task", "reopen", issue],
             Self::TaskAbandon { issue, .. } => vec!["task", "abandon", issue],
@@ -352,7 +388,8 @@ impl Write {
 
     pub(crate) fn directory(&self) -> &Path {
         match self {
-            Self::TaskComplete { directory, .. }
+            Self::TaskCreate { directory, .. }
+            | Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
             | Self::TaskNotes { directory, .. }
@@ -403,6 +440,11 @@ impl Write {
     /// prints to stdout, recording its Process around it when `lf` would.
     /// `None` when `lf` would send it to another Machine: nothing was written.
     pub fn write(&self) -> anyhow::Result<Option<String>> {
+        // The CLI owns full creation, Graph launch and conversation admission.
+        // App callers and Machine carriers use this same command, not an FFI run.
+        if matches!(self, Self::TaskCreate { .. }) {
+            return Ok(None);
+        }
         let argv: Vec<String> = std::iter::once("lf".to_owned())
             .chain(self.argv())
             .collect();
@@ -423,6 +465,7 @@ impl Write {
     fn perform(&self, repo: &Path, cli: &Cli) -> anyhow::Result<String> {
         let command = cli.command.as_ref().context("a write names its command")?;
         Ok(match self {
+            Self::TaskCreate { .. } => unreachable!("creation delegates to its CLI"),
             Self::TaskComplete { issue, .. } => {
                 task_complete(repo, issue, None)?;
                 format!("{issue}: completed\n")

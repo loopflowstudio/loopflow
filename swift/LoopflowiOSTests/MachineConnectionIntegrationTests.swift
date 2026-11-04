@@ -104,11 +104,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
     }
 
     private func exerciseOutput(client: RemoteMobileClient, session: String, task: WorkViewPlan.Content) async throws {
-        // Select the fixture's separate retained terminal in a real Work surface.
-        // Task selection is proven above; no synthetic owner/transport is used.
-        var fields = try JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(task))
-        fields["primary_session"] = .string(session)
-        let outputTask = try JSONDecoder().decode(WorkViewPlan.Content.self, from: JSONEncoder().encode(fields))
+        // Select another retained terminal without rewriting the Task's primary.
         let workspace = MobileWorkspace(client: client)
         let controller = SessionTerminalController(workspace: workspace)
         controller.loadViewIfNeeded()
@@ -171,9 +167,11 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             tail = String((tail + String(decoding: bytes.suffix(128), as: UTF8.self)).suffix(128))
             if tail.contains("output-complete") { complete = true }
         }
-        await workspace.open(outputTask)
+        await workspace.open(task, sessionID: session)
         try await wait("Output fixture did not become viewable") { workspace.state == .viewing || problem() != nil }
         XCTAssertNil(problem())
+        XCTAssertEqual(workspace.selected?.primarySession, task.primarySession)
+        XCTAssertEqual(workspace.sessionID, session)
         workspace.requestControl()
         try await wait("Output fixture did not grant control") { workspace.state == .controlling || problem() != nil }
         XCTAssertNil(problem())
@@ -289,6 +287,11 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         XCTAssertEqual(try store.load().text, "A separate idea that must not be submitted")
         XCTAssertTrue(try store.load().savedRequests.isEmpty)
         XCTAssertEqual(task.primarySession, outcome.receipt?.sessionId)
+        let createdSessions = try await client.sessions(for: task, after: nil)
+        XCTAssertTrue(createdSessions.entries.contains { $0.id == task.primarySession })
+        XCTAssertTrue(createdSessions.entries.allSatisfy {
+            $0.interactive && ($0.taskIds.contains(task.work.id) || $0.workspace?.taskId == task.work.id)
+        }, "A newly created Task must not list the earlier Task's conversations")
         let workspace = MobileWorkspace(client: client)
         let controller = SessionTerminalController(workspace: workspace)
         controller.loadViewIfNeeded()
@@ -312,6 +315,11 @@ final class MachineConnectionIntegrationTests: XCTestCase {
                                  tasks: [WorkViewPlan.Content]) async throws {
         XCTAssertEqual(tasks.count, 1, "Only the isolated fixture Task may be present")
         let task = try XCTUnwrap(tasks.first { $0.primarySession == proof.session })
+        let sessions = try await client.sessions(for: task, after: nil)
+        XCTAssertTrue(sessions.entries.contains { $0.id == proof.session })
+        XCTAssertTrue(sessions.entries.allSatisfy {
+            $0.interactive && ($0.taskIds.contains(task.work.id) || $0.workspace?.taskId == task.work.id)
+        }, "The Machine must scope its page to this Task before limiting results")
         let workspace = MobileWorkspace(client: client)
         let controller = SessionTerminalController(workspace: workspace)
         controller.loadViewIfNeeded()

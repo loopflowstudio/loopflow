@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "sessions-1",
+  "operation": {
+    "kind": "read",
+    "query": {
+      "read": "session_page",
+      "directory": "/repo",
+      "headless": false,
+      "after": null,
+      "task": "task_00000000000000000000000000000001"
+    }
+  }
+}

@@ -154,6 +154,7 @@ pub enum Read {
         directory: PathBuf,
         headless: bool,
         after: Option<String>,
+        task: Option<String>,
     },
     /// `lf --cwd <directory> ops tokens [--days <days>]`: the codebase's size.
     Tokens {
@@ -317,11 +318,13 @@ impl Read {
                 directory,
                 headless,
                 after,
+                task,
             } => {
                 let mut argv = at(directory, &["desktop", "sessions", "--json", "--page"]);
                 argv.extend(words(session_flags(*headless)));
                 argv.extend(words(&["--limit", "100"]));
                 argv.extend(optional("--after", after.as_ref()));
+                argv.extend(optional("--task", task.as_ref()));
                 argv
             }
             Self::Tokens { directory, days } => {

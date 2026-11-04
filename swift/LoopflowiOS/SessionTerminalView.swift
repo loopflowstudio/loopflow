@@ -116,6 +116,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private var findHeight: NSLayoutConstraint!
     private var finding = false
     private var findGeometry: TerminalGeometry?
+    private var displayedSessionID: String?
 
     init(workspace: MobileWorkspace) {
         self.workspace = workspace
@@ -321,6 +322,11 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     }
 
     func update(theme: ThemeDefinition) {
+        if displayedSessionID != workspace.sessionID {
+            displayedSessionID = workspace.sessionID
+            endFind(restoreFocus: false)
+            findField.text = nil
+        }
         let canWrite = workspace.state == .controlling
         let changed = terminal.canWrite != canWrite
         if changed, canWrite, finding { endFind(restoreFocus: false) }

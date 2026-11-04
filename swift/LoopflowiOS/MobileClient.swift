@@ -45,6 +45,11 @@ protocol MobileSessionOpeningClient {
 }
 
 @MainActor
+protocol MobileSessionListingClient {
+    func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage
+}
+
+@MainActor
 protocol MobileTaskObservation: AnyObject {
     var readings: AsyncThrowingStream<MobileTaskReading, any Error> { get }
     func refresh() async throws
@@ -129,6 +134,8 @@ final class MobileWorkspace {
     private(set) var isLoadingTasks = true
     private(set) var tasksError: String?
     private(set) var selected: WorkViewPlan.Content?
+    private(set) var sessionID: String?
+    var sessionListingClient: (any MobileSessionListingClient)? { client as? any MobileSessionListingClient }
     private(set) var programStatus: ProgramStatusRecords?
     private(set) var state: MobileConnectionState = .loading
     // A mounted renderer consumes output immediately; no second scrollback store.
@@ -140,12 +147,12 @@ final class MobileWorkspace {
     init(client: any MobileClient) { self.client = client }
 
     var canStartSession: Bool {
-        (state == .ended || state == .notRunning) && selected?.primarySession != nil
+        (state == .ended || state == .notRunning) && sessionID != nil
             && client is any MobileSessionOpeningClient
     }
 
     func startSession() async {
-        guard canStartSession, let task = selected, let session = task.primarySession,
+        guard canStartSession, let task = selected, let session = sessionID,
               let opener = client as? any MobileSessionOpeningClient else { return }
         disconnect()
         let opening = generation
@@ -154,7 +161,7 @@ final class MobileWorkspace {
             try await opener.startSession(sessionID: session)
             guard opening == generation else { return }
             try Task.checkCancellation()
-            await open(task)
+            await open(task, sessionID: session)
         } catch {
             guard opening == generation else { return }
             fail("Opening was not confirmed. Reconnect to inspect this Session before another attempt. \(error.localizedDescription)")
@@ -215,9 +222,10 @@ final class MobileWorkspace {
         isLoadingTasks = false
     }
 
-    func open(_ task: WorkViewPlan.Content) async {
+    func open(_ task: WorkViewPlan.Content, sessionID chosenSession: String? = nil) async {
         reconnectOnForeground = false
-        let sameSession = selected?.primarySession == task.primarySession
+        let requested = chosenSession ?? task.primarySession
+        let sameSession = sessionID == requested
         disconnect()
         if !sameSession {
             terminalGeometry = nil
@@ -225,8 +233,9 @@ final class MobileWorkspace {
             render?(Data(), true)
         }
         selected = task
+        sessionID = requested
         state = .loading
-        guard let session = task.primarySession else {
+        guard let session = requested else {
             state = .unavailable(task.unavailable.first ?? "No existing Session is recorded")
             return
         }
@@ -267,7 +276,7 @@ final class MobileWorkspace {
 
     func reconnect() async {
         guard let selected else { return }
-        await open(selected)
+        await open(selected, sessionID: sessionID)
     }
 
     func requestControl() {
@@ -318,6 +327,7 @@ final class MobileWorkspace {
         reconnectOnForeground = false
         disconnect()
         selected = nil
+        sessionID = nil
         render = nil
         findInTerminal = nil
         setGeometry = nil

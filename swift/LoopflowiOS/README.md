@@ -22,6 +22,15 @@ keeps the query but clears its old highlight; search again against the new scree
 Search the compact Task list by title or checkout path. A Task without a recorded
 Session opens an explanation instead of an empty terminal.
 
+The **Sessions** button lists this Task's open conversations with their names,
+providers, availability and primary/current markers. Select one to view its terminal;
+**Use keyboard** takes control separately. Each keeps its own unfinished draft.
+Reconnect, returning to the app and **Open Session** stay on the conversation you
+selected. Choosing one never changes the Task's primary Session. Pull to refresh;
+**Load more Sessions** reads the next page. A failed read preserves the list, and
+closing the sheet cancels its requests. The shared CLI applies Task membership
+before the page limit; the phone has no separate Session inventory or watcher.
+
 Observing preserves the owner's grid in a scrollable viewport. Taking geometry
 control fits the terminal to the phone and software keyboard; losing it restores
 the owner's grid. Layout changes send a resize only when the granted size changes.

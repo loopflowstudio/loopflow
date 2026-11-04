@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 
 @MainActor
-final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSessionOpeningClient {
+final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSessionOpeningClient, MobileSessionListingClient {
     private(set) var credential: MachineCredential
 
     init(credential: MachineCredential) { self.credential = credential }
@@ -18,6 +18,14 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     func observeTasks() async throws -> any MobileTaskObservation {
         try await verifyMachine()
         return try await RemoteTaskObservation.open(credential: credential, query: Self.taskQuery)
+    }
+
+    func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage {
+        try await verifyMachine(required: ["session_page", "repository_path"])
+        let directory = try await read(.repositoryPath(id: task.work.repository))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = try await read(.sessionPage(directory: directory, headless: false, after: after, task: task.work.id))
+        return try JSONDecoder().decode(SessionPage.self, from: Data(output.utf8))
     }
 
     func attach(sessionID: String) async throws -> any MobileAttachment {

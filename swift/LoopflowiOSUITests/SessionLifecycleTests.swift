@@ -4,6 +4,37 @@ import XCTest
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testChooseAnotherSessionAndReturnToTheOriginalDraft() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let keyboard = app.buttons["Use keyboard"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        keyboard.tap()
+        app.typeText("original draft")
+        app.buttons["Sessions"].tap()
+        let review = app.buttons.containing(.staticText, identifier: "Design review").firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        try app.performAccessibilityAudit(for: [.hitRegion, .sufficientElementDescription])
+        capture(app, "session-picker")
+        review.tap()
+        XCTAssertTrue(app.staticTexts["Viewing Session"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Design review"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        keyboard.tap()
+        app.typeText("review draft")
+        app.buttons["Sessions"].tap()
+        app.buttons.containing(.staticText, identifier: "Implementation").firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Viewing Session"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Implementation"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        capture(app, "session-picker-return")
+    }
+
     func testFindUsesThePhoneKeyboardWithoutTakingSessionControl() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture"]

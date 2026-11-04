@@ -103,9 +103,12 @@ setup delegates to the promoted installation; source builds use an explicit
 `LF_HOME` to keep experiments separate.
 
 - `read {query}` uses the existing `Read` shape. Supported reads: `roadmap`,
-  `desktop_sessions`, `machine_id`, `portfolio`, `repository_path`, `view_plan`,
+  `desktop_sessions`, `session_page`, `machine_id`, `portfolio`, `repository_path`, `view_plan`,
   `all_view_plans`. Repository IDs resolve on the
   destination with `repository_path`; paths in local reads are destination paths.
+  `session_page` accepts an optional Task filter before its 100-row limit and
+  returns the CLI's existing SessionPage with a continuation cursor. Selecting a
+  row never changes the Task's primary Session or takes terminal control.
   `view_plan` returns the existing WorkViewPlan, including the recorded primary
   Session; roadmap membership alone cannot select one. A missing primary stays
   absent. Resolve its owner with `session_owner` before attachment.

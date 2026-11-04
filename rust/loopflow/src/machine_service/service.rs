@@ -227,6 +227,7 @@ async fn operation(
                     "owner_bridge".into(),
                     "session_owner".into(),
                     "desktop_sessions".into(),
+                    "session_page".into(),
                     "view_plan".into(),
                     "all_view_plans".into(),
                 ],
@@ -292,6 +293,7 @@ fn supported_read(query: &Read) -> bool {
         Read::Roadmap { .. }
             | Read::AllViewPlans { .. }
             | Read::DesktopSessions { .. }
+            | Read::SessionPage { .. }
             | Read::MachineId
             | Read::Portfolio
             | Read::RepositoryPath { .. }

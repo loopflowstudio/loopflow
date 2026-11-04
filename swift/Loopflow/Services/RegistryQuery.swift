@@ -63,7 +63,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case workLink(directory: String, url: String)
     case repositoryPath(id: String)
     case waveGraph(directory: String, wave: String?)
-    case sessionPage(directory: String, headless: Bool, after: String?)
+    case sessionPage(directory: String, headless: Bool, after: String?, task: String?)
     case tokens(directory: String, days: Int?)
     case retention
     case doctor
@@ -134,9 +134,10 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["--repository", id, "config", "repository", "--path"]
         case .waveGraph(_, let wave):
             return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
-        case .sessionPage(_, let headless, let after):
+        case .sessionPage(_, let headless, let after, let task):
             return ["desktop", "sessions", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
                 + ["--limit", "100"] + (after.map { ["--after", $0] } ?? [])
+                + (task.map { ["--task", $0] } ?? [])
         case .tokens(_, let days):
             return ["ops", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
         case .retention:
@@ -208,8 +209,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .repositoryPath(let id): TaggedFields("repository_path", ["id": id])
         case .waveGraph(let directory, let wave):
             TaggedFields("wave_graph", ["directory": directory, "wave": wave])
-        case .sessionPage(let directory, let headless, let after):
-            TaggedFields("session_page", ["directory": directory, "headless": headless, "after": after])
+        case .sessionPage(let directory, let headless, let after, let task):
+            TaggedFields("session_page", ["directory": directory, "headless": headless, "after": after, "task": task])
         case .tokens(let directory, let days):
             TaggedFields("tokens", ["directory": directory, "days": days])
         case .retention: TaggedFields("retention")
@@ -936,7 +937,7 @@ public struct RegistryQuery: Sendable {
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
         try Self.decode(SessionPage.self, from: await serve(
-            .sessionPage(directory: cwd ?? "/", headless: includingHeadless, after: after)))
+            .sessionPage(directory: cwd ?? "/", headless: includingHeadless, after: after, task: nil)))
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.

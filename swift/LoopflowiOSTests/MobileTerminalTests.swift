@@ -11,6 +11,69 @@ import XCTest
 final class MobileTerminalTests: XCTestCase {
     private var window: UIWindow?
 
+    func testChosenSessionSurvivesReconnectForegroundAndExplicitOpening() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let task = try XCTUnwrap(workspace.selected)
+        let primary = task.primarySession
+        let other = "session_fixture_4"
+        let oldLink = client.link
+        await workspace.open(task, sessionID: other)
+        await settle()
+        controller.update(theme: .light)
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(workspace.selected?.primarySession, primary, "Selection must not rewrite the Task")
+        XCTAssertEqual(workspace.sessionID, other)
+        XCTAssertEqual(client.transport.controlRequests, 0)
+        XCTAssertTrue(client.starts.isEmpty)
+        oldLink.drop()
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        await workspace.reconnect()
+        await settle()
+        XCTAssertEqual(client.attachments.last, other)
+        workspace.suspend()
+        await workspace.restoreForegroundSession()
+        await settle()
+        XCTAssertEqual(client.attachments.last, other)
+        XCTAssertEqual(workspace.state, .viewing)
+        client.ownerNotRunning = true
+        await workspace.reconnect()
+        XCTAssertEqual(workspace.state, .notRunning)
+        await workspace.startSession()
+        await settle()
+        XCTAssertEqual(client.starts, [other])
+        XCTAssertEqual(client.attachments.last, other)
+        XCTAssertEqual(workspace.state, .viewing)
+    }
+
+    func testSwitchingSessionsPreservesSeparateDraftsAndDropsInputControl() async throws {
+        let client = FixtureClient()
+        let workspace = MobileWorkspace(client: client)
+        let task = try await client.workingTasks()[0]
+        let rows = try await client.sessions(for: task, after: nil).entries
+        var screen = ""
+        workspace.render = { bytes, _ in screen = String(decoding: bytes, as: UTF8.self) }
+        defer { workspace.leave() }
+        for (session, draft) in [(rows[0], "first draft"), (rows[1], "second draft")] {
+            await workspace.open(task, sessionID: session.id)
+            await settle()
+            XCTAssertEqual(workspace.state, .viewing)
+            workspace.send(Data("must not edit while observing".utf8))
+            workspace.requestControl()
+            await settle()
+            workspace.send(Data(draft.utf8))
+            await settle()
+            XCTAssertTrue(screen.contains(draft))
+        }
+        await workspace.open(task, sessionID: rows[0].id)
+        await settle()
+        XCTAssertTrue(screen.contains("first draft"))
+        XCTAssertFalse(screen.contains("second draft"))
+        XCTAssertFalse(screen.contains("must not edit"))
+        XCTAssertEqual(workspace.state, .viewing)
+    }
+
     func testFindMovesBetweenUnicodeMatchesWithoutSendingInputOrChangingTheGrid() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }

@@ -211,6 +211,8 @@ struct MobileSessionView: View {
     @Environment(\.dynamicTypeSize) private var textSize
     @State private var opening: Task<Void, Never>?
     @State private var showingActivity = false
+    @State private var showingSessions = false
+    @State private var chosenSession: SessionRecord?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -243,6 +245,11 @@ struct MobileSessionView: View {
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if workspace.sessionListingClient != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Sessions", systemImage: "bubble.left.and.bubble.right") { showingSessions = true }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Find in Session", systemImage: "magnifyingglass") { workspace.findInTerminal?() }
                     .disabled(workspace.findInTerminal == nil)
@@ -250,6 +257,16 @@ struct MobileSessionView: View {
         }
         .task { await workspace.open(task) }
         .onDisappear { opening?.cancel(); workspace.leave() }
+        .sheet(isPresented: $showingSessions) {
+            if let client = workspace.sessionListingClient {
+                MobileSessionsView(client: client, task: task, currentID: workspace.sessionID, theme: theme) { session in
+                    chosenSession = session
+                    guard session.id != workspace.sessionID else { return }
+                    opening?.cancel()
+                    opening = Task { await workspace.open(task, sessionID: session.id) }
+                }
+            }
+        }
         .alert("Session activity", isPresented: $showingActivity) {
             Button("Close", role: .cancel) {}
         } message: {
@@ -263,6 +280,11 @@ struct MobileSessionView: View {
             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
             VStack(alignment: .leading, spacing: 3) {
+                if let chosenSession {
+                    Text(chosenSession.title)
+                        .font(Typography.strong(14))
+                        .lineLimit(2)
+                }
                 if let activityLabel {
                     Button { showingActivity = true } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {

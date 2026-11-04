@@ -267,6 +267,13 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     directory: repo.path().to_owned(),
                     headless: true,
                     after: None,
+                    task: None,
+                },
+                Read::SessionPage {
+                    directory: repo.path().to_owned(),
+                    headless: false,
+                    after: None,
+                    task: Some("INF-123".into()),
                 },
                 Read::Tokens {
                     directory: repo.path().to_owned(),

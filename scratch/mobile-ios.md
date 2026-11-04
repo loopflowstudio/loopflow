@@ -858,3 +858,52 @@ proofs; physical-phone and actual-provider acceptance are still open.
 The mounted-window hidden-keyboard case passed at 06:46:44: opening and closing
 Find while the terminal keyboard was hidden sent no geometry updates. This covers
 the local keyboard transition in Simulator, not physical keyboard accessories.
+
+### Choose an existing Task Session — November 4 implementation
+
+Jack Heart's expanded native-app goal includes navigating the conversations already
+available on Desktop. Keep Task → primary Session as the first tap. Add a Sessions
+sheet with existing names, provider/status, primary/current markers, refresh and
+bounded Load more. Selecting a conversation only attaches as an observer. Pin that
+selected Session through reconnect, foreground recovery and explicit Open Session;
+do not change the Task's primary conversation or copy a Work DTO to disguise selection.
+
+Reuse SessionRecord and the existing SessionPage/CLI query. Add the optional Task
+filter to that shared page so the Machine applies membership before its 100-row
+limit, instead of filtering an incomplete repository-wide page on the phone.
+Expose the same read through the remote carrier. No second Session inventory,
+watcher or resolver. Errors retain the last sheet reading with retry; dismissal
+cancels pending reads. Headless Runs and unrelated Task Sessions stay out of the
+picker. Verify multiple distinct drafts, stale attachment fencing, no implicit
+control/start, pagination/retry, native touch and real carrier reads.
+
+
+The Sessions sheet now consumes the shared Task-scoped SessionPage and exposes
+current/primary markers, bounded loading and retry at the failed cursor. Dismissing
+or superseding a reading cancels its Task and fences late replies. MobileWorkspace
+keeps selected Session identity separately from the immutable Task reading, through
+reconnect, foreground return and explicit opening. Switching clears old terminal
+search state and grants no control. The live output proof now uses this selection
+API instead of rewriting a WorkViewPlan fixture's primary Session.
+
+Verification: 39 native terminal tests and three Session-list tests passed at
+`Test-LoopflowiOS-2026.11.04_06-54-51--0800.xcresult`, including separate drafts,
+selected-Session recovery, no implicit start/control and old attachment fencing.
+The final cancellation/retry tests passed at 06:57:25. Light/dark/accessibility-text
+layouts were inspected from 06:58:49 (`scratch/demo-assets/session-picker-*.png`).
+The actual touch switch/return and hit-region/accessible-description audit passed
+at 07:02:22; its capture shows the original unfinished draft after returning.
+Rust wire fixtures, served-read/CLI parity (including a Task-scoped page), fmt and
+all-targets Clippy passed. Logs: `/tmp/mobile-session-page-rust.log`,
+`/tmp/mobile-session-page-parity.log`, `/tmp/mobile-sessions-clippy.log`.
+
+Host-Tailscale proof passed at
+`Test-LoopflowiOS-2026.11.04_07-01-09--0800.xcresult` (49.873 seconds native). It
+read Task-scoped pages for both original and created Tasks, selected a non-primary
+retained terminal without changing the Task reading, then passed service restart,
+current activity, passive recovery and 33,554,432 output bytes with 512 edited
+acknowledgements exactly once. Input-to-next-output p95 was 14.3 ms/max 20.1 ms;
+feed CPU was 16.716 seconds across 32,770 calls. Logs:
+`/tmp/mobile-sessions-live.log`, `/tmp/mobile-sessions-live-native.log`. Temporary
+Serve route removed; empty configuration verified. This remains Simulator plus
+stand-in-provider acceptance, not physical-phone or actual-provider UX proof.

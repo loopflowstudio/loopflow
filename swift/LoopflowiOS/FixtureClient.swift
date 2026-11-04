@@ -3,7 +3,7 @@ import Loopflow
 
 /// Explicit offline demo. Input runs an editor; it is not a recording or a server.
 @MainActor
-final class FixtureClient: MobileClient {
+final class FixtureClient: MobileClient, MobileSessionListingClient {
     private var sessions: [String: FixtureTerminal] = [:]
 
     func workingTasks() async throws -> [WorkViewPlan.Content] {
@@ -21,6 +21,15 @@ final class FixtureClient: MobileClient {
 
     func observeTasks() async throws -> any MobileTaskObservation {
         FixtureTaskObservation(tasks: try await workingTasks())
+    }
+
+    func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage {
+        guard let url = Bundle.main.url(forResource: "session-readings", withExtension: "json") else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let readings = try JSONDecoder().decode([String: SessionPage].self, from: Data(contentsOf: url))
+        guard let page = readings[task.work.id] else { throw RegistryQueryError("No fixture reading for this Task") }
+        return page
     }
 }
 

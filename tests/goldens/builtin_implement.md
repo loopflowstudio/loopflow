@@ -104,6 +104,10 @@ plan in the conversation; do not require a document template or a prior skill.
 
 1. **Understand the design**
    Recover the intended outcome, accepted constraints, approach, and acceptance checks.
+   Read the current user-docs draft, when present, including saved edits since
+   the previous pass. It describes the experience to build; preserve corrections
+   rather than regenerating it from an older plan. Reconcile consequential
+   conflicts with accepted direction in the conversation or working design.
    Read the current plan wherever it lives. Reconstruct the affected concepts,
    owners, persistence, and call paths before choosing where behavior belongs.
    Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
@@ -137,6 +141,12 @@ plan in the conversation; do not require a document template or a prior skill.
      Do not stage the landing with flags, v2s, or setups nothing uses yet.
 
 3. **Sanity check**
+   - Reread the user-docs draft before finishing to pick up edits made during
+     implementation. Verify its examples against the behavior built; keep
+     missing behavior explicit rather than weakening the docs to match it.
+     Incorporate the finished text into its named permanent destinations before
+     delivery. Replace the scratch draft with links to those docs so further
+     edits have one home; preserve any edits made since the last read.
    - Build the changed code and run the focused test for the behavior changed:
      the narrowest filter that names it, never a whole package or workspace
      suite. Skip builds for prose-only edits. Reuse a still-applicable passing

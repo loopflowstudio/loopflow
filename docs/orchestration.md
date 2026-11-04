@@ -81,6 +81,7 @@ Mechanical steps ride along as commands:
 `pursue` is a Graph with a backward edge:
 
 ```yaml
+- write-docs           # draft the user docs before implementation
 - implement
 - compress
 - graph: refresh      # sync with main, then realign the plan
@@ -89,6 +90,16 @@ Mechanical steps ride along as commands:
 - loop: implement
 - pr-publish
 ```
+
+`write-docs` turns the chosen direction into user documentation at
+`scratch/user-docs.md`: examples, expected results, and what someone needs to
+know to use the change. In `feature`, this happens after exploration. Loopflow
+Desktop surfaces the draft beside the conversation: **this is what's being
+built; edit it or discuss changes while work continues.** There is no extra
+review stop. Saved edits guide implementation; for a change that needs attention
+now, tell the Task conversation. The finished text moves into the project's
+permanent docs before delivery. Changes with no user-facing documentation need
+no draft.
 
 At each `loop:`, the deciding step reads the work and the plan and returns
 advance, iterate (back to the target, with direction) or blocked (with the

@@ -480,6 +480,14 @@ mod tests {
         // A composed graph's name finds its first step.
         let pursue = graph.find("pursue").unwrap();
         assert_eq!(pursue.cursor().index, next.cursor().index);
+        assert_eq!(
+            graph.find("write-docs").unwrap().cursor().index,
+            next.cursor().index
+        );
+        assert_eq!(
+            graph.find("implement").unwrap().cursor().index,
+            next.cursor().index + 1
+        );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
         // After the last interactive step nothing remains.

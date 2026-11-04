@@ -221,7 +221,7 @@ Preserve these obligations:
   bounded; do not persist every snapshot or terminal byte. Exact additional
   latency/queue/reconnect metrics and retention remain implementation choices.
 
-Checks: `cargo test -p loopflow --test transport_tests machine_service_ -- --include-ignored --test-threads=1` — 9 passed; the installed test binary’s exact replacement case also passed after adding concurrent setup and the LaunchServices-owned updater. `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone` — 1 passed headlessly, app built; formatting, Python lint and diff checks passed. Gate retains affected suites, Xcode/Linux paths and telemetry; demo retains rendered continuity and Desktop quit/reopen.
+Checks: `cargo test -p loopflow --test transport_tests machine_service_ -- --include-ignored --test-threads=1` — 9 passed, including installed replacement; `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone` — app built and 1 test passed headlessly (macOS deployment-target linker warnings); `cargo fmt --check` and `git diff --check` passed. Gate retains affected suites, Xcode/Linux paths, deployment-target compatibility and telemetry; demo retains rendered continuity and Desktop quit/reopen.
 
 ## Later work and parallel boundaries
 

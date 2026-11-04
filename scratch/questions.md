@@ -12,7 +12,26 @@ supervisor isolation; SMAppService updates may kill the helper; remote proxies
 cannot borrow Unix peer trust. Exact remote transport, takeover UX, unattended
 Mac hosting, create/start recovery and remaining Work cutover remain later work.
 
-The compress step's explicit context-budget instruction authorizes curation.
-Condensed repeated attribution guidance in Wave memory; live decisions and
-evidence remain unchanged. Prior wording is preserved at
-`5b44a394cff91d0aa20c614c3b20c3f7e121affb:.lf/wave/product/MEMORY.md`.
+November 3 reconciliation: LOO-718's existing-Task → existing-Session path needs
+`view_plan`; exposing the existing shared read is a bounded contract correction.
+The additive contract was published at `12fbe9102c` on the Task branch. No remote
+transport or takeover decision is inferred. Full installed-executable replacement with active Work and unchanged
+provider-usage totals remain acceptance work; separate registrar/restart fixtures
+do not establish them.
+
+November 3 concept review: retain Desktop's deliberate retry policy for a lost
+Machine connection. This is the simpler recovery interaction and preserves the
+existing no-implicit-relaunch rule. The retry must reconnect the exact owner,
+without invoking provider resume or taking a newer viewer's claims. This is a
+derived implementation direction from Jack Heart's accepted continuity contract,
+not a new approval of automatic takeover. Details and counterexamples live in
+`scratch/mobile-backend.md`; no local product question needs an answer here.
+
+November 3 implementation: keep the Machine relay alive and put deliberate
+Ctrl+R reconnect / Ctrl+] close in its terminal, so connection loss never reaches
+SessionsStore's ordinary preparation. Terminal recovery asks the exact owner for
+a fresh screen because a local disconnect prompt changes the displayed screen;
+nonterminal relays use retained Resume bytes and fall back to a fresh attachment
+when the spool expires. Both retain the owner, reconnect token and byte position
+in memory only, request free claims without replacement, and discard outage input.
+Native presentation remains for the interactive demo.

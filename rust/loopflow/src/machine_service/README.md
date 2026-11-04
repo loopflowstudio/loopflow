@@ -60,6 +60,10 @@ setup delegates to the promoted installation; source builds use an explicit
   `transport/README.md` and `transport/wire.rs`. Each terminal has its own socket.
   The owner alone grants input/geometry, handles bounded output continuation and
   revokes stale control. No automatic owner replacement or raw-input replay.
+  Desktop retains its relay after bridge loss: Ctrl+R reconnects the exact owner,
+  Ctrl+] closes. Recovery uses Resume for byte streams or a fresh terminal screen,
+  requests free claims without replacement, and reports an unavailable owner
+  without running provider resume. Newer viewers retain input and geometry.
 
 Request start/exit diagnostics correlate service incarnation, request ID, child
 PID, CLI trace ID and exit code. Ordinary CLI Process records and provider usage stay with

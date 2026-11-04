@@ -1,11 +1,12 @@
 # One Machine backend for Desktop and phone
 
-LOO-593 · Backend implementation design · November 3, 2026 · Product
+LOO-593 · Accepted local scope; implementation reconciled November 3, 2026 · Product
 
 Jack Heart authorized the installed local Machine backend through launch-plan,
 continuing to interactive demo without Auto-Ship approval. LOO-718 builds the
-native iOS client in parallel. The published local contract lets that work proceed
-before installation and native continuity review finish.
+native iOS client in parallel. The local contract was published at `5b44a394cf`
+and consumed by LOO-718, now at interactive demo with PR #1812. Native continuity
+review remains open.
 
 Jack selected native Swift, host Tailscale, terminal Sessions, CLI command
 delegation and the describe-first new-Task sheet. Local revision 1 implements
@@ -42,7 +43,9 @@ service. Window focus, pane arrangement, menus and renderer FFI stay in Desktop.
 **Delete — do not maintain:** the migrated roadmap read/watch and Session-rename
 FFI closures are removed. The service’s duplicate Checkpoint DTO/parser is removed;
 Subscription owns checkpoint validation, argument decoding and the final error
-reading. No exclusive fixture depended on that DTO. The full-cutover follow-up
+reading. No exclusive fixture depended on that DTO. Machine bridge loss no longer
+exits the live relay and discards its connection state; direct CLI attachment
+retains its existing behavior. The full-cutover follow-up
 must inventory and remove remaining LoopflowLibrary/ServedWatch Work glue and
 unused lf_read/lf_write/lf_subscribe exports with exclusive build/test wiring.
 Move shared Rust implementation rather than copying it. Preserve renderer FFI,
@@ -54,6 +57,14 @@ for migrated operations.
 [rust/loopflow/src/machine_service/README.md](../rust/loopflow/src/machine_service/README.md)
 owns revision-1 operations and limits. Rust wire types, their Swift mirror and
 `tests/fixtures/dto/machine/` are the shared contract already supplied to LOO-718.
+LOO-718 identified that roadmap membership cannot select a primary Session. The
+November 3 reconciliation exposes the existing `Read::ViewPlan` as `view_plan`,
+with `tests/fixtures/dto/machine/view_plan.json`; it returns authoritative
+`contents[].primary_session` before `session_owner` resolves the existing owner.
+The additive capability and fixture were published on the Task branch at
+`12fbe9102c` for the parallel client.
+No selection heuristic or new DTO is introduced.
+
 One operation uses one same-user Unix connection with length-prefixed JSON.
 Requests have correlation IDs; replies include service-instance identity. Bootstrap
 advertises version, executable identity and capabilities. Required/optional fields
@@ -78,6 +89,38 @@ Reconnect takes fresh Work readings and resumes bounded terminal output or repla
 its screen. It cannot steal a newer controller claim or replay uncertain raw keys
 or Send. Voice drafts remain on the phone until deliberate submission.
 
+### Connection recovery is not Session resume
+
+Implemented following the November 3 concept review of Jack Heart's continuity
+requirement. Losing the Machine connection keeps the terminal relay and native
+surface alive. The relay reports “Machine connection lost”; Ctrl+R deliberately
+reconnects and Ctrl+] closes. It retains the exact owner, reconnect token and
+received-byte position in memory. There is no persisted viewer registry or new
+Session state. Desktop never enters ordinary `lf resume --prepare` merely because
+the bridge closed. Explicit Open and Move here keep their existing meanings.
+
+Terminal recovery requests a fresh screen from that same owner: the local prompt
+has changed the displayed screen, so replay alone would leave its cursor and modes
+wrong. Byte-stream relays use the existing owner Resume protocol; expired output
+falls back to a fresh attachment. Recovery requests free input without replacement
+and queues geometry behind an existing owner. When another viewer has control,
+it reconnects passively. Replayed claim notices cannot override the acknowledgement's
+current claims or run a historical provider-successor command.
+
+Typing while disconnected or awaiting acknowledgement is discarded. A failed input
+write is uncertain and never retried. Service unavailability leaves deliberate
+retry available; a service refusal naming an unavailable exact owner ends this
+path explicitly without Session preparation or another provider. The owner retains
+its existing lifetime policy. Work subscriptions separately reopen for complete
+current readings; uncertain rename outcomes are inspected, never resubmitted.
+
+The real relay stays connected during the service-restart proof, returns to the
+unfinished draft and lets the same Graph advance. Additional focused proofs cover
+another viewer taking input/geometry during the outage, a byte stream exceeding
+the retained spool, and owner exit with no provider relaunch. Native presentation,
+installed-update composition and usage accounting still belong to gate/demo below.
+The historical review page is `scratch/concept-review.html`.
+
 ## Installation and lifetime
 
 The selected installation and public lf entry own service setup for Desktop and
@@ -93,9 +136,13 @@ separate supervisor identities; source builds cannot replace the default service
 
 Executable replacement may require unregister/re-register, terminating the helper.
 Graph and Session owners must survive actual supervisor cleanup; setsid alone is
-insufficient evidence. The isolated launchd replacement fixture proves continuity
-for existing owners. Linux uses a user service with normal control-group cleanup:
-this slice only renames Sessions and bridges existing owners. Execution-start
+insufficient evidence. The isolated launchd fixture uses `kickstart -k` and proves
+service restart continuity for existing owners. The signed-container fixture
+separately proves unregister/register, but neither replaces the installed executable
+while Work runs.
+That composed installed-update acceptance remains outstanding. Linux uses a user
+service with normal control-group cleanup: this slice only renames Sessions and
+bridges existing owners. Execution-start
 operations need an isolation proof before entering that service.
 
 Respect disabled Background Items rather than registering around them. Personal
@@ -106,12 +153,17 @@ implementation. Deleting Desktop cannot imply supported standalone hosting.
 
 ## Remaining acceptance
 
-Gate owns affected suites, the Xcode link path and Linux user-service replacement.
+Gate owns affected suites, the Xcode link path, Linux user-service replacement,
+and composed installed-executable replacement with active Work.
 Demo owns actual Desktop quit/reopen, consent/disablement and rendered editable
 Session continuity. The headless owner fixture proves an unfinished draft, exact
 provider/owner identity and Graph progress; it does not prove native input, phone
 interaction or real-provider usage reporting. The signed-container registrar proof
-and isolated launchd owner/Graph proof are distinct.
+and isolated launchd owner/Graph proof are distinct. Slow-consumer bounds and
+cancellation are implemented; dedicated saturation/cancellation acceptance remains
+with gate. Command trace isolation is covered; no fixture yet measures unchanged
+provider-usage totals across reconnect. That telemetry acceptance remains open,
+including attribution/default equivalence beyond the rename result comparison.
 
 Preserve these obligations:
 
@@ -127,12 +179,7 @@ Preserve these obligations:
   bounded; do not persist every snapshot or terminal byte. Exact additional
   latency/queue/reconnect metrics and retention remain implementation choices.
 
-Checks: `cargo test -p loopflow --lib machine_service::` — 3 passed;
-`cargo test -p loopflow --test transport_tests machine_service_` — 2 passed,
-1 opt-in supervisor proof ignored; `cargo fmt --check` and
-`cargo clippy --all-targets -- -D warnings` passed. Gate owns broader checks above;
-demo owns native/device judgment. Earlier installation and Swift proof remains at
-`5b44a394cff91d0aa20c614c3b20c3f7e121affb:scratch/mobile-backend.md`.
+Checks: `cargo test -p loopflow --test transport_tests machine_service_reconnect_` — 3 passed; `cargo test -p loopflow --test transport_tests machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart` — 1 passed with the real relay attached; shared-contract checks from the preceding pass remain applicable (`machine_service::` 3 passed; Swift `MachineProtocolTests` 4 passed). `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; the expired-output proof passed again after clearing an obsolete reconnect token on fresh attachment. Gate/demo own the acceptance above, including the complete transport suite and Linux Clippy. Earlier supervisor/Swift evidence: `5b44a394cff91d0aa20c614c3b20c3f7e121affb:scratch/mobile-backend.md`.
 
 ## Later work and parallel boundaries
 
@@ -160,10 +207,11 @@ substitute conversation-only launch, headless/ship approval or silent Machine
 rental. Proof must lose a reply and retry without duplicate creation, preserve a
 created Task after Graph failure, and show remote failure causes no local mutation.
 
-Preserve overlapping work: LOO-720/#1809 terminal activity; LOO-582/#1807 Session
-identity; LOO-673/#1791 Desktop queries; LOO-312/#1656 installation; LOO-714/#1805
-defaults; #1808 Wave DTO revert (Task attribution unresolved). Recheck landed status
-when integrating. LOO-717 owns shell policy; LOO-709/710/712 own retention, snapshots
+Integrated at `324a0f6dc4`: LOO-720/#1809 terminal activity, including owner-sampled
+status and output ordering; the bridge retains that unchanged owner protocol.
+Preserve other overlapping work: LOO-582/#1807 Session identity; LOO-673/#1791
+Desktop queries; LOO-312/#1656 installation; LOO-714/#1805 defaults; #1808 Wave DTO
+revert (Task attribution unresolved). Recheck landed status when integrating. LOO-717 owns shell policy; LOO-709/710/712 own retention, snapshots
 and Session transport. This service bridges those owners.
 
 ## Evidence

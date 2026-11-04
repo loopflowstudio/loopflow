@@ -1779,7 +1779,8 @@ fn attach_with_terminal(
     mut terminal: Option<ViewerTerminal>,
 ) -> Result<()> {
     let mut preview = terminal.is_some();
-    let mut socket = if std::env::var_os("LF_MACHINE_SERVICE").is_some() {
+    let machine = std::env::var_os("LF_MACHINE_SERVICE").is_some();
+    let mut socket = if machine {
         crate::machine_service::client::bridge(id)?
     } else {
         UnixStream::connect(endpoint(id)?).context(
@@ -1809,8 +1810,55 @@ fn attach_with_terminal(
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = crate::terminal_title::ViewerTitle::new(id);
-    loop {
+    let mut reconnect: Option<String> = None;
+    let mut received = 0;
+    let mut interrupted: Option<String> = None;
+    let mut recovering = false;
+    let mut resuming = false;
+    let mut claim_sequence = 0;
+    'relay: loop {
+        if let Some(reason) = interrupted.take() {
+            // Close the old bridge before asking the owner for its free claims.
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+            let Some(next) = reconnect_machine(id, &mut terminal, &reason)? else {
+                return Ok(());
+            };
+            socket = next;
+            socket.set_write_timeout(Some(Duration::from_secs(2)))?;
+            decoder = Decoder::default();
+            controlled = false;
+            owned = false;
+            recovering = true;
+            // The local prompt changed a terminal's screen. Replace it with the
+            // owner's current screen; byte streams can continue without repaint.
+            resuming = terminal.is_none() && reconnect.is_some();
+            let (rows, cols) = size();
+            let request = if resuming {
+                Request::Resume(Resume {
+                    reconnect: reconnect.clone().expect("resume has a token"),
+                    received,
+                    control: true,
+                    own: Some(Own::Request),
+                    rows,
+                    cols,
+                })
+            } else {
+                reconnect = None;
+                received = 0;
+                recovery_attachment(true)
+            };
+            if let Err(error) = send(&mut socket, request) {
+                interrupted = Some(error.to_string());
+                continue;
+            }
+            acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
+        }
         title.tick();
+        if machine && acknowledgement_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            interrupted =
+                Some("Attachment was not acknowledged; its outcome is unknown".to_owned());
+            continue;
+        }
         anyhow::ensure!(
             acknowledgement_deadline.is_none_or(|deadline| Instant::now() < deadline),
             "Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed"
@@ -1840,16 +1888,30 @@ fn attach_with_terminal(
         }
         if fds[0].revents != 0 {
             let mut bytes = [0; 16384];
-            let n = socket.read(&mut bytes)?;
-            anyhow::ensure!(n != 0, "Execution owner disconnected; outcome is unknown");
+            let n = match socket.read(&mut bytes) {
+                Ok(n) if n != 0 => n,
+                result if machine => {
+                    interrupted = Some(match result {
+                        Err(error) => error.to_string(),
+                        _ => "The bridge closed".to_owned(),
+                    });
+                    continue;
+                }
+                Ok(_) => bail!("Execution owner disconnected; outcome is unknown"),
+                Err(error) => return Err(error.into()),
+            };
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
+                if tag != Tag::Reply {
+                    received += payload.len() as u64;
+                }
                 let pieces = match tag {
                     Tag::Reply => {
                         let reply: Outgoing = serde_json::from_slice(&payload)?;
                         match reply.reply {
                             Reply::Attached {
                                 viewer,
+                                reconnect: token,
                                 nonce,
                                 token: claim,
                                 terminal: is_terminal,
@@ -1859,7 +1921,24 @@ fn attach_with_terminal(
                                 acknowledgement_deadline = None;
                                 controlled = claim.is_some();
                                 owned = owner.as_ref() == Some(&viewer);
-                                scanner = Some(Scanner::new(&nonce));
+                                reconnect = Some(token);
+                                if !resuming {
+                                    scanner = Some(Scanner::new(&nonce));
+                                }
+                                claim_sequence = reply.seq;
+                                if recovering {
+                                    discard_reconnect_input()?;
+                                    fds[1].revents = 0;
+                                    write_output(&mut terminal, 2, if controlled {
+                                        b"\r\nReconnected to the same Session.\r\n"
+                                    } else {
+                                        b"\r\nReconnected as a viewer; input remains elsewhere. Use Move here to take control.\r\n"
+                                    })?;
+                                    if let Some(terminal) = &mut terminal {
+                                        terminal.handoff()?;
+                                    }
+                                    recovering = false;
+                                }
                                 if preview {
                                     terminal.as_mut().expect("preview owns a terminal").handoff()?;
                                     preview = false;
@@ -1871,7 +1950,25 @@ fn attach_with_terminal(
                                     terminal.as_ref().expect("terminal entered").make_raw()?;
                                 }
                             }
+                            Reply::Busy if recovering => {
+                                // A fresh screen cannot atomically ask for optional
+                                // input. On Busy, attach passively to the same owner.
+                                if let Err(error) = send(&mut socket, recovery_attachment(false)) {
+                                    interrupted = Some(error.to_string());
+                                    continue 'relay;
+                                }
+                            }
                             Reply::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
+                            Reply::ReconnectRequired if recovering => {
+                                resuming = false;
+                                reconnect = None;
+                                received = 0;
+                                write_output(&mut terminal, 2, b"\r\nRetained output expired; reading the same owner's current screen.\r\n")?;
+                                if let Err(error) = send(&mut socket, recovery_attachment(true)) {
+                                    interrupted = Some(error.to_string());
+                                    continue 'relay;
+                                }
+                            }
                             Reply::ReconnectRequired => {
                                 anyhow::bail!("Execution owner no longer holds this viewer's stream")
                             }
@@ -1892,6 +1989,13 @@ fn attach_with_terminal(
                         wire::Piece::Bytes(bytes) => {
                             write_output(&mut terminal, stream, &bytes)?;
                             continue;
+                        }
+                        // The acknowledgement describes current claims. Replayed
+                        // old notices cannot revoke them or resume a provider.
+                        wire::Piece::Event(seq, Event::Control { .. } | Event::Owner { .. })
+                            if resuming && seq <= claim_sequence =>
+                        {
+                            continue
                         }
                         wire::Piece::Event(_, event) => event,
                     };
@@ -1951,7 +2055,13 @@ fn attach_with_terminal(
             if n == 0 {
                 stdin_open = false;
                 if terminal.is_none() && controlled {
-                    send(&mut socket, Request::EndInput)?;
+                    if let Err(error) = send(&mut socket, Request::EndInput) {
+                        if !machine {
+                            return Err(error);
+                        }
+                        interrupted = Some(error.to_string());
+                        continue;
+                    }
                 }
             } else if terminal.is_some() && bytes[..n].contains(&0x1d) {
                 // Restore the terminal before saying how to return.
@@ -1963,19 +2073,105 @@ fn attach_with_terminal(
                 }
                 return Ok(());
             } else if controlled {
-                send_frame(&mut socket, Tag::Input, &bytes[..n])?;
+                if let Err(error) = send_frame(&mut socket, Tag::Input, &bytes[..n]) {
+                    if !machine {
+                        return Err(error);
+                    }
+                    // The write may have reached the owner. Never retain or resend it.
+                    interrupted = Some(error.to_string());
+                    continue;
+                }
             }
         }
         let current_size = size();
         if terminal.is_some() && current_size != previous_size {
             previous_size = current_size;
-            send(
+            let resized = send(
                 &mut socket,
                 Request::Resize {
                     rows: current_size.0,
                     cols: current_size.1,
                 },
-            )?;
+            );
+            if let Err(error) = resized {
+                if !machine {
+                    return Err(error);
+                }
+                interrupted = Some(error.to_string());
+            }
+        }
+    }
+}
+
+fn recovery_attachment(control: bool) -> Request {
+    let (rows, cols) = size();
+    Request::Attach {
+        control,
+        replace: false,
+        own: control.then_some(Own::Request),
+        rows,
+        cols,
+        name: tty_name(libc::STDIN_FILENO),
+        moved: None,
+    }
+}
+
+/// Deliberate connection recovery, retaining the exact owner in this relay.
+/// No Session preparation, provider command, or uncertain input is repeated.
+fn reconnect_machine(
+    id: &LfProcessId,
+    terminal: &mut Option<ViewerTerminal>,
+    reason: &str,
+) -> Result<Option<UnixStream>> {
+    if terminal.is_none() && io::stdout().is_terminal() {
+        *terminal = Some(ViewerTerminal::enter()?);
+    }
+    if let Some(terminal) = terminal {
+        terminal.handoff()?;
+        terminal.make_raw()?;
+    }
+    discard_reconnect_input()?;
+    write_output(terminal, 2, format!("\r\nMachine connection lost: {reason}.\r\nCtrl+R to reconnect; Ctrl+] to close. Typing while disconnected is discarded.\r\n").as_bytes())?;
+    loop {
+        let mut bytes = [0; 8192];
+        let n = io::stdin().read(&mut bytes)?;
+        if n == 0 || bytes[..n].contains(&0x1d) {
+            return Ok(None);
+        }
+        if !bytes[..n].contains(&0x12) {
+            continue;
+        }
+        match crate::machine_service::client::bridge(id) {
+            Ok(socket) => return Ok(Some(socket)),
+            Err(error) if error.is::<crate::machine_service::client::BridgeRefused>() => {
+                return Err(error);
+            }
+            Err(error) => write_output(
+                terminal,
+                2,
+                format!("\r\nCould not reconnect: {error}. Ctrl+R to retry; Ctrl+] to close.\r\n")
+                    .as_bytes(),
+            )?,
+        }
+    }
+}
+
+fn discard_reconnect_input() -> io::Result<()> {
+    let mut fd = libc::pollfd {
+        fd: 0,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // Drain queued keys and terminal reports, including keys typed during the
+    // handshake. This is never an input queue to replay on the next connection.
+    loop {
+        // SAFETY: poll borrows one live descriptor entry for the duration of the call.
+        if unsafe { libc::poll(&mut fd, 1, 0) } <= 0 || fd.revents == 0 {
+            return Ok(());
+        }
+        let mut bytes = [0; 8192];
+        if io::stdin().read(&mut bytes)? == 0 {
+            return Ok(());
         }
     }
 }

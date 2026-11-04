@@ -25,6 +25,15 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 but never answers reads `detached` too; reattaching stops its provider and continues
 the same provider thread in a new owner, without replaying input.
 
+Desktop's Machine relay stays alive when its service connection drops. The
+terminal reports **Machine connection lost**: press Ctrl+R to reconnect to the
+same owner, or Ctrl+] to close. Terminal recovery refreshes the owner's screen;
+byte streams resume from their received position, or refresh when retained output
+expires. Disconnected typing and uncertain writes are never replayed. If another
+viewer took control, recovery observes it without replacing input or geometry;
+**Move here** remains an explicit action. An unavailable owner ends recovery
+without launching or resuming a provider. Ordinary explicit Open remains separate.
+
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
 from the last viewer change, command output or held work. A turn, pending request

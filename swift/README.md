@@ -755,15 +755,16 @@ lf desktop sessions --json --watch         # the repository's Sessions as Deskto
 lf planning status --json --watch          # stored sync receipts
 ```
 
-A window serves these `--watch` reads inside the app, one subscription per
-part, through `RegistryQuery.watchWork()` and Loopflow's Rust library
-(`rust/loopflow-ffi/include/loopflow.h`): no `lf` process runs. Each part names
-its `ServedRead`, the `lf` command above that prints the same frames. Task
-file and diff reads, the Wave list, this Machine's identity, the portfolio, a
-Work's saved panes, Task owners and the Graph catalog are `ServedRead`s too,
-read once and served the same way, so opening a window starts no `lf`.
+A window observes these reads through `RegistryQuery.watchWork()`, one
+subscription per part. The roadmap read/watch crosses the Machine socket; the
+service uses the shared Rust subscription. Other parts still run through the
+in-app Rust library (`rust/loopflow-ffi/include/loopflow.h`). Each part names its
+`ServedRead`, the `lf` command above that prints the same frames. Task files,
+diffs, Waves, Machine identity, Portfolio, saved panes, Task owners and Graphs
+still use that library. Service readiness may start the selected `lf` helper.
+Session rename crosses the Machine service and runs the complete CLI command.
 Completing, reopening, deferring, moving and editing a Task, saving a Task
-file, renaming or binding a Session, ensuring a Wave's Project, the planning
+file, binding a Session, ensuring a Wave's Project, the planning
 refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
 library calls the function their `lf` command calls and records the same
 Process; arrangement records none, as its command does. Other writes, the
@@ -965,7 +966,10 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 ## Testing
 
 Task readings and Session rename use the installed Machine service; Session
-terminals bridge their existing owner through it. These operations surface service
+terminals bridge their existing owner through it. A lost Machine bridge leaves the
+relay and native surface alive: Ctrl+R reconnects that exact owner and refreshes its
+screen; Ctrl+] closes. Recovery never prepares or resumes a provider, and a newer
+viewer retains control until an explicit Move here. These operations surface service
 errors without a direct FFI fallback. Other Work operations retain FFI until their
 cutover. See the [local protocol](../rust/loopflow/src/machine_service/README.md).
 `scripts/test_desktop.sh --filter MachineProtocolTests` builds the consumer and

@@ -198,7 +198,11 @@ async fn operation(
             respond(socket, id, instance, Reply::Bridged).await?;
             // Tokio uses bounded copy buffers. Closing either side releases the
             // owner claim; no service state can restore it on another connection.
-            tokio::io::copy_bidirectional(socket, &mut destination).await?;
+            if let Err(error) = tokio::io::copy_bidirectional(socket, &mut destination).await {
+                // Once bridged, this connection speaks only the owner protocol.
+                // Close it on failure; a JSON error would corrupt that stream.
+                tracing::debug!(%error, "Machine owner bridge disconnected");
+            }
             return Ok(());
         }
     };

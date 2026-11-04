@@ -29,6 +29,33 @@ struct Fixture {
 
 struct PausedOwner(libc::pid_t);
 
+struct StopOwner<'a>(&'a Fixture, String);
+
+impl Drop for StopOwner<'_> {
+    fn drop(&mut self) {
+        // Sessionless completed Processes can already have been collected.
+        let running = self
+            .0
+            .sql()
+            .query_row(
+                "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+                [&self.1],
+                |r| r.get::<_, bool>(0),
+            )
+            .optional()
+            .unwrap()
+            .unwrap_or(false);
+        if running {
+            self.0.stop(&self.1);
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while self.0.endpoint(&self.1).exists() {
+                assert!(Instant::now() < deadline, "fixture owner did not stop");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+}
+
 impl Drop for PausedOwner {
     fn drop(&mut self) {
         // SAFETY: only the fixture's paused owner is resumed, including on panic.
@@ -2710,6 +2737,26 @@ struct Terminal {
     screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 impl Terminal {
+    /// A byte-stream relay, with neither an owner PTY nor a local terminal.
+    fn stream(mut command: Command) -> Self {
+        let (mut reader, writer) = UnixStream::pair().unwrap();
+        command
+            .stdin(Stdio::piped())
+            .stdout(std::os::fd::OwnedFd::from(writer.try_clone().unwrap()))
+            .stderr(std::os::fd::OwnedFd::from(writer));
+        let child = command.spawn().unwrap();
+        drop(command);
+        let screen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = screen.clone();
+        std::thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            while let Ok(read @ 1..) = reader.read(&mut buffer) {
+                written.lock().unwrap().extend_from_slice(&buffer[..read]);
+            }
+        });
+        Self { child, screen }
+    }
+
     fn spawn(command: Command) -> Self {
         Self::spawn_with_placement(command, None)
     }
@@ -2775,6 +2822,44 @@ impl Terminal {
     fn stop(mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+    }
+
+    fn input(&mut self, bytes: &[u8]) {
+        self.child.stdin.as_mut().unwrap().write_all(bytes).unwrap();
+    }
+
+    fn wait_text(&mut self, text: &str) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let screen = self.screen.lock().unwrap().clone();
+            if String::from_utf8_lossy(&screen).contains(text) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "missing {text:?}: {}",
+                String::from_utf8_lossy(&screen)
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn wait_exit(&mut self) -> std::process::ExitStatus {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(Instant::now() < deadline, "relay did not exit");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -3882,6 +3967,135 @@ fn machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart()
     machine_service_continuity(false);
 }
 
+#[test]
+fn machine_service_reconnect_preserves_newer_viewers_input_and_geometry() {
+    // Exercise both byte-counted Resume and fresh terminal-screen recovery.
+    for terminal in [false, true] {
+        let fixture = Fixture::new();
+        let owner = fixture.owner(fixture.serve(terminal, &[
+            "/bin/sh", "-c",
+            "printf 'ready-for-input\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ]));
+        let _cleanup = StopOwner(&fixture, owner.clone());
+        let mut service = MachineServiceProof::start(&fixture, false);
+        let mut command = fixture.command(&["session", "attach", &owner]);
+        command.env("LF_MACHINE_SERVICE", "1");
+        let mut relay = if terminal {
+            Terminal::spawn(command)
+        } else {
+            Terminal::stream(command)
+        };
+        relay.wait_text("ready-for-input");
+        service.restart();
+        relay.wait_text("Machine connection lost");
+        service.ready();
+
+        let mut newer = fixture.attach(
+            &owner,
+            json!({
+                "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+            }),
+        );
+        relay.input(b"uncertain typing\x12");
+        relay.wait_text("Reconnected as a viewer");
+        relay.assert_viewing("Recovered observer");
+        relay.input(b"must not reach the provider\n");
+        let mut observer = fixture.connect(&owner);
+        observer.request(
+            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
+        );
+        let reply = observer.until_reply();
+        assert_eq!(reply["owner"], newer.id, "reconnect cannot steal geometry");
+        assert!(reply["token"].is_null());
+        newer.input("newer viewer\n");
+        newer.finish();
+        assert_eq!(fixture.wait_file("answer"), "newer viewer");
+        assert!(relay.wait_exit().success());
+        if !terminal {
+            let screen = relay.screen.lock().unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&screen)
+                    .matches("ready-for-input")
+                    .count(),
+                1,
+                "Resume must continue at the received byte, not replay the initial output"
+            );
+        }
+    }
+}
+
+#[test]
+fn machine_service_reconnect_refreshes_expired_output_without_replaying_input() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            r#"
+printf 'ready-for-outage\n'
+while [ ! -f "$HOME/release" ]; do sleep 0.02; done
+dd if=/dev/zero bs=65536 count=20 2>/dev/null | tr '\000' x
+printf '\ncurrent-output\n'
+printf done > "$HOME/filled"
+read -r answer
+printf '%s' "$answer" > "$HOME/answer"
+"#,
+        ],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = MachineServiceProof::start(&fixture, false);
+    let mut command = fixture.command(&["session", "attach", &owner]);
+    command.env("LF_MACHINE_SERVICE", "1");
+    let mut relay = Terminal::stream(command);
+    relay.wait_text("ready-for-outage");
+    service.restart();
+    relay.wait_text("Machine connection lost");
+    service.ready();
+    std::fs::write(fixture.home.path().join("release"), "go").unwrap();
+    fixture.wait_file("filled");
+    relay.input(b"discarded\x12");
+    relay.wait_text("Retained output expired");
+    relay.wait_text("current-output");
+    relay.input(b"fresh input\n");
+    assert_eq!(fixture.wait_file("answer"), "fresh input");
+    assert!(relay.wait_exit().success());
+}
+
+#[test]
+fn machine_service_reconnect_reports_an_ended_owner_without_starting_another() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s\n' "$$" >> "$HOME/launches"
+printf 'provider-ready\n'
+read -r answer < /dev/tty
+"#,
+    );
+    let owner = fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "hello"));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let first = fixture.launches(1);
+    let mut service = MachineServiceProof::start(&fixture, false);
+    let mut command = fixture.command(&["session", "attach", &owner]);
+    command.env("LF_MACHINE_SERVICE", "1").env("PATH", &path);
+    let mut relay = Terminal::spawn(command);
+    relay.wait_text("provider-ready");
+    service.restart();
+    relay.wait_text("Machine connection lost");
+    service.ready();
+    fixture.stop(&owner);
+    fixture.ends(&owner);
+    relay.input(&[0x12]);
+    relay.wait_text("Session owner is unavailable");
+    assert!(!relay.wait_exit().success());
+    assert_eq!(
+        fixture.launches(1),
+        first,
+        "connection recovery cannot launch or resume a provider"
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "registers and removes an isolated launchd job; run explicitly outside network sandbox"]
@@ -3896,6 +4110,7 @@ fn machine_service_continuity(supervised: bool) {
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 stty -echo < /dev/tty
 printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'machine-proof-provider-ready\n'
 read -r answer < /dev/tty
 printf '%s\n' "$answer" >> "$HOME/answers"
 "#,
@@ -3919,14 +4134,6 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     );
     command.env("PATH", path);
     let owner = fixture.owner(command);
-    struct StopOwner<'a>(&'a Fixture, String);
-    impl Drop for StopOwner<'_> {
-        fn drop(&mut self) {
-            if self.0.running(&self.1) {
-                self.0.stop(&self.1);
-            }
-        }
-    }
     let _cleanup = StopOwner(&fixture, owner.clone());
     let first = fixture.launches(1);
     let owner_pid = pid_of_process(&fixture, &owner);
@@ -3939,6 +4146,11 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let mut viewer = service.viewer(&owner);
     viewer.input("draft");
     drop(viewer); // Desktop quit: the owner keeps its native editor.
+    let mut command = fixture.command(&["session", "attach", &owner]);
+    command.env("LF_MACHINE_SERVICE", "1");
+    let mut relay = Terminal::spawn(command);
+    relay.wait_text("machine-proof-provider-ready");
+    fixture.wait_controlled(&owner);
     let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
     let (mut watch, initial) = service.request(
         "tasks",
@@ -4054,6 +4266,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     }
     drop(watch);
     service.restart();
+    relay.wait_text("Machine connection lost");
     let deadline = Instant::now() + Duration::from_secs(20);
     while service.ready() == first_instance {
         assert!(Instant::now() < deadline);
@@ -4065,12 +4278,14 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         first,
         "reconnect must not launch another provider"
     );
-    let mut resumed = service.viewer(&owner);
-    resumed.input(" kept\n");
+    relay.input(b"discard this typing");
+    relay.input(&[0x12]);
+    relay.wait_text("Reconnected to the same Session");
+    relay.input(b" kept\n");
     fixture.launches(2); // The existing Graph advanced exactly once.
-    resumed.input("done\n");
-    resumed.finish();
+    relay.input(b"done\n");
     fixture.ends(&owner);
+    assert!(relay.wait_exit().success());
     assert_eq!(fixture.launches(2).len(), 2);
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),

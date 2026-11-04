@@ -817,14 +817,19 @@ fixtures must declare opposite launch modes, independent of Session defaults.
 ```bash
 cargo test -p loopflow --lib machine_service::
 cargo test -p loopflow --test transport_tests machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart
+cargo test -p loopflow --test transport_tests machine_service_reconnect_
 cargo test -p loopflow --test transport_tests installed_machine_service_preserves_owner_and_graph_across_replacement -- --ignored
 ```
 
 The ordinary socket proof covers Task subscription changes, CLI/command parity,
-concurrent trace isolation and editable owner/Graph continuity after replacement.
+authoritative primary-Session selection, concurrent trace isolation and editable
+owner/Graph continuity with the real relay connected during service restart.
+Recovery tests cover byte-position continuation, fresh terminal screens, newer
+viewers retaining input/geometry, expired output and owner exit without relaunch.
 The opt-in macOS variant uses a unique launchd job and disposable Machine, then
 boots it out. Run it outside the runner's network sandbox. A separate signed
 bundle proof runs `uv run python scripts/test_machine_service_registration.py`;
-it exercises the production SMAppService registrar without starting Work.
+it exercises the production SMAppService registrar without starting Work. These
+separate proofs do not replace an installed executable while Work is active.
 Linux supervisor replacement remains a Linux installation check; this service
 starts no providers or Graphs, and keeps systemd's control-group cleanup.

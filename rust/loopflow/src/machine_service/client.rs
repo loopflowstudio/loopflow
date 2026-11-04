@@ -4,6 +4,11 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
+/// The service answered the exact-owner request, but could not bridge it.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(crate) struct BridgeRefused(String);
+
 pub fn connect(operation: Operation) -> Result<(UnixStream, Response)> {
     let mut socket = UnixStream::connect(super::socket_path()?)
         .context("Machine service unavailable; run `lf machine service ensure`")?;
@@ -53,7 +58,7 @@ pub fn bridge(owner: &crate::id::LfProcessId) -> Result<UnixStream> {
         owner: owner.clone(),
     })?;
     if let Reply::Error { code, message } = &response.result {
-        anyhow::bail!("{code:?}: {message}");
+        return Err(BridgeRefused(format!("{code:?}: {message}")).into());
     }
     anyhow::ensure!(
         matches!(response.result, Reply::Bridged),

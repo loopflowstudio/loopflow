@@ -756,13 +756,17 @@ lf planning status --json --watch          # stored sync receipts
 ```
 
 A window observes these reads through `RegistryQuery.watchWork()`, one
-subscription per part. The roadmap read/watch crosses the Machine socket; the
+subscription per part. The roadmap read/watch crosses the local client API socket; the
 service uses the shared Rust subscription. Other parts still run through the
 in-app Rust library (`rust/loopflow-ffi/include/loopflow.h`). Each part names its
 `ServedRead`, the `lf` command above that prints the same frames. Task files,
 diffs, Waves, Machine identity, Portfolio, saved panes, Task owners and Graphs
-still use that library. Service readiness may start the selected `lf` helper.
-Session rename crosses the Machine service and runs the complete CLI command.
+still use that library. Readiness currently obtains the selected `lf` helper.
+The accepted [server boundary](../docs/architecture/server.md) puts registration
+and updates under installation, connection readiness in the server client, and
+Machine destination routing separately. The `MachineService` / `MachineProtocol`
+source names and CLI namespace await that coordinated cutover.
+Session rename crosses the server and runs the complete CLI command.
 Completing, reopening, deferring, moving and editing a Task, saving a Task
 file, binding a Session, ensuring a Wave's Project, the planning
 refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
@@ -909,7 +913,9 @@ exact window and pane, and `lf desktop` resolves those from one inspection (see 
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,
 same-uid peers, a stale file unlinked) and answers newline-delimited JSON:
 `inspect`, `perform`, `read_text` and `events`. It serves only `lf desktop` and
-hosts no Sessions. An unknown action or bad argument throws `DesktopArgumentError`
+hosts no Sessions. This app-owned automation endpoint closes with Desktop; the
+shared client API server has an independent lifetime and serves Work/terminal
+access. An unknown action or bad argument throws `DesktopArgumentError`
 (code `argument`, exit 2); a stale or missing target throws `DesktopTargetError`
 (`target`, exit 3); another API version answers `version`. The receipt carries the
 window's destination and the affected workspace in the same MainActor turn, so it
@@ -965,8 +971,8 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 ## Testing
 
-Task readings and Session rename use the installed Machine service; Session
-terminals bridge their existing owner through it. A lost Machine bridge leaves the
+Task readings and Session rename use the installed client API server; Session
+terminals bridge their existing owner through it. A lost server bridge leaves the
 relay and native surface alive. A native status row shows automatic exact-owner
 recovery, with input paused and local copy, Find and scrolling available. Exhausted
 retries show an unavailable explanation and Retry; only authoritative exit means

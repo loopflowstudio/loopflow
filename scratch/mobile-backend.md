@@ -1,334 +1,205 @@
-# One Machine backend for Desktop and phone
+# Separate execution destinations, client access and installation
 
-LOO-593 · Accepted local scope; implementation reconciled November 4, 2026 · Product
+LOO-593 · Design revised November 4, 2026 · Interactive demo
 
-## Accepted scope and implementation · November 4, 2026
+## Accepted direction
 
-Jack Heart requested addressing the preceding review before shipping: implement
-automatic exact-owner reconnection with native connection status and prove
-installed-helper replacement while an unfinished draft and Graph remain live.
-This selects the review's recommended automatic option and supersedes its pending
-choice and the earlier deliberate Ctrl+R direction for Desktop. Jack authorized
-publication through interactive demo, without merge or Auto-Ship approval.
+Jack Heart requested returning to the drawing board after identifying that
+`lf machine service` mixes remote execution management with client API access.
+Jack selected a documentation/design rewrite around this split:
 
-Keep connection status outside provider terminal bytes. Disable input during
-recovery, use bounded retry/backoff, cancel on pane closure, preserve another
-viewer's input and geometry claims, and never replay uncertain input or commands.
-Unavailable is not ended: only authoritative execution evidence establishes exit.
-Disabled or incompatible service states need an actionable native explanation.
-The existing owner keeps lifetime policy and execution. Do not add a durable
-viewer registry, Session lifecycle, scheduler or retention authority.
+- **Machine** names where work runs: identity, SSH connections, destination
+  defaults, pools and rentals. Keep `lf machine` and `lf --machine` here.
+- **Server** gives Desktop and mobile access to Loopflow on a host. Move client
+  admission, availability and the serving entry point to `lf server`.
+- **Installation** selects and updates artifacts and registers the server.
+  Keep that lifecycle under `lf install`, including automatic local setup.
+- **Desktop** owns its windows, panes, rendering and app-owned automation API.
+  Keep `lf desktop` and `DesktopServer` separate from the shared server.
 
-Automatic recovery and the composed installed-helper replacement fixture are
-implemented. The fixture retains exact provider, Session owner, editable draft
-and live Graph through replacement, then edits/submits the draft and verifies
-Graph progress. Focused cases cover newer-viewer control, expired output,
-unavailable owner and cancellation without input replay. Native presentation,
-actual Desktop quit/reopen and the broader obligations in Remaining acceptance
-still need evidence. Separate registrar/restart tests alone were insufficient;
-the composed proof is now part of this revision's recorded passing checks.
+The canonical boundary and proposed usage are in
+[Clients, servers and execution destinations](../docs/architecture/server.md).
+This replaces the earlier Machine-service framing. The command migration is
+not implemented by this review. Jack requested docs edits, not a Graph restart,
+publication or shipping. Earlier authorization reached interactive demo; no
+merge or Auto-Ship approval follows from this rewrite.
 
-LOO-718/PR #1812 incorporates `07a6a184d4` and implements remote mobile transport,
-pairing and client integration. Inspection of its local branch at `983b271695`
-on November 4 found additive remote configuration, owner startup and program-status
-events. Those remain in LOO-718; this recovery revision preserves the published
-local/owner wire contract. LOO-593 remains the foundation to land first after its
-checks and demo; the order recommendation itself approves no landing.
+## Experience and ownership
 
-The local contract was published at `5b44a394cf` and consumed by LOO-718.
-Native continuity review remains open.
-
-Jack selected native Swift, host Tailscale, terminal Sessions, CLI command
-delegation and the describe-first new-Task sheet. Local revision 1 implements
-neither remote admission nor recoverable create/start. The original HTML review
-in LOO-718 contains recommendations, not additional accepted decisions. This is
-the single active backend design.
-
-## Local slice and ownership
+Install Loopflow, open Desktop and edit a Session. Local client access is prepared
+by installation; no server setup ritual or Tailscale is needed. Enable remote
+access separately to pair a phone with that host. A phone is a client of a Machine,
+not another execution destination. Selecting another worker remains an explicit
+Machine operation.
 
 ```text
-Desktop ── private Unix socket ── Machine service
-                                   ├── shared Rust Read / Subscription
-                                   ├── complete command via installed lf
-                                   └── bridge to existing Session owner ── agent / PTY
+Desktop ─ private Unix socket ─┐
+                             ├─ server ─ shared Rust Read / Subscription
+phone ─ authenticated API ────┘         ├ complete command through installed lf
+        (LOO-718)                      └ existing Session owner ─ agent / PTY
 
-Desktop owns UI automation and native terminal rendering.
-The existing Graph runner and Session owners retain execution and lifetime.
+installation ─ selected executable + server registration / replacement
+Machine routing ─ SSH destination's ordinary lf invocation
+Desktop automation ─ app-owned windows / panes / menus
 ```
 
-Desktop now sends roadmap reads/subscriptions and Session rename through the
-service, with no direct-FFI fallback. Session panes bridge their exact existing
-owner. Other Work operations retain their current transport until the full
-cutover in LOO-718’s task plan. Preserve RegistryQuery consumers and domain DTOs.
-The app-owned DesktopServer still lives and dies with Desktop and owns no Sessions.
-Its original routing/discovery questions remain in
-[the original scope](research_notes/desktop-server-original-scope.md).
+The server handles admission, framing and bounded delivery. Complete shared
+commands retain defaults, mutation, attribution and recovery. Session owners
+retain provider processes, input/geometry claims and lifetime policy. Graphs
+retain their own execution. Drafts, active turns, pending requests and running
+Graphs already protect their owners; the server adds no retention authority.
+CLI use does not require the server. No scheduler, shadow Work store or durable
+viewer registry belongs here.
 
-The service runs as the existing OS account and data directory. It owns admission,
-framing and bounded delivery; it introduces no scheduler, PTY manager, retention
-policy, shadow store or Task orchestration. Shared CLI operations own resolution,
-defaults, mutation, attribution and recovery. CLI use need not depend on the
-service. Window focus, pane arrangement, menus and renderer FFI stay in Desktop.
+## What exists and what must change
 
-**Delete — do not maintain:** the migrated roadmap read/watch and Session-rename
-FFI closures are removed. The service’s duplicate Checkpoint DTO/parser is removed;
-Subscription owns checkpoint validation, argument decoding and the final error
-reading. No exclusive fixture depended on that DTO. Machine bridge loss no longer
-exits the live relay and discards its connection state; direct CLI attachment
-retains its existing behavior. The full-cutover follow-up
-must inventory and remove remaining LoopflowLibrary/ServedWatch Work glue and
-unused lf_read/lf_write/lf_subscribe exports with exclusive build/test wiring.
-Move shared Rust implementation rather than copying it. Preserve renderer FFI,
-CLI operations, SSH and app-owned UI automation. Do not restore lfd or a fallback
-for migrated operations.
+LOO-593 has implemented a local server under `machine_service/`, with roadmap
+read/watch, Session rename through the CLI and exact existing-owner attachment.
+Those migrated operations have no direct-FFI fallback. Other Work operations
+still use their existing adapters. App-owned UI automation remains separate.
 
-## Protocol and reconnection
+LOO-718/PR #1812 incorporates `07a6a184d4`; inspection at `983b271695` on November 4
+found remote HTTPS/WSS over host Tailscale, pairing/revocation, native iOS and
+recoverable create/start work. That is evidence from the parallel branch, not
+verification of the combined release. LOO-593 is the local foundation; LOO-718
+owns the remote/mobile experience. Both need the accepted naming boundary.
 
-[rust/loopflow/src/machine_service/README.md](../rust/loopflow/src/machine_service/README.md)
-owns revision-1 operations and limits. Rust wire types, their Swift mirror and
-`tests/fixtures/dto/machine/` are the shared contract already supplied to LOO-718.
-LOO-718 identified that roadmap membership cannot select a primary Session. The
-November 3 reconciliation exposes the existing `Read::ViewPlan` as `view_plan`,
-with `tests/fixtures/dto/machine/view_plan.json`; it returns authoritative
-`contents[].primary_session` before `session_owner` resolves the existing owner.
-The additive capability and fixture were published on the Task branch at
-`12fbe9102c` for the parallel client.
-No selection heuristic or new DTO is introduced.
+| Current implementation | Target responsibility | Required change |
+| --- | --- | --- |
+| `lf machine service run/status` | Server availability | Move to proposed `lf server run/status`; status stays observational |
+| `lf machine service ensure` and registration under `machine_service/` | Installation plus connection readiness | Put selected-build registration/update under installation; keep connection/bootstrap in the client; remove public setup machinery |
+| Remote enablement, pairing and device commands in LOO-718's Machine group | Server client access | Move under the server group; settle the exact subcommands with that branch |
+| `MachineService`, `MachineProtocol`, service-specific `machine_*` files | Server client/protocol | Rename callers and fixtures together; keep domain Machine identity intact |
+| Bundled LaunchAgent/systemd names and persisted access settings | Installation migration | Replace registration once; preserve settings/credentials and prevent duplicate listeners |
+| Remaining Work FFI adapters | Shared operations reached through server | Inventory and delete each replaced route during the wider cutover; preserve renderer FFI |
 
-One operation uses one same-user Unix connection with length-prefixed JSON.
-Requests have correlation IDs; replies include service-instance identity. Bootstrap
-advertises version, executable identity and capabilities. Required/optional fields
-have no implicit DTO defaults.
+Do not create compatibility aliases for internal commands or duplicate protocol
+implementations. Persisted state and installed supervisor registrations need an
+explicit migration. Do not rename `MachineId`, `machine_id`, execution-location
+records, `LF_HOME` or ordinary SSH routing just because the server reports them.
+The namespace change alone does not require a new wire revision.
 
-- Reads use existing Rust Read::read. Roadmap subscriptions use Read::subscribe,
-  complete replacement readings, generation and explicit unavailable state.
-  Blocking reads run off network workers; closing cancels. The shared watch owns
-  checkpoint errors and coalescing. Bounded consumers reconnect for fresh state;
-  store revisions are not replay cursors.
-- Session rename delegates Write::argv to a real lf subprocess. Each command has
-  an isolated environment and fresh CLI trace. No process-global caller mutation
-  or service→CLI→service recursion. Request IDs provide correlation only. A lost
-  reply means outcome unknown; never automatically resubmit it.
-- Session-owner lookup never launches or resumes a provider. Attachment bridges
-  the existing binary owner protocol with bounded buffers. The owner retains
-  input/geometry claims, stale-control rejection and output continuation. A missing
-  owner fails explicitly; it never creates a replacement conversation. Ordinary
-  CLI attachment remains direct; Desktop selects the bridge.
+## Preserve the working contract
 
-Reconnect takes fresh Work readings and resumes bounded terminal output or replaces
-its screen. It cannot steal a newer controller claim or replay uncertain raw keys
-or Send. Voice drafts remain on the phone until deliberate submission.
+[The local protocol README](../rust/loopflow/src/machine_service/README.md) owns
+revision-1 operations and bounds. Rust wire types, the Swift mirror and fixtures
+under `tests/fixtures/dto/machine/` currently supply both clients. `view_plan`
+returns authoritative `contents[].primary_session`; roadmap membership cannot
+select a primary. Owner resolution never starts a provider. Attach names the
+exact existing owner and bridges its unchanged binary protocol.
 
-### Automatic exact-owner recovery · November 4, 2026
+Reads/subscriptions reuse shared Rust operations and fresh complete readings.
+Closing cancels; reconnect does not replay store revisions. Commands run complete
+CLI operations with isolated environments and fresh traces. Request IDs correlate;
+they do not deduplicate. A lost command reply means outcome unknown and cannot
+be automatically resubmitted. Recoverable create/start belongs in shared command
+admission, not a gateway response cache; preserve the original Task on launch
+failure and never duplicate creation after a lost reply.
 
-Jack Heart selected this interaction after the November 3–4 review. Desktop now
-owns a private temporary per-surface status mailbox. The relay sends atomic JSON
-connection readings outside terminal bytes; native chrome shows reconnecting,
-read-only or unavailable, and offers Retry after eight capped-backoff attempts.
-The surface removes its mailbox on closure, cancelling recovery. No database,
-Session state, viewer registry, provider launch or retention policy is added.
-Only the existing owner’s exit event establishes ended; a failed bridge remains
-unavailable with the retained screen marked stale.
+The private same-user Unix socket and remote admission have different trust
+boundaries. A remote proxy cannot borrow its local UID to authenticate a phone.
+Remote access is opt-in; revoking a phone or disabling it must leave local clients
+and execution owners intact. Preserve unrelated Tailscale Serve routes. Any future
+hub is optional ingress/retransmission, not the execution owner or a prerequisite
+for private use.
 
-Input waits for the exact owner’s acknowledgement. Recovery requests free claims
-without replacement; a newer input/geometry controller remains authoritative.
-Fresh terminal snapshots restore screen/parser state; byte streams resume their
-received position, refreshing if the spool expired. Outage input and uncertain
-writes are discarded. Retry is a mailbox signal, never provider input. Native
-read-only mode uses Ghostty's input suppression while leaving selection, copy,
-Find and scrolling handlers available; rendered behavior remains demo proof.
-Plain CLI Machine relays retain deliberate Ctrl+R; Desktop has no recovery text
-in provider output.
+## Preserve automatic recovery and explicit control
 
-**Delete — do not maintain:** Desktop’s terminal recovery prompt and Ctrl+R
-dependency, including `Status::closed_or_retry` interpreting raw keys as Retry;
-the installed fixture’s kickstart-only replacement path. These are removed.
-Native Retry reads only the mailbox; one relay owns ordinary mutable retry
-counters. `MachineServiceProof::command` pins owner, Graph, relay and command
-children to the installed executable under test. Preserve ordinary CLI
-attachment, existing owner protocol, claim fencing, app-owned UI automation and
-the shared mobile contract. LOO-718’s overlapping owner-start and program-status
-changes were inspected; this revision neither imports them nor changes that wire.
+Jack Heart's earlier accepted review direction remains intact: automatic
+exact-owner recovery, native connection status outside terminal bytes, no replay
+of uncertain input and no replacement provider. The implemented native surface
+has a private temporary mailbox; it carries status and one-shot actions only.
+Closure removes it and cancels recovery. Eight capped-backoff attempts lead to
+an actionable unavailable state and Retry. Unavailable is not ended: only the
+owner's execution evidence establishes exit.
 
-The composed macOS fixture installs an actual lf helper in an isolated signed app,
-starts the owner and Graph from that installed path, and holds a draft. It replaces
-the executable inode with identically signed bytes, verifies the bundle seal and
-invokes the production registrar’s unregister/register path. LaunchServices
-registers the temporary app container and launches its updater as the app;
-macOS App Management correctly refuses an external test runner’s bundle writes.
-Connection generations prevent a stale connected reading
-from satisfying recovery. It then edits/submits the draft and checks exact
-owner/provider identity and Graph progression. This is executable replacement
-with the same candidate build, not a released-version migration or a rendered
-Desktop demonstration.
+Input pauses until the exact owner acknowledges. Passive recovery requests free
+claims without replacing a newer viewer. Terminal screens refresh; byte streams
+resume their received position or refresh when the spool expired. Outage input
+and uncertain writes are discarded. Native read-only mode preserves selection,
+copy, Find and scrolling. Plain CLI server relays retain their existing Ctrl+R
+interaction; Desktop uses native status.
 
-Historical review, source links and rejected alternatives remain at
-`82fdb0e928:scratch/mobile-backend.md`; Jack Heart’s accepted November 4 direction
-leads this document. Review feedback also required local reading interactions and
-installed-owner executable retirement, included above.
+**Move here** is available in the connected read-only pane. Its mailbox action
+names the current generation and is consumed before the existing replacing
+Attach is sent. Consumption advances the generation; input waits for the owner's
+acknowledgement. Refresh the parser/screen together while retaining cumulative
+stream offset. A lost acknowledgement recovers non-replacing, even if a newer
+viewer has meanwhile acquired control. Never replay takeover. Closure cancels
+pending actions; stale readings cannot re-enable consumed actions.
 
-### In-pane Move here · November 4, 2026
-
-The concept review found that passive recovery retained a live read-only pane,
-but its native row only pointed to Move here outside that pane. Jack Heart's
-accepted explicit takeover is now connected directly to the existing relay.
-`WorkspacePanesView.openButton`, `_elsewherePlaceholder` and Session preparation
-retain their separate unopened-pane behavior.
-
-**Delete — do not maintain:** replace the unreachable “Use Move here” hint and
-its assumption that `input: false` means another viewer still holds input. No
-exclusive fixture or wire operation is removed. The native row now says
-“Read-only. Move here to type.” Its button is available only while connected and
-read-only. Local selection, copy, Find and scroll retain their existing handlers.
-The relay's paired reconnect/takeover flags become one recovery reason, consumed
-on acknowledgement. Every attachment hands the retained display to its incoming
-screen, so a separate preview flag is unnecessary. Keep the output offset and
-parser together: takeover refreshes parsing without resetting the stream's offset.
-
-The private surface mailbox carries a one-shot action naming its current
-generation. The relay consumes it before sending the existing replacing
-`Attach { control: true, replace: true, own: Take, … }` to the exact owner.
-Consumption advances the generation; input remains paused until acknowledgement.
-At acknowledgement, parser/screen refresh together while the existing stream's
-cumulative byte offset remains intact. No preparation, provider resume, shared
-wire change, persisted Session state or execution/retention owner is introduced.
-
-A lost acknowledgement recovers non-replacing. Neither the takeover nor
-uncertain typing is replayed, including when a newer viewer claimed input and
-geometry meanwhile. Retry only repairs the connection. The native action cannot
-repeat while pending; stale status cannot re-enable it. Pane closure removes
-its pending mailbox action and the relay observes closure even while connected.
-
-Source reconciliation at `2b9ecd9790` confirms the in-pane action and consumed
-generation match this design; no further product choice is needed for this local
-correction. The inspected local upstream and LOO-718 refs remain `ac8e088f5f`
-and `983b271695`; this is not a fresh remote integration check.
-
-The November 4 headless concept review finds no further design change within
-Jack Heart's accepted local scope. Connection availability and permission to type
-remain separate: Retry repairs transport; Move here explicitly replaces claims
-on the same owner. The surface mailbox is disposable presentation, the owner
-grants control, and existing Session/Graph records retain execution identity.
-The lost-acknowledgement/newer-viewer counterexample is covered in the current
-source and focused proofs; it remains a constraint on later changes. Usage docs
-already describe this interaction; no skill instruction change is needed.
-The next experience proof is the rendered native path, including local reading
-during recovery and the visible Move here action, under Remaining acceptance.
-
-Focused proofs cover retained draft/provider/Graph, intercepted takeover reply
-followed by a newer claim, stale action rejection and closure before action
-consumption. Swift tests exercise the same mailbox and native presentation state.
-Rendered reading/copy/Find/scroll and clicking the visible button remain demo
-work; `scratch/concept-review.html` is the current interaction sketch, not
-rendered native evidence. Remote takeover UX remains outside the accepted slice.
+This counterexample remains decisive: a takeover succeeds, its reply is lost,
+and another viewer claims control. Automatic recovery must leave that newer
+viewer in control. Retry changes connectivity; Move here changes control.
 
 ## Installation and lifetime
 
-The selected installation and public lf entry own service setup for Desktop and
-CLI. Default-Machine commands delegate to the promoted CLI. Desktop automatically
-obtains the service and checks readiness; disabled or incompatible service states
-remain visible. Normal local use requires no Tailscale.
+One installation authority reconciles the selected executable, public CLI and
+server registration. Desktop requests readiness from it; status and reconnect
+cannot silently install, select another build or override disabled background
+items. Current macOS packaging uses a signed app's bundled helper and SMAppService;
+explicit development data directories have separate supervisor identities.
+Linux uses a user systemd service with normal control-group cleanup.
 
-On macOS, SMAppService registers the selected signed app’s existing lf helper and
-bundled LaunchAgent plist. A temporary ad-hoc-signed container proved the production
-registrar. A separately distributed GUI-less signed container remains an option,
-not a supported standalone distribution. Explicit development LF_HOME values use
-separate supervisor identities; source builds cannot replace the default service.
+Executable replacement may unregister and terminate the server. Existing owner
+and Graph processes must survive actual supervisor cleanup; `setsid()` alone is
+insufficient proof. The server must not become their launch/lifetime owner as
+more commands move onto it. Execution-start operations require an isolation proof.
+Sleep makes a host unavailable; logout/reboot preserve records, not live processes.
+Before-login hosting and a separately distributed GUI-less package remain open
+product questions. Removal must preserve Work/credentials and explicitly address
+active execution; deleting Desktop implies no standalone hosting promise.
 
-Executable replacement may require unregister/re-register, terminating the helper.
-Graph and Session owners must survive actual supervisor cleanup; setsid alone is
-insufficient evidence. The composed signed-container fixture replaces the
-installed executable while its owner and Graph remain live. Linux uses a user
-service with normal control-group cleanup: this slice only renames Sessions and
-bridges existing owners. Execution-start operations need an isolation proof
-before entering that service.
+## Evidence and remaining proof
 
-Respect disabled Background Items rather than registering around them. Personal
-LaunchAgents end at logout; sleep makes the host unavailable, and reboot preserves
-records rather than live processes. Before-login hosting is a separate promise.
-Removal must preserve Work and credentials and define active-session handling before
-implementation. Deleting Desktop cannot imply supported standalone hosting.
+The composed macOS fixture starts an owner and Graph from an installed helper,
+holds a draft, replaces the executable inode with the same candidate's signed
+bytes, checks the bundle seal and exercises production unregister/register. Its
+updater runs through LaunchServices as the app. A fresh relay acknowledgement
+precedes editing/submitting the draft; exact owner/provider identity and Graph
+progress survive. This proves installed same-build replacement, not released
+version migration or rendered Desktop continuity.
 
-## Remaining acceptance
+At `2b9ecd9790`, eleven focused Rust transport tests and three Swift connection
+tests passed; the app built headlessly. They cover newer claims, expired output,
+owner unavailability, cancellation, stale actions and lost takeover replies.
+Publication at `8c54f5e08a` also passed the opt-in installed replacement proof,
+formatting, Clippy with warnings denied, Ruff and whitespace checks. A fixture
+repair replaced `open -W`'s unreliable short-process watch with the updater's
+existing completion result; it does not retry registration or replacement.
+These are previous implementation evidence, not tests of the proposed rename.
 
-Gate owns affected suites, the Xcode link path, Linux user-service replacement,
-subscription saturation/cancellation and unchanged provider-usage totals across
-reconnect. Attribution/default equivalence beyond the rename result remains open.
-Demo owns actual Desktop quit/reopen, consent/disablement, native input and rendered
-editable Session continuity. The installed headless fixture proves signed
-registration, executable replacement, a held draft, exact owner/provider identity
-and Graph progress. It does not prove native input, phone interaction or
-real-provider usage reporting. Terminal slow-consumer bounds, cancellation and
-command trace isolation are covered.
+Next proof after the coordinated cutover:
 
-Preserve these obligations:
+- Install/update through the real selected installation; prove one registered
+  server and one local endpoint. Existing paired credentials/settings survive.
+  CLI help and every supervisor/client caller use the new command ownership.
+- Repeat composed signed replacement with a draft and Graph live. Prove the
+  equivalent Linux supervisor path; preserve normal cgroup cleanup.
+- Demonstrate rendered Desktop quit/reopen, native recovery, local copy/Find/scroll
+  and visible Move here. Show disabled background items and version mismatch
+  truthfully. Headless model tests do not prove that interaction.
+- Check CLI/socket defaults, state and attribution equivalence, subscription
+  initial/change/error/cancel behavior, saturation, concurrent startup and command
+  isolation. Reconnect must not duplicate provider-usage totals. Broader Xcode
+  link, Linux and telemetry acceptance remains open.
+- Join LOO-718's phone path to the migrated server. Lose create/start replies,
+  recover one original Task or report uncertainty, and show remote route failure
+  makes no local mutation. Revocation/remote disablement preserves local editing.
 
-- CLI/socket equivalence in state, defaults and attribution; initial/change/error/
-  cancel subscriptions; bounded slow clients and fresh reconnect readings.
-- Concurrent requests remain distinct; concurrent startup obtains one service.
-  Installed helper replacement and Desktop quit preserve existing execution.
-  Disabled consent and version skew have truthful failure states.
-- Telemetry explains command outcome or uncertainty without duplicating provider
-  usage after reconnect. Commands retain shared Process records; observations add
-  neither Work nor usage. Correlate request, service instance, child PID, trace and
-  resulting Work identity without inventing execution ancestry. Diagnostics remain
-  bounded; do not persist every snapshot or terminal byte. Exact additional
-  latency/queue/reconnect metrics and retention remain implementation choices.
+## Boundaries and research
 
-Checks (November 4): reused `2b9ecd9790` evidence — `cargo test -p loopflow --test transport_tests machine_service_ -- --test-threads=1`: 11 passed, installed-replacement test opt-in/ignored; `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone`: app built, 3 passed headlessly (existing display-link deprecation and deployment-target warnings); `cargo fmt` passed. Documentation reconciliation: `git diff --check` passed; `lf context` within both limits. Installed-replacement proof remains at `7670600cf5:scratch/mobile-backend.md`; gate owns broader regression, Xcode/Linux paths and telemetry, demo owns rendered interaction and Desktop quit/reopen.
+Preserve LOO-720/#1809 terminal activity (integrated at `324a0f6dc4`), LOO-582/#1807
+Session identity, LOO-673/#1791 Desktop queries, LOO-312/#1656 installation,
+LOO-714/#1805 defaults and #1808 Wave DTO repair (Task attribution unresolved).
+Recheck integration state before changing shared code. LOO-717 owns shell policy;
+LOO-709/710/712 own retention, snapshots and transport. The server bridges them.
 
-Publication verification (November 4): `lf sync --manual` completed without
-conflicts against `ac8e088f5f`. The current installed-replacement proof initially
-failed because `open -W` could not install its process watch before the short-lived
-app updater exited (`kevent: No such process`). The fixture now launches once
-through LaunchServices and waits for the updater's existing completion result,
-without retrying registration or replacement. The focused
-`installed_machine_service_preserves_owner_and_graph_across_replacement` test
-then passed (1 passed, `--include-ignored --test-threads=1`), proving the current
-relay through signed same-build replacement. `cargo fmt --check`,
-`cargo clippy --all-targets -- -D warnings`, Ruff check/format and whitespace
-checks passed. This does not replace the remaining native demo or gate checks.
-
-## Later work and parallel boundaries
-
-LOO-718 owns iOS targets, renderer/input integration, selected-Task UI and client
-tests. LOO-593 owns Rust service/wire truth and representative macOS integration.
-Coordinate shared Swift package/project edits rather than defining another wire
-shape. Terminal recordings and fixtures support client work independently of
-packaging. Live phone integration joins the paths; full Work cutover is required
-before treating the wider architecture as supported.
-
-Remote carrier, pairing/compatibility, phone takeover gesture and unattended Mac
-hosting remain open. Recommend separately enabled HTTPS/WSS over host Tailscale
-Serve with revocable credentials and expected Machine identity. Same-user socket
-trust cannot authenticate a remote proxy; reachability is insufficient. Preserve
-unrelated Serve routes. A future optional hub may own authenticated durable ingress
-and retransmission, while Machine admission/execution stays shared and private use
-never requires the hub. Existing explicit SSH command destinations remain valid.
-
-Recoverable create/start belongs at the shared command boundary, not a gateway
-response cache. Retain request identity and exact payload across external creation;
-recover the original Task after launch failure, or report uncertainty. The eventual
-sheet shows its last valid repository/Machine default and permits changes. Match
-Desktop’s complete task-create/run operation and conversation admission; do not
-substitute conversation-only launch, headless/ship approval or silent Machine
-rental. Proof must lose a reply and retry without duplicate creation, preserve a
-created Task after Graph failure, and show remote failure causes no local mutation.
-
-Integrated at `324a0f6dc4`: LOO-720/#1809 terminal activity, including owner-sampled
-status and output ordering; the bridge retains that unchanged owner protocol.
-Preserve other overlapping work: LOO-582/#1807 Session identity; LOO-673/#1791
-Desktop queries; LOO-312/#1656 installation; LOO-714/#1805 defaults; #1808 Wave DTO
-revert (Task attribution unresolved). Recheck landed status when integrating. LOO-717 owns shell policy; LOO-709/710/712 own retention, snapshots
-and Session transport. This service bridges those owners.
-
-## Evidence
-
-Archived “Lessons from earlier lfd attempts” shows that
-shared executors still suffered orchestration drift (#304), exec delegation never
-finished its cutover (#825), and shared functions could retain competing lifecycle
-owners. No inspected evidence proves a completed thin backend was tried and failed.
-“Machine service installation and lifecycle” distinguishes observed supervisor
-behavior from product claims. Both reports are preserved at
-`0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/reports/`; historical timeout
-values do not override current owner policy (two minutes of detached quiet by default).
+[Earlier lfd research](reports/Lessons%20from%20earlier%20lfd%20attempts.md) shows
+shared executors still suffered orchestration drift (#304) and the CLI delegation
+cutover remained unfinished (#825). [Installation research](reports/Machine%20service%20installation%20and%20lifecycle.md)
+separates supervisor observations from product promises. These are historical
+sources; their old naming and proposed timeouts do not override this design or
+current owner policy. [Original Desktop scope](research_notes/desktop-server-original-scope.md)
+retains the app-automation questions. The current review is
+[concept-review.html](concept-review.html).

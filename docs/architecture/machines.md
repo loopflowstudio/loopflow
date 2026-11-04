@@ -1,5 +1,10 @@
 # Machines and processes
 
+`lf machine` manages execution destinations: connections, defaults, pools and
+rentals. `lf --machine` runs a command at its destination. Client access and
+server installation have separate owners; see the accepted
+[server boundary](server.md) and its pending command cutover.
+
 A machine is one OS user's Loopflow authority in one data directory. It owns local processes,
 credentials, planning storage, command and conversation records, and OS locks.
 Two users on one host, or two data directories, have separate machine identities.
@@ -73,8 +78,10 @@ lf --machine build-home --wave product wave-operate
 its Machine identity, resolves its own files and store, and returns the result.
 Planning intent, including Task ownership, has one owner of record: the planning
 provider, or Loopflow's journal when the plan is local. Execution facts stay with
-the Machine that produced them, and inventories remain local. There are no
-daemons or listeners.
+the Machine that produced them, and inventories remain local. SSH command
+routing needs no resident API server. Desktop uses a separate local client API
+server; LOO-718 adds authenticated remote client access. Neither moves execution
+ownership into a central service.
 
 The Machine and ownership types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by

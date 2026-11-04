@@ -53,13 +53,15 @@ delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
 Fixtures still create their own disposable Homes; a test never alters an
 installed database.
 
-`uv run python scripts/test_machine_service_registration.py` proves macOS bundled
-service registration headlessly. It signs a temporary helper, uses the production
+`uv run python scripts/test_machine_service_registration.py` proves installation of the macOS bundled
+client API server headlessly. The script retains its pre-cutover name; registration
+and replacement belong to installation, separate from client admission and Machine
+destination routing. It signs a temporary helper, uses the production
 SMAppService registrar through a LaunchServices-registered app, checks idempotent
 setup and replacement, then unregisters its unique job and app entry. Bundle
 replacement runs as the app itself, respecting macOS App Management. It does not open Desktop or an existing Machine database. The
 composed installed executable replacement with a held draft and live Graph is documented in
-[Rust tests](../rust/loopflow/tests/README.md#machine-service).
+[Rust tests](../rust/loopflow/tests/README.md#client-api-server).
 
 Runner changes also need the command-plan checks in
 `python/tests/test_release_automation.py` during focused verification.

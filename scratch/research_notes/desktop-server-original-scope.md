@@ -1,6 +1,7 @@
 # Historical LOO-593 scope
 
-Captured before the November 3 mobile/backend handoff. Historical evidence, not current implementation direction. App-owned UI automation remains app-owned; the new Machine service has a separate lifetime. Unselected automation routing/discovery extensions remain later questions.
+Captured before the November 3 mobile/backend handoff. Historical evidence, not current implementation direction. App-owned UI automation remains app-owned; the shared client API server has a separate lifetime. The accepted November 4
+[responsibility split](../mobile-backend.md) supersedes the Machine-service naming. Unselected automation routing/discovery extensions remain later questions.
 
 ## Problem and outcome
 

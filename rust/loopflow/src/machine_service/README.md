@@ -1,4 +1,11 @@
-# Connect to the local Machine
+# Connect to the local Loopflow server
+
+This README documents the **current implementation**. The accepted
+[responsibility split](../../../../docs/architecture/server.md) moves serving and
+client access to `lf server`, with registration/update owned by installation.
+That command and source-name cutover is pending; the commands below still use the
+current `machine service` spelling. Machine connections, pools, rentals and SSH
+routing remain separate.
 
 ```sh
 lf machine service ensure   # obtain the selected installation's service
@@ -9,6 +16,9 @@ The foreground `lf machine service run` belongs to the OS supervisor. Desktop
 uses the service for Task readings, Session rename and existing terminal
 attachment. Other Work operations still use their existing transport pending
 LOO-718's full cutover. Desktop's UI automation socket remains app-owned.
+
+Installation owns registration and replacement, even while its adapter lives in
+this module. Readiness must not become a second installation authority.
 
 On macOS the signed selected app bundles `com.loopflow.machine.plist` and
 registers it with SMAppService. Explicit development Machines use separately

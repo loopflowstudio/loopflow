@@ -202,7 +202,8 @@ the separate `lf reteam` operation.
    isolated copy, and prove the candidate can read it.
 3. Atomically repoint the launcher used by future top-level processes.
 4. Let already-running processes continue with their selected executable.
-5. Restart only the Machine services and app surfaces actually being replaced.
+5. Reconcile the client API server registration and restart only that server and
+   app surfaces actually being replaced; preserve independent execution owners.
 6. Recover or roll back from the persisted artifact-selection receipt.
 7. Garbage-collect old artifacts separately from activation.
 
@@ -212,8 +213,9 @@ qualify (`lf install --dev`). An unreleased build's receipt, `lf --version`
 and `lf doctor` name it, e.g. `build e9b2c2eac on v0.14.16`, or `schema work …`
 when it carries an unmerged migration.
 
-The installation promotion lock serializes artifact selection and service
-replacement. It does not discover, drain, stop, or settle conversations and it is not
+The installation promotion lock serializes artifact selection and server
+registration/replacement. This belongs to installation, independently of Machine
+connections and client admission; see the [server boundary](server.md). It does not discover, drain, stop, or settle conversations and it is not
 held by ordinary harnesses. A store snapshot lets preview prove a candidate
 schema without mutating the selected store.
 

@@ -1,41 +1,47 @@
-# LOO-593 decisions and gaps
+# LOO-593 decisions and remaining questions
 
-Jack Heart's accepted November 4 direction and remaining acceptance live in
-`scratch/mobile-backend.md`: automatic exact-owner recovery, native status and
-explicit in-pane takeover, through demo without Auto-Ship. This supersedes the
-historical pending-choice and Desktop Ctrl+R direction. The local command proof
-uses Session rename; create/start recovery remains later work.
+Jack Heart selected the November 4 documentation redesign in
+[the working design](mobile-backend.md): Machine manages execution destinations,
+server exposes client access, and installation owns registration and updates.
+`lf server` is the target command group; current code still uses
+`lf machine service`. This review changes documentation only. No Graph restart,
+publication, merge or Auto-Ship approval is implied.
 
-Full source research was checkpointed at `0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/` before curation.
-The archived notes include contrary evidence: lfd already shared executors but
-drifted in complete-operation/lifecycle ownership; setsid alone proves no
-supervisor isolation; SMAppService updates may kill the helper; remote proxies
-cannot borrow Unix peer trust. Exact remote transport, takeover UX, unattended
-Mac hosting, create/start recovery and remaining Work cutover remain later work.
+Keep the earlier accepted recovery interaction: automatic exact-owner reconnect,
+native status, explicit in-pane Move here, newer control claims preserved and
+no input/command replay. Drafts, active turns, pending requests and running Graphs
+already protect their owners. The split adds no retention policy.
 
-November 3 reconciliation: LOO-718's existing-Task → existing-Session path needs
-`view_plan`; exposing the existing shared read is a bounded contract correction.
-The additive contract was published at `12fbe9102c` on the Task branch. No remote
-transport or takeover decision is inferred. The composed installed replacement proof now covers active Work; unchanged
-provider-usage totals remain acceptance work.
+## Remaining design details
 
-November 4 implementation assumption: connection status uses an atomic temporary
-mailbox owned by each native surface. It carries presentation and one-shot actions,
-never persisted Work or execution authority; closure removes it. This keeps the
-published service/owner contract unchanged for LOO-718. Ghostty’s existing
-`toggle_readonly` action preserves local reading while suppressing PTY input
-(https://ghostty.org/docs/config/keybind/reference#toggle_readonly).
+1. Remote command spelling belongs with LOO-718: enabling client access, pairing,
+   listing clients and revocation all live under server. The ownership split is
+   accepted; the exact verbs are still a proposal to reconcile with that branch.
+2. Installation migration must replace old supervisor registration once and
+   retain access configuration/credentials without duplicate listeners. Internal
+   command aliases are not needed; persisted/installed state does need migration.
+3. GUI-less distribution, before-login Mac hosting, removal during active work
+   and the phone takeover gesture remain separate product choices.
 
-The signed replacement proof uses the same candidate build at a new inode. It
-proves installed executable retirement and supervisor replacement during active
-Work; released-version migration and rendered Desktop quit/reopen remain distinct.
+## Proof still owed by the implementation
 
-November 4 concept-review assumption: the accepted explicit Move here applies to
-the retained read-only pane produced by recovery. Make it available there through
-the same owner's existing claim protocol; do not require closing the pane or
-preparing a provider. This is a correction implied by Jack Heart's selected
-interaction, not a new remote takeover decision. The working design records the
-one-shot action and lost-acknowledgement counterexample, now implemented. The
-existing generation also fences explicit actions: consuming one advances it,
-preventing delayed duplicates from becoming a new takeover. Rendered interaction
-remains demo evidence.
+- Native rendered Desktop recovery, quit/reopen, reading/copy/Find/scroll and the
+  visible Move here action. Headless mailbox tests do not establish these.
+- Linux installed replacement; broader Xcode, subscription bounds/cancellation,
+  defaults/attribution equivalence and unchanged provider-usage totals.
+- Coordinated command/source cutover and real LOO-718 integration. The earlier
+  signed proof uses the same candidate at a new executable inode, not a released
+  version migration. Re-run that composition after implementation changes.
+
+The decisive recovery counterexample remains a lost takeover acknowledgement
+followed by a newer viewer's claim. Consume the generation-bound action once;
+recover passively, never repeat takeover or uncertain typing.
+
+Historical research is retained under `scratch/reports/`, with the full original
+checkpoint at `0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/`. Shared executors
+alone did not prevent lfd orchestration drift; `setsid()` alone does not prove
+supervisor isolation; remote proxies cannot borrow Unix peer trust.
+
+Wave memory's existing Machine-service terminology reflects the prior design.
+Reconcile it through the next authored memory-maintenance step using this accepted
+split; it is not edited by this conversation's documentation review.

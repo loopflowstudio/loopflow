@@ -25,7 +25,7 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 but never answers reads `detached` too; reattaching stops its provider and continues
 the same provider thread in a new owner, without replaying input.
 
-Desktop's Machine relay stays alive when its service connection drops. Its native
+Desktop's server relay stays alive when its service connection drops. Its native
 status row shows **Reconnecting…** and pauses input while local selection, copy,
 Find and scrolling remain available. Recovery refreshes the same owner's screen;
 byte streams resume from their received position or refresh when output expires.
@@ -45,7 +45,7 @@ the relay consumes it once before requesting an explicit replacing attachment,
 and advances the generation. Stale actions cannot cross a connection loss.
 Surface closure removes the directory and cancels pending actions. This is
 presentation state, not a durable viewer registry or execution authority. Plain
-CLI Machine relays retain their Ctrl+R/Ctrl+] interaction.
+CLI server relays retain their Ctrl+R/Ctrl+] interaction.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
@@ -214,10 +214,14 @@ provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
 
 Desktop Session panes set `LF_MACHINE_SERVICE=1` for their terminal relay. The
-relay obtains an `attach` bridge from the local Machine service before speaking
+relay obtains an `attach` bridge from the local client API server before speaking
 this same owner protocol. No owner or provider is created on bridge failure.
 Ordinary CLI attachments keep their direct socket path. See
-[Machine service](../machine_service/README.md) for admission and framing.
+[current server protocol](../machine_service/README.md) for admission and framing.
+`LF_MACHINE_SERVICE` and the module names still reflect the pre-cutover namespace;
+the accepted [server boundary](../../../../docs/architecture/server.md) separates
+client access from Machine routing. `lf session serve` remains the execution-owner
+entry, distinct from the proposed server serving entry.
 
 Native providers own their Program Status (OSC 7501) reports, which pass through
 unchanged. Claude's native title updates stay enabled because disabling them also

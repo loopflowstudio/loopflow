@@ -175,7 +175,10 @@ user / agent --> lf CLI --------+----------+-----------+
 another machine is another Machine; cross it explicitly with `lf --machine`
 ```
 
-There is no central Loopflow server. A Machine owns its processes, credentials,
+Each host can expose a [client API server](architecture/server.md) to Desktop and
+mobile; it does not centralize execution across Machines. Machine routing selects
+where commands run, the server admits clients, and installation owns server
+registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
 definitions and memory. The planning provider (a Git ref or Linear) and GitHub
 keep shared planning and delivery truth. Readers join those sources; they do not replace them with a universal

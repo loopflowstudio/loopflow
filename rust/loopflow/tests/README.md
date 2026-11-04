@@ -812,7 +812,12 @@ Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
 
-## Machine service
+## Client API server
+
+These commands retain current `machine_service` test names until the coordinated
+[server cutover](../../../docs/architecture/server.md). Socket behavior belongs
+to client access; OS registration/replacement belongs to installation. Their
+composed test must continue to prove both with existing execution owners live.
 
 ```bash
 cargo test -p loopflow --lib machine_service::

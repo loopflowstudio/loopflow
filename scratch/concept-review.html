@@ -3,77 +3,67 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-593 · Keep the recovered pane usable</title>
+<title>LOO-593 · Machine, server, installation</title>
 <style>
-:root{color-scheme:light dark;--paper:#faf9f5;--ink:#202a31;--muted:#59656b;--rule:#c5cbc9;--accent:#126257;--panel:#f0f2ee}
-@media(prefers-color-scheme:dark){:root{--paper:#17201f;--ink:#e8ece8;--muted:#b1bfba;--rule:#475852;--accent:#8ed9c5;--panel:#202b28}}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:36px 24px 60px}header,footer,.muted{color:var(--muted);font-size:13px}h1{font-size:clamp(28px,5vw,38px);line-height:1.15;letter-spacing:-.025em;margin:24px 0 14px}h2{font-size:21px;margin:30px 0 10px}p{margin:10px 0}a{color:var(--accent)}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 ui-monospace,monospace}.path{border-block:1px solid var(--rule);padding:12px 0}.example{background:var(--panel);padding:18px;border:1px solid var(--rule);margin:14px 0}.status{padding-bottom:10px;border-bottom:1px solid var(--rule);color:var(--accent)}button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:7px 11px;cursor:pointer}button:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}button:disabled{opacity:.55;cursor:default}li{margin:12px 0}ol{padding-left:24px}footer{margin-top:30px}@media(max-width:480px){main{padding:24px 18px 40px}}
+:root{color-scheme:light dark;--bg:#faf9f5;--ink:#202824;--muted:#5b665f;--line:#ccd2c9;--accent:#1b6151;--panel:#eef2eb}
+@media(prefers-color-scheme:dark){:root{--bg:#17201c;--ink:#eef2e9;--muted:#b4c0b7;--line:#42534a;--accent:#93d9bd;--panel:#24342b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.6 system-ui,sans-serif}main{max-width:850px;margin:auto;padding:56px 28px 80px}header{margin-bottom:48px}.meta{font-size:13px;color:var(--muted)}h1{font:clamp(36px,7vw,58px)/1.08 Georgia,serif;letter-spacing:-.035em;margin:20px 0}h2{font:30px/1.2 Georgia,serif;margin:44px 0 16px}h3{font-size:19px;margin:24px 0 6px}p{margin:12px 0}a{color:var(--accent);text-underline-offset:3px}code{font:0.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{padding:20px;background:var(--panel);white-space:pre-wrap;font-size:15px;line-height:1.65}table{border-collapse:collapse;width:100%;font-size:16px}td,th{padding:14px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500}.decision{border-left:3px solid var(--accent);padding-left:20px}.note{color:var(--muted);font-size:15px}li{margin:10px 0}ol{padding-left:25px}@media(max-width:560px){main{padding:30px 18px 50px}table{font-size:14px}td,th{padding:10px 5px}pre{padding:14px;font-size:13px}}
 </style>
 </head>
 <body><main>
-<header>LOO-593 · concept-review · November 4, 2026<br>
-Built from <a href="mobile-backend.md">mobile-backend.md</a>,
-<code>transport.rs</code>, <code>transport/connection.rs</code>,
-<code>MachineConnection.swift</code>, <code>GhosttyTerminalView.swift</code>,
-<code>SessionsView.swift</code>, <code>WorkspacePanesView.swift</code>,
-<code>transport_tests.rs</code> and <code>swift/README.md</code>.</header>
-<h1>Recover the same Session; move input deliberately</h1>
-<p><strong>No further design change or open product choice in the accepted local slice.</strong> This headless concept review checks <code>2b9ecd9790</code> against Jack Heart's accepted recovery direction. The in-pane correction is implemented; the remaining work is evidence at the native surface, not another product decision.</p>
-<p>The consequential mismatch is resolved: a recovered read-only pane now offers Move here where the draft is visible. Retry repairs the connection; Move here explicitly requests control. Neither action starts a provider. <a href="mobile-backend.md">The working design</a> retains all gate and demo obligations.</p>
-<div class="path">
-<p><strong>Open Task</strong> → recorded primary Session → <code>read(view_plan)</code></p>
-<p><strong>Read and edit</strong> → existing execution owner → <code>session_owner → attach</code></p>
-<p><strong>Recover</strong> → same owner, free claims only → fresh screen or bounded output continuation</p>
-<p><strong>Retry</strong> → unavailable connection → bounded exact-owner reconnect, without replacing claims</p>
-<p><strong>Move here · implemented</strong> → explicit claim on that owner → existing replacing <code>Attach</code>, then acknowledgement</p>
-</div>
-<h2>Before: a usable screen with an unreachable action</h2>
-<div class="example">
-<p><strong>Previous implementation · corrected</strong></p>
-<p class="status">Read-only — input is in another viewer. Use Move here to take control.</p>
-<pre>Unfinished provider draft:
-Explain the failing migration before changing…</pre>
-<p>The retained surface stayed live, but Move here was offered only in elsewhere/closed placeholders. The live Session path ignored that intent.</p>
-</div>
-<h2>After: act where the Session is visible</h2>
-<div class="example">
-<p><strong>Current implementation · interaction sketch</strong></p>
-<p class="muted">This simulation changes only this page. It is not native demo evidence.</p>
-<p class="status" id="status" aria-live="polite">Read-only. Move here to type.</p>
-<pre>Unfinished provider draft:
-Explain the failing migration before changing…</pre>
-<button type="button" id="move">Move here</button>
-<button type="button" id="ack" disabled>Simulate acknowledgement</button>
-<button type="button" id="lost" disabled>Simulate lost reply</button>
-<p id="result" aria-live="polite">Reading, copy, Find and scrolling stay available. Only this explicit action requests input and geometry from the same owner.</p>
-</div>
-<p><strong>Surface presence and input permission are separate.</strong> The native connection reading is disposable presentation, not persistent Session state. A generation-bound mailbox action reaches the existing relay. The owner grants input and geometry; existing Session and Graph records retain execution identity. Closing the pane removes its mailbox and cancels recovery.</p>
-<p>Move here sends <code>Attach { control: true, replace: true, own: Take, … }</code> once, consuming the action before transmission. Input waits for acknowledgement. The fresh screen and parser replace the retained display together while the stream offset stays intact. Recovery never repeats the takeover or uncertain typing.</p>
-<h2>Normal use, failure and recovery</h2>
+<header>
+<p class="meta">LOO-593 · Interactive demo / design revision · November 4, 2026<br>
+Sources: <a href="mobile-backend.md">working design</a>, <a href="../docs/architecture/server.md">server boundary</a>, <a href="../rust/loopflow/src/machine_service/README.md">current protocol</a></p>
+<h1>Where work runs.<br>How clients reach it.<br>How it gets installed.</h1>
+<p class="decision"><strong>Accepted:</strong> Machine, server and installation have separate responsibilities. The next design detail is how remote-access commands read within <code>lf server</code>; the namespace migration is still unimplemented.</p>
+<p>Jack Heart requested this rewrite after <code>lf machine service</code> made execution destinations and phone access appear to be one concept.</p>
+</header>
+<h2>Actions → concepts → APIs</h2>
+<table>
+<thead><tr><th>What you do</th><th>What owns it</th><th>Command or API</th></tr></thead>
+<tbody>
+<tr><td>Run an agent on mini</td><td>Machine destination</td><td>Existing <code>lf --machine mini …</code></td></tr>
+<tr><td>Read Work and continue editing from a client</td><td>Server admission and connections</td><td>Proposed <code>lf server</code>; shared reads, commands, owner bridge</td></tr>
+<tr><td>Install or update Loopflow</td><td>Installation</td><td>Existing <code>lf install</code>; registration/update moves behind this authority</td></tr>
+<tr><td>Arrange Desktop's panes</td><td>Desktop presentation</td><td>Existing <code>lf desktop</code>; app-owned socket</td></tr>
+</tbody></table>
+<h2>Before and after</h2>
+<h3>Current command shape</h3>
+<pre><code>lf machine
+  connections / pools / rentals
+  service run / status / ensure
+  remote client access in LOO-718</code></pre>
+<p>The mismatch is responsibility: choosing a worker and admitting a phone are independent actions. Server registration is installation machinery, even when its code lives beside the listener.</p>
+<h3>Accepted ownership; proposed command shape</h3>
+<pre><code>lf machine       execution destinations
+lf --machine …   route a command to one
+lf server        client access and availability
+lf install       artifacts, registration, updates
+lf desktop       windows, panes, app automation</code></pre>
+<p class="note">Current executable commands still use <code>lf machine service</code>. Final remote-access subcommands need reconciliation with LOO-718. This page does not claim the rename has shipped.</p>
+<h2>Keep editing through replacement</h2>
 <ol>
-<li><strong>Normal:</strong> recovery returns read-only because a newer viewer controls the owner. Keep reading; choose Move here to edit the same draft. The other viewer loses its claim, while the provider and Graph remain.</li>
-<li><strong>Failure:</strong> the takeover reply is lost. The claim may have changed; do not infer failure or queue typing. Show reconnecting outside terminal bytes.</li>
-<li><strong>Recovery:</strong> reconnect non-replacing to the same owner. If another viewer obtained control meanwhile, remain read-only. A fresh deliberate action is required to replace it. Closing the pane cancels pending presentation/action state.</li>
+<li><strong>Open Desktop.</strong> Installation prepares the local server. Desktop connects without a separate setup ritual.</li>
+<li><strong>Hold a draft while a Graph runs.</strong> Update the installed helper. The server connection drops; the existing execution owners continue.</li>
+<li><strong>See “Reconnecting…” in native chrome.</strong> The screen stays visible. Copy, Find and scrolling remain available; typing waits for the exact owner's acknowledgement.</li>
+<li><strong>Continue on that owner.</strong> Automatic recovery preserves a newer viewer's claim. A read-only pane offers <strong>Move here</strong> for explicit control. <strong>Retry</strong> repairs connectivity only.</li>
 </ol>
-<p><strong>Counterexample:</strong> if a lost reply causes recovery to resend Move here and revoke a newer viewer, this design has failed. Likewise, closing and reopening a healthy viewer just to expose its action is not the intended interaction.</p>
-<h2>Keep the proven boundary and the remaining proof</h2>
-<p>The inspected Rust fixture intercepts the takeover acknowledgement after the owner applies it, then grants a newer viewer input and geometry. Recovery remains read-only and drops uncertain input. Swift tests cover the mailbox generation, pending state and closure. The working design records prior passing results; this documentation-only review reran no code tests.</p>
-<p>The signed same-build helper replacement fixture uses the installed owner/Graph path and verifies retained draft submission after a new acknowledged connection generation. It does not prove native behavior. The next demo must exercise the visible Move here action, reading/copy/Find/scroll during recovery, and actual Desktop quit/reopen. Linux replacement, usage totals and the remaining gate obligations stay open.</p>
-<p>“Standalone” means the UI can close while the service remains. The selected signed app supplies the Mac helper; existing execution owners retain their lifetime policy. Separate GUI-less distribution, remote takeover and unattended hosting remain later scope.</p>
-<p>Machine transports Work; existing Rust reads, CLI operations and Session/Graph owners keep authority. Desktop UI automation stays app-owned. No new wire contract, scheduler, retention policy or provider launch belongs in this correction.</p>
-<h2>Decision questions · resolved by accepted scope</h2>
+<p class="decision">If takeover succeeds but its reply is lost, and another viewer claims control, recovery must leave that newer claim intact. Never replay takeover, typing or an uncertain command.</p>
+<p>The composed signed same-build replacement test already retains the owner, provider, draft and Graph. Rendered Desktop continuity and Linux replacement remain proof to complete; the new command layout needs its own installation migration check.</p>
+<h2>One server, existing owners</h2>
+<pre><code>Desktop ─ Unix socket ─┐
+                      ├─ server ─ shared reads / subscriptions
+phone ─ HTTPS / WSS ───┘         ├ complete CLI commands
+        (LOO-718)               └ Session owner ─ provider / PTY</code></pre>
+<p>The server owns admission and delivery. Session owners retain terminal control and lifetime; Graphs retain execution. Drafts, active turns, pending requests and running Graphs already protect their owners.</p>
+<p>A paired phone is a client credential. It does not become a worker, move a Task or own its provider. Remote access has separate authentication; turning it off must leave local access and execution intact.</p>
+<h2>What the implementation must replace</h2>
+<p>Move command routes, supervisor entries, installed launcher calls, Swift names and fixtures together. Remove the old internal paths. Migrate installed registrations and access settings without duplicate listeners or lost credentials. Preserve <code>MachineId</code>, <code>machine_id</code>, SSH routing and existing owner protocols.</p>
+<p>LOO-593 owns the local foundation and recovery. LOO-718 owns remote access and the native phone path. This review changes docs and records their shared cutover; it does not restart either Graph.</p>
+<h2>Questions for the next review</h2>
 <ol>
-<li><strong>Where should explicit control be available?</strong><br>1a. On the retained read-only pane, using the same owner. Implemented; no close/reopen detour.</li>
-<li><strong>May recovery repeat a takeover?</strong><br>2a. No; an uncertain action is consumed once. This follows Jack Heart’s accepted no-replay and newer-claim requirements.</li>
-<li><strong>Is another product choice open for this correction?</strong><br>3a. No. No implementation direction changes in this review. Remote takeover UX and later-work decisions remain outside this slice.</li>
+<li><strong>Remote command wording:</strong> should enablement read as <code>server access</code>, with pairing and clients alongside it, or as one remote-access subgroup? The responsibility is settled; these spellings remain proposed.</li>
+<li><strong>Boundary check:</strong> is any action shown here still making you understand installation machinery just to connect and keep editing?</li>
 </ol>
-<footer>Design record: <a href="mobile-backend.md">scratch/mobile-backend.md</a>. This step changes documentation only. No publication, merge or Auto-Ship approval; loop-or-next decides the next Graph step.</footer>
-</main>
-<script>
-const move=document.getElementById('move'),ack=document.getElementById('ack'),lost=document.getElementById('lost'),status=document.getElementById('status'),result=document.getElementById('result');
-move.addEventListener('click',()=>{status.textContent='Moving input here… Input paused.';result.textContent='One explicit claim request to the existing owner. Await its acknowledgement; retain no keys or retryable takeover.';move.disabled=true;ack.disabled=false;lost.disabled=false;});
-ack.addEventListener('click',()=>{status.textContent='Connected · Input available';result.textContent='The same owner acknowledged control. Continue editing the retained draft. Provider and Graph identity are unchanged.';ack.disabled=true;lost.disabled=true;});
-lost.addEventListener('click',()=>{status.textContent='Recovered · Read-only. Move here to type.';result.textContent='Simulation: the reply was lost and a newer viewer claimed control before recovery. Recovery did not repeat the takeover. A new deliberate click is required.';move.disabled=false;ack.disabled=true;lost.disabled=true;});
-</script>
-</body>
-</html>
+<p class="note">GUI-less distribution and before-login hosting remain separate questions. Neither is needed to establish this split. Auto-Ship remains off.</p>
+</main></body></html>

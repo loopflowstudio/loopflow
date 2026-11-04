@@ -10,7 +10,12 @@ superseded and preserved at
 
 ## Accepted outcome and constraints
 
-Task conversations open without an Open click after launch, selection and restart.
+Task conversations open without a Start or Open click after launch, selection and
+restart. Jack Heart clarified during the November 4 re-demo: “but the conversation
+should be auto stated and opened” and “thats teh whole pointof this task”. For
+working Tasks (idle, active, moving), automatic preparation creates the primary
+Session if absent and starts the native conversation if it has no history, or
+resumes existing history. The previous explicit-Start rule is superseded.
 Recent unfinished Tasks stay warm for fast input; returning lands at the bottom.
 Jack selected that memory tradeoff on November 4. Completed Tasks release on
 departure through LOO-717. Close removes warm intent; refresh cannot undo Close,
@@ -22,11 +27,12 @@ another client's input. The overlay explains the holder using Rust's labels and
 prepared command; without a saved screen it shows the explanation alone. The
 independent CLI fork remains available on the same Task and checkout.
 
-Viewing, prefetch and restore never start a Graph, submit captured input, create
-a provider thread or replay interrupted input. Explicit Task launch retains its
-authority; navigation observes the resulting conversation. Missing native history
-requires explicit Start/New. Missing checkout, account or Machine evidence stays
-an explicit action or failure, without checkout reconstruction or local fallback.
+Viewing, prefetch and restore never start a Task Graph or replay interrupted or
+captured input. Creating the initial native conversation for a working Task is
+now explicitly within the automatic-open requirement. Keep this distinct from
+automatically executing Task work. Do not expand prefetch to unstarted backlog
+Tasks. Missing account or Machine evidence stays an actionable failure; the
+selected Task must not fall back to a different checkout or Machine.
 
 The selected Task opens first after relaunch, followed by the bounded saved warm
 set where safe. Saved layout and status are display evidence, not retention or
@@ -39,8 +45,8 @@ and moving Tasks, including those absent from saved recent history. The selected
 Task leads, then saved recent working Tasks, then other working Tasks by their
 shared update time; other saved unfinished Tasks fill remaining space. Prefetch
 uses the existing reveal queue and location validation, preserves Close, and
-never waits before rendering. A Task with no existing conversation stays
-unavailable; prefetch never creates one.
+never waits before rendering. Eligible working Tasks with no Session or no
+provider history are automatically initialized and opened within the same bounds.
 
 The initial engineering limits are eight recent unfinished Task conversations
 across repository windows and two concurrent preparations. Visible panes remain
@@ -49,7 +55,25 @@ memory budget or numbers chosen by Jack. No NSView is shared between windows.
 Eviction releases Desktop's viewer and hold; protected work and other hosts may
 keep the provider running. Shells retain their independent lifecycle.
 
-## Implementation owners
+## Remaining correction after the re-demo
+
+The currently published implementation still presents Start for absent Sessions
+and missing history. That is insufficient even though the button now works.
+Use the existing shared opening path to ensure/open working Task conversations
+on load and selection, with no user Start click. Preserve launch-lock validation
+and non-replacing input claims: another client retains control and only Take back
+may replace it. Make initialization idempotent across refresh, concurrent windows,
+repeated prefetch and restore. Preserve Close and late-result fencing. No Graph
+or duplicated/replayed Task prompt may be introduced by automatic initialization.
+
+Prove both absence cases through the real configured app, starting from fresh
+disposable data: launch with working Tasks, select them, see native conversations
+without Start/Open, then relaunch and verify retained identity and no duplicate
+turns. Include fresh-load prefetch without saved visits. Update assertions that
+encode the superseded Start gate. Prepare that already-working candidate before
+asking Jack to re-demo; manual Start is no longer acceptable demo setup.
+
+## Current implementation owners (before this correction)
 
 Rust’s shared Session projection supplies Start, Take back and reveal availability
 from current-input history and ownership on every read. `human_session::open_without_replacing`

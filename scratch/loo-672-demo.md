@@ -1,5 +1,71 @@
 # LOO-672 — Task conversation demo, November 4, 2026
 
+## Latest review: automatic startup still missing
+
+Jack Heart supplied the Codex continuity screenshot showing **Conversation
+unavailable**, **No saved provider history**, and **Start conversation**, then
+said: “but the conversation should be auto stated and opened” and “thats teh whole
+pointof this task”. The assistant had started the named Codex conversation by
+clicking Start while this clarification arrived. That manual setup does not meet
+the requirement. The prior Start-button/native-launch observations below remain
+valid narrow evidence, but do not establish the intended Task experience.
+
+Working Tasks must automatically create/start/open their primary conversation
+when needed on load or selection. Existing history resumes; absent Session and
+missing native history are both automatic cases. No Start/Open click. This
+supersedes the previous explicit-Start design constraint. Preserve bounded warmth,
+prefetch, Close, non-replacing claims and explicit Take back. No Task Graph or
+replayed prior input is authorized by navigation. Backlog Tasks remain outside
+working-Task prefetch.
+
+The review has not passed. The design and accepted decisions now carry this
+clarification. Recommended and authorized correction: implement automatic working
+Task initialization, verify both absence cases in the actual native app without
+manual setup clicks, then return to demo. No installation or shipping approval
+was given. The current candidate still contains the rejected Start gate.
+
+
+## Interactive re-demo opened — November 4
+
+Jack Heart invoked `demo` again after the correction was published. The assistant
+launched the prepared candidate with its private Machine, bundled CLI and explicit
+repository argument. The manifest's source diff hash matches published commit
+`0acc950924` relative to its recorded `df07fd9b5f` base. No main installation or
+registry was modified.
+
+Observed through the native app:
+
+- Selecting **Start a conversation** initially showed Open while the read settled,
+  then exposed **Start conversation**. The prior Machine cleanup error was absent.
+  The redundant passive-reveal explanation and Retry remained above the pane;
+  no design acceptance is inferred from that presentation.
+- Clicking Start once launched real Codex 0.166.0 on the disposable Task checkout.
+  Its native composer rendered; after startup, the sidebar showed Done. This was
+  an explicit Start, not navigation starting a turn. No Graph launch was observed.
+- Selecting **Claude continuity** offered Start for the prepared Session with no
+  native history. Clicking it launched real Claude, which reached a folder-trust
+  prompt for the disposable checkout. The assistant left that prompt for Jack.
+  Claude also printed that its fullscreen renderer had previously failed and was
+  disabled on this machine; its displayed fallback is retained as evidence.
+- The former local-Machine cleanup error was absent on both selected Tasks.
+  This is rendered evidence in addition to the earlier real-CLI lifecycle tests.
+
+Current screenshots: [Start](demo-evidence/redemo-start.png),
+[Codex launched](demo-evidence/redemo-codex.png), and
+[Claude trust prompt](demo-evidence/redemo-claude-trust.png).
+[Process observation](demo-evidence/redemo-processes.json) contains native Claude
+and Codex agent processes. It does not prove exact draft fidelity or readiness
+latency. Jack has not yet provided re-demo feedback or acceptance.
+
+The app is left on **Claude continuity**. First review: inspect/answer the trust
+prompt for this disposable checkout, type an unsubmitted draft, switch to
+**Start a conversation** (the now-running Codex conversation), and return. Report
+whether the exact draft and content remain and whether input is immediate. The
+separate **Codex continuity** Task still permits testing explicit Start from
+prepared metadata. Rex, cold return, relaunch/prefetch, stale-owner recovery and
+twenty-Task private footprint remain to be exercised; this first interaction is
+not full acceptance. Record subsequent feedback here and regenerate `demo.html`.
+
 ## Current re-demo candidate — November 4
 
 The screenshot corrections and non-replacing Start repair are ready for review.

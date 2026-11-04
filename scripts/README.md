@@ -90,6 +90,12 @@ text logs retain roughly 5–10 MiB between runs. APFS sharing and concurrent wr
 mean removed allocation and the free-space delta can differ. Launchd's stdout/stderr
 also goes to `~/Library/Logs/loopflow-disk-cleanup-launchd.log`.
 
+Check the receipt's `dry_run` and timestamps before treating it as a scheduled
+run. Exit zero means the inspected cleanup completed; a positive
+`target_shortfall_bytes` still means free space is below the target. Retained
+output stays protected even when the target cannot be reached. If the receipt
+is missing or predates the invocation, use that invocation's exit and logs.
+
 ## Changed-aware runner
 
 ```bash

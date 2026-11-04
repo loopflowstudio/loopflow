@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-722 · Cleanup concept review</title>
+<style>
+:root { color-scheme: light dark; --ink:#242925; --paper:#faf9f5; --muted:#59635d; --line:#bdc9c0; --accent:#245f43; }
+@media (prefers-color-scheme: dark) { :root { --ink:#e6ebe5; --paper:#171c19; --muted:#aebbb0; --line:#4b5d50; --accent:#a1d6b6; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 system-ui,sans-serif; }
+main { max-width:780px; padding:48px 24px 72px; margin:auto; }
+header { color:var(--muted); font-size:14px; }
+h1 { font-size:clamp(28px,5vw,39px); line-height:1.17; font-weight:650; margin:24px 0; }
+h2 { font-size:23px; line-height:1.3; margin:38px 0 14px; }
+h3 { font-size:18px; margin-bottom:6px; }
+p { margin:12px 0; }
+code { font-size:.88em; overflow-wrap:anywhere; }
+pre { border-left:3px solid var(--line); padding:12px 16px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.decision { border-left:4px solid var(--accent); padding-left:20px; }
+.muted, small { color:var(--muted); }
+article { border-top:1px solid var(--line); padding:12px 0; }
+ol { padding-left:24px; }
+a { color:var(--accent); }
+</style>
+</head>
+<body><main>
+<header>LOO-722 · concept-review · 2026-11-04<br>
+Built from <code>scratch/loo-722.md</code>, <code>scratch/questions.md</code>,
+the current Task definition, <code>scripts/disk_cleanup.py</code>,
+<code>scripts/disk-cleanup.sh</code>, <code>scripts/README.md</code>,
+<code>.lf/skills/disk-cleanup.md</code> and <code>python/tests/test_disk_cleanup.py</code>.
+Implementation reviewed at <code>428b89adfa</code>.</header>
+
+<h1>How soon should hourly cleanup make unfinished work rebuild?</h1>
+<div class="decision">
+<p><strong>Open product choice.</strong> The branch uses four idle hours normally,
+one hour below 64 GiB free, and fifteen minutes below 32 GiB. Jack Heart requested
+adaptive reclamation; the 24-hour cutoff authorized the earlier one-time sweep.
+It did not select these recurring windows.</p>
+<p>Below 32 GiB, a twenty-minute pause could mean a full rebuild on return.
+The preservation tests do not establish whether that cost is acceptable.</p>
+</div>
+<p class="muted">Headless review outcome for loop-or-next: open choice.
+No code, machine cleanup or schedule changes. Policy alternatives below are not accepted decisions.</p>
+
+<h2>Keep the interaction small</h2>
+<article>
+<h3>Before · checkout activity kept output alive</h3>
+<p>The prior shell cleaner retained an entire checkout's output when any process
+held the checkout. A model ran ahead of scheduled cleanup; the directory lock
+could outlive its owner.</p>
+<pre><code>hourly cron → skill/model → shell cleanup
+any held checkout → retain all generated output
+stale directory lock → inspect and remove manually</code></pre>
+</article>
+<article>
+<h3>Existing branch · one operation, three concepts</h3>
+<pre><code>Preview → measured candidate → scripts/disk-cleanup.sh --dry-run
+Reclaim → same operation → scripts/disk-cleanup.sh
+Schedule → launchd job → scripts/disk-cleanup.sh install
+Explain → run observation → timestamped JSON receipt + logs</code></pre>
+<p><code>Candidate</code> carries paths and checkout ownership.
+<code>_inventory</code> and <code>_reason</code> derive eligibility;
+<code>Cleaner.run</code> rechecks before removal. <code>_schedule</code> keeps
+one job pointing at the main checkout. There is no durable deletion queue.</p>
+<p>Task completion still controls native worktree/source pruning. Idle generated
+output can be reclaimed in unfinished work. Open output, builders, source,
+history and unknown inspection remain protected at every pressure tier.</p>
+</article>
+
+<h2>Walk through one run</h2>
+<p><strong>Normal:</strong> 50 GiB free; a debug profile is idle for two hours.
+The draft policy can reclaim it while a held release binary and unpublished
+source survive. At 64 GiB free, later eligibility checks return to four hours.</p>
+<p><strong>Failure:</strong> a native child times out after generated-output
+reclamation. Its process group is killed, failure produces nonzero status, and
+the receipt retains the measured outcome. Unknown activity stops deletion.</p>
+<p><strong>Recovery:</strong> the kernel releases the lock when the process dies.
+The next scheduled run inventories again, including any partially removed root.
+It does not replay a saved removal plan. Schedule installation leaves an active
+job alone and attempts to restore the previous job after bootstrap failure.</p>
+<p><strong>Counterexample:</strong> repeated twenty-minute pauses and rebuilds
+could regenerate pressure faster than cleanup removes it. A blanket 24-hour
+recurring window could instead keep almost every daily build. Neither tradeoff
+is resolved by the one-time sweep.</p>
+
+<h2>Proposed reporting clarification</h2>
+<p>Use existing receipt fields; add no state model or command.</p>
+<pre><code>Cleanup completed; free space remains below target.
+Report target_shortfall_bytes separately from failures.
+Check dry_run and timestamps before attributing the receipt to this run.</code></pre>
+<p>A preview overwrites the latest JSON receipt. A skipped run does not.
+A failed receipt write can leave an older result in place. The skill should
+report current exit/log evidence when the receipt is missing or stale.</p>
+<p class="muted">Proposed usage and skill wording is recorded in
+<code>scratch/loo-722.md</code>. Installed-cycle acceptance and sustained generation
+measurements remain outstanding; this page claims no new test or live-run results.</p>
+
+<h2>Decision record</h2>
+<ol>
+<li><strong>What recurring rebuild tradeoff should the hourly cleaner make?</strong>
+<p><strong>1a.</strong> Accept 4 hours / 1 hour / 15 minutes at the current
+64 GiB and 32 GiB thresholds, including unfinished checkouts.</p>
+<p><strong>1b.</strong> Require longer recurring idle windows; specify the three
+windows while keeping pressure response.</p>
+<p>Source, history and live-output preservation remain required in either case.
+The next proof is policy-aligned tests, the installed scheduled cycle, and
+successive reclamation/rebuild observations. No answer is assumed here.</p>
+</li>
+</ol>
+</main></body>
+</html>

@@ -1,5 +1,13 @@
 # Decisions
 
+2026-11-04: Jack Heart accepted recurring generated-output retention of four hours
+normally, one hour below 64 GiB free, and fifteen minutes below 32 GiB free after
+the rebuild-cost consequence was presented. This resolves the earlier policy
+question and the stopped Graph's sole blocker. Code and tests already implement
+the accepted windows. Receipt-reporting clarifications are applied; continue
+publication and the authored demo/delivery boundaries without replaying finished
+implementation. Policy acceptance does not authorize landing or a machine sweep.
+
 2026-11-04: No separate design was supplied. The Task directive selects the existing
 cleaner. The implementation uses a stdlib runner through the system interpreter
 on macOS so launchd never waits for uv resolution or its cache lock. Developer
@@ -11,7 +19,7 @@ job's path.
 and native Task pruning stay unchanged. New direct builds racing inspection
 remain unsupported. Jack Heart's later 24-hour direction applied to the parent's
 one-time sweep, not approval of these recurring thresholds. Policy acceptance
-remain in `scratch/loo-722.md`.
+remains in `scratch/loo-722.md`.
 
 2026-11-04: The earlier unavailable launchctl read left running state unknown.
 Jack's 17:37 UTC Task comment supplies newer evidence: the parent stopped the

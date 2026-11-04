@@ -501,8 +501,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var connectionAcceptsInput: Bool { machineConnection?.reading.acceptsInput ?? true }
     private let connectionLabel = NSTextField(labelWithString: "")
     private lazy var retryConnection = NSButton(title: "Retry", target: self, action: #selector(retryMachineConnection))
+    private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveMachineConnection))
     lazy var connectionBar: NSStackView = {
-        let bar = NSStackView(views: [connectionLabel, retryConnection])
+        let bar = NSStackView(views: [connectionLabel, moveConnection, retryConnection])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.isHidden = true
@@ -512,8 +513,11 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }()
 
     @objc private func retryMachineConnection() {
-        guard machineConnection?.reading.state == .unavailable else { return }
         machineConnection?.retry()
+    }
+
+    @objc private func moveMachineConnection() {
+        machineConnection?.moveHere()
     }
 
     private func showConnection(_ reading: MachineConnectionReading) {
@@ -526,6 +530,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         connectionLabel.toolTip = reading.title
         connectionBar.isHidden = reading.title == nil
         retryConnection.isHidden = reading.state != .unavailable
+        moveConnection.isHidden = !reading.canMoveHere
         superview?.needsLayout = true
     }
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every

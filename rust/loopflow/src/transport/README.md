@@ -30,15 +30,20 @@ status row shows **Reconnecting…** and pauses input while local selection, cop
 Find and scrolling remain available. Recovery refreshes the same owner's screen;
 byte streams resume from their received position or refresh when output expires.
 Disconnected typing and uncertain writes are never replayed. If another viewer
-took control, recovery observes it without replacing input or geometry; **Move
-here** remains explicit. Eight attempts with capped backoff lead to **Session
+took control, recovery observes it without replacing input or geometry. Choose
+**Move here** in the read-only pane's connection row to edit the same running
+Session. Input stays paused until its owner acknowledges; a lost reply never
+repeats that takeover. Eight attempts with capped backoff lead to **Session
 unavailable** and a native **Retry** action. Only an owner exit event means ended.
 Closing the surface cancels recovery. Ordinary explicit Open remains separate.
 
 The native surface creates a private temporary mailbox directory and passes
 `LF_MACHINE_STATUS` to its relay only. Atomic JSON readings carry connection
 generation, state, input capability and optional explanation; `status.retry`
-requests another bounded cycle. Surface closure removes the directory. This is
+requests another bounded cycle. `status.move` carries the current generation;
+the relay consumes it once before requesting an explicit replacing attachment,
+and advances the generation. Stale actions cannot cross a connection loss.
+Surface closure removes the directory and cancels pending actions. This is
 presentation state, not a durable viewer registry or execution authority. Plain
 CLI Machine relays retain their Ctrl+R/Ctrl+] interaction.
 

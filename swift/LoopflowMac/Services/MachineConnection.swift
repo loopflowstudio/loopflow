@@ -2,16 +2,18 @@ import Foundation
 
 /// A surface owns this temporary mailbox; it conveys no Session authority.
 struct MachineConnectionReading: Decodable, Equatable {
-    enum State: String, Decodable { case connected, reconnecting, unavailable, ended }
+    enum State: String, Decodable { case connected, moving, reconnecting, unavailable, ended }
     let generation: UInt64
     let state: State
     let input: Bool
     let message: String?
 
     var acceptsInput: Bool { state == .connected && input }
+    var canMoveHere: Bool { state == .connected && !input }
     var title: String? {
         switch state {
-        case .connected: input ? nil : "Read-only — input is in another viewer. Use Move here to take control."
+        case .connected: input ? nil : "Read-only. Move here to type."
+        case .moving: "Moving input here… Input paused."
         case .reconnecting: "Reconnecting… Input paused; last screen may be stale."
         case .unavailable: message ?? "Session unavailable. Last screen is stale."
         case .ended: "Session ended."
@@ -22,20 +24,26 @@ struct MachineConnectionReading: Decodable, Equatable {
 @MainActor
 final class MachineConnection {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("lf-view-" + UUID().uuidString)
-    var path: String { directory.appendingPathComponent("status.json").path }
+    private var statusURL: URL { directory.appendingPathComponent("status.json") }
+    var path: String { statusURL.path }
     private(set) var reading = MachineConnectionReading(generation: 0, state: .reconnecting, input: false, message: nil)
     private var observation: Task<Void, Never>?
+    private var changed: (@MainActor (MachineConnectionReading) -> Void)?
+    private var pendingMove: UInt64?
 
     func start(changed: @escaping @MainActor (MachineConnectionReading) -> Void) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                                                attributes: [.posixPermissions: 0o700])
+        self.changed = changed
         changed(reading)
         observation = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 if let data = FileManager.default.contents(atPath: path),
                    let next = try? JSONDecoder().decode(MachineConnectionReading.self, from: data),
+                   pendingMove.map({ next.generation > $0 }) ?? true,
                    next != reading {
+                    pendingMove = nil
                     reading = next
                     changed(next)
                 }
@@ -45,12 +53,28 @@ final class MachineConnection {
     }
 
     func retry() {
-        try? Data().write(to: URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("retry"), options: .atomic)
+        guard observation != nil, reading.state == .unavailable else { return }
+        try? Data().write(to: statusURL.deletingPathExtension().appendingPathExtension("retry"), options: .atomic)
+    }
+
+    func moveHere() {
+        guard observation != nil, reading.canMoveHere else { return }
+        do {
+            let action = statusURL.deletingPathExtension().appendingPathExtension("move")
+            try JSONEncoder().encode(reading.generation).write(to: action, options: .atomic)
+            pendingMove = reading.generation
+            reading = MachineConnectionReading(generation: reading.generation, state: .moving, input: false, message: nil)
+            changed?(reading)
+        } catch {
+            // A removed mailbox means this surface has closed. No action is queued.
+        }
     }
 
     func stop() {
         observation?.cancel()
         observation = nil
+        pendingMove = nil
+        changed = nil
         try? FileManager.default.removeItem(at: directory)
     }
 }

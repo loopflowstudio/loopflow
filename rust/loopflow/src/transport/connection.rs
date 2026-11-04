@@ -62,6 +62,29 @@ impl Status {
         self.publish("ended", false, None)
     }
 
+    pub(super) fn closed(&self) -> bool {
+        !self.path.parent().is_some_and(|path| path.is_dir())
+    }
+
+    /// Consume before sending: a lost acknowledgement never retries a takeover.
+    pub(super) fn take_move(&mut self, ready: bool) -> Result<bool> {
+        let path = self.path.with_extension("move");
+        let requested = match std::fs::read(&path) {
+            Ok(bytes) => {
+                std::fs::remove_file(path)?;
+                serde_json::from_slice::<u64>(&bytes).ok()
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        if !ready || self.closed() || requested != Some(self.generation) {
+            return Ok(false);
+        }
+        self.generation += 1;
+        self.publish("moving", false, None)?;
+        Ok(true)
+    }
+
     pub(super) fn connect(
         &mut self,
         owner: &LfProcessId,
@@ -165,7 +188,7 @@ impl Status {
     // Raw keys are discarded, never treated as Retry or queued across a
     // connection boundary. Closure cancels even a blocked handshake.
     fn wait(&self, delay: Duration) -> io::Result<bool> {
-        if !self.path.parent().is_some_and(|path| path.is_dir()) {
+        if self.closed() {
             return Ok(false);
         }
         let mut fd = libc::pollfd {

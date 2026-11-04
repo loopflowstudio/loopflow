@@ -971,7 +971,10 @@ relay and native surface alive. A native status row shows automatic exact-owner
 recovery, with input paused and local copy, Find and scrolling available. Exhausted
 retries show an unavailable explanation and Retry; only authoritative exit means
 ended. Recovery never prepares or resumes a provider, and a newer viewer retains
-control until an explicit Move here. These operations surface service
+control until **Move here** in the read-only pane's connection row. That action
+keeps input paused until acknowledgement and retains the draft and running
+provider. A lost reply recovers passively; it never repeats the takeover.
+Closing the pane cancels its pending action. These operations surface service
 errors without a direct FFI fallback. Other Work operations retain FFI until their
 cutover. See the [local protocol](../rust/loopflow/src/machine_service/README.md).
 `scripts/test_desktop.sh --filter MachineProtocolTests` builds the consumer and

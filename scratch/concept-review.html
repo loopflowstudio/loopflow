@@ -2,83 +2,76 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-593 · Recover the connection</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-593 · Keep the recovered pane usable</title>
 <style>
 :root{color-scheme:light dark;--paper:#faf9f5;--ink:#202a31;--muted:#59656b;--rule:#c5cbc9;--accent:#126257;--panel:#f0f2ee}
 @media(prefers-color-scheme:dark){:root{--paper:#17201f;--ink:#e8ece8;--muted:#b1bfba;--rule:#475852;--accent:#8ed9c5;--panel:#202b28}}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:36px 24px 60px}header,footer,.muted{color:var(--muted);font-size:13px}h1{font-size:clamp(28px,5vw,38px);line-height:1.15;letter-spacing:-.025em;margin:24px 0 14px}h2{font-size:21px;margin:28px 0 10px}p{margin:10px 0}a{color:var(--accent);text-underline-offset:3px}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{font:14px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}.path{border-block:1px solid var(--rule);padding:12px 0}.path p{margin:4px 0}.example{background:var(--panel);padding:16px;border:1px solid var(--rule);margin:12px 0}.example label{display:block;font-weight:600}button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:5px;padding:7px 11px;cursor:pointer;margin:6px 6px 0 0}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 -2px var(--accent)}.status{border-bottom:1px solid var(--rule);padding-bottom:9px;margin-bottom:10px;color:var(--accent)}li{margin:9px 0}ol,ul{padding-left:24px}details{border-top:1px solid var(--rule);padding:14px 0;margin-top:20px}summary{cursor:pointer;font-weight:600}footer{margin-top:28px}@media(max-width:480px){main{padding:24px 18px 40px}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:36px 24px 60px}header,footer,.muted{color:var(--muted);font-size:13px}h1{font-size:clamp(28px,5vw,38px);line-height:1.15;letter-spacing:-.025em;margin:24px 0 14px}h2{font-size:21px;margin:30px 0 10px}p{margin:10px 0}a{color:var(--accent)}code{font:.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 ui-monospace,monospace}.path{border-block:1px solid var(--rule);padding:12px 0}.example{background:var(--panel);padding:18px;border:1px solid var(--rule);margin:14px 0}.status{padding-bottom:10px;border-bottom:1px solid var(--rule);color:var(--accent)}button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:7px 11px;cursor:pointer}button:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}button:disabled{opacity:.55;cursor:default}li{margin:12px 0}ol{padding-left:24px}footer{margin-top:30px}@media(max-width:480px){main{padding:24px 18px 40px}}
 </style>
 </head>
 <body><main>
 <header>LOO-593 · concept-review · November 4, 2026<br>
-Sources: <a href="mobile-backend.md">working design</a>, <code>transport.rs::reconnect_machine</code>,
-<code>transport/README.md</code>, <code>MachineService.swift</code>, <code>machine_service/wire.rs</code>.</header>
-<h1>Recover automatically without losing the Session</h1>
-<p><strong>Selected November 4:</strong> reconnect to the same live owner automatically and show connection state outside the terminal. Input stays paused until the owner confirms the connection and current control.</p>
-<p class="muted">Jack Heart requested this implementation and the installed-helper replacement proof. Current behavior still waits for Ctrl+R. This page is an interaction sketch, not a native screenshot or a successful demo.</p>
-
+Built from <a href="mobile-backend.md">mobile-backend.md</a>,
+<code>transport.rs</code>, <code>transport/connection.rs</code>,
+<code>MachineConnection.swift</code>, <code>GhosttyTerminalView.swift</code>,
+<code>SessionsView.swift</code>, <code>WorkspacePanesView.swift</code>,
+<code>transport_tests.rs</code> and <code>swift/README.md</code>.</header>
+<h1>Make Move here work in the recovered pane</h1>
+<p><strong>Design changed; next implement direction.</strong> The accepted explicit takeover needs a visible action while the recovered terminal is read-only. No new product decision is required.</p>
+<p>Jack Heart selected automatic exact-owner recovery with native status and newer-viewer claim preservation. That recovery is implemented. The remaining mismatch: the native row points to Move here, but the action lives in placeholders and its handler returns while the terminal is live.</p>
 <div class="path">
-<p><strong>Open Task</strong> → primary Session → <code>read(view_plan)</code></p>
-<p><strong>Edit</strong> → existing execution owner → <code>session_owner → attach</code></p>
-<p><strong>Recover connection</strong> → same owner and current claims → refresh screen; never replay keys</p>
+<p><strong>Open Task</strong> → recorded primary Session → <code>read(view_plan)</code></p>
+<p><strong>Read and edit</strong> → existing execution owner → <code>session_owner → attach</code></p>
+<p><strong>Recover</strong> → same owner, free claims only → fresh screen or bounded output continuation</p>
+<p><strong>Move here · proposed correction</strong> → explicit claim on that owner → existing replacing <code>Attach</code>, then acknowledgement</p>
 </div>
-
-<h2>During a helper interruption</h2>
+<h2>Before: a usable screen with an unreachable action</h2>
 <div class="example">
-<label>Existing implementation · inside the terminal</label>
-<pre>Machine connection lost: …
-Ctrl+R to reconnect; Ctrl+] to close.
-Typing while disconnected is discarded.</pre>
-<p>The provider may still be running. The viewer waits for a key before attempting recovery.</p>
-</div>
-<div class="example">
-<label>Proposed native presentation · simulation</label>
-<p class="muted">Explore the states below. These controls change this sketch only.</p>
-<div role="group" aria-label="Simulated connection state">
-<button type="button" data-state="lost" aria-pressed="true">Connection drops</button>
-<button type="button" data-state="back" aria-pressed="false">Owner reconnects</button>
-<button type="button" data-state="other" aria-pressed="false">Control moved elsewhere</button>
-<button type="button" data-state="unavailable" aria-pressed="false">Owner unreachable</button>
-<button type="button" data-state="ended" aria-pressed="false">Owner ended</button>
-</div>
-<div aria-live="polite" aria-atomic="true">
-<p class="status" id="status">Reconnecting… Input paused.</p>
+<p><strong>Existing implementation</strong></p>
+<p class="status">Read-only — input is in another viewer. Use Move here to take control.</p>
 <pre>Unfinished provider draft:
 Explain the failing migration before changing…</pre>
-<p id="result">Preserve the last screen. Retry only the connection to the recorded owner; queue no typing.</p>
+<p>The retained surface stays live. Move here is offered in the elsewhere/closed placeholders; the live Session path ignores that intent.</p>
 </div>
+<h2>After: act where the Session is visible</h2>
+<div class="example">
+<p><strong>Proposed correction · interaction sketch</strong></p>
+<p class="muted">This simulation changes only this page. It is not native demo evidence.</p>
+<p class="status" id="status" aria-live="polite">Read-only. Move here to type.</p>
+<pre>Unfinished provider draft:
+Explain the failing migration before changing…</pre>
+<button type="button" id="move">Move here</button>
+<button type="button" id="ack" disabled>Simulate acknowledgement</button>
+<button type="button" id="lost" disabled>Simulate lost reply</button>
+<p id="result" aria-live="polite">Reading, copy, Find and scrolling stay available. Only this explicit action requests input and geometry from the same owner.</p>
 </div>
-<p><strong>The boundary stays:</strong> Machine carries traffic; the owner keeps execution, drafts and control; Desktop presents connection state. A native status signal would be new client plumbing, not a new Session lifecycle.</p>
-<p><strong>Unreachable does not establish ended.</strong> Preserve the last screen as stale when attachment fails. Only authoritative execution evidence can label the Session ended. Disabled service and incompatible installation need their own explanations.</p>
-
-<details>
-<summary>Hashimoto-inspired review</summary>
-<p class="muted">Simulated analysis grounded in public writing. Mitchell Hashimoto did not review this change; the judgments below are ours.</p>
-<ul>
-<li><strong>Keep the shared core.</strong> Reuse the existing owner, Rust reads and CLI commands. Let Desktop and iOS exercise the contract before expanding it. This applies the consumer-driven extraction described in <a href="https://mitchellh.com/writing/libghostty-is-coming">Libghostty Is Coming</a>.</li>
-<li><strong>Make the next proof usable.</strong> Replace the installed helper while a draft and Graph are live, then keep editing. Separate registration and restart tests leave that composition unproved. This applies the tangible-progress approach in <a href="https://mitchellh.com/writing/building-large-technical-projects">Building Large Technical Projects</a>.</li>
-<li><strong>Judge the interruption in context.</strong> A recovery shortcut can be correct and still break the editing flow. Native status is a proposal to evaluate with actual use, applying <a href="https://mitchellh.com/writing/feel-it">You Have to Feel It</a>.</li>
-<li><strong>Force failures.</strong> Keep takeover, expired-output and ended-owner tests; finish update, cancellation, uncertain-command and usage proofs. The principle comes from <a href="https://mitchellh.com/writing/tripwire">Testing Error Recovery</a>, not a recommendation to add Zig or Tripwire here.</li>
-</ul>
-</details>
-
-<details>
-<summary>What must survive—and what remains unproved</summary>
-<p>Held drafts, active turns, pending requests and running Graphs already protect their owners. The default two-minute detached quiet expiry applies to unheld Sessions. Headless Runs do not expire because viewers leave. Keep this existing policy.</p>
-<p>Automatic recovery must become passive when another viewer owns control, stop when the pane closes, report disabled/incompatible service or an ended owner explicitly, and never resubmit commands or uncertain input. A replacement provider would violate this recovery contract.</p>
-<p>Native quit/reopen, installed-helper replacement, unchanged provider usage, affected suites and Linux acceptance remain open. This review adds no passed checks. “Standalone” means the UI can close; the selected signed app still supplies the Mac helper.</p>
-</details>
-
-<footer><a href="https://github.com/loopflowstudio/loopflow/pull/1813">PR #1813</a> is published; the Task remains at demo. Implementation is requested; Auto-Ship remains unapproved. The accepted direction is recorded in <a href="mobile-backend.md">mobile-backend.md</a>.</footer>
-<h2>Selected direction</h2>
+<p><strong>Surface presence and input permission are separate.</strong> Keep the existing connection reading; add no persistent Session state. The native action reaches the relay already attached to this exact owner. The owner’s existing claim protocol remains authoritative.</p>
+<p>Use <code>Attach { control: true, replace: true, own: Take, … }</code> only for this explicit action. Pause input until acknowledgement, restore snapshot/parser state together, and consume the action once. Do not route it through provider preparation or automatically repeat it after connection loss.</p>
+<h2>Normal use, failure and recovery</h2>
 <ol>
-<li>Recovery interaction:<br><strong>1a. Selected:</strong> Automatic reconnect with native status; implement and return to demo.<br><strong>1b. Not selected:</strong> Deliberate native Reconnect button.<br><strong>1c. Superseded for Desktop:</strong> Keep the Ctrl+R terminal prompt.</li>
+<li><strong>Normal:</strong> recovery returns read-only because a newer viewer controls the owner. Keep reading; choose Move here to edit the same draft. The other viewer loses its claim, while the provider and Graph remain.</li>
+<li><strong>Failure:</strong> the takeover reply is lost. The claim may have changed; do not infer failure or queue typing. Show reconnecting outside terminal bytes.</li>
+<li><strong>Recovery:</strong> reconnect non-replacing to the same owner. If another viewer obtained control meanwhile, remain read-only. A fresh deliberate action is required to replace it. Closing the pane cancels pending presentation/action state.</li>
 </ol>
+<p><strong>Counterexample:</strong> if a lost reply causes recovery to resend Move here and revoke a newer viewer, this design has failed. Likewise, closing and reopening a healthy viewer just to expose its action is not the intended interaction.</p>
+<h2>Keep the proven boundary and the remaining proof</h2>
+<p>The signed same-build helper replacement fixture exercises the installed owner/Graph path, retained draft and acknowledged recovery generation. The working design records its passing result. This review ran no tests.</p>
+<p>The next proof must use the retained native read-only pane’s action, then lose its acknowledgement before a newer claim. Actual Desktop quit/reopen, rendered reading/input behavior, Linux replacement, usage totals and the remaining gate obligations stay open. “Standalone” continues to mean the UI can close; the selected signed app supplies the Mac helper.</p>
+<p>Machine transports Work; existing Rust reads, CLI operations and Session/Graph owners keep authority. Desktop UI automation stays app-owned. No new wire contract, scheduler, retention policy or provider launch belongs in this correction.</p>
+<h2>Decision record</h2>
+<ol>
+<li><strong>Where should explicit control be available?</strong><br>1a. Next implement direction: on the retained read-only pane, using the same owner.<br>1b. Requiring a close/reopen detour is rejected as inconsistent with the accepted interaction.</li>
+<li><strong>May recovery repeat a takeover?</strong><br>2a. No; an uncertain action is consumed once. This follows Jack Heart’s accepted no-replay and newer-claim requirements.</li>
+<li><strong>Is another product choice open for this correction?</strong><br>3a. No. Remote takeover UX and later-work decisions remain outside this slice.</li>
+</ol>
+<footer>Design record: <a href="mobile-backend.md">scratch/mobile-backend.md</a>. This step changes documentation only. No publication, merge or Auto-Ship approval; loop-or-next decides the next Graph step.</footer>
 </main>
 <script>
-const states={lost:['Reconnecting… Input paused.','Preserve the last screen. Retry only the connection to the recorded owner; queue no typing.'],back:['Connected · Input available','Refresh from the same owner and allow new input after acknowledgement. Never replay outage typing.'],other:['Connected · Read-only','Another viewer holds control. Observe the same Session; Move here remains a deliberate action.'],unavailable:['Session unavailable · Last screen is stale','The exact owner cannot be reached. Its exit is unknown. Explain the failure without starting another provider.'],ended:['Session ended · Last screen is stale','Execution evidence confirms the owner ended. Stop connection recovery; do not launch a replacement provider.']};
-document.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>{const [status,result]=states[button.dataset.state];document.getElementById('status').textContent=status;document.getElementById('result').textContent=result;document.querySelectorAll('[data-state]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));}));
+const move=document.getElementById('move'),ack=document.getElementById('ack'),lost=document.getElementById('lost'),status=document.getElementById('status'),result=document.getElementById('result');
+move.addEventListener('click',()=>{status.textContent='Moving input here… Input paused.';result.textContent='One explicit claim request to the existing owner. Await its acknowledgement; retain no keys or retryable takeover.';move.disabled=true;ack.disabled=false;lost.disabled=false;});
+ack.addEventListener('click',()=>{status.textContent='Connected · Input available';result.textContent='The same owner acknowledged control. Continue editing the retained draft. Provider and Graph identity are unchanged.';ack.disabled=true;lost.disabled=true;});
+lost.addEventListener('click',()=>{status.textContent='Recovered · Read-only. Move here to type.';result.textContent='Simulation: the reply was lost and a newer viewer claimed control before recovery. Recovery did not repeat the takeover. A new deliberate click is required.';move.disabled=false;ack.disabled=true;lost.disabled=true;});
 </script>
 </body>
 </html>

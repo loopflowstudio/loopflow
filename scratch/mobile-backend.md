@@ -2,14 +2,14 @@
 
 LOO-593 · Accepted local scope; implementation reconciled November 4, 2026 · Product
 
-## Current implementation direction · November 4, 2026
+## Accepted scope and implementation · November 4, 2026
 
 Jack Heart requested addressing the preceding review before shipping: implement
 automatic exact-owner reconnection with native connection status and prove
 installed-helper replacement while an unfinished draft and Graph remain live.
 This selects the review's recommended automatic option and supersedes its pending
-choice and the earlier deliberate Ctrl+R direction for Desktop. Return to the
-interactive demo with the changes published; no merge or Auto-Ship approval.
+choice and the earlier deliberate Ctrl+R direction for Desktop. Jack authorized
+publication through interactive demo, without merge or Auto-Ship approval.
 
 Keep connection status outside provider terminal bytes. Disable input during
 recovery, use bounded retry/backoff, cancel on pane closure, preserve another
@@ -19,24 +19,21 @@ Disabled or incompatible service states need an actionable native explanation.
 The existing owner keeps lifetime policy and execution. Do not add a durable
 viewer registry, Session lifecycle, scheduler or retention authority.
 
-Implement and demonstrate the composed installed path in an isolated signed
-installation: retain exact provider, Session owner, editable draft and live Graph;
-replace the executable through the real installation/registration path; restore
-the view; edit and submit the retained draft; verify continued Graph progress.
-Also prove newer-viewer control, expired output, unavailable owner and cancellation
-without input replay. Separate foreground restart and registrar tests are useful
-but cannot substitute for this composition. Record native presentation and
-Desktop quit/reopen evidence and preserve the existing telemetry/other acceptance
-obligations below. Bring the installed-update proof forward into this revision,
-rather than deferring it to the post-demo gate again.
+Automatic recovery and the composed installed-helper replacement fixture are
+implemented. The fixture retains exact provider, Session owner, editable draft
+and live Graph through replacement, then edits/submits the draft and verifies
+Graph progress. Focused cases cover newer-viewer control, expired output,
+unavailable owner and cancellation without input replay. Native presentation,
+actual Desktop quit/reopen and the broader obligations in Remaining acceptance
+still need evidence. Separate registrar/restart tests alone were insufficient;
+the composed proof is now part of this revision's recorded passing checks.
 
-LOO-718/PR #1812 now incorporates `07a6a184d4` and implements remote mobile
-transport, pairing and client integration in its own checkout. Keep this revision
-focused on the local backend and Desktop recovery. Inspect overlapping fixes in
-LOO-718 before changing shared boundaries; preserve the published contract and
-make any necessary additive consumer changes explicit. Do not import the wider
-mobile feature set into this Task. LOO-593 remains the foundation to land first
-after its checks and demo; the order recommendation itself approves no landing.
+LOO-718/PR #1812 incorporates `07a6a184d4` and implements remote mobile transport,
+pairing and client integration. Inspection of its local branch at `983b271695`
+on November 4 found additive remote configuration, owner startup and program-status
+events. Those remain in LOO-718; this recovery revision preserves the published
+local/owner wire contract. LOO-593 remains the foundation to land first after its
+checks and demo; the order recommendation itself approves no landing.
 
 The local contract was published at `5b44a394cf` and consumed by LOO-718.
 Native continuity review remains open.
@@ -138,8 +135,10 @@ without replacement; a newer input/geometry controller remains authoritative.
 Fresh terminal snapshots restore screen/parser state; byte streams resume their
 received position, refreshing if the spool expired. Outage input and uncertain
 writes are discarded. Retry is a mailbox signal, never provider input. Native
-read-only mode preserves selection, copy, Find and scrolling. Plain CLI Machine
-relays retain deliberate Ctrl+R; Desktop has no recovery text in provider output.
+read-only mode uses Ghostty's input suppression while leaving selection, copy,
+Find and scrolling handlers available; rendered behavior remains demo proof.
+Plain CLI Machine relays retain deliberate Ctrl+R; Desktop has no recovery text
+in provider output.
 
 **Delete — do not maintain:** Desktop’s terminal recovery prompt and Ctrl+R
 dependency, including `Status::closed_or_retry` interpreting raw keys as Retry;
@@ -167,6 +166,45 @@ Historical review, source links and rejected alternatives remain at
 `82fdb0e928:scratch/mobile-backend.md`; Jack Heart’s accepted November 4 direction
 leads this document. Review feedback also required local reading interactions and
 installed-owner executable retirement, included above.
+
+### In-pane Move here · November 4, 2026
+
+The concept review found that passive recovery retained a live read-only pane,
+but its native row only pointed to Move here outside that pane. Jack Heart's
+accepted explicit takeover is now connected directly to the existing relay.
+`WorkspacePanesView.openButton`, `_elsewherePlaceholder` and Session preparation
+retain their separate unopened-pane behavior.
+
+**Delete — do not maintain:** replace the unreachable “Use Move here” hint and
+its assumption that `input: false` means another viewer still holds input. No
+exclusive fixture or wire operation is removed. The native row now says
+“Read-only. Move here to type.” Its button is available only while connected and
+read-only. Local selection, copy, Find and scroll retain their existing handlers.
+The relay's paired reconnect/takeover flags become one recovery reason, consumed
+on acknowledgement. Every attachment hands the retained display to its incoming
+screen, so a separate preview flag is unnecessary. Keep the output offset and
+parser together: takeover refreshes parsing without resetting the stream's offset.
+
+The private surface mailbox carries a one-shot action naming its current
+generation. The relay consumes it before sending the existing replacing
+`Attach { control: true, replace: true, own: Take, … }` to the exact owner.
+Consumption advances the generation; input remains paused until acknowledgement.
+At acknowledgement, parser/screen refresh together while the existing stream's
+cumulative byte offset remains intact. No preparation, provider resume, shared
+wire change, persisted Session state or execution/retention owner is introduced.
+
+A lost acknowledgement recovers non-replacing. Neither the takeover nor
+uncertain typing is replayed, including when a newer viewer claimed input and
+geometry meanwhile. Retry only repairs the connection. The native action cannot
+repeat while pending; stale status cannot re-enable it. Pane closure removes
+its pending mailbox action and the relay observes closure even while connected.
+
+Focused proofs cover retained draft/provider/Graph, intercepted takeover reply
+followed by a newer claim, stale action rejection and closure before action
+consumption. Swift tests exercise the same mailbox and native presentation state.
+Rendered reading/copy/Find/scroll and clicking the visible button remain demo
+work; `scratch/concept-review.html` is the historical interaction sketch, not
+rendered native evidence. Remote takeover UX remains outside the accepted slice.
 
 ## Installation and lifetime
 
@@ -221,7 +259,7 @@ Preserve these obligations:
   bounded; do not persist every snapshot or terminal byte. Exact additional
   latency/queue/reconnect metrics and retention remain implementation choices.
 
-Checks: `cargo test -p loopflow --test transport_tests machine_service_ -- --include-ignored --test-threads=1` — 9 passed, including installed replacement; `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone` — app built and 1 test passed headlessly (macOS deployment-target linker warnings); `cargo fmt --check` and `git diff --check` passed. Gate retains affected suites, Xcode/Linux paths, deployment-target compatibility and telemetry; demo retains rendered continuity and Desktop quit/reopen.
+Checks (November 4): `cargo test -p loopflow --test transport_tests machine_service_ -- --test-threads=1` — 11 passed, installed-replacement test opt-in/ignored; `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone` — app built, 3 passed headlessly (existing display-link deprecation and macOS deployment-target linker warnings); `cargo fmt`, `git diff --check` passed; `lf context` within both limits. Prior installed-replacement proof is recorded at `7670600cf5:scratch/mobile-backend.md`; gate owns broader regression, Xcode/Linux paths and telemetry, while demo owns rendered interaction and Desktop quit/reopen.
 
 ## Later work and parallel boundaries
 

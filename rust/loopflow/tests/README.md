@@ -818,6 +818,7 @@ fixtures must declare opposite launch modes, independent of Session defaults.
 cargo test -p loopflow --lib machine_service::
 cargo test -p loopflow --test transport_tests machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart
 cargo test -p loopflow --test transport_tests machine_service_reconnect_
+cargo test -p loopflow --test transport_tests machine_service_move_here_
 cargo test -p loopflow --test transport_tests installed_machine_service_preserves_owner_and_graph_across_replacement -- --ignored
 ```
 
@@ -826,6 +827,10 @@ authoritative primary-Session selection, concurrent trace isolation and editable
 owner/Graph continuity with the real relay connected during service restart.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer
 viewers retaining input/geometry, expired output and owner exit without relaunch.
+Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
+acknowledgement before a newer claim, reject stale actions and cancel a queued
+action on pane closure. Native mailbox tests cover presentation until acknowledgement;
+rendered copy/Find/scroll and the visible action remain interactive demo evidence.
 The opt-in macOS variant creates an isolated signed app bundle, starts the owner
 and Graph from its installed helper, replaces that executable inode with identically
 signed bytes, verifies the bundle seal and invokes the production SMAppService

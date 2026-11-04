@@ -408,12 +408,9 @@ Desktop Session navigation (LOO-372). Task association still includes all work.
 Filtered absence cannot release native surfaces or clear drafts and selection.
 Explicit completion remains separate from turn completion.
 
-October 7's #1490 (`d8ec7c4fe`) supersedes stream-only Waiting: validated OSC 7501
-reports observed by Desktop override stream inference in Rust. LOO-384 remains
-for non-reporters; reading Claude's transcript is Jack's open choice. Detached
-observation and lf emission remain unfinished (Infrastructure's LOO-398/394).
-Provider adoption and composed native-pane acceptance remain unproven; this does
-not establish status in cmux or herdr.
+LOO-720/#1809 adds owner-sampled terminal status and output ordering. Native/provider
+acceptance remains separate. The superseded Desktop-only account and non-reporter
+questions remain at `7670600cf5:.lf/wave/product/MEMORY.md`, this heading.
 
 ## Current Tasks and completion history (reconciled 2026-10-17)
 
@@ -946,17 +943,21 @@ installation authority and execution owners, no new scheduler/retention.
 Never replay uncertain commands/input. Unix peer
 trust cannot authenticate a remote proxy.
 
-Connection recovery differs from Session resume: retain exact owner and output
-position; deliberate reconnect must preserve newer claims and start no provider.
-A local prompt changes terminal state, requiring a fresh screen; byte streams can
-use owner Resume. Fixtures interrupt a connected relay,
-including takeover, expired output and owner exit. Dropping the viewer first proved
-owner survival only. Separate registrar/restart proofs still do not establish
-installed-binary replacement, native continuity or unchanged usage totals.
+Jack Heart selected automatic Desktop recovery with native status November 4.
+Recovery retains the exact owner, preserves newer claims and starts no provider.
+Temporary surface mailboxes carry status/Retry outside terminal bytes; closure
+cancels. Unavailable is not ended. Read-only retains local copy/Find/scroll handlers;
+uncertain input is discarded. Plain CLI relays retain deliberate reconnect.
 
-LOO-718 consumes the shared contract. ViewPlan selects the primary Session;
-roadmap membership cannot. Owner lookup starts nothing. Remote carrier,
-unattended hosting and phone takeover UX remain open.
+Signed helper replacement retains owner, draft
+and Graph through submission and progression. LaunchServices runs the app-owned
+updater; external runners cannot model App Management. Recovery assertions require
+a new acknowledged generation. Same-build replacement proves neither version
+migration, rendered Desktop continuity, Linux replacement nor unchanged usage.
+
+LOO-718 consumes the contract. ViewPlan selects the primary Session, not roadmap
+membership; owner lookup starts nothing. Remote carrier, unattended hosting and
+phone takeover UX remain open.
 
 LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
 files resurfaced retired Waves. Writes register directories; reads list store
@@ -1139,9 +1140,9 @@ Workflow-loading landing hold survives; LOO-488 owns whole-app theming.
 ### Shared viewing boundary
 
 Jack Heart accepted per-conversation ownership October 16. LOO-416 integrated
-LOO-415's attach-only transport (`7bfa10fa72`, October 17); Desktop adoption and
-combined continuity are unproved. Viewer loss never restarts execution; text-grid
-snapshots don't prove renderer restoration. Earlier tmux and LOO-280–283 notes:
+LOO-415's attach-only transport (`7bfa10fa72`); LOO-593 adds local Desktop recovery.
+Rendered continuity remains unproved. Viewer loss never restarts execution;
+text-grid snapshots don't prove renderer restoration. Earlier tmux/LOO-280–283:
 `f8fe8aff0:wave/product/MEMORY.md`, this heading.
 
 ## Learnings

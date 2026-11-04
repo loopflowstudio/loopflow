@@ -1777,7 +1777,7 @@ pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
 }
 
 /// A reconnect token, byte position and partial event scanner describe one
-/// retained output stream. A fresh screen replaces all three together.
+/// retained output stream. A fresh connection replaces all three together.
 #[derive(Default)]
 struct RelayOutput {
     reconnect: Option<String>,
@@ -1829,12 +1829,17 @@ impl RelayOutput {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Recovery {
+    Reconnect,
+    Takeover,
+}
+
 fn attach_with_terminal(
     id: &LfProcessId,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
 ) -> Result<()> {
-    let mut preview = terminal.is_some();
     let machine = std::env::var_os("LF_MACHINE_SERVICE").is_some();
     let mut status = connection::Status::from_env();
     let mut socket = if let Some(status) = &mut status {
@@ -1877,8 +1882,11 @@ fn attach_with_terminal(
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = crate::terminal_title::ViewerTitle::new(id);
-    let mut recovering = false;
+    let mut recovery = None;
     'relay: loop {
+        if status.as_ref().is_some_and(connection::Status::closed) {
+            return Ok(());
+        }
         if let Some(reason) = interrupted.take() {
             // Close the old bridge before asking the owner for its free claims.
             let _ = socket.shutdown(std::net::Shutdown::Both);
@@ -1895,7 +1903,7 @@ fn attach_with_terminal(
             decoder = Decoder::default();
             controlled = false;
             owned = false;
-            recovering = true;
+            recovery = Some(Recovery::Reconnect);
             if let Err(error) = send(&mut socket, output.recover(terminal.is_some())) {
                 interrupted = Some(error.to_string());
                 continue;
@@ -1969,24 +1977,26 @@ fn attach_with_terminal(
                                 acknowledgement_deadline = None;
                                 controlled = claim.is_some();
                                 owned = owner.as_ref() == Some(&viewer);
+                                let recovered = recovery.take();
+                                if recovered == Some(Recovery::Takeover) {
+                                    // Reset the parser at the fresh snapshot, keeping
+                                    // this connection's cumulative resume offset.
+                                    output.scanner = Some(Scanner::new(&nonce));
+                                }
                                 output.attached(token, &nonce, reply.seq);
-                                if recovering || status.is_some() {
+                                if recovered.is_some() || status.is_some() {
                                     discard_reconnect_input()?;
                                     fds[1].revents = 0;
                                 }
-                                if recovering && status.is_none() {
+                                if recovered.is_some() && status.is_none() {
                                     write_output(&mut terminal, 2, if controlled {
                                         b"\r\nReconnected to the same Session.\r\n"
                                     } else {
                                         b"\r\nReconnected as a viewer; input remains elsewhere. Use Move here to take control.\r\n"
                                     })?;
                                 }
-                                if preview || recovering {
-                                    if let Some(terminal) = &mut terminal {
-                                        terminal.handoff()?;
-                                    }
-                                    preview = false;
-                                    recovering = false;
+                                if let Some(terminal) = &mut terminal {
+                                    terminal.handoff()?;
                                 }
                                 if is_terminal {
                                     if terminal.is_none() {
@@ -1998,7 +2008,7 @@ fn attach_with_terminal(
                                     status.connected(controlled)?;
                                 }
                             }
-                            Reply::Busy if recovering => {
+                            Reply::Busy if recovery.is_some() => {
                                 // A fresh screen cannot atomically ask for optional
                                 // input. On Busy, attach passively to the same owner.
                                 if let Err(error) = send(&mut socket, output.fresh_attachment(false)) {
@@ -2007,7 +2017,7 @@ fn attach_with_terminal(
                                 }
                             }
                             Reply::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
-                            Reply::ReconnectRequired if recovering => {
+                            Reply::ReconnectRequired if recovery.is_some() => {
                                 if status.is_none() {
                                     write_output(&mut terminal, 2, b"\r\nRetained output expired; reading the same owner's current screen.\r\n")?;
                                 }
@@ -2100,6 +2110,33 @@ fn attach_with_terminal(
                         }
                     }
                 }
+            }
+        }
+        if let Some(status) = &mut status {
+            if status.closed() {
+                return Ok(());
+            }
+            if status.take_move(acknowledgement_deadline.is_none() && !controlled)? {
+                controlled = false;
+                owned = false;
+                recovery = Some(Recovery::Takeover);
+                discard_reconnect_input()?;
+                fds[1].revents = 0;
+                let (rows, cols) = size();
+                let request = Request::Attach {
+                    control: true,
+                    replace: true,
+                    own: Some(Own::Take),
+                    rows,
+                    cols,
+                    name: tty_name(libc::STDIN_FILENO),
+                    moved: None,
+                };
+                if let Err(error) = send(&mut socket, request) {
+                    interrupted = Some(error.to_string());
+                    continue;
+                }
+                acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
             }
         }
         if fds[1].revents != 0 {

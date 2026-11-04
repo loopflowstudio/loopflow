@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-720 · Report the work, preserve it on return</title>
+<style>
+:root{color-scheme:light dark;--paper:#faf9f5;--ink:#252a28;--muted:#616b65;--line:#d9dfd7;--accent:#25624e;--wash:#edf2ec}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:880px;margin:auto;padding:42px 26px 56px}header{font-size:13px;color:var(--muted)}h1{font:600 clamp(28px,4vw,39px)/1.15 system-ui;margin:18px 0}h2{font-size:19px;margin:28px 0 10px}p{margin:10px 0}small,.muted{color:var(--muted)}code{font-size:.85em;overflow-wrap:anywhere}blockquote{margin:20px 0;padding:10px 18px;border-left:3px solid var(--accent);background:var(--wash)}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;vertical-align:top;padding:11px 9px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500}strong{font-weight:650}.pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}.flow{padding:16px 0;border-block:1px solid var(--line);line-height:1.9}ol{padding-left:24px}li{margin:10px 0}details{margin:14px 0}summary{cursor:pointer}a{color:var(--accent)}@media(prefers-color-scheme:dark){:root{--paper:#181d1b;--ink:#e4e9e2;--muted:#a4b0a7;--line:#3b453e;--accent:#a1cfb6;--wash:#242e28}}@media(max-width:600px){main{padding:25px 18px}.pair{grid-template-columns:1fr;gap:0}td,th{padding:9px 5px}table{font-size:12px}}
+</style>
+<main>
+<header>LOO-720 · Concept review · November 3, 2026<br>Built from <code>scratch/loo-720.md</code>, transport output, ProgramStatus models, Desktop callback/observation and pane sources.</header>
+<h1>An open conversation is not a Working claim.</h1>
+<p><strong>Review the contract:</strong> Rex and Desktop should follow reported activity through a turn and reconnect. No new product decision is needed to apply the accepted direction. Desktop parsing and visible presentation are required proof.</p>
+<div class="pair">
+<section><h2>Before · reproduced in fixtures</h2><p>Provider: <strong>Idle</strong><br>lf launcher: <strong>Working</strong><br>Summary: <strong>Working</strong></p><p class="muted">Different report IDs coexist. Finishing the turn cannot clear the launcher's separate claim.</p></section>
+<section><h2>Candidate · implemented</h2><p>Provider: <strong>Idle</strong><br>lf launcher: <strong>no activity claim</strong><br>Summary: <strong>Idle</strong></p><p class="muted">Keep independent nested work visible. Do not lower Working's priority to hide incorrect evidence.</p></section>
+</div>
+<h2>One conversation, including return</h2>
+<table>
+<thead><tr><th>Your action / event</th><th>Expected experience in both hosts</th><th>Concept → state-changing API</th></tr></thead>
+<tbody>
+<tr><td>Submit a turn; tools run quietly</td><td><strong>Working</strong>; silence changes nothing</td><td>Provider report → OSC 7501 <code>state=working</code></td></tr>
+<tr><td>A question or permission request arrives</td><td><strong>Blocked · Question / Permission</strong></td><td>Same report ID → <code>state=blocked</code> + kind</td></tr>
+<tr><td>Answer; the turn finishes</td><td><strong>Working → Idle / Done</strong></td><td>Report replacement; Task completion stays separate</td></tr>
+<tr><td>Detach, then return after settlement</td><td>Current report appears before another prompt</td><td>Retained records → <code>Output::snapshot</code> → replace viewer claims</td></tr>
+<tr><td>A report clears, or work fails</td><td>No label for a cleared claim; <strong>Error</strong> for a reported failure</td><td>Clear removes the named subtree; Error remains evidence</td></tr>
+</tbody></table>
+<h2>Desktop must complete the whole path</h2>
+<p class="flow">Actual terminal bytes → <strong>Ghostty parser</strong> → copied callback → <code>ProgramStatusSurface</code> → <code>session observe-status</code> → stored Session report → live Desktop update → <strong>pane + work summary</strong></p>
+<p>Session panes read the stored projection. A correct terminal-local callback does not prove that either visible label updated.</p>
+<blockquote><strong>Evidence boundary:</strong> existing tests cover decoded callbacks, presentation and CLI watch propagation. The running app parsing real bytes and displaying the result remains unverified. This page illustrates the contract; it is not a screenshot or demo result.</blockquote>
+<details><summary>Draft Desktop usage copy · live acceptance pending</summary><p>Submit a turn and follow its reported state in the pane and work summary. Working stays visible during quiet work. Blocked identifies a question, permission request or sign-in. A finished turn shows the provider's Idle or Done. Reconnect to recover the latest report without sending another prompt. A cleared report leaves no program-status label; it does not complete the Task.</p><p>Existing transport guidance and skill instructions need no rewrite.</p></details>
+<h2>What would disprove the repair?</h2>
+<p>A real provider finishes without a settlement report. Desktop stores Idle but still displays Working. Reconnect loses a pending question or restores an old claim. Any of these requires repair; elapsed time cannot stand in for missing evidence.</p>
+<p>The next demonstration compares provider bytes, stored/live records and visible labels in a disposable conversation on identified candidate builds. Controlled terminal reports separately cover clear, Error, malformed input and nested work. No input goes to unrelated conversations.</p>
+<h2>Review questions</h2>
+<ol>
+<li>Does any transition above need different behavior? Identify the row and expected state.</li>
+<li>Is there another Desktop location, beyond the pane and work summary, whose status should be included?</li>
+</ol>
+<p class="muted">These are invitations to correct the contract, not approval to ship. The Task remains at its demo step.</p>
+</main>
+</html>

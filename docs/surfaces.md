@@ -45,6 +45,9 @@ existing LF Sessions; `lf resume <session>` explicitly takes input or resumes sa
 provider history. An observing copy starts no new ordinary shells. Add
 `--new-shells` when creating a copy to include fresh shells; receipts count them.
 The Task viewer uses `n`/`p` to select a step and `l` to inspect its captured log.
+Explicitly opening a passive arrival adds its tools beside the existing panes
+once. Reopening a broad workspace recovers an exited follower in a new tab,
+preserving native edits in its old tab.
 
 New Task windows use saved Task pane intent, then the Wave's default, then the
 builtin arrangement. Desktop and Rex read the same semantic tools; their active
@@ -54,8 +57,9 @@ page has no terminal renderer and is reported as unsupported.
 
 The Workspace tab follows shared Work changes. A Task's first start adds a
 passive Task view without taking focus or starting a provider or shell. Closing
-that tab stops following; reopening reconciles missed arrivals. Closing a Task
-tab leaves it closed during following. Missing observations never retire work.
+that tab stops following; a later explicit open recovers following and reconciles
+missed arrivals. Closing a Task tab leaves it closed during following. Missing
+observations never retire work.
 
 ```bash
 lf desktop layout wave-default:<wave-id>             # read the default
@@ -76,14 +80,18 @@ Branch and PR intents pin both commit SHAs; `--head <sha>` reads that committed
 comparison without mixing in local changes. Editor settings may launch an
 external GUI. Paths remain separate arguments.
 
-`--server` selects a local Rex Unix server explicitly. Remote Tasks open through
+`--server` selects a local Rex Unix server explicitly. A native Rex caller can
+omit its server environment; automatic opening then resolves Rex's configured
+default and checks the caller block. If the caller belongs to another server,
+`--server` is currently required. Remote Tasks open through
 their recorded Machine's LF route and local Rex server, in separate native
 containers. Unavailable Machines stay unavailable; no local shell substitutes.
 `--no-focus` preserves the host's selected window.
 A successful server mutation does not establish app visibility or provider input
 readiness. Rex server restart can retain block IDs while replacing their commands
 with new shells; reopen preserves those blocks and does not replay commands.
-Lifecycle retirement remains owned by the shared retention policy.
+Rex occurrence reporting and native closure are not yet integrated with the
+shared retention policy; materialization alone does not register a lifetime hold.
 
 Herdr support is bounded to a selected Task on the current local server,
 identified by `HERDR_SOCKET_PATH`: create, reuse and focus a workspace, with direct

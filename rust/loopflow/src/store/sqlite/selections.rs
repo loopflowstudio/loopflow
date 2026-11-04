@@ -1320,9 +1320,7 @@ mod tests {
 
     #[test]
     fn wave_task_defaults_only_materialize_unsaved_task_layouts() {
-        use crate::work::selection::{
-            BrowserTab, PaneIntent, PaneTree, ShellTab, TaskLayoutTemplate, WorkWorkspaceKey,
-        };
+        use crate::work::selection::{TaskLayoutTemplate, WorkWorkspaceKey};
         use std::collections::BTreeSet;
         let (_dir, store, repo) = fixture();
         let task = WorkWorkspaceKey {
@@ -1341,43 +1339,9 @@ mod tests {
             kind: WorkWorkspaceKind::Wave,
             id: wave_id.to_string(),
         };
-        let tree = PaneTree::Split {
-            axis: crate::work::selection::SplitAxis::Vertical,
-            ratio: 0.6,
-            first: Box::new(PaneTree::Pane {
-                id: "session".into(),
-                content: PaneIntent::Session {
-                    session_id: None,
-                    location: None,
-                },
-            }),
-            second: Box::new(PaneTree::Split {
-                axis: crate::work::selection::SplitAxis::Horizontal,
-                ratio: 0.6,
-                first: Box::new(PaneTree::Pane {
-                    id: "shell".into(),
-                    content: PaneIntent::Shell {
-                        tabs: vec![ShellTab {
-                            id: "shell-one".into(),
-                            location: None,
-                            lf_process_id: None,
-                        }],
-                        selected: Some("shell-one".into()),
-                    },
-                }),
-                second: Box::new(PaneTree::Pane {
-                    id: "browser".into(),
-                    content: PaneIntent::Browser {
-                        location: None,
-                        tabs: vec![BrowserTab::Task { id: "task".into() }],
-                        selected: Some("task".into()),
-                    },
-                }),
-            }),
-        };
         let template = TaskLayoutTemplate {
             revision: 0,
-            tree,
+            tree: designated_tree(&WorkWorkspaceKind::Task),
             hidden: BTreeSet::new(),
         };
         let mut saved = store.save_wave_task_layout(&wave, &template).unwrap();

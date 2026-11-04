@@ -36,25 +36,27 @@ impl SqliteStore {
         host: &str,
         server: &str,
     ) -> StoreResult<Vec<HostWorkspace>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        let ids = {
-            let mut statement = snapshot.prepare("SELECT DISTINCT h.id FROM host_workspaces h JOIN host_work_occurrences o ON o.workspace_id=h.id WHERE h.repository_id=?1 AND h.host=?2 AND h.server=?3 AND json_extract(o.work_json,'$.kind')=?4 AND json_extract(o.work_json,'$.id')=?5 ORDER BY h.updated_at DESC")?;
-            let kind = serde_json::to_value(&work.kind)?;
-            let rows = statement
-                .query_map(
-                    params![work.repository, host, server, kind.as_str(), work.id],
-                    |row| row.get::<_, String>(0),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
-        };
-        ids.iter()
-            .filter_map(|id| read_workspace(&snapshot, id).transpose())
-            .collect()
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT DISTINCT h.id,h.repository_id,h.host,h.server,h.selection_json,h.copy_name,h.container_id,h.observation,h.updated_at
+             FROM host_workspaces h JOIN host_work_occurrences o ON o.workspace_id=h.id
+             WHERE h.repository_id=?1 AND h.host=?2 AND h.server=?3
+               AND json_extract(o.work_json,'$.kind')=?4 AND json_extract(o.work_json,'$.id')=?5
+             ORDER BY h.updated_at DESC",
+        )?;
+        let kind = serde_json::to_value(&work.kind)?;
+        let rows = statement.query_map(
+            params![work.repository, host, server, kind.as_str(), work.id],
+            |row| Ok(map_workspace(row)),
+        )?;
+        rows.map(|row| row?).collect()
     }
     pub fn host_workspace(&self, id: &str) -> StoreResult<Option<HostWorkspace>> {
-        read_workspace(&self.conn.lock().expect("store mutex poisoned"), id)
+        self.conn.lock().expect("store mutex poisoned").query_row(
+            "SELECT id,repository_id,host,server,selection_json,copy_name,container_id,observation,updated_at FROM host_workspaces WHERE id=?1",
+            [id],
+            |row| Ok(map_workspace(row)),
+        ).optional()?.transpose()
     }
 
     pub fn save_host_workspace(&self, workspace: &HostWorkspace) -> StoreResult<()> {
@@ -67,24 +69,11 @@ impl SqliteStore {
 
     pub fn host_occurrence(&self, id: &str) -> StoreResult<Option<HostOccurrence>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let row = conn.query_row(
+        conn.query_row(
             "SELECT workspace_id,work_json,destination_id,observation,updated_at FROM host_work_occurrences WHERE id=?1",
             [id],
-            |row| Ok((row.get(0)?, row.get::<_, String>(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-        ).optional()?;
-        row.map(
-            |(workspace_id, work, destination_id, observation, updated_at)| {
-                Ok(HostOccurrence {
-                    id: id.into(),
-                    workspace_id,
-                    work: serde_json::from_str(&work)?,
-                    destination_id,
-                    observation,
-                    updated_at,
-                })
-            },
-        )
-        .transpose()
+            |row| Ok(map_occurrence(row, id)),
+        ).optional()?.transpose()
     }
 
     pub fn save_host_occurrence(&self, occurrence: &HostOccurrence) -> StoreResult<()> {
@@ -96,35 +85,27 @@ impl SqliteStore {
     }
 }
 
-fn read_workspace(conn: &rusqlite::Connection, id: &str) -> StoreResult<Option<HostWorkspace>> {
-    let row = conn.query_row(
-            "SELECT id,repository_id,host,server,selection_json,copy_name,container_id,observation,updated_at FROM host_workspaces WHERE id=?1", [id],
-            |row| Ok((row.get::<_,String>(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get::<_,String>(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?)),
-        ).optional()?;
-    row.map(
-        |(
-            id,
-            repository_id,
-            host,
-            server,
-            selection,
-            copy_name,
-            container_id,
-            observation,
-            updated_at,
-        )| {
-            Ok(HostWorkspace {
-                id,
-                repository_id,
-                host,
-                server,
-                selection: serde_json::from_str(&selection)?,
-                copy_name,
-                container_id,
-                observation,
-                updated_at,
-            })
-        },
-    )
-    .transpose()
+fn map_workspace(row: &rusqlite::Row<'_>) -> StoreResult<HostWorkspace> {
+    Ok(HostWorkspace {
+        id: row.get(0)?,
+        repository_id: row.get(1)?,
+        host: row.get(2)?,
+        server: row.get(3)?,
+        selection: serde_json::from_str(&row.get::<_, String>(4)?)?,
+        copy_name: row.get(5)?,
+        container_id: row.get(6)?,
+        observation: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+fn map_occurrence(row: &rusqlite::Row<'_>, id: &str) -> StoreResult<HostOccurrence> {
+    Ok(HostOccurrence {
+        id: id.into(),
+        workspace_id: row.get(0)?,
+        work: serde_json::from_str(&row.get::<_, String>(1)?)?,
+        destination_id: row.get(2)?,
+        observation: row.get(3)?,
+        updated_at: row.get(4)?,
+    })
 }

@@ -7,7 +7,7 @@ pub(super) use herdr::open_herdr;
 use layout::{block, layout};
 
 use std::collections::{BTreeSet, HashMap};
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 use std::path::Path;
 use std::process::Command;
 
@@ -75,7 +75,7 @@ impl Rex {
         command.args(["--autostart=false", "--timeout", "2s", "-S", &self.server]);
         command.args(["api", "call", method, &serde_json::to_string(&args)?]);
         let output = super::run_host(command, "Rex")
-            .map_err(|error| anyhow::anyhow!("{}", error.reason()))?;
+            .map_err(|error| anyhow::anyhow!("Rex {method}: {}", error.reason()))?;
         serde_json::from_str(&output).context("Rex reply is unreadable; outcome is unknown")
     }
     fn local(server: Option<&str>) -> Result<Self> {
@@ -431,23 +431,29 @@ fn ensure_container(
     label: &str,
     follow: bool,
     cwd: &Path,
-) -> Result<String> {
+) -> Result<()> {
     let _opening = Opening::lock_key(&format!("host-workspace:{}", workspace.id))?;
     if let Some(current) = store.host_workspace(&workspace.id)? {
         *workspace = current;
     }
     let inventory = rex.sessions()?;
-    if let Some(id) = &workspace.container_id {
-        if inventory.iter().any(|item| item["session_id"] == *id) {
-            return Ok(id.clone());
-        }
+    let retained = inventory.iter().find(|item| {
+        workspace
+            .container_id
+            .as_ref()
+            .is_some_and(|id| item["session_id"] == *id)
+    });
+    if retained.is_none() && workspace.container_id.is_some() {
         workspace.observation = "closed".into();
     }
     let marker = format!("[lf:{}]", workspace.id);
-    if let Some(item) = inventory.iter().find(|item| {
-        item["label"]
-            .as_str()
-            .is_some_and(|label| label.ends_with(&marker))
+    // Native labels may have changed; the recorded identity wins over a marker.
+    if let Some(item) = retained.or_else(|| {
+        inventory.iter().find(|item| {
+            item["label"]
+                .as_str()
+                .is_some_and(|label| label.ends_with(&marker))
+        })
     }) {
         workspace.container_id = Some(
             item["session_id"]
@@ -468,13 +474,7 @@ fn ensure_container(
             None => label.into(),
         };
         let label: String = label.chars().filter(|c| !c.is_control()).take(80).collect();
-        let mut windows = if follow {
-            vec![
-                json!({"window_label":"Workspace", "layout":block("Workspace", cwd, viewer_argv(cwd, &["open","--host","rex","--watch-workspace", &workspace.id])?)}),
-            ]
-        } else {
-            Vec::new()
-        };
+        let mut windows = Vec::new();
         if let SelectionExpression::Wave { wave } = &workspace.selection.expression {
             if let Some(session) =
                 store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
@@ -493,13 +493,15 @@ fn ensure_container(
                 .into(),
         );
     }
-    workspace.observation = "retained".into();
-    workspace.updated_at = now();
-    store.save_host_workspace(workspace)?;
-    Ok(workspace
-        .container_id
-        .clone()
-        .expect("container was just recorded"))
+    if retained.is_none() {
+        workspace.observation = "retained".into();
+        workspace.updated_at = now();
+        store.save_host_workspace(workspace)?;
+    }
+    if follow {
+        ensure_follower(rex, workspace, cwd)?;
+    }
+    Ok(())
 }
 
 fn open(
@@ -523,6 +525,7 @@ fn open(
     )?;
     let explicit = target.task.is_some();
     if explicit && root.observation == "new" {
+        let inventory = rex.sessions()?;
         let work = &plan
             .contents
             .first()
@@ -533,8 +536,7 @@ fn open(
                 continue;
             }
             if let Some(container) = &existing.container_id {
-                if rex
-                    .sessions()?
+                if inventory
                     .iter()
                     .any(|item| item["session_id"] == *container)
                 {
@@ -675,7 +677,7 @@ fn task_workspace(
         .get_wave(wave)?
         .map(|wave| wave.slug().to_owned())
         .unwrap_or_else(|| wave.to_string());
-    ensure_container(store, rex, &mut group, &label, false, repo)?;
+    ensure_container(store, rex, &mut group, &label, true, repo)?;
     groups.insert(wave.clone(), group.clone());
     Ok(group)
 }
@@ -714,8 +716,7 @@ fn materialize(
         presentation.diff
     ));
     let _opening = Opening::lock_key(&format!("host-occurrence:{id}"))?;
-    let prior = store.host_occurrence(&id)?;
-    let mut occurrence = prior.unwrap_or(HostOccurrence {
+    let mut occurrence = store.host_occurrence(&id)?.unwrap_or(HostOccurrence {
         id,
         workspace_id: workspace.id.clone(),
         work: content.work.clone(),
@@ -726,7 +727,15 @@ fn materialize(
     let inventory = rex.windows(container)?;
     if let Some(id) = &occurrence.destination_id {
         if inventory.iter().any(|window| window["window_id"] == *id) {
-            return Ok((id.clone(), false, 0));
+            return activate(
+                store,
+                rex,
+                container,
+                &mut occurrence,
+                content,
+                repo,
+                presentation,
+            );
         }
         occurrence.observation = "closed".into();
         occurrence.updated_at = now();
@@ -745,10 +754,19 @@ fn materialize(
             .as_str()
             .context("Window has no identity")?
             .to_string();
-        occurrence.destination_id = Some(id.clone());
-        occurrence.observation = "retained".into();
+        occurrence.destination_id = Some(id);
+        // A lost creation reply does not establish whether tools were started.
+        // Preserve that uncertainty instead of turning it into replay permission.
         store.save_host_occurrence(&occurrence)?;
-        return Ok((id, false, 0));
+        return activate(
+            store,
+            rex,
+            container,
+            &mut occurrence,
+            content,
+            repo,
+            presentation,
+        );
     }
     anyhow::ensure!(
         occurrence.observation != "unknown",
@@ -770,9 +788,78 @@ fn materialize(
         .context("Rex create reply omitted window identity; outcome is unknown")?
         .to_string();
     occurrence.destination_id = Some(id.clone());
-    occurrence.observation = "retained".into();
+    occurrence.observation = if presentation.passive || content.location.is_none() {
+        "passive"
+    } else {
+        "retained"
+    }
+    .into();
     store.save_host_occurrence(&occurrence)?;
     Ok((id, true, shells))
+}
+
+// Activation adds the selected tools beside the native arrival. It never replaces
+// a block: the arrival may already contain edits or native splits.
+fn activate(
+    store: &SqliteStore,
+    rex: &Rex,
+    container: &str,
+    occurrence: &mut HostOccurrence,
+    content: &ViewContent,
+    repo: &Path,
+    presentation: Presentation<'_>,
+) -> Result<(String, bool, usize)> {
+    let id = occurrence
+        .destination_id
+        .clone()
+        .context("Task window is unavailable")?;
+    anyhow::ensure!(
+        occurrence.observation != "activating",
+        "Tool activation outcome is unknown; no duplicate was attempted"
+    );
+    if presentation.passive || occurrence.observation != "passive" || content.location.is_none() {
+        return Ok((id, false, 0));
+    }
+    let (layout, shells) = layout(store, content, repo, presentation)?;
+    occurrence.observation = "activating".into();
+    store.save_host_occurrence(occurrence)?;
+    rex.call("session.new_split", json!({"session_id":container,"window_id":id,"direction":"horizontal","side":"after","focus":false,"layout":layout}))?;
+    occurrence.observation = "retained".into();
+    store.save_host_occurrence(occurrence)?;
+    Ok((id, true, shells))
+}
+
+// The OS lock proves follower liveness, including after a host restart. Native
+// window/block identities alone cannot prove that their commands survived.
+fn follower_file(id: &str) -> Result<std::fs::File> {
+    let directory = crate::store::lf_home_dir().join("open");
+    std::fs::create_dir_all(&directory)?;
+    Ok(std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join(format!("{}.follower", identity(id))))?)
+}
+
+fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path) -> Result<()> {
+    use fs2::FileExt;
+    let mut file = follower_file(&workspace.id)?;
+    match file.try_lock_exclusive() {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+        Err(error) => return Err(error.into()),
+    }
+    let mut pending = String::new();
+    file.read_to_string(&mut pending)?;
+    anyhow::ensure!(
+        pending.is_empty(),
+        "Workspace follower launch is pending or unknown; no duplicate was attempted"
+    );
+    file.write_all(b"pending")?;
+    file.sync_all()?;
+    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":block("Workspace",cwd,viewer_argv(cwd,&["open","--host","rex","--watch-workspace", &workspace.id])?)}))?;
+    Ok(())
 }
 
 fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
@@ -797,6 +884,11 @@ fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
 }
 
 fn follow(id: &str) -> Result<()> {
+    use fs2::FileExt;
+    let follower = follower_file(id)?;
+    // The creator briefly owns this lock until the native launch returns.
+    follower.lock_exclusive()?;
+    follower.set_len(0)?;
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     // Creation records the pending occurrence before starting this native block.
     let mut workspace = store

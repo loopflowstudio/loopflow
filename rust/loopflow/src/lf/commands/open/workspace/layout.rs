@@ -11,23 +11,30 @@ pub(super) fn block(label: &str, cwd: &Path, argv: Vec<String>) -> Value {
     json!({"block":{"flavor":"com.superlogical.terminal.shell","label":label,"options":{"cwd":cwd,"shell":"none","command":argv}}})
 }
 
+fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
+    json!({"split":{
+        "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
+        "ratio": ratio, "before": before, "after": after,
+    }})
+}
+
 pub(super) fn layout(
     store: &SqliteStore,
     content: &ViewContent,
     repo: &Path,
     presentation: Presentation<'_>,
 ) -> Result<(Value, usize)> {
-    if let Some(location) = &content.location {
-        anyhow::ensure!(
-            location.machine_id == store.local_machine()?.id.as_str(),
-            "Task runs on Machine {}; no local tool was created",
-            location.machine_id
-        );
-    }
-    if presentation.passive || content.location.is_none() {
+    let Some(location) = &content.location else {
+        return Ok((task_view(content, repo)?, 0));
+    };
+    anyhow::ensure!(
+        location.machine_id == store.local_machine()?.id.as_str(),
+        "Task runs on Machine {}; no local tool was created",
+        location.machine_id
+    );
+    if presentation.passive {
         return Ok((task_view(content, repo)?, 0));
     }
-    let location = content.location.as_ref().expect("location checked");
     let cwd = Path::new(&location.cwd);
     anyhow::ensure!(
         cwd.is_dir(),
@@ -37,34 +44,55 @@ pub(super) fn layout(
         let conversation = conversation(content, cwd, presentation.session)?;
         return Ok((
             if presentation.diff {
-                json!({"split":{"direction":"horizontal","ratio":0.618,"before":conversation,"after":tool(content,cwd,"changes",None,Some(&ChangeComparison::WorkingTree { base: "parent".into() }))?}})
+                split(
+                    SplitAxis::Vertical,
+                    0.618,
+                    conversation,
+                    tool(
+                        content,
+                        cwd,
+                        "changes",
+                        None,
+                        Some(&ChangeComparison::WorkingTree {
+                            base: "parent".into(),
+                        }),
+                    )?,
+                )
             } else {
                 conversation
             },
             0,
         ));
     }
-    let saved = store.pane_layout(&content.work)?;
-    let mut shells = 0;
-    let tree = if let Some(saved) = &saved {
-        render_tree(
-            &saved.tree,
-            &saved.hidden,
-            content,
-            cwd,
-            &mut shells,
-            !presentation.omit_shells,
-        )?
-    } else {
+    let Some(saved) = store.pane_layout(&content.work)? else {
         let conversation = conversation(content, cwd, None)?;
         if presentation.omit_shells {
             return Ok((conversation, 0));
         }
-        shells = 1;
-        Some(
-            json!({"split":{"direction":"horizontal","ratio":0.618,"before":conversation,"after":{"split":{"direction":"vertical","ratio":0.618,"before":task_view(content,cwd)?,"after":tool(content,cwd,"shell",None,None)?}}}}),
-        )
+        return Ok((
+            split(
+                SplitAxis::Vertical,
+                0.618,
+                conversation,
+                split(
+                    SplitAxis::Horizontal,
+                    0.618,
+                    task_view(content, cwd)?,
+                    tool(content, cwd, "shell", None, None)?,
+                ),
+            ),
+            1,
+        ));
     };
+    let mut shells = 0;
+    let tree = render_tree(
+        &saved.tree,
+        &saved.hidden,
+        content,
+        cwd,
+        &mut shells,
+        !presentation.omit_shells,
+    )?;
     Ok((
         match tree {
             Some(tree) => tree,
@@ -140,46 +168,72 @@ fn render_tree(
                 render_tree(first, hidden, content, cwd, shells, new_shells)?,
                 render_tree(second, hidden, content, cwd, shells, new_shells)?,
             ) {
-                (Some(before), Some(after)) => Some(
-                    json!({"split":{"direction":if *axis == SplitAxis::Vertical {"horizontal"} else {"vertical"},"ratio":ratio,"before":before,"after":after}}),
-                ),
+                (Some(before), Some(after)) => Some(split(*axis, *ratio, before, after)),
                 (first, second) => first.or(second),
             }
         }
         PaneTree::Pane { content: pane, .. } => {
-            Some(match pane {
-                PaneIntent::Session { session_id, .. } => {
-                    conversation(content, cwd, session_id.as_deref())?
-                }
-                PaneIntent::Shell { tabs, selected } => {
-                    if !new_shells {
-                        return Ok(None);
-                    }
-                    if let Some(tab) = tabs.iter().find(|tab| Some(&tab.id) == selected.as_ref()) {
-                        anyhow::ensure!(tab.location.as_ref().is_none_or(|place| Some(place) == content.location.as_ref()), "Saved shell belongs to another location; it remains in its source host");
-                    }
-                    *shells += 1;
-                    tool(content, cwd, "shell", None, None)?
-                }
-                PaneIntent::Browser {
-                    location,
-                    tabs,
-                    selected,
-                } => {
-                    anyhow::ensure!(
-                        location
-                            .as_ref()
-                            .is_none_or(|place| Some(place) == content.location.as_ref()),
-                        "Saved Files belong to another location; source state was retained"
-                    );
-                    match tabs.iter().find(|tab| Some(tab.id()) == selected.as_deref()) {
-                        Some(BrowserTab::Files {tabs,selected,..}) => tool(content,cwd,"files",tabs.iter().find(|tab| Some(&tab.id) == selected.as_ref()).map(|tab|tab.path.as_str()),None)?,
-                        Some(BrowserTab::Changes {comparison,..}) => tool(content,cwd,"changes",None,Some(comparison))?,
-                        Some(BrowserTab::Url {url,..}) => bail!("Web page {url} remains in the source host; no terminal renderer is configured"),
-                        _ => task_view(content, cwd)?,
-                    }
-                }
-            })
+            render_pane(pane, content, cwd, shells, new_shells)?
         }
     })
+}
+
+fn render_pane(
+    pane: &PaneIntent,
+    content: &ViewContent,
+    cwd: &Path,
+    shells: &mut usize,
+    new_shells: bool,
+) -> Result<Option<Value>> {
+    Ok(Some(match pane {
+        PaneIntent::Session { session_id, .. } => {
+            conversation(content, cwd, session_id.as_deref())?
+        }
+        PaneIntent::Shell { tabs, selected } => {
+            if !new_shells {
+                return Ok(None);
+            }
+            if let Some(tab) = tabs.iter().find(|tab| Some(&tab.id) == selected.as_ref()) {
+                anyhow::ensure!(
+                    tab.location
+                        .as_ref()
+                        .is_none_or(|place| Some(place) == content.location.as_ref()),
+                    "Saved shell belongs to another location; it remains in its source host"
+                );
+            }
+            *shells += 1;
+            tool(content, cwd, "shell", None, None)?
+        }
+        PaneIntent::Browser {
+            location,
+            tabs,
+            selected,
+        } => {
+            anyhow::ensure!(
+                location
+                    .as_ref()
+                    .is_none_or(|place| Some(place) == content.location.as_ref()),
+                "Saved Files belong to another location; source state was retained"
+            );
+            match tabs
+                .iter()
+                .find(|tab| Some(tab.id()) == selected.as_deref())
+            {
+                Some(BrowserTab::Files { tabs, selected, .. }) => {
+                    let path = tabs
+                        .iter()
+                        .find(|tab| Some(&tab.id) == selected.as_ref())
+                        .map(|tab| tab.path.as_str());
+                    tool(content, cwd, "files", path, None)?
+                }
+                Some(BrowserTab::Changes { comparison, .. }) => {
+                    tool(content, cwd, "changes", None, Some(comparison))?
+                }
+                Some(BrowserTab::Url { url, .. }) => {
+                    bail!("Web page {url} remains in the source host; no terminal renderer is configured")
+                }
+                _ => task_view(content, cwd)?,
+            }
+        }
+    }))
 }

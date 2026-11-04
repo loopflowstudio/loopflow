@@ -1,10 +1,10 @@
 //! `lf open`: resolve Work through its shared owners, choose one presentation
-//! destination, and ask that destination to open the Work's conversation.
+//! destination, and open the Work there.
 //!
 //! Hosts translate only documented caller context and open/focus operations.
-//! They never select a conversation: every terminal destination runs
-//! `lf session resume` for the resolved Work, whose admission and attachment
-//! fences own reuse. Desktop resolves the same address through `--link --json`.
+//! Rex and Herdr materialize native tools with passive conversation viewers;
+//! other terminal routes use `lf session resume`, whose attachment fences own
+//! reuse. Desktop resolves the same address through `--link --json`.
 
 mod workspace;
 
@@ -1516,10 +1516,21 @@ fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError
 
 /// Run one host request with a finite timeout and return its stdout.
 fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
+    // Native inventories can exceed a pipe buffer. Spool while the child runs
+    // so waiting for exit cannot deadlock behind an unread stdout/stderr pipe.
+    let capture = || tempfile::tempfile().map_err(|error| RouteError::Definite(error.to_string()));
+    let mut stdout = capture()?;
+    let mut stderr = capture()?;
+    let output = stdout
+        .try_clone()
+        .map_err(|error| RouteError::Definite(error.to_string()))?;
+    let errors = stderr
+        .try_clone()
+        .map_err(|error| RouteError::Definite(error.to_string()))?;
     let mut child = command
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(output)
+        .stderr(errors)
         .spawn()
         .map_err(|error| RouteError::Definite(format!("cannot run {host}: {error}")))?;
     let (status, timed_out) =
@@ -1527,13 +1538,23 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
             .map_err(|error| RouteError::Unknown(error.to_string()))?;
     if timed_out {
         let _ = child.kill();
+        let _ = child.wait();
         return Err(RouteError::Unknown(format!(
             "{host} did not answer within {}s",
             HOST_TIMEOUT.as_secs()
         )));
     }
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
+    use std::io::Seek;
+    stdout
+        .rewind()
+        .map_err(|error| RouteError::Unknown(error.to_string()))?;
+    stderr
+        .rewind()
+        .map_err(|error| RouteError::Unknown(error.to_string()))?;
+    let stdout =
+        std::io::read_to_string(stdout).map_err(|error| RouteError::Unknown(error.to_string()))?;
+    let stderr =
+        std::io::read_to_string(stderr).map_err(|error| RouteError::Unknown(error.to_string()))?;
     if status.success() {
         Ok(stdout)
     } else {
@@ -1544,11 +1565,6 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
             format!("{host} refused: {detail}")
         }))
     }
-}
-
-fn drain(pipe: Option<impl std::io::Read>) -> String {
-    pipe.and_then(|pipe| std::io::read_to_string(pipe).ok())
-        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1800,6 +1816,21 @@ fn print_unknown(unknown: &[String]) {
 mod tests {
     use super::{named_bundle, DesktopApp, DESKTOP_BUNDLE};
     use std::path::PathBuf;
+
+    #[test]
+    fn host_inventory_can_exceed_pipe_capacity() {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "head -c 131072 /dev/zero; head -c 131072 /dev/zero >&2",
+        ]);
+        assert_eq!(
+            super::run_host(command, "fixture")
+                .unwrap_or_else(|error| panic!("{}", error.reason()))
+                .len(),
+            131072
+        );
+    }
 
     #[test]
     fn desktop_bundle_defaults_to_the_release_id() {

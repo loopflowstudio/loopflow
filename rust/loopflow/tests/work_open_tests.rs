@@ -7,6 +7,19 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{register_task_without_pr, EnvGuard};
 
+/// Native host fixtures own the server and every terminal process it starts.
+struct NativeServer(std::process::Child);
+
+impl Drop for NativeServer {
+    fn drop(&mut self) {
+        // SAFETY: each fixture starts its server as a new process group leader.
+        unsafe {
+            libc::kill(-(self.0.id() as i32), libc::SIGTERM);
+        }
+        let _ = self.0.wait();
+    }
+}
+
 /// The built CLI with no inherited Loopflow or host context, and `bin` first on PATH.
 fn lf(home: &Path, cwd: &Path, bin: Option<&Path>, args: &[&str]) -> Output {
     lf_with(home, cwd, bin, &[], args)
@@ -1052,18 +1065,8 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
 fn rex_native_workspace_keeps_window_and_block_identity() {
     use std::os::unix::process::CommandExt;
-    use std::process::{Child, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
-    struct Server(Child);
-    impl Drop for Server {
-        fn drop(&mut self) {
-            // SAFETY: this test created the child as its own process group.
-            unsafe {
-                libc::kill(-(self.0.id() as i32), libc::SIGTERM);
-            }
-            let _ = self.0.wait();
-        }
-    }
     let root = tempfile::Builder::new()
         .prefix("rex498-")
         .tempdir_in("/tmp")
@@ -1123,7 +1126,7 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    let mut server = Server(child);
+    let mut server = NativeServer(child);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !socket.exists() {
         assert!(
@@ -1283,6 +1286,96 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         ],
     ));
     assert_eq!(repeated["receipts"][0]["destination"], passive["window_id"]);
+    let activated = call("session.view", serde_json::json!({"session_id":wave}));
+    let task_window = |view: &Value| {
+        view["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|window| window["window_id"] == passive["window_id"])
+            .unwrap()
+            .clone()
+    };
+    let activated_window = task_window(&activated);
+    assert!(
+        activated_window["layers"][0]["blocks"]
+            .as_array()
+            .unwrap()
+            .len()
+            > block_count
+    );
+    let passive_id = &passive["layers"][0]["blocks"][0]["block_id"];
+    assert!(activated_window["layers"][0]["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|block| &block["block_id"] == passive_id));
+    json(&lf(
+        &home,
+        repo.path(),
+        None,
+        &[
+            "open",
+            "--task",
+            "INF-124",
+            "--host",
+            "rex",
+            "--server",
+            &endpoint,
+            "--no-focus",
+            "--json",
+        ],
+    ));
+    let reopened = call("session.view", serde_json::json!({"session_id":wave}));
+    assert_eq!(
+        task_window(&reopened),
+        activated_window,
+        "Reopening must not add or replace tools"
+    );
+    assert_eq!(reopened["active_window_id"], arrived["active_window_id"]);
+    assert_eq!(sessions(&home), 0);
+
+    let follower_window = reopened["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|window| window["label"] == "Workspace")
+        .unwrap()["window_id"]
+        .clone();
+    call(
+        "session.close_window",
+        serde_json::json!({"session_id":wave,"window_id":follower_window}),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        json(&lf(
+            &home,
+            repo.path(),
+            None,
+            &[
+                "open",
+                &repository_url,
+                "--host",
+                "rex",
+                "--server",
+                &endpoint,
+                "--no-focus",
+                "--json",
+            ],
+        ));
+        let recovered = call("session.view", serde_json::json!({"session_id":wave}));
+        if recovered["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|window| window["label"] == "Workspace")
+        {
+            assert_eq!(task_window(&recovered), activated_window);
+            break;
+        }
+        assert!(Instant::now() < deadline, "Follower did not recover");
+        std::thread::sleep(Duration::from_millis(50));
+    }
     for session in call("session.list", serde_json::json!({}))["sessions"]
         .as_array()
         .unwrap()
@@ -1302,18 +1395,8 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
 fn herdr_native_workspace_reuses_its_native_tools() {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::{net::UnixStream, process::CommandExt};
-    use std::process::{Child, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
-    struct Server(Child);
-    impl Drop for Server {
-        fn drop(&mut self) {
-            // SAFETY: the isolated server is the leader of this test's process group.
-            unsafe {
-                libc::kill(-(self.0.id() as i32), libc::SIGTERM);
-            }
-            let _ = self.0.wait();
-        }
-    }
     let root = tempfile::Builder::new()
         .prefix("h498-")
         .tempdir_in("/tmp")
@@ -1326,7 +1409,7 @@ fn herdr_native_workspace_reuses_its_native_tools() {
     let herdr = std::env::var_os("LOOPFLOW_TEST_HERDR")
         .expect("set LOOPFLOW_TEST_HERDR to the installed Herdr executable");
     let config = root.path().join("c");
-    let mut server = Server(
+    let mut server = NativeServer(
         Command::new(herdr)
             .args(["--session", "probe", "server"])
             .env_clear()

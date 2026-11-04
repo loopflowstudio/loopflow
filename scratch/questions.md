@@ -1,5 +1,8 @@
 # LOO-691 questions
 
-- Open (Jack Heart): which `lf` performs host releases: the installed build, or
-  a home that follows main? The README paragraph from the fetch fix records the
-  installed build until this is decided.
+- Decided (Jack Heart, 2026-11-04): the host's installed `lf` performs releases.
+  No separate release home. Jack's dedicated machine already follows `dev`, so
+  release fixes reach it from green main, without the one-release lag.
+  `release/README.md` should say the dedicated host follows `dev`.
+- Assumed (LOO-691): an issue closed as a duplicate drops its hold, like not
+  planned; the surviving issue needs the label to keep holding `stable`.

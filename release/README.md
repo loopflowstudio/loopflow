@@ -55,9 +55,10 @@ repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
 
-The release host runs its installed `lf` on any stream; it need not follow
-`dev`. To release with a fix the installed build lacks, `lf install --dev`
-first: a main build refuses a store missing main's migrations.
+The dedicated release host runs its installed `lf` and follows `dev`, so
+release fixes reach it from green main. On a Machine that follows another
+stream, `lf install --dev` before releasing with a fix the installed build
+lacks: a main build refuses a store missing main's migrations.
 
 Failed release-PR checks enter the same watched CI repair as `lf pr land`.
 Release preparation still rebuilds version metadata when main advances.
@@ -143,15 +144,20 @@ first launch after an update runs `lf install adopt`, which migrates the store
 and links `lf` into the new bundle without moving files.
 
 ```bash
-lf task create --title "Sessions lose their name" --regressed-in v0.15.3
-lf task edit LOO-12 --regressed-in v0.15.3      # mark an existing bug
+gh issue create --title "Sessions lose their name" --label regressed-in:v0.15.3
+gh issue edit 12 --add-label regressed-in:v0.15.3    # mark an existing bug
+gh issue close 12 --reason completed                 # the fix landed
+gh issue close 12 --reason "not planned"             # it was not a regression
 ```
 
-A regression is a bug Task marked with the release it regressed in. While it
-is open, `stable` stays below that release. Completing it (landing the fix)
-makes the first release published afterwards eligible once it soaks; releases
-in between still carry the bug and stay skipped. The run logs which Task holds
-`stable`. It reads the release Machine's Tasks, never Linear.
+A regression is a GitHub issue on the repository being released, labelled with
+the release it regressed in. While it is open, `stable` stays below that
+release. Closing it as completed makes the first release published afterwards
+eligible once it soaks; releases in between still carry the bug and stay
+skipped. Closing it as not planned or as a duplicate, or removing the label,
+drops the hold. Every Machine reads the same issues. The run logs which issue
+holds `stable`. When GitHub can't be read, the release still publishes,
+`stable` stays put, and `lf release status` says why; `lf release check` fails.
 
 ## What we took from other projects
 
@@ -161,7 +167,7 @@ Surveyed 2026-10-28 for LOO-669 (ideas only; no code taken).
 |----------|---------|------|
 | Cut every release from main; no paired minor/patch snapshot | Docker, opencode, Codex alphas, Ghostty tip | Adopted: a minor is a bigger number cut from main like any release |
 | Stable is a pointer to a build that already shipped, moved forward, never rebuilt | Claude Code, Rust, Zed, Deno | Adopted: `stable` follows releases ≥ 7 days old |
-| Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: `--regressed-in` holds `stable` below a regression |
+| Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: a `regressed-in:vX.Y.Z` issue holds `stable` below a regression |
 | One appcast per stream, chosen by a setting | Ghostty | Adopted: `appcast-preview.xml` and `appcast-stable.xml` |
 | Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Adopted: `Packages (main)` signs and notarizes the app for `dev` |
 | Refuse newer-format data and name which side to update | Rex, Firefox | Adopted: `can_open` before every install, never "delete the store" |

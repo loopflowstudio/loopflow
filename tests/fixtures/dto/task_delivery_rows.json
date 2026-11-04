@@ -10,7 +10,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -296,7 +295,6 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -582,7 +580,6 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -868,7 +865,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": "2026-10-08",
-      "regressed_in": "v0.15.3",
       "sync": {
         "connected": false,
         "changes": []
@@ -941,7 +937,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": "2026-10-08",
-      "regressed_in": "v0.15.3",
       "sync": {
         "connected": false,
         "changes": []
@@ -1014,7 +1009,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -1300,7 +1294,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []

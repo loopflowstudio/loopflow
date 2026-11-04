@@ -2026,9 +2026,6 @@ until `lf ship`."
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
-        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
-        #[arg(long, value_name = "VERSION")]
-        regressed_in: Option<String>,
         /// Start it as `lf task run` does, then open its conversation here
         #[arg(long)]
         run: bool,
@@ -2163,9 +2160,6 @@ until `lf ship`."
         /// Assignee identity; provider user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
-        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
-        #[arg(long, value_name = "VERSION")]
-        regressed_in: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },

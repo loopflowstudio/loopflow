@@ -690,11 +690,6 @@ struct TaskPlanningFactsView: View {
                     .font(Typography.body(12.5))
                     .foregroundStyle(palette.textSecondary)
             }
-            if let version = task.task.regressedIn {
-                Text("Regressed in \(version)")
-                    .font(Typography.body(12.5))
-                    .foregroundStyle(palette.textSecondary)
-            }
         }
     }
 }

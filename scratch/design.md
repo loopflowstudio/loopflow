@@ -1,8 +1,10 @@
 # LOO-691: releases resume after their PR merges, and regressions live on GitHub
 
 Jack Heart, 2026-11-04: fetch fix and GitHub regressions are one PR (#1780).
-Notion removal and planning parity moved to LOO-726. The separate release home
-is out of this diff; `loo-691-combined` (e8ffd80ca0, local) keeps that work.
+Notion removal and planning parity moved to LOO-726. Jack chose the installed
+`lf` for host releases. Jack's dedicated machine already follows `dev`, so there is
+no release lag, and
+the separate release home is dropped.
 
 ## Done
 
@@ -19,7 +21,7 @@ gh issue create --title "Sessions lose their name" --label regressed-in:v0.15.3
 
 While that issue is open, `stable` stays below v0.15.3. Closing it as completed
 makes the first release published afterwards eligible once it soaks. Closing it
-as not planned, or removing the label, drops the hold. Every Machine reads the
+as not planned or as a duplicate, or removing the label, drops the hold. Every Machine reads the
 same issues, so nothing depends on which Machine marked it or runs the release.
 Jack Heart chose the issue as the record: Tasks carry no regression field.
 
@@ -37,10 +39,11 @@ Jack Heart chose the issue as the record: Tasks carry no regression field.
   create|edit`, `regressed_in` on Task, `TaskUpdate`, DTOs and fixtures, Swift
   (`WaveWorkMap.swift`), `Edit`/`WorkValue::TaskRegressedIn`,
   `regression_tasks`, `planning_explain`, and their tests.
-- `tasks.regressed_in` shipped in v0.15.1. Stop reading and writing it; do not
-  drop it here (destructive schema changes are staged). A released `lf` may
-  still put `TaskRegressedIn` on a Git plan ref, so this build must read such a
-  document and ignore the value. Check how unknown WorkValues decode.
+- `tasks.regressed_in` shipped in v0.15.1. Nothing reads it now; do not drop it
+  here (destructive schema changes are staged). Released `lf` requires
+  `task_regressed_in` on every Task it imports from a Git plan ref, so it
+  round-trips unread as `HistoricalTaskRegressedIn`, as `task_paused` does.
+  LOO-727 removes it after those builds exit.
 - Docs: `release/README.md` (mark, clear, soak) and the `release-run` skill.
   Delete "It reads the release Machine's Tasks, never Linear."
 
@@ -49,9 +52,13 @@ Jack Heart chose the issue as the record: Tasks carry no regression field.
 release_tests with the fake `gh`: an open labelled issue holds `stable`; closed
 as completed releases the next soaked release; closed as not planned does not
 hold; a failing `gh issue` read publishes, holds `stable` and fails `release
-check`. A store fixture at v0.15.1 with `regressed_in` set still opens.
+check`. A released mark crosses the plan ref unread
+(`a_released_regression_mark_round_trips_the_plan_ref_unread`).
+
+Check: `release_tests` 80/80, focused lib and `dto_fixtures` passing; affected
+suites and Swift belong to gate.
 
 ## Not in this diff
 
-- The release home (undecided), Notion, planning parity (LOO-726).
-- Dropping `tasks.regressed_in` after old builds exit.
+- Notion and planning parity (LOO-726).
+- Dropping `tasks.regressed_in` after old builds exit (LOO-727).

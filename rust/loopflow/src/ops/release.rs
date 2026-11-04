@@ -421,11 +421,7 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
                 .iter()
                 .find(|release| preview_tag.as_deref() == Some(release.tag.as_str()))
                 .map(|release| release.published_at),
-            Some(stable_stream(
-                &releases,
-                &regressions(&main_repo)?,
-                chrono::Utc::now(),
-            )),
+            Some(read_stable_stream(&main_repo, &releases)),
         )
     } else {
         (None, None)
@@ -451,6 +447,15 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Releas
     }
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    if target.completion == ReleaseCompletion::GithubRelease {
+        // A home that cannot read them learns it here, before a run publishes
+        // and holds `stable`.
+        regressions(&main_repo).map_err(|error| {
+            OpsError::Message(format!(
+                "this home cannot read regressions, so stable would hold: {error}"
+            ))
+        })?;
+    }
     collect_release_changes(&main_repo, &target)
 }
 
@@ -4305,11 +4310,11 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
         .collect())
 }
 
-/// A regression Task as the stable rule reads it: releases from `version` on
-/// carry the bug, until the first release published after its fix landed.
+/// A regression as the stable rule reads it: releases from `version` on carry
+/// the bug, until the first release published after its issue closed.
 #[derive(Debug)]
 struct Regression {
-    task: String,
+    issue: u64,
     version: (u64, u64, u64),
     fixed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -4323,34 +4328,101 @@ impl Regression {
     }
 }
 
-/// The repository's regression Tasks. A done Task whose completion time is
-/// unreadable keeps covering, so a stalled `stable` is the failure, not a bug.
-fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::ops::planning_sync::planning_store())?;
-    let tasks = store
-        .sqlite
-        .regression_tasks(&repo.to_string_lossy())
-        .map_err(|error| OpsError::Message(format!("read regression Tasks: {error}")))?;
-    Ok(tasks
-        .into_iter()
-        .filter(|task| task.state.as_deref() != Some("canceled"))
-        .filter_map(|task| {
-            let fixed_at = if task.state.as_deref() == Some("completed") {
-                task.completed_at
-                    .as_deref()
-                    .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-                    .map(|at| at.with_timezone(&chrono::Utc))
-            } else {
-                None
-            };
-            Some(Regression {
-                version: parse_version(task.regressed_in.as_deref()?)?,
-                task: task.identifier,
-                fixed_at,
-            })
+const REGRESSED_IN_LABEL: &str = "regressed-in:";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhRegressionIssue {
+    number: u64,
+    state: String,
+    state_reason: Option<String>,
+    closed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl GhRegressionIssue {
+    /// Open holds; closed as not planned or as a duplicate holds nothing. A
+    /// closed issue without a time keeps covering, so a stalled `stable` is
+    /// the failure, not a bug.
+    fn regression(self, version: (u64, u64, u64)) -> Option<Regression> {
+        let fixed_at = match (self.state.as_str(), self.state_reason.as_deref()) {
+            ("OPEN", _) => None,
+            (_, Some("NOT_PLANNED" | "DUPLICATE")) => return None,
+            _ => self.closed_at,
+        };
+        Some(Regression {
+            issue: self.number,
+            version,
+            fixed_at,
         })
-        .collect())
+    }
+}
+
+/// The repository's regressions: its GitHub issues labelled
+/// `regressed-in:vX.Y.Z`, so every Machine reads the same ones.
+fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
+    let mut regressions = Vec::new();
+    for label in labels(repo)? {
+        let Some(version) = label
+            .strip_prefix(REGRESSED_IN_LABEL)
+            .and_then(parse_version)
+        else {
+            continue;
+        };
+        let json = run_stdout(
+            repo,
+            "gh",
+            &[
+                "issue",
+                "list",
+                "--state",
+                "all",
+                "--label",
+                &label,
+                "--limit",
+                "1000",
+                "--json",
+                "number,state,stateReason,closedAt",
+            ],
+        )?;
+        let issues: Vec<GhRegressionIssue> = serde_json::from_str(&json)
+            .map_err(|err| OpsError::Parse(format!("failed to parse issues: {err}")))?;
+        regressions.extend(
+            issues
+                .into_iter()
+                .filter_map(|issue| issue.regression(version)),
+        );
+    }
+    Ok(regressions)
+}
+
+/// `--search` is a fuzzy match that misses labels, so this reads them all.
+fn labels(repo: &Path) -> OpsResult<Vec<String>> {
+    let names = run_stdout(
+        repo,
+        "gh",
+        &[
+            "label", "list", "--limit", "10000", "--json", "name", "--jq", ".[].name",
+        ],
+    )?;
+    Ok(names.lines().map(str::to_string).collect())
+}
+
+/// The stable stream against the repository's regressions. Unread regressions
+/// hold `stable` where it is and say why.
+fn read_stable_stream(repo: &Path, releases: &[PublishedRelease]) -> StableStream {
+    match regressions(repo) {
+        Ok(regressions) => stable_stream(releases, &regressions, chrono::Utc::now()),
+        Err(error) => StableStream {
+            current: releases
+                .iter()
+                .find(|release| release.is_latest)
+                .map(StreamRelease::from),
+            next: None,
+            holds: vec![StableHold::RegressionsUnread {
+                reason: error.to_string(),
+            }],
+        },
+    }
 }
 
 /// The release `stable` should point at now, when that is ahead of where it
@@ -4401,8 +4473,12 @@ pub enum StableHold {
         until: chrono::DateTime<chrono::Utc>,
     },
     Regression {
-        task: String,
+        issue: u64,
         tags: Vec<String>,
+    },
+    /// The repository's regressions could not be read; `stable` stays put.
+    RegressionsUnread {
+        reason: String,
     },
 }
 
@@ -4412,8 +4488,11 @@ impl std::fmt::Display for StableHold {
             Self::Soaking { tag, until } => {
                 write!(formatter, "{tag} soaks until {}", until.format("%Y-%m-%d"))
             }
-            Self::Regression { task, tags } => {
-                write!(formatter, "{task} holds {}", tags.join(", "))
+            Self::Regression { issue, tags } => {
+                write!(formatter, "#{issue} holds {}", tags.join(", "))
+            }
+            Self::RegressionsUnread { reason } => {
+                write!(formatter, "regressions unread: {reason}")
             }
         }
     }
@@ -4450,8 +4529,8 @@ fn stable_stream(
                 .filter(|release| regression.covers(release))
                 .map(|release| release.tag.clone())
                 .collect();
-            (!tags.is_empty()).then(|| StableHold::Regression {
-                task: regression.task.clone(),
+            (!tags.is_empty()).then_some(StableHold::Regression {
+                issue: regression.issue,
                 tags,
             })
         })
@@ -4485,11 +4564,7 @@ fn advance_stable(
     progress: &impl Progress,
     lock: &ReleaseLock,
 ) -> OpsResult<()> {
-    let stable = stable_stream(
-        &published_releases(repo, target)?,
-        &regressions(repo)?,
-        chrono::Utc::now(),
-    );
+    let stable = read_stable_stream(repo, &published_releases(repo, target)?);
     for hold in &stable.holds {
         progress.status(&hold.to_string());
     }
@@ -4629,7 +4704,7 @@ mod tests {
 
     fn regression(version: &str, fixed_days_ago: Option<i64>) -> Regression {
         Regression {
-            task: "LOO-1".to_string(),
+            issue: 1,
             version: parse_version(version).unwrap(),
             fixed_at: fixed_days_ago.map(|days| chrono::Utc::now() - chrono::TimeDelta::days(days)),
         }
@@ -4693,7 +4768,7 @@ mod tests {
         assert_eq!(stable.current.unwrap().tag, "v0.15.2");
         assert_eq!(stable.next.unwrap().tag, "v0.15.9");
         let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
-        assert_eq!(holds, ["LOO-1 holds v0.16.2, v0.16.1, v0.16.0"]);
+        assert_eq!(holds, ["#1 holds v0.16.2, v0.16.1, v0.16.0"]);
 
         let soaking = stable_stream(&releases[..1], &[], now);
         assert_eq!(

@@ -1473,7 +1473,7 @@ fn daily_run_moves_stable_to_the_newest_soaked_release() {
             ("v0.9.2", 8, false),
             ("v0.9.1", 20, true),
         ],
-        None,
+        Regressions::NoLabels,
     );
     assert_eq!(
         effects,
@@ -1482,14 +1482,14 @@ fn daily_run_moves_stable_to_the_newest_soaked_release() {
 }
 
 #[test]
-fn an_open_regression_task_holds_stable_below_the_release_it_regressed_in() {
+fn an_open_regression_issue_holds_stable_below_the_release_it_regressed_in() {
     let effects = run_stable_advance(
         &[
             ("v0.9.3", 9, false),
             ("v0.9.2", 12, false),
             ("v0.9.1", 20, true),
         ],
-        Some("0.9.3"),
+        Regressions::labelled("v0.9.3", regression_issue("OPEN", "", None)),
     );
     assert_eq!(
         effects,
@@ -1498,14 +1498,78 @@ fn an_open_regression_task_holds_stable_below_the_release_it_regressed_in() {
 }
 
 #[test]
-fn release_status_names_the_task_holding_stable() {
+fn a_regression_closed_as_completed_releases_the_next_soaked_release() {
+    let effects = run_stable_advance(
+        &[
+            ("v0.9.3", 9, false),
+            ("v0.9.2", 12, false),
+            ("v0.9.1", 20, true),
+        ],
+        Regressions::labelled("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10))),
+    );
+    assert_eq!(
+        effects,
+        "publisher promote --tag v0.9.3\ngh release edit v0.9.3 --latest\n"
+    );
+}
+
+#[test]
+fn a_release_published_before_the_fix_stays_held() {
+    let effects = run_stable_advance(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10))),
+    );
+    assert_eq!(effects, "");
+}
+
+#[test]
+fn a_reopened_regression_holds_stable_again() {
+    let effects = run_stable_advance(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled("v0.9.2", regression_issue("OPEN", "REOPENED", Some(20))),
+    );
+    assert_eq!(effects, "");
+}
+
+#[test]
+fn a_regression_closed_as_not_planned_holds_nothing() {
+    let effects = run_stable_advance(
+        &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
+        Regressions::labelled("v0.9.2", regression_issue("CLOSED", "NOT_PLANNED", Some(1))),
+    );
+    assert_eq!(
+        effects,
+        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
+    );
+}
+
+#[test]
+fn unread_regressions_hold_stable_and_say_why() {
+    let releases = [("v0.9.2", 12, false), ("v0.9.1", 20, true)];
+    assert_eq!(run_stable_advance(&releases, Regressions::Unreadable), "");
+
+    let (repo, _log, _env) = stable_fixture(&releases, Regressions::Unreadable);
+    let stable = release_status(repo.path(), None).unwrap().stable.unwrap();
+    assert_eq!(stable.current.unwrap().tag, "v0.9.1");
+    assert_eq!(stable.next, None);
+    let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+    assert_eq!(holds.len(), 1);
+    assert!(holds[0].contains("issues are disabled"), "{holds:?}");
+
+    let error = release_check(repo.path(), None).unwrap_err().to_string();
+    assert!(error.contains("stable would hold"), "{error}");
+    assert!(error.contains("issues are disabled"), "{error}");
+}
+
+#[test]
+fn release_status_names_the_issue_holding_stable() {
     let (repo, _log, _env) = stable_fixture(
         &[
             ("v0.9.3", 9, false),
             ("v0.9.2", 2, false),
             ("v0.9.1", 20, true),
         ],
-        Some("0.9.3"),
+        Regressions::labelled("v0.9.3", regression_issue("OPEN", "", None)),
     );
 
     let status = release_status(repo.path(), None).unwrap();
@@ -1517,15 +1581,64 @@ fn release_status_names_the_task_holding_stable() {
     assert_eq!(stable.next, None);
     let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
     assert_eq!(holds.len(), 2);
-    assert!(holds[0].ends_with(" holds v0.9.3"), "{holds:?}");
+    assert_eq!(holds[0], "#7 holds v0.9.3");
     assert!(holds[1].starts_with("v0.9.2 soaks until "), "{holds:?}");
 }
 
+/// What the fake `gh` answers for the repository's regressions.
+enum Regressions {
+    /// A repository with no labels, for which `gh` prints nothing.
+    NoLabels,
+    Labelled {
+        label: String,
+        issue: serde_json::Value,
+    },
+    /// Labels read; the issue read fails.
+    Unreadable,
+}
+
+impl Regressions {
+    fn labelled(version: &str, issue: serde_json::Value) -> Self {
+        Self::Labelled {
+            label: format!("regressed-in:{version}"),
+            issue,
+        }
+    }
+
+    /// The `label list` and `issue list` arms of a fake `gh` script.
+    fn gh_arms(&self) -> String {
+        let (labels, issues) = match self {
+            Self::NoLabels => (String::new(), String::new()),
+            Self::Labelled { label, issue } => (
+                format!("bug\nregressed-in:soon\n{label}"),
+                format!(
+                    "  'issue list') [ \"$6\" = '{label}' ] || exit 1; echo '{}'; exit 0;;\n",
+                    serde_json::json!([issue])
+                ),
+            ),
+            Self::Unreadable => (
+                "regressed-in:v0.9.2".to_string(),
+                "  'issue list') echo 'issues are disabled' >&2; exit 1;;\n".to_string(),
+            ),
+        };
+        format!("  'label list') printf '%s' '{labels}'; exit 0;;\n{issues}")
+    }
+}
+
+/// Issue #7 as `gh issue list --json` prints it, closed `closed_days_ago`.
+fn regression_issue(state: &str, reason: &str, closed_days_ago: Option<i64>) -> serde_json::Value {
+    let closed_at = closed_days_ago
+        .map(|days| (chrono::Utc::now() - chrono::TimeDelta::days(days)).to_rfc3339());
+    serde_json::json!({
+        "number": 7, "state": state, "stateReason": reason, "closedAt": closed_at,
+    })
+}
+
 /// Run the daily release with nothing to release against published `(tag,
-/// days ago, latest)` releases, optionally after marking a regression Task,
-/// and return the stream effects it logged.
-fn run_stable_advance(releases: &[(&str, i64, bool)], regressed_in: Option<&str>) -> String {
-    let (repo, log, _env) = stable_fixture(releases, regressed_in);
+/// days ago, latest)` releases and `regressions`, and return the stream
+/// effects it logged.
+fn run_stable_advance(releases: &[(&str, i64, bool)], regressions: Regressions) -> String {
+    let (repo, log, _env) = stable_fixture(releases, regressions);
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
 
@@ -1534,11 +1647,11 @@ fn run_stable_advance(releases: &[(&str, i64, bool)], regressed_in: Option<&str>
 }
 
 /// A `completion: github-release` repository whose fake `gh` lists published
-/// `(tag, days ago, latest)` releases and logs stream effects, optionally
-/// with a regression Task marked.
+/// `(tag, days ago, latest)` releases and `regressions`, and logs stream
+/// effects.
 fn stable_fixture(
     releases: &[(&str, i64, bool)],
-    regressed_in: Option<&str>,
+    regressions: Regressions,
 ) -> (TestRepo, PathBuf, EnvGuard) {
     let repo = TestRepo::new();
     let log = repo.path().join("effects.log");
@@ -1553,8 +1666,9 @@ fn stable_fixture(
         .collect();
     let releases = serde_json::Value::Array(releases);
     let gh = format!(
-        "#!/bin/sh\n[ \"$1\" != --version ] || exit 0\ncase \"$1 $2\" in\n  'release view') echo '{{\"isDraft\":false}}'; exit 0;;\n  'release list') cat <<'JSON'\n{releases}\nJSON\n    exit 0;;\n  'release edit') echo \"gh $*\" >> '{log}'; exit 0;;\n  'pr list'|'run list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $*\" >&2\nexit 1\n",
-        log = log.display()
+        "#!/bin/sh\n[ \"$1\" != --version ] || exit 0\ncase \"$1 $2\" in\n  'release view') echo '{{\"isDraft\":false}}'; exit 0;;\n  'release list') cat <<'JSON'\n{releases}\nJSON\n    exit 0;;\n  'release edit') echo \"gh $*\" >> '{log}'; exit 0;;\n  'pr list'|'run list') echo '[]'; exit 0;;\n{regressions}esac\necho \"unexpected gh invocation: $*\" >&2\nexit 1\n",
+        log = log.display(),
+        regressions = regressions.gh_arms(),
     );
     let env = EnvGuard::new(&[("gh", gh.as_str())]);
     repo.create_file(
@@ -1573,17 +1687,6 @@ fn stable_fixture(
     repo.commit("Configure release streams");
     git(&repo, &["push", "origin", "HEAD"]);
     git(&repo, &["tag", "v0.9.3"]);
-    if let Some(version) = regressed_in {
-        let task = loopflow::ops::task::task_create(
-            repo.path(),
-            None,
-            Some("Sessions lose their name".into()),
-            None,
-            Some(format!("v{version}")),
-        )
-        .unwrap();
-        assert_eq!(task.regressed_in, Some(format!("v{version}")));
-    }
     (repo, log, env)
 }
 

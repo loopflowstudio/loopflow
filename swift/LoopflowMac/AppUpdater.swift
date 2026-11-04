@@ -27,20 +27,10 @@ enum AppUpdates {
         }
     }
 
-    /// Follow the public entry just as `lf install` does, including custom locations.
-    static func isInstalled(_ bundle: URL, environment: [String: String] = ProcessInfo.processInfo.environment,
-                            home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
-        let installed: URL
-        if let applications = environment["LF_APPLICATIONS_DIR"], !applications.isEmpty {
-            installed = URL(filePath: applications).appending(path: "Loopflow.app")
-        } else {
-            let directory = environment["LF_INSTALL_DIR"].map { URL(filePath: $0) }
-                ?? home.appending(path: ".local/bin")
-            let helper = directory.appending(path: "lf").resolvingSymlinksInPath()
-            let app = helper.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            installed = app.lastPathComponent == "Loopflow.app" ? app : URL(filePath: "/Applications/Loopflow.app")
-        }
-        return bundle.resolvingSymlinksInPath().standardizedFileURL == installed.resolvingSymlinksInPath().standardizedFileURL
+    /// `/Applications/Loopflow.app` (or `LF_APPLICATIONS_DIR`'s), the bundle `lf install` manages.
+    static func isInstalled(_ bundle: URL, environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        let applications = environment["LF_APPLICATIONS_DIR"] ?? "/Applications"
+        return bundle.standardizedFileURL.path == URL(filePath: applications).appending(path: "Loopflow.app").standardizedFileURL.path
     }
 
     /// Whether this launch is the first of a bundle version `lf install adopt` hasn't recorded.
@@ -97,7 +87,7 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @unchecked Sendable {
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
     }
 
-    /// Check through Sparkle from the app's update action (`loopflow://update`).
+    /// `lf install` asks a running app to update (`loopflow://update`).
     @MainActor func checkForUpdates() {
         controller?.checkForUpdates(nil)
     }

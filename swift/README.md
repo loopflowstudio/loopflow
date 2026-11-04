@@ -673,8 +673,7 @@ launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
 
-The installed app updates itself (`AppUpdater`, Sparkle), including a custom
-location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
+Only `/Applications/Loopflow.app` updates itself (`AppUpdater`, Sparkle): it
 reads its stream from `~/.lf/config.yaml`, asks its bundled
 `lf install can-open` before installing, and runs `lf install adopt` on the first
 launch of a new version. Dev builds, and a Machine recording `dev` (which has no

@@ -624,24 +624,35 @@ classify commits as foreign. Preserve every commit. Stack forks still own squash
 refreshing them during publication can restore files main deleted. Disposable
 CLI proofs pass; installed Etude and hosted acceptance remain unproved.
 
-## Scheduled release accounting (LOO-285, curated 2026-11-04)
+## Scheduled release accounting (LOO-285, source reconciliation October 2)
 
-Jack Heart retained one execution per wake for frozen missed dues. Acceptance
-requires two adjacent original dues, two automatic executions, publication and
-required verification without manual repair. Collapsed misses are not settlements.
+Jack Heart retained one execution per wake for frozen missed dues. Completion
+still requires two adjacent original configured dues, two automatic executions,
+at least one artifact publication, required verification and no manual repair.
+Collapsed misses supply accounting coverage, never additional settlements.
 
-Publication uncertainty preserves candidates, receipts and repair ownership;
-continuation transfers no Home or lock authority. Release memory owns operation
-recovery; Continuation lessons retain cleanup custody.
+Publication uncertainty blocks candidate replacement; retain rejected candidates,
+original dues, physical cron exits, publisher stages, settlement proofs and repair
+ownership independently. Same-Home continuation does not transfer old-Home authority.
+Child-held mutation locks and checkout leases protect separate scopes; cleanup
+reacquires after descriptor closure. Parent death, elapsed time and reset/stash
+helpers cannot confer cleanup rights or replace a held lock inode.
 
-October 5's unchanged-schedule repair yielded no qualifying pair: three
-opportunities had unknown timezone provenance and zero executions. September 24's
-36 telemetry failures remain contrary evidence. Installed accounting, Intelligence
-handoff and two automatic settlements remain unproved. LOO-357/#1441 removed only
-the UI-host prerequisite. Jack's demo waiver/landing authorization and fuller
-evidence, granting no new installation, schedule/Home or review authority:
-`c65d1643a0b93afb165df91f6227d48f6e9e583c:.lf/wave/infrastructure/MEMORY.md`,
-this heading.
+October 5 evidence: installed jobs repaired at unchanged 09:00/10:00 schedules;
+three opportunities have unknown timezone provenance, zero executions and no
+qualifying pair. Schedule repair cannot backfill settlement; September 24's 36
+telemetry failures remain contrary evidence. Reproduce a current failure before
+repeating analytics repair. Recovery fixtures are not Scheduled evidence. No
+installed pass or accepted Intelligence handoff is established.
+
+LOO-357/PR #1441 removed the UI-host prerequisite; Jack Heart waived the
+interactive demo and authorized #1419 landing October 4. Installed acceptance and
+two automatic settlements remain unproved; no local reconciliation authorizes
+installation, schedule/Home changes or review completion. Reporting proves no
+operation success; activation proves neither accounting installation nor
+qualifying settlement. Dated proofs and authorizations:
+`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
+Scheduled release accounting.
 
 ## Operator acceptance and account direction (2026-10-04)
 
@@ -916,44 +927,30 @@ behavior, LOO-296 restoration and LOO-286/287 configured continuity remain
 unproved. Exact obligations also remain at `71bbdb80d2` under this heading.
 UI observation schedules no work.
 
-## Installation and command scope (curated 2026-11-04)
+## Installation and command scope (curated 2026-10-11)
 
-Jack Heart closed LOO-292 on machine evidence and approved #1529 landing.
-Dated authorization, cadence/app and ECR evidence:
-`c65d1643a0b93afb165df91f6227d48f6e9e583c:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Cached disposable proofs establish no hosted recovery; persistent
-throttling is infrastructure failure. Release memory owns download/entry lessons.
-
-Install owns artifacts; sync owns checkouts. Reinstall cannot heal a truncated
-gate. Recovery and exact-store preflight precede promotion. Preserve matching Mac
-bytes, launchd labels/logs and custom directories. OS-account Home bypasses
-HOME/LF_HOME: activation/recovery proofs need disposable accounts. Simulated
+Jack Heart closed LOO-292 on machine evidence October 4. History, cadence/app checks:
+`243ed91a36:wave/infrastructure/MEMORY.md`, Installation and command scope/closure.
+Install owns artifacts; sync owns checkouts. Reinstall cannot heal a truncated gate.
+Pinned artifacts activate through promotion; candidate recovery and exact-store
+preflight precede authorization. Verify matching macOS bytes and preserve launchd
+labels/logs/custom directories without source maintenance. OS-account Home bypasses
+HOME/LF_HOME: verify activation failure/recovery in disposable accounts. Simulated
 launchctl proves no timing; asynchronous copy caused mismatched bytes/segfault.
+Ubuntu 24.04 passed where Debian lacked GLIBC.
 
 LOO-287 retains command-scope reduction and unproved ordinary-folder/provider
 completion and target-first resolution. Distinguish non-Git folders from Git errors;
-never invent routes. Setup/receipt redesign remain unselected; phase proves no
-advancement.
+never invent repositories/routes. Setup and receipt redesign remain unselected;
+a phase alone proves no advancement.
 
-## Upgrade continuity (LOO-502/723, reconciled 2026-11-04)
+Jack Heart approved #1529 for landing October 11 (`ff9c03dd`). ECR quota
+failure and bounded-retry evidence: `72dbe0344f73722bd90a4f392c3e801cd976b80f:.lf/wave/infrastructure/MEMORY.md`,
+Installation and command scope. Cached disposable proofs establish no hosted
+recovery; persistent throttling fails as infrastructure. [Release memory](release/MEMORY.md)
+retains cold-download/operation-entry evidence; reporting proves no operation success.
 
-LOO-723: Jack Heart requested coherent installation and desktop/mini rollout.
-A CLI-only receipt left Desktop's helper unable to read the store; version/CLI
-success proves no pairing. Receipt-backed promotion
-validates the complete pair and reconciles matching files. CLI-only omits initial
-app setup, a headless review assumption. No helper fallback or bundle splicing.
-
-Resolve acquisition, freshness and promotion together after receipt recovery:
-explicit destination, public-linked app, then default. Independent environment
-selection loses custom locations under schedules. Recovery keeps its pinned paths;
-downloaded installers need the resolved target even when their scripts are older.
-
-Promotion stops only Desktop; helpers retain images/bundles until retirement.
-Jack's November 4 report of reopened Sessions losing input/crashing supersedes
-liveness as recovery proof. LOO-724 owns hooks/reconnect; causation remains unproved.
-Release's entry-point lesson applies: fixtures and interim main repair prove no
-corrected-build rollout. Both Machines need identity/store/scheduled checks and
-existing Sessions completing turns with continued interaction. Landing is insufficient.
+## Upgrade continuity (LOO-502, 2026-10-17)
 
 Jack Heart removed executable pinning after #1587 review, accepting natural
 failure and retry in the same Session/checkout; delivery stays review-only.

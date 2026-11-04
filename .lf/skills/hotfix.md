@@ -82,14 +82,10 @@ env $(env | grep -o '^LF_[A-Z_]*' | sed 's/^/-u /') \
 
 Add a test that fails without the fix when one is cheap. A failure stops the run.
 
-## 4. Build the complete installation
+## 4. One release build
 
-On a Machine with Desktop installed, deliver the fix in a complete matching
-signed app and CLI before installing it. A standalone hotfix binary cannot
-update that installation. Never replace its bundled helper separately.
-
-On an app-free Machine, a standalone draft-free build on the store's exact
-frontier can be promoted:
+A plain release build is enough: promote accepts any draft-free build on the
+store's exact frontier and refuses one carrying a migration draft.
 
 ```bash
 cargo build --release -p loopflow --bin lf
@@ -98,9 +94,7 @@ cargo build --release -p loopflow --bin lf
 
 ## 5. Preview, then promote
 
-Run promote with the binary you just built; it promotes itself. For a Desktop
-installation, supply the complete signed bundle with `--app-source` and the
-existing app location with `--app-target` on both preview and promotion.
+Run promote with the binary you just built; it promotes itself.
 
 ```bash
 ./target/release/lf self install promote --cli-target ~/.local/bin/lf --preview
@@ -116,8 +110,8 @@ pending migration` or `REFUSED` means the build carries schema work, so stop.
 Rerun step 1's `active.json` command: it now prints the hotfix commit and the
 new active CLI path.
 
-With Desktop installed, verify that the public CLI links into the promoted
-bundle and its helper reports the same build and opens the store.
+Desktop's bundled helper (`/Applications/Loopflow.app/Contents/MacOS/lf`) is
+not part of a CLI promote. Name it as stale in the report.
 
 ## 6. Roll over stale processes
 
@@ -127,11 +121,16 @@ Running lf processes keep their binary until they exit. Count them by binary:
 ps -axo comm= | grep -E '/\.lf/bin/lf-|Loopflow\.app/Contents/MacOS/lf' | sort | uniq -c
 ```
 
-Existing idle retirement moves eligible owners onto the installed build. Leave
-busy Sessions and running Graphs on their images; do not kill their helpers or
-delete renamed bundles they still use. Promotion owns Desktop replacement and
-reopening. A surviving process alone does not prove a usable Session: verify
-reconnect and a completed turn through the configured path.
+Anything not on the active CLI path from step 5 is stale. Until LOO-634 ships
+a rollover command, move only what is safe to stop by hand:
+
+- Sessions that are available (`lf session list --available --all --json`) and
+  have no running Graph can be stopped: `kill` the stale `lf session serve`
+  process that hosts them. They resume on the new binary with
+  `lf resume`.
+- Leave busy Sessions and running Graphs alone. They pick up the fix when they
+  exit. List them in the report with their binary.
+- Quit and reopen Desktop only when the person using it agrees.
 
 Report the counts by binary before and after.
 

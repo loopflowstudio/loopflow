@@ -621,20 +621,13 @@ def test_deleted_python_test_falls_back_to_the_full_suite():
     assert command.argv[-5:] == ["uv", "run", "--no-sync", "pytest", "python/tests/"]
 
 
-def test_macos_cleanup_proof_builds_before_network_isolation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_mechanical_cleanup_checks_need_no_cli_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
-    for changed in (["scripts/loopflow-dev.py"], ["python/tests/test_disk_cleanup.py"]):
-        commands = gate._python_commands(changed)
-        build = next(i for i, command in enumerate(commands) if command.label == "python-cli")
-        isolated = next(i for i, command in enumerate(commands) if command.label == "python")
-        assert build < isolated
-        assert commands[build].argv[:6] == ["cargo", "build", "-p", "loopflow", "--bin", "lf"]
-    assert all(
-        command.label != "python-cli"
-        for command in gate._python_commands(["python/tests/test_gate_bounded.py"])
-    )
+    commands = gate._python_commands(["python/tests/test_disk_cleanup.py"])
+    assert [command.label for command in commands] == ["python-dependencies", "python"]
+    refresh = gate._python_commands(["python/tests/test_checkout_refresh.py"])
+    labels = [command.label for command in refresh]
+    assert labels.index("python-cli") < labels.index("python")
 
 
 def test_python_verifier_change_runs_the_full_python_suite():
@@ -896,3 +889,25 @@ def test_resource_timeout_stops_its_cleanup_child(tmp_path, monkeypatch):
     assert "timed out" in failure
     time.sleep(1.2)
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("failure", [None, "command", "postflight"])
+def test_disposable_artifacts_keep_the_gate_outcome(tmp_path, monkeypatch, failure):
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: tmp_path / "evidence")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: artifacts)
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+
+    def resources(recover):
+        report = _resource_report()
+        if not recover and failure == "postflight":
+            report["ok"] = False
+            return report, "resource breach"
+        return report, None
+
+    monkeypatch.setattr(gate, "_run_resource_check", resources)
+    plan = _plan(_cmd(["bash", "-c", "exit 1" if failure == "command" else "true"], "probe"))
+    assert gate.run_plans([plan]) == (1 if failure else 0)
+    assert json.loads((artifacts / ".cleanup-evidence.json").read_text()) == {
+        "outcome": "failed" if failure else "passed"
+    }

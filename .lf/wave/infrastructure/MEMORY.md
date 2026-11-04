@@ -983,24 +983,29 @@ proof and limits: `38dd8abd09:.lf/wave/infrastructure/MEMORY.md`, this heading;
 design: `4ca3bbe3d7b30b8a4bb05d466ad55f5eeb368201:scratch/loo-502.md`.
 MTG-117's unknown exit is not proven upgrade-caused.
 
-## Moving onto the installed lf (LOO-705, 2026-11-02)
+## Moving onto the installed lf (LOO-705/724, reconciled 2026-11-04)
 
-Jack Heart requested one rollover mechanism after 0.15.0 refused 0.15.1 attaches
-and rollover moved none. Replacement from durable state, without negotiation,
-remains the headless choice pending Jack. `installation::superseded` compares
-the owner's build with its launch entry (`resolve_lf_binary`), shared by owner,
-resume and inventory. Removed/replaced/superseded owners end when waiting and
-send `<entry> session resume <id>`; viewers execute it without replaying argv
-(LOO-708 execs viewers before Clap). Resume watches an answering busy owner;
-an unanswering one ends with a cut-turn report. Rollover sweeps all superseded
-owners; viewed/artifact-set filters are deleted. Graph runners stay; steps use
-the entry. Jack calls LOO-709's 2m grace sufficient for "move always."
+Jack Heart selected one rollover mechanism; durable-state replacement remains a
+headless choice. Successors never replay; EOF stays unknown. Earlier decisions: `cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`,
+this heading.
 
-Cross-build transport adds optional fields to existing Response variants, never
-variants (`moved` broke 0.15.0). Compare against the relaunch entry, not the
-viewer binary. Unreadable advanced stores keep retrying; mismatched app/CLI
-builds restart each other's owners. Fixtures prove neither Mac `lf resume LOO-618`
-nor a Graph's next step on a newer build.
+Jack Heart requires affected Sessions to complete turns and sustain input with
+identity/history/Work/drafts intact. LOO-582's viewer-write timeout and LOO-718's
+freeze remain unexplained. Interrupted viewers prove no crash; `Uncertain` input
+and same-thread resume prove no draft preservation.
+
+LOO-724 reproduces SQLite contention blocking owner control. Nonblocking writes
+and timed retry retain input before delivery without PTY spinning. Regression:
+control, viewer return, once-only delivery after unlock; no incident attribution.
+
+Dead-leader observation needs no local lifeline; fixtures retain natural-exit
+recovery and persistent-survivor refusal without signaling. Candidate four-turn
+proof covers owner replacement, drafts/history and viewer return without replay,
+not older wire/store or configured recovery. Release's entry-point lesson applies.
+
+The parent's signed `ac8e088f5f` Desktop repair pairs CLI/helper and retains old
+runtimes; it predates LOO-724's repairs and proves no resumed turn. LOO-723 owns
+policy/mini rollout; affected-Session recovery stays coordinated with the parent.
 
 ## Shipped history
 

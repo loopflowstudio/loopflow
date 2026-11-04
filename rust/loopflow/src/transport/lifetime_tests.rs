@@ -175,7 +175,7 @@ fn ending_order_fixture() {
             "UPDATE agent_sessions SET interactive=1, transport_lf_process_id=?1 WHERE id='session'",
             [owner.as_str()],
         )?;
-        assert!(store.owner_waits_for_person(&owner)?);
+        assert_eq!(store.owner_retention(&owner)?, None);
         let result = super::serve(&["/bin/sleep".into(), "30".into()], true);
         assert_eq!(result.unwrap_err().to_string(), "ending candidate vetoed");
         let _ = std::fs::remove_file(super::endpoint(&owner)?);

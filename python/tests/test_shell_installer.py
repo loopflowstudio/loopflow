@@ -134,6 +134,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         "LFTEST_LOG": str(tmp_path / "curl.log"),
         "LFTEST_PROMOTE_LOG": str(tmp_path / "promote.log"),
         "LF_INSTALL_CLI_ONLY": "1",
+        "LF_APPLICATIONS_DIR": str(tmp_path / "Applications"),
         "HOME": str(tmp_path / "home"),
     }
 
@@ -299,3 +300,22 @@ def test_channel_and_version_conflict(installer: Path, env: dict[str, str]) -> N
     result = _run(installer, ["--channel", "preview", "--version", "0.9.9"], env)
     assert result.returncode != 0
     assert "not both" in result.stderr
+
+
+@pytest.mark.parametrize("cli_only", ["environment", "flag"])
+def test_cli_only_keeps_an_existing_app_in_the_update(
+    installer: Path, env: dict[str, str], tmp_path: Path, cli_only: str
+) -> None:
+    applications = tmp_path / "Applications"
+    (applications / "Loopflow.app").mkdir(parents=True)
+    app_env = {
+        **env,
+        "LF_INSTALL_CLI_ONLY": "1" if cli_only == "environment" else "0",
+        "LFTEST_UNAME_SYSTEM": "Darwin",
+        "LFTEST_UNAME_ARCH": "arm64",
+    }
+    result = _run(installer, ["--cli-only"] if cli_only == "flag" else [], app_env)
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "promote.log").read_text().splitlines()[0].split()
+    assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
+    assert "/Loopflow.dmg" in (tmp_path / "curl.log").read_text()

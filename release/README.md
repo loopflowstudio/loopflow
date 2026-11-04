@@ -38,13 +38,19 @@ copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
 On a Mac with Loopflow.app, `~/.local/bin/lf` links to the app's bundled
 `Contents/MacOS/lf`, so the terminal and Desktop always run one build; elsewhere
-it links to the selected build under `~/.lf/bin`. `lf install` replaces a
-Loopflow.app that isn't running. A running app that updates itself is asked to
-update instead, and `lf` follows the new bundle; an older running app is quit,
-replaced and reopened. Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI
-without replacing or stopping Desktop and its clients. Promotion advances the shared store through
-the install switch and retains the prior published artifacts;
-it does not restart Tasks or Flows.
+it links to the selected build under `~/.lf/bin`. `lf install` promotes the complete
+signed bundle through one recoverable installation switch, quitting and reopening
+Desktop when necessary. `LF_INSTALL_CLI_ONLY=1` skips initial Desktop setup on an
+app-free Machine; an existing app always updates with the CLI. Direct promotion
+can reuse an installed bundle only when its helper matches the candidate.
+Freshness checks the public link, bundled helper identity and store compatibility,
+as well as the app's release version. A matching version string alone is insufficient.
+
+Running Session owners and Graphs keep their process images. Promotion never kills
+bundled `lf` processes; renamed bundles remain while they are in use. Existing
+idle rollover moves eligible owners onto the installed build. Installed files and
+already-running processes can therefore report different builds during an update.
+Promotion retains the prior published artifacts and does not restart Tasks or Graphs.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.

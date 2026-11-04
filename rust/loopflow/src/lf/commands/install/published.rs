@@ -23,8 +23,6 @@ const MAIN_PACKAGES: &str = "main-packages.yml";
 const MAIN_APP: &str = "Loopflow-dmg";
 /// The reader floors a release's build opens (`lf self install reader-catalog`).
 const READER_CATALOG: &str = "reader-catalog.txt";
-/// Starts Loopflow.app's own update check (`LoopflowApp.handleDeepLink`).
-const APP_UPDATE_LINK: &str = "loopflow://update";
 
 /// The build line an install follows (`release/README.md`, Streams).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,9 +70,6 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
     if stream == Stream::Dev {
         return main_build();
     }
-    if cfg!(target_os = "macos") {
-        finish_adoption(&applications_dir())?;
-    }
     let client = http_client()?;
     let tag = stream_release(&client, stream)?;
     install_release(&client, stream, &tag)
@@ -103,13 +98,18 @@ fn stream_release(client: &Client, stream: Stream) -> Result<String> {
 
 fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
     let directory = install_dir()?;
-    let applications = applications_dir();
+    let applications = installs_app().then(applications_dir);
     let stream = stream.as_str();
-    if is_current(
-        &directory,
-        tag,
-        installs_app().then_some(applications.as_path()),
-    ) {
+    if is_current(&directory, tag, applications.as_deref()) {
+        // Matching files can still have an interrupted receipt or a stale gate.
+        // Let the same promotion owner reconcile them before reporting success.
+        promote_build(
+            &directory.join("lf"),
+            &directory,
+            applications
+                .map(|root| root.join("Loopflow.app"))
+                .as_deref(),
+        )?;
         println!("{stream} {tag} is already installed.");
         return Ok(());
     }
@@ -118,24 +118,6 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
         println!(
             "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
              Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
-        );
-        return Ok(());
-    }
-    let app = applications.join("Loopflow.app");
-    if installs_app() && updates_itself(&app) && app_is_running(&app)? {
-        // Replacing a running bundle under it is Sparkle's job, not ours.
-        let status = Command::new("/usr/bin/open")
-            .args(["-g", APP_UPDATE_LINK])
-            .status()
-            .context("ask Loopflow.app to update")?;
-        if !status.success() {
-            bail!(
-                "could not ask {} to update ({status}); quit it and rerun `lf install`",
-                app.display()
-            );
-        }
-        println!(
-            "{stream} is at {tag}; Loopflow.app is running, so it installs the update and `lf` follows it."
         );
         return Ok(());
     }
@@ -175,33 +157,14 @@ pub fn adopt() -> Result<()> {
     )
 }
 
-/// Adopt Loopflow.app when Sparkle replaced it and its first launch hasn't run
-/// yet: the app's `lf` is ahead of the store, so every terminal `lf` refuses
-/// until something migrates it. Moves no files.
-fn finish_adoption(applications: &Path) -> Result<()> {
-    let lf = applications.join("Loopflow.app/Contents/MacOS/lf");
-    if preflight_verdict(&lf).as_deref() != Some("promote_and_migrate") {
-        return Ok(());
-    }
-    let status = Command::new(&lf)
-        .args(["install", "adopt"])
-        .status()
-        .with_context(|| format!("adopt {}", lf.display()))?;
-    if !status.success() {
-        bail!(
-            "adopting the updated {} failed ({status}); fix the error above and rerun `lf install`",
-            lf.display()
-        );
-    }
-    Ok(())
-}
-
-/// Loopflow.app installs beside `lf` on a Mac unless `LF_INSTALL_CLI_ONLY=1`.
+/// CLI-only omits initial Desktop setup; an existing app stays in the installation.
 fn installs_app() -> bool {
-    cfg!(target_os = "macos") && std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1")
+    cfg!(target_os = "macos")
+        && (std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1")
+            || applications_dir().join("Loopflow.app").exists())
 }
 
-fn applications_dir() -> PathBuf {
+pub(super) fn applications_dir() -> PathBuf {
     std::env::var_os("LF_APPLICATIONS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/Applications"))
@@ -357,37 +320,46 @@ fn main_build() -> Result<()> {
     }
     let candidate = temporary.path().join("lf");
     let directory = install_dir()?;
-    let mut promote = Command::new(&candidate);
-    promote
-        .args(["self", "install", "promote", "--cli-target"])
-        .arg(directory.join("lf"))
-        .arg("--sync-skills");
     // Mounted until promotion has copied the app out of it.
     let image = installs_app()
         .then(|| DiskImage::download(run, temporary.path()))
         .transpose()?;
-    if let Some(image) = &image {
-        let applications = applications_dir();
-        // Promotion quits a running app, replaces it and reopens it.
-        promote
-            .arg("--app-source")
-            .arg(image.app())
-            .arg("--app-target")
-            .arg(applications.join("Loopflow.app"))
-            .arg("--legacy-app-target")
-            .arg(applications.join("Concerto.app"));
-    }
-    let status = promote
-        .status()
-        .context("start the main build's promotion")?;
-    if !status.success() {
-        bail!("installing main {revision} failed ({status}); fix the error above and rerun `lf install --dev`");
-    }
+    promote_build(
+        &candidate,
+        &directory,
+        image.as_ref().map(DiskImage::app).as_deref(),
+    )?;
     println!(
         "main: {revision}\ninstalled: {}",
         directory.join("lf").display()
     );
     schedule(None)
+}
+
+fn promote_build(candidate: &Path, directory: &Path, app: Option<&Path>) -> Result<()> {
+    let mut promote = Command::new(candidate);
+    super::isolate_candidate_command(&mut promote);
+    promote
+        .args(["install", "promote", "--cli-target"])
+        .arg(directory.join("lf"))
+        .arg("--sync-skills");
+    if let Some(app) = app {
+        let applications = applications_dir();
+        promote
+            .arg("--app-source")
+            .arg(app)
+            .arg("--app-target")
+            .arg(applications.join("Loopflow.app"))
+            .arg("--legacy-app-target")
+            .arg(applications.join("Concerto.app"));
+    }
+    let status = promote.status().context("start installation promotion")?;
+    if !status.success() {
+        bail!(
+            "installation promotion failed ({status}); fix the error above and rerun `lf install`"
+        );
+    }
+    Ok(())
 }
 
 /// The signed, notarized Loopflow.dmg a main packages run built, mounted
@@ -547,22 +519,21 @@ fn install_dir() -> Result<PathBuf> {
 
 fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool {
     let version = tag.trim_start_matches('v');
-    let lf = directory.join("lf");
-    let installed = inspect(&lf, &["--version"]).is_some_and(|output| {
+    let Ok(lf) = fs::canonicalize(directory.join("lf")) else {
+        return false;
+    };
+    // The public entry must name the bundled helper. Once paired, one preflight
+    // checks their shared build and store compatibility; promotion reconciles receipts.
+    if applications.is_some_and(|root| !has_release_app(root, version, &lf)) {
+        return false;
+    }
+    inspect(&lf, &["--version"]).is_some_and(|output| {
         output.status.success()
             && String::from_utf8_lossy(&output.stdout).trim() == format!("lf {version}")
-    });
-    installed
-        && preflight_verdict(&lf).as_deref() == Some("promote")
-        && applications.is_none_or(|root| has_release_app(root, version))
-}
-
-/// What `lf install preflight` says installing `lf` would do to the store.
-fn preflight_verdict(lf: &Path) -> Option<String> {
-    let output = inspect(lf, &["install", "preflight", "--json"])
-        .filter(|output| output.status.success())?;
-    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    preview["verdict"]["kind"].as_str().map(str::to_string)
+    }) && inspect(&lf, &["install", "preflight", "--json"])
+        .filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice::<super::BinaryPreflight>(&output.stdout).ok())
+        .is_some_and(|preflight| preflight.verdict == super::Verdict::Promote)
 }
 
 // Installed binaries can be stale or broken; update detection must not hang.
@@ -572,10 +543,12 @@ fn inspect(program: &Path, args: &[&str]) -> Option<Output> {
         .build()
         .ok()?;
     runtime.block_on(async {
+        let mut command = Command::new(program);
+        super::isolate_candidate_command(&mut command);
+        command.args(args);
         tokio::time::timeout(
             Duration::from_secs(30),
-            tokio::process::Command::new(program)
-                .args(args)
+            tokio::process::Command::from(command)
                 .kill_on_drop(true)
                 .output(),
         )
@@ -600,27 +573,15 @@ pub(super) fn app_info(app: &Path) -> Option<serde_json::Value> {
     .and_then(|output| serde_json::from_slice(&output.stdout).ok())
 }
 
-fn has_release_app(applications: &Path, version: &str) -> bool {
+fn has_release_app(applications: &Path, version: &str, resolved_cli: &Path) -> bool {
     let app = applications.join("Loopflow.app");
+    let helper = app.join("Contents/MacOS/lf");
     app_info(&app).is_some_and(|info| {
         info["CFBundleShortVersionString"] == version && info["CFBundleVersion"] == version
     }) && ["Loopflow", "lf"].iter().all(|name| {
         fs::metadata(app.join("Contents/MacOS").join(name))
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-    })
-}
-
-/// An app built with Sparkle's signing key installs its own updates.
-fn updates_itself(app: &Path) -> bool {
-    app_info(app).is_some_and(|info| {
-        info["SUPublicEDKey"]
-            .as_str()
-            .is_some_and(|key| !key.is_empty())
-    })
-}
-
-fn app_is_running(app: &Path) -> Result<bool> {
-    Ok(!super::running_app_processes(&[app.join("Contents/MacOS/Loopflow")])?.is_empty())
+    }) && fs::canonicalize(&helper).is_ok_and(|path| path == resolved_cli)
 }
 
 fn manifest_digest<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
@@ -655,6 +616,10 @@ fn run_verified_installer(
         .arg(path)
         .args(["--version", tag])
         .env("LF_INSTALL_DIR", directory)
+        .env(
+            "LF_INSTALL_CLI_ONLY",
+            if installs_app() { "0" } else { "1" },
+        )
         .status()
         .context("start the published installer")?;
     if !status.success() {
@@ -886,11 +851,10 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::{checked, updates_itself, DiskImage};
+    use super::{checked, DiskImage};
     use super::{
-        cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
-        package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
-        Stream, CRON_MARKER,
+        cron_table, is_current, newest_release, newest_run, opens_store, package_target,
+        record_stream, recorded_stream, release_tag, run_verified_installer, Stream, CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -900,10 +864,44 @@ mod tests {
     use std::process::Command;
 
     fn binary(path: &Path, name: &str) {
+        let candidate =
+            serde_json::to_string(&crate::lf::commands::install::CandidateIdentity::current())
+                .unwrap();
         fs::write(path, format!(
-            "#!/bin/sh\ncase \"$*\" in\n  --version) echo '{name} 9.9.9' ;;\n  'install preflight --json') echo '{{\"candidate\":{{}},\"verdict\":{{\"kind\":\"promote\"}}}}' ;;\n  *) exit 2 ;;\nesac\n"
+            "#!/bin/sh\ncase \"$*\" in\n  --version) echo '{name} 9.9.9' ;;\n  'install preflight --json') echo '{{\"candidate\":{candidate},\"verdict\":{{\"kind\":\"promote\"}}}}' ;;\n  *) exit 2 ;;\nesac\n"
         )).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cli_only_skips_setup_but_keeps_an_existing_app() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore =
+            crate::test_ambient::EnvGuard::clear(&["LF_INSTALL_CLI_ONLY", "LF_APPLICATIONS_DIR"]);
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_INSTALL_CLI_ONLY", "1");
+        std::env::set_var("LF_APPLICATIONS_DIR", temp.path());
+        assert!(!super::installs_app());
+        let payload =
+            b"#!/bin/sh\nprintf '%s' \"$LF_INSTALL_CLI_ONLY\" > \"$LF_INSTALL_DIR/mode\"\n";
+        let manifest = format!("{:x}  install.sh\n", Sha256::digest(payload));
+        run_verified_installer(temp.path(), temp.path(), "v9.9.9", &manifest, payload).unwrap();
+        assert_eq!(fs::read_to_string(temp.path().join("mode")).unwrap(), "1");
+        fs::create_dir(temp.path().join("Loopflow.app")).unwrap();
+        assert!(super::installs_app());
+        run_verified_installer(temp.path(), temp.path(), "v9.9.9", &manifest, payload).unwrap();
+        assert_eq!(fs::read_to_string(temp.path().join("mode")).unwrap(), "0");
+    }
+
+    #[test]
+    fn an_installed_build_cannot_report_success_when_promotion_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let cli = temp.path().join("lf");
+        fs::write(&cli, "#!/bin/sh\nexit 23\n").unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = super::promote_build(&cli, temp.path(), None).unwrap_err();
+        assert!(error.to_string().contains("installation promotion failed"));
     }
 
     #[test]
@@ -1063,54 +1061,41 @@ mod tests {
         for name in ["Loopflow", "lf"] {
             binary(&contents.join("MacOS").join(name), name);
         }
+        fs::remove_file(temp.path().join("lf")).unwrap();
+        std::os::unix::fs::symlink(contents.join("MacOS/lf"), temp.path().join("lf")).unwrap();
         for (version, expected) in [("9.9.8", false), ("9.9.9", true)] {
             fs::write(contents.join("Info.plist"), format!(
                 "<plist version=\"1.0\"><dict><key>CFBundleShortVersionString</key><string>{version}</string><key>CFBundleVersion</key><string>{version}</string></dict></plist>"
             )).unwrap();
             assert_eq!(current(), expected);
         }
+        let helper = contents.join("MacOS/lf");
+        let original = fs::read_to_string(&helper).unwrap();
+        fs::write(
+            &helper,
+            original.replace("\"promote\"", "\"reject\",\"reasons\":[\"newer store\"]"),
+        )
+        .unwrap();
+        assert!(!current());
+        fs::write(&helper, &original).unwrap();
+        // Same marketing version on an independently promoted CLI cannot hide
+        // a different build still installed in Desktop.
+        fs::remove_file(temp.path().join("lf")).unwrap();
+        binary(&temp.path().join("lf"), "lf");
+        let source = crate::lf::commands::install::CandidateIdentity::current().source_revision;
+        fs::write(&helper, original.replace(&source, "different-build")).unwrap();
+        assert!(!current());
+        fs::write(&helper, &original).unwrap();
+        assert!(
+            !current(),
+            "even matching independent files must repair the public link"
+        );
+        fs::remove_file(temp.path().join("lf")).unwrap();
+        std::os::unix::fs::symlink(&helper, temp.path().join("lf")).unwrap();
+        assert!(current());
         fs::remove_file(contents.join("MacOS/Loopflow")).unwrap();
         assert!(!current());
         fs::write(contents.join("Info.plist"), "invalid plist").unwrap();
         assert!(!current());
-    }
-
-    /// Between Sparkle's install-on-quit and the app's next launch, `lf install`
-    /// migrates the store through the app's own `lf` instead of downloading.
-    #[test]
-    fn an_app_ahead_of_the_store_is_adopted_in_place() {
-        let temp = tempfile::tempdir().unwrap();
-        let macos = temp.path().join("Loopflow.app/Contents/MacOS");
-        fs::create_dir_all(&macos).unwrap();
-        finish_adoption(temp.path()).unwrap();
-        let adopted = temp.path().join("adopted");
-        let app_lf = |verdict: &str| {
-            fs::write(macos.join("lf"), format!(
-                "#!/bin/sh\ncase \"$*\" in\n  'install preflight --json') echo '{{\"verdict\":{{\"kind\":\"{verdict}\"}}}}' ;;\n  'install adopt') touch '{}' ;;\n  *) exit 2 ;;\nesac\n",
-                adopted.display()
-            )).unwrap();
-            fs::set_permissions(macos.join("lf"), fs::Permissions::from_mode(0o755)).unwrap();
-        };
-        app_lf("promote");
-        finish_adoption(temp.path()).unwrap();
-        assert!(!adopted.exists());
-        app_lf("promote_and_migrate");
-        finish_adoption(temp.path()).unwrap();
-        assert!(adopted.exists());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn only_an_app_with_a_sparkle_key_updates_itself() {
-        let temp = tempfile::tempdir().unwrap();
-        let app = temp.path().join("Loopflow.app");
-        assert!(!updates_itself(&app));
-        fs::create_dir_all(app.join("Contents")).unwrap();
-        for (key, expected) in [("", false), ("test-public-key", true)] {
-            fs::write(app.join("Contents/Info.plist"), format!(
-                "<plist version=\"1.0\"><dict><key>SUPublicEDKey</key><string>{key}</string></dict></plist>"
-            )).unwrap();
-            assert_eq!(updates_itself(&app), expected);
-        }
     }
 }

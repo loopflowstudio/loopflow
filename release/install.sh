@@ -231,10 +231,11 @@ main() {
   dst="$install_dir/lf"
   chmod +x "$src"
   app_source=""
-  if [ "$(uname -s)" = "Darwin" ] && [ "$cli_only" != "1" ]; then
-    applications_dir="${LF_APPLICATIONS_DIR:-/Applications}"
+  applications_dir="${LF_APPLICATIONS_DIR:-/Applications}"
+  # CLI-only skips initial app setup; it cannot split an existing installation.
+  if [ "$(uname -s)" = "Darwin" ] && { [ "$cli_only" != "1" ] || [ -e "$applications_dir/Loopflow.app" ]; }; then
     if [ ! -d "$applications_dir" ] || [ ! -w "$applications_dir" ]; then
-      echo "Application target is not writable: $applications_dir (pass --cli-only to skip the app)" >&2
+      echo "Application target is not writable: $applications_dir (CLI-only skips the app only when none is installed)" >&2
       exit 1
     fi
     dmg_name="Loopflow.dmg"

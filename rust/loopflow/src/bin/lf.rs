@@ -1566,7 +1566,7 @@ fn init_tracing(verbose: bool) {
         return;
     }
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("warn"))
+        .with_env_filter(EnvFilter::new("warn,loopflow::machine_service=info"))
         .with_ansi(false)
         .with_writer(|| loopflow::diagnostic_log::DiagnosticLog)
         .event_format(loopflow::diagnostic_log::IdentifiedLines)

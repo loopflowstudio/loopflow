@@ -24,6 +24,7 @@ pub mod journal;
 pub mod lf;
 pub mod machine_records;
 pub(crate) mod machine_route;
+pub mod machine_service;
 pub mod naming;
 pub(crate) mod os_process;
 pub mod platform;

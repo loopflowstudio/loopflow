@@ -101,6 +101,8 @@ targets:
           - Security
           - -framework
           - SystemConfiguration
+          - -framework
+          - ServiceManagement
           - -liconv
           - -lproc
         INFOPLIST_FILE: LoopflowMac/Info.plist

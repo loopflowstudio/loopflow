@@ -220,7 +220,11 @@ pub(crate) fn directory(home: &Path) -> Result<PathBuf> {
     )))
 }
 
-fn endpoint(id: &LfProcessId) -> Result<PathBuf> {
+pub(crate) fn endpoint(id: &LfProcessId) -> Result<PathBuf> {
+    Ok(private_directory()?.join(format!("{id}.sock")))
+}
+
+pub(crate) fn private_directory() -> Result<PathBuf> {
     let dir = directory(&crate::store::lf_home_dir())?;
     match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
         Ok(()) => {}
@@ -237,7 +241,7 @@ fn endpoint(id: &LfProcessId) -> Result<PathBuf> {
         }
         Err(e) => return Err(e.into()),
     }
-    Ok(dir.join(format!("{id}.sock")))
+    Ok(dir)
 }
 
 fn nonblocking(fd: RawFd) -> io::Result<()> {
@@ -1754,9 +1758,13 @@ fn attach_with_terminal(
     mut terminal: Option<ViewerTerminal>,
 ) -> Result<()> {
     let mut preview = terminal.is_some();
-    let mut socket = UnixStream::connect(endpoint(id)?).context(
-        "Execution owner is unavailable; no provider was restarted and no input was replayed",
-    )?;
+    let mut socket = if std::env::var_os("LF_MACHINE_SERVICE").is_some() {
+        crate::machine_service::client::bridge(id)?
+    } else {
+        UnixStream::connect(endpoint(id)?).context(
+            "Execution owner is unavailable; no provider was restarted and no input was replayed",
+        )?
+    };
     socket.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
     let (rows, cols) = size();

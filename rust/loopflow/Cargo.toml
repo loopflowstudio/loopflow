@@ -148,7 +148,7 @@ reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
 rusqlite = { version = "0.40", features = ["backup", "bundled", "hooks", "trace"] }
 fs2 = "0.4"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
-tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tokio-tungstenite = "0.30"

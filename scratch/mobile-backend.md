@@ -2,7 +2,7 @@
 
 LOO-593 · Backend implementation design · November 3, 2026 · Product
 
-Jack Heart selected native Swift, host Tailscale, terminal Sessions, CLI command delegation and the describe-first new-Task sheet. Jack accepted the general direction of replacing Desktop’s Work C binding with a socket protocol, then asked whether this repeats lfd’s mistakes. Jack authorized the local backend implementation lane through launch-plan. Detailed packaging and protocol choices remain to resolve with evidence; no server name has been selected. [Installation and lifecycle research](<reports/Machine service installation and lifecycle.md>) distinguishes verified behavior from recommendations.
+Jack Heart selected native Swift, host Tailscale, terminal Sessions, CLI command delegation and the describe-first new-Task sheet. Jack accepted the general direction of replacing Desktop’s Work C binding with a socket protocol, then asked whether this repeats lfd’s mistakes. Jack authorized the local backend implementation lane through launch-plan. The local protocol and selected-app packaging are implemented below; remote admission and standalone Mac distribution remain open. [Installation and lifecycle research](<reports/Machine service installation and lifecycle.md>) distinguishes verified behavior from recommendations.
 
 The original HTML review remains in the LOO-718 checkout. Its recommendations are proposals, not recorded answers. This file is the working backend design; do not maintain a second active backend design in LOO-718.
 
@@ -30,9 +30,9 @@ Desktop retains its UI automation endpoint and native terminal rendering.
 
 ## Current system and cutover boundary
 
-Today `RegistryQueryLocal` wires Work queries through `LoopflowLibrary` to `lf_read`, `lf_write` and `lf_subscribe`; other commands already invoke `lf`. `DesktopServer` is a separate app-lifetime UI automation endpoint. There is no general Machine listener or installation yet. The proposed service runs as the existing Machine's OS account and data directory, without requiring Desktop windows.
+Desktop now routes roadmap readings/subscriptions and Session rename through the Machine service. Other Work queries still use `LoopflowLibrary` and its shared Rust C bindings until their named cutover. `DesktopServer` remains a separate app-lifetime UI automation endpoint. The Machine service runs as the existing OS account and data directory without requiring Desktop windows.
 
-Preserve `RegistryQuery` consumers and domain DTOs where their semantics fit. Replace the Work transport with a socket client. Shared methods have request IDs, typed errors, protocol capabilities and service-instance identity; subscriptions add generation/cancellation and bounded delivery. Local and remote transports share application semantics, not assumed peer identity. 
+Preserve `RegistryQuery` consumers and domain DTOs where their semantics fit. Replace the Work transport with a socket client. Shared methods have request IDs, typed errors, protocol capabilities and service-instance identity; subscriptions add generation/cancellation and bounded delivery. Local and remote transports share application semantics, not assumed peer identity.
 
 - **Reads and subscriptions:** call existing Rust `Read::read` and `Read::subscribe`. These already share `lf watch` behavior. Start with complete replacement readings and explicit unavailable state; do not invent replay cursors from store revisions. Run blocking reads away from network handling and cancel unused watches.
 - **Commands:** accept typed operations and delegate through installed `lf` argument arrays, reusing command mappings. Resolve repository IDs on the destination. Internal commands execute locally without calling back into the service; avoid service→CLI→service recursion.
@@ -45,23 +45,15 @@ Preserve `RegistryQuery` consumers and domain DTOs where their semantics fit. Re
 
 Recommend a supervised foreground Rust service with one installation identity per Machine. Desktop resolves the authoritative installation, registers/bootstraps a per-user LaunchAgent when needed, connects to its private socket and verifies readiness. Normal local use needs no Tailscale. Show disabled Background Items or incompatible versions honestly; do not re-register around an explicit macOS disablement.
 
-`SMAppService` fits a helper in the selected signed bundle. A GUI-less signed container can provide standalone Mac deployment. Exact packaging remains open: app-bundled helper versus independently promoted container. Existing installation promotion and the public `lf` entry must own both Desktop and CLI setup, rather than competing installers. Development builds use explicit separate homes/identities. 
+`SMAppService` registers the existing lf helper in the selected signed app bundle. The production registrar passed an ad-hoc-signed container proof. A separately promoted GUI-less signed container remains a future standalone Mac distribution option. Existing installation promotion and the public `lf` entry must own both Desktop and CLI setup, rather than competing installers. Development builds use explicit separate homes/identities.
 
 Helper updates can require unregister/re-register, which terminates the helper. Closing Desktop or replacing the network service must leave Graphs and Session owners running. Prove this with actual launchd cleanup and Linux service units; process detachment alone is insufficient. Personal LaunchAgents stop at logout. Sleep makes the host unavailable; reboot preserves records, not processes. Before-login hosting is a separate deployment promise. Uninstall removes only owned service registration/artifacts, preserving Work and credentials; define active-session handling before implementing removal.
 
 ## Public operations and trust
 
-Proposed names, not implemented endpoints:
+The implemented local revision and executable fixtures are documented in `rust/loopflow/src/machine_service/README.md`. Future remote admission must add authenticated bootstrap, recoverable create/start and request-status lookup at their shared operation owners. Local request IDs currently provide correlation, without durable deduplication.
 
-| Operation | Meaning |
-|---|---|
-| `bootstrap()` | Authenticated Machine identity, protocol/capabilities, repositories and destinations |
-| `subscribe_tasks(repository_id)` | Complete readings with unavailable state and subscription generation |
-| `create_task(request_id, repository_id, execution_machine_id, text)` | Recoverable create/start admission |
-| `request_status(request_id)` | Original result, progress or explicit unknown outcome |
-| `attach_session(session_id, resume_cursor)` | Observe an existing owner, then separately acquire control/geometry |
-
-Recommend HTTPS/WSS through host Tailscale Serve, with remote listening enabled separately from local service setup. Keep local same-user peer admission separate from a remote/proxy endpoint: Serve connected to an ordinary trusted Unix socket otherwise appears as the proxy's local UID. Pairing supplies revocable phone credentials and expected Machine identity; reachability is insufficient. Preserve unrelated Serve routes. Exact pairing, protocol compatibility and Swift Unix transport implementation still need specification.
+Recommend HTTPS/WSS through host Tailscale Serve, with remote listening enabled separately from local service setup. Keep local same-user peer admission separate from a remote/proxy endpoint: Serve connected to an ordinary trusted Unix socket otherwise appears as the proxy's local UID. Pairing supplies revocable phone credentials and expected Machine identity; reachability is insufficient. Preserve unrelated Serve routes. Exact pairing and remote protocol compatibility still need specification; the local Swift Unix client is implemented in this slice.
 
 Rex's discoverable schemas, snapshot/event ordering, bounded consumers and separate terminal data capabilities are useful precedents. Reuse existing DTOs with required or explicitly optional fields and Rust/Swift fixtures. Initial phone connections target paired Machines directly; existing SSH routing can remain inside commands with explicit destinations. A future hub uses separate authenticated ingress, never becoming a required terminal relay or scheduling authority.
 
@@ -89,7 +81,7 @@ Acceptance: start work from the phone, disconnect, restart the service and recon
 
 Prove representative Desktop Work reads/subscriptions, commands and Session attachment through the installed local service. Native iOS renderer/input work proceeds alongside this proof, consuming the same contract and fixtures. Live phone integration joins the two paths; it need not wait for every Desktop operation to migrate. Complete the Work cutover before treating the architecture as supported. LOO-718’s separate task plan owns the later integration, full cutover and new-Task delivery boundaries.
 
-**Delete — do not maintain:** migrated `RegistryQueryLocal` FFI closures, `LoopflowLibrary`/`ServedWatch` Work glue, and unused `lf_read`/`lf_write`/`lf_subscribe` exports with exclusive build/test wiring after consumer inventory. Move shared Rust implementation rather than copying it. Preserve justified renderer FFI, CLI operation code, SSH and Desktop UI automation. No permanent direct-FFI fallback, resurrected lfd store or second retention authority.
+**Delete — do not maintain:** this slice removed the roadmap read/watch and Session-rename direct-FFI closures from `RegistryQueryLocal.shared`. The full-cutover follow-up removes remaining `LoopflowLibrary`/`ServedWatch` Work glue and unused `lf_read`/`lf_write`/`lf_subscribe` exports with exclusive build/test wiring after consumer inventory. Move shared Rust implementation rather than copying it. Preserve justified renderer FFI, CLI operation code, SSH and Desktop UI automation. No permanent direct-FFI fallback, resurrected lfd store or second retention authority.
 
 Prove CLI/socket parity in resulting Task/Session state, defaults and Process attribution; compare initial/change/error/cancel watches. Lose a create reply, restart and retry the same identity: recover one Task or report unknown. Preserve a created Task after Graph failure; remote transport failure must cause no local mutation. Bound slow-client resources and reject stale control. Under actual supervisors, quit Desktop and replace the helper while preserving the same provider/owner; concurrent startups produce one service under one installation/schema authority. Check disabled consent and CLI/service version skew. Real-device review completes Task → editable Session → background/reconnect. Exact commands follow implementation modules; packaging, carrier and handoff remain open.
 
@@ -102,3 +94,32 @@ LOO-718 owns iOS targets, renderer integration, native keyboard/input, selected 
 Current overlapping PRs: #1809 / LOO-720 terminal activity; #1807 / LOO-582 Session identity and transport; #1791 / LOO-673 Desktop list/FFI semantics; #1656 / LOO-312 app activation/promotion; #1805 / LOO-714 Graph/agent defaults; #1808 Wave DTO revert (Task attribution unresolved). Preserve their behavior and recheck landed status. Original app-only server boundaries are retained in research_notes/desktop-server-original-scope.md. LOO-717 owns shell policy, and LOO-709/710/712 own retention/snapshots/Session transport; this service bridges those owners.
 
 The selected feature Graph starts at implement and stops at demo. This handoff does not approve Auto-Ship. Record installed-supervisor proof separately from unit fixtures.
+
+## Implementation decisions · November 3, 2026
+
+The source research is preserved at `0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/`; the two synthesis
+reports remain here. Historical timeout values in those reports do not override
+the current owner policy (currently two minutes of detached quiet by default).
+
+The local slice uses revision-1 length-prefixed JSON on one private Unix socket,
+one operation per connection. Task readings use Read::Roadmap/Subscription; the
+existing command is Session rename using Write::argv and a real lf subprocess.
+Terminal attachment bridges the exact existing owner Process ID. No resume or
+provider launch is inferred from a missing owner. The protocol and fixtures live
+in rust/loopflow/src/machine_service/ and tests/fixtures/dto/machine/.
+
+Desktop's roadmap and rename closures are replaced without fallback. Other FFI
+consumers remain for the named full-cutover follow-up; the canonical Rust Read
+and Write enums stay shared. The terminal relay selects the bridge only for
+Desktop Session panes, preserving ordinary CLI direct attachment and SSH.
+
+Mac packaging uses the selected signed app's existing lf as the bundled
+SMAppService program; source experiments use a private LF_HOME and separately
+named launchd registration. No separate binary or store authority is introduced.
+Linux uses a user service with normal control-group cleanup because this slice
+starts no Graph/provider: it only renames Sessions and bridges existing owners.
+Future execution-start operations must prove isolation before entering that unit.
+
+Remaining review: gate owns affected suites, the Xcode link path and Linux user-service replacement. Demo owns actual Desktop quit/reopen, Background Items consent/disablement and phone interaction; the headless owner fixture does not prove rendered input or real-provider usage reporting. The native registration proof uses a temporary signed container, while the live owner/Graph proof uses an isolated launchd job.
+
+Focused checks: `cargo test --lib machine_service::`, the two `transport_tests machine_service_ -- --include-ignored` proofs, `scripts/test_desktop.sh --filter MachineProtocolTests`, the release-plist test, signed-container registrar proof, `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. The continuity proof preserves the exact unfinished draft, one provider/owner and Graph progress; concurrent commands retain distinct repository traces and correlated default diagnostics. Gate owns the broader checks above; demo owns device judgment. The minimal contract and fixtures are shared with LOO-718.

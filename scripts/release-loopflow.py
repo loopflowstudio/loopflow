@@ -246,6 +246,9 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    agents = app_macos_dir.parent / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True, exist_ok=True)
+    shutil.copy(SWIFT_DIR / "LaunchAgents" / "com.loopflow.machine.plist", agents)
     release_binary = os.environ.get("LF_RELEASE_BINARY")
     if release_binary:
         bin_dir = Path(release_binary).parent

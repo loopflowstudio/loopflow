@@ -12,8 +12,10 @@ enum RegistryQueryLocal {
     static let shared = RegistryQuery(runWithInput: { args, cwd, input in
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
     }, serve: { query in
-        try await LoopflowLibrary.read(query)
+        if case .roadmap = query { return try await MachineService.read(query) }
+        return try await LoopflowLibrary.read(query)
     }, write: { change in
+        if case .sessionRename = change { return try await MachineService.write(change) }
         if let made = try await LoopflowLibrary.write(change) { return made }
         // `lf` sends this write to another Machine; its command does.
         return try await LocalWaveAgentLauncher.queryLf(change.argv, cwd: change.cwd, input: change.input)
@@ -43,7 +45,10 @@ enum RegistryQueryLocal {
             return LineWatch(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
     }, watchWork: {
-        try WorkWatches.observe(launch: LoopflowLibrary.watch)
+        try WorkWatches.observe { query in
+            if case .roadmap = query { return try MachineService.watch(query) }
+            return try LoopflowLibrary.watch(query)
+        }
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

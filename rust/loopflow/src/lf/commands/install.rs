@@ -2780,6 +2780,9 @@ pub fn promote(
         let current = fs::canonicalize(std::env::current_exe()?)?;
         promote_from_installation(artifacts, &current, sync_skills, preview_only)?;
     }
+    if !preview_only {
+        crate::machine_service::installation::refresh_after_promotion();
+    }
     if sync_skills && !preview_only {
         install_link_receiver(artifacts.app_target);
     }

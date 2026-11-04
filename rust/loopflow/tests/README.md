@@ -811,3 +811,20 @@ fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
+
+## Machine service
+
+```bash
+cargo test -p loopflow --lib machine_service::
+cargo test -p loopflow --test transport_tests machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart
+cargo test -p loopflow --test transport_tests installed_machine_service_preserves_owner_and_graph_across_replacement -- --ignored
+```
+
+The ordinary socket proof covers Task subscription changes, CLI/command parity,
+concurrent trace isolation and editable owner/Graph continuity after replacement.
+The opt-in macOS variant uses a unique launchd job and disposable Machine, then
+boots it out. Run it outside the runner's network sandbox. A separate signed
+bundle proof runs `uv run python scripts/test_machine_service_registration.py`;
+it exercises the production SMAppService registrar without starting Work.
+Linux supervisor replacement remains a Linux installation check; this service
+starts no providers or Graphs, and keeps systemd's control-group cleanup.

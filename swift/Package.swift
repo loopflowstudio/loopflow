@@ -68,6 +68,7 @@ let package = Package(
                 .linkedFramework("IOKit", .when(platforms: [.macOS])),
                 .linkedLibrary("c++", .when(platforms: [.macOS])),
                 // What `cargo rustc -p loopflow-ffi -- --print native-static-libs` names.
+                .linkedFramework("ServiceManagement", .when(platforms: [.macOS])),
                 .linkedFramework("CoreServices", .when(platforms: [.macOS])),
                 .linkedFramework("Security", .when(platforms: [.macOS])),
                 .linkedFramework("SystemConfiguration", .when(platforms: [.macOS])),

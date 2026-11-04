@@ -190,3 +190,9 @@ over the terminal and reports newly recorded diagnostics after returning. Native
 provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
+
+Desktop Session panes set `LF_MACHINE_SERVICE=1` for their terminal relay. The
+relay obtains an `attach` bridge from the local Machine service before speaking
+this same owner protocol. No owner or provider is created on bridge failure.
+Ordinary CLI attachments keep their direct socket path. See
+[Machine service](../machine_service/README.md) for admission and framing.

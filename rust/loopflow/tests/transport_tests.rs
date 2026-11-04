@@ -3501,3 +3501,372 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
         viewer.wire
     );
 }
+
+// Machine adapter proofs keep the existing owner/provider fixture and its
+// protocol. The service must never become another execution authority.
+struct MachineServiceProof<'a> {
+    fixture: &'a Fixture,
+    child: Option<Child>,
+    supervised: bool,
+}
+
+impl<'a> MachineServiceProof<'a> {
+    fn start(fixture: &'a Fixture, supervised: bool) -> Self {
+        let mut service = Self {
+            fixture,
+            child: None,
+            supervised,
+        };
+        if supervised {
+            let results = std::thread::scope(|scope| {
+                let ensure = || {
+                    fixture
+                        .command(&["machine", "service", "ensure"])
+                        .output()
+                        .unwrap()
+                };
+                let first = scope.spawn(ensure);
+                let second = scope.spawn(ensure);
+                [first.join().unwrap(), second.join().unwrap()]
+            });
+            let instances: Vec<Value> = results
+                .into_iter()
+                .map(|result| {
+                    assert!(
+                        result.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&result.stderr)
+                    );
+                    serde_json::from_slice::<Value>(&result.stdout).unwrap()["instance"].clone()
+                })
+                .collect();
+            assert_eq!(
+                instances[0], instances[1],
+                "Concurrent startup must obtain one service"
+            );
+        } else {
+            service.child = Some(
+                fixture
+                    .command(&["machine", "service", "run"])
+                    .env_remove("RUST_LOG")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            );
+        }
+        service.ready();
+        service
+    }
+
+    fn ready(&self) -> String {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Ok(mut socket) = UnixStream::connect(self.fixture.endpoint("machine")) {
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                machine_send(
+                    &mut socket,
+                    json!({"version":1,"id":"ready","operation":{"kind":"bootstrap"}}),
+                );
+                let response = machine_receive(&mut socket);
+                assert_eq!(response["result"]["kind"], "bootstrap", "{response}");
+                return response["instance"].as_str().unwrap().to_owned();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Machine service did not become ready"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn restart(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            self.child = Some(
+                self.fixture
+                    .command(&["machine", "service", "run"])
+                    .env_remove("RUST_LOG")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            );
+        } else {
+            let output = Command::new("/bin/launchctl")
+                .args(["kickstart", "-k", &self.target()])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    fn target(&self) -> String {
+        let digest = hex::encode(Sha256::digest(
+            self.fixture
+                .home
+                .path()
+                .canonicalize()
+                .unwrap()
+                .as_os_str()
+                .as_encoded_bytes(),
+        ));
+        // SAFETY: geteuid has no preconditions.
+        format!(
+            "gui/{}/com.loopflow.machine.{}",
+            unsafe { libc::geteuid() },
+            &digest[..16]
+        )
+    }
+
+    fn request(&self, id: &str, operation: Value) -> (UnixStream, Value) {
+        let mut socket = UnixStream::connect(self.fixture.endpoint("machine")).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        machine_send(
+            &mut socket,
+            json!({"version":1,"id":id,"operation":operation}),
+        );
+        let response = machine_receive(&mut socket);
+        assert_eq!(response["id"], id);
+        (socket, response)
+    }
+
+    fn viewer(&self, owner: &str) -> Viewer {
+        let (socket, response) = self.request("attach", json!({"kind":"attach","owner":owner}));
+        assert_eq!(response["result"]["kind"], "bridged");
+        let mut viewer = Viewer {
+            socket,
+            token: None,
+            id: String::new(),
+            reconnect: String::new(),
+            nonce: String::new(),
+            received: 0,
+            wire: 0,
+            ids: 0,
+        };
+        viewer.request(
+            json!({"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80}),
+        );
+        let attached = viewer.until_reply();
+        assert_eq!(attached["kind"], "attached");
+        viewer.accept(&attached);
+        viewer
+    }
+}
+
+impl Drop for MachineServiceProof<'_> {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if self.supervised {
+            let _ = Command::new("/bin/launchctl")
+                .args(["bootout", &self.target()])
+                .output();
+        }
+    }
+}
+
+fn machine_send(socket: &mut UnixStream, value: Value) {
+    let bytes = serde_json::to_vec(&value).unwrap();
+    socket
+        .write_all(&(bytes.len() as u32).to_be_bytes())
+        .unwrap();
+    socket.write_all(&bytes).unwrap();
+}
+
+fn machine_receive(socket: &mut UnixStream) -> Value {
+    let mut header = [0; 4];
+    socket.read_exact(&mut header).unwrap();
+    let length = u32::from_be_bytes(header) as usize;
+    assert!(length <= 32 * 1024 * 1024);
+    let mut bytes = vec![0; length];
+    socket.read_exact(&mut bytes).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+#[test]
+fn machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart() {
+    machine_service_continuity(false);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "registers and removes an isolated launchd job; run explicitly outside network sandbox"]
+fn installed_machine_service_preserves_owner_and_graph_across_replacement() {
+    machine_service_continuity(true);
+}
+
+fn machine_service_continuity(supervised: bool) {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+read -r answer < /dev/tty
+printf '%s\n' "$answer" >> "$HOME/answers"
+"#,
+    );
+    fixture
+        .repo
+        .create_file(".lf/skills/probe.md", "Do the fixture work.");
+    fixture
+        .repo
+        .create_file(".lf/graphs/machine-proof.yaml", "- probe\n- probe\n");
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-i",
+            "-a",
+            "claude",
+            "graph",
+            "machine-proof",
+        ],
+    );
+    command.env("PATH", path);
+    let owner = fixture.owner(command);
+    struct StopOwner<'a>(&'a Fixture, String);
+    impl Drop for StopOwner<'_> {
+        fn drop(&mut self) {
+            if self.0.running(&self.1) {
+                self.0.stop(&self.1);
+            }
+        }
+    }
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let first = fixture.launches(1);
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let session = fixture.session_of_owner(&owner);
+    let mut service = MachineServiceProof::start(&fixture, supervised);
+    let first_instance = service.ready();
+    let (_, resolved) =
+        service.request("resolve", json!({"kind":"session_owner","session":session}));
+    assert_eq!(resolved["result"]["owner"], owner);
+    let mut viewer = service.viewer(&owner);
+    viewer.input("draft");
+    drop(viewer); // Desktop quit: the owner keeps its native editor.
+    let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
+    let (mut watch, initial) = service.request(
+        "tasks",
+        json!({"kind":"subscribe","query":query,"generation":7}),
+    );
+    assert_eq!(initial["result"]["kind"], "reading");
+    assert_eq!(initial["result"]["generation"], 7);
+    machine_send(&mut watch, json!({"id":17}));
+    let confirmed = machine_receive(&mut watch);
+    assert_eq!(confirmed["result"]["frame"]["answers"], 17);
+
+    // Compare the shared CLI write with the socket write, including its real
+    // returned Session. Request identities never become a service parent Task.
+    let (_, renamed) = service.request("rename", json!({"kind":"command","change":{"write":"session_rename","directory":fixture.repo.path(),"id":session,"name":"Kept draft"}}));
+    assert_eq!(renamed["result"]["code"], 0, "{renamed}");
+    let cli = fixture
+        .command(&["session", "rename", "--json", "--", &session, "Kept draft"])
+        .output()
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let socket_record: Value =
+        serde_json::from_str(renamed["result"]["output"].as_str().unwrap()).unwrap();
+    let cli_record: Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(socket_record, cli_record);
+    let changes = std::thread::scope(|scope| {
+        let send = |id: &str| {
+            service.request(id, json!({"kind":"command","change":{"write":"session_rename","directory":fixture.repo.path(),"id":session,"name":id}})).1
+        };
+        let first = scope.spawn(move || send("parallel-a"));
+        let second = scope.spawn(move || send("parallel-b"));
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    for change in &changes {
+        assert_eq!(change["result"]["code"], 0, "{change}");
+        let trace = change["result"]["trace_id"].as_str().unwrap();
+        let events = loopflow::journal::read_events(
+            &loopflow::journal::traces_root(fixture.repo.path()).join(trace),
+        )
+        .unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.command.as_ref().is_some_and(|command| command
+                    .iter()
+                    .any(|arg| arg == change["id"].as_str().unwrap()))),
+            "{events:?}"
+        );
+        assert!(events.iter().all(|event| event.trace_id.as_str() == trace));
+        let diagnostics = std::fs::read_to_string(fixture.home.path().join("logs/lf.log")).unwrap();
+        assert!(
+            diagnostics
+                .lines()
+                .any(|line| line.contains("Machine command exited")
+                    && line.contains(trace)
+                    && line.contains(change["id"].as_str().unwrap())
+                    && line.contains(&first_instance)),
+            "{diagnostics}"
+        );
+    }
+    assert_ne!(
+        changes[0]["result"]["trace_id"],
+        changes[1]["result"]["trace_id"]
+    );
+    // A changed Task reading uses the shared invalidation path, with no polling
+    // projection or shadow Task store in the service.
+    support::register_task_with_pr(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "machine-proof",
+        &fixture.repo.head_sha(),
+    );
+    machine_send(&mut watch, json!({"id":18}));
+    loop {
+        let changed = machine_receive(&mut watch);
+        if changed["result"]["frame"]["answers"] == 18 {
+            assert!(
+                changed["result"]["frame"]["body"]
+                    .to_string()
+                    .contains("INF-123"),
+                "{changed}"
+            );
+            break;
+        }
+    }
+    drop(watch);
+    service.restart();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while service.ready() == first_instance {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+    assert_eq!(
+        fixture.launches(1),
+        first,
+        "reconnect must not launch another provider"
+    );
+    let mut resumed = service.viewer(&owner);
+    resumed.input(" kept\n");
+    fixture.launches(2); // The existing Graph advanced exactly once.
+    resumed.input("done\n");
+    resumed.finish();
+    fixture.ends(&owner);
+    assert_eq!(fixture.launches(2).len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
+        "draft kept\ndone\n"
+    );
+}

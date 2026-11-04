@@ -958,6 +958,14 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 ## Testing
 
+Task readings and Session rename use the installed Machine service; Session
+terminals bridge their existing owner through it. These operations surface service
+errors without a direct FFI fallback. Other Work operations retain FFI until their
+cutover. See the [local protocol](../rust/loopflow/src/machine_service/README.md).
+`scripts/test_desktop.sh --filter MachineProtocolTests` builds the consumer and
+checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
+source experiments select a separate `LF_HOME`.
+
 Desktop's `swift` suite builds the app through the test-target dependency and
 runs model and production-view tests through `scripts/test_desktop.sh`, which
 denies WindowServer connections even on a logged-in host. No Automation

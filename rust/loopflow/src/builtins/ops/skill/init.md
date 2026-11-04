@@ -194,13 +194,15 @@ repository binding changes only through the repository-wide migration.
 
 ### New durable Wave
 
-Ask for one outcome and a short name. Create:
+Ask for one outcome and a short name. Add it:
 
-```text
-.lf/wave/<name>/GOAL.md
+```bash
+lf wave add <name> --objective "<outcome>"
 ```
 
-Write the goal as a durable operating contract: objective, observable success,
+This registers the Wave, starts its first chapter, and commits
+`.lf/wave/<name>/` on the main checkout. Then edit that `GOAL.md` there. Write
+the goal as a durable operating contract: objective, observable success,
 boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
 in the chapter plan. Curate durable decisions in `.lf/wave/<name>/MEMORY.md` through
 the repository workflow; do not invent runtime memory commands or duplicate the

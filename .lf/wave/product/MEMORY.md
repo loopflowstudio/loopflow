@@ -262,20 +262,13 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   new Task appear there; Jack kept the rule then (2026-10-05). LOO-505 now
   exposes unstarted standalone captures in repository inventory/navigation.
 
-## Workflow and Flow alignment (LOO-386, 2026-10-07)
+## Graph alignment (reconciled 2026-11-02)
 
-Jack Heart approved LOO-386/#1492, retaining Workflow/Flow and restart-to-start,
-then requested gate and Task-completing landing. Review/approval:
-`9669d67d5:scratch/workflow-review.md`; earlier detail: `97bf9dbcb`, this heading.
-
-Independent namespaces retain kind/name. Restart keeps the graph/history;
-Wave/repository defaults affect future take-up (LOO-505). Latest FlowProcessDetail
-grants no control authority; selection, execution and TaskRunControl stay separate.
-LOO-400's `e467ea995` supplies Process/LFID; old captures remain readable.
-Wave-owned commands supersede Project commands. A reset Task cannot advance
-from an older Flow's arrival. Catalog, gate failures/repairs and reruns:
-`a73198197:wave/product/MEMORY.md`, this heading. Approval proves no native,
-live-planning, configured-provider acceptance or chapter KR.
+AGENTS.md owns the current Graph/Task contract. Latest GraphProcessDetail grants
+no control authority; Task position, execution and TaskRunControl stay separate.
+Jack Heart's LOO-386 approval and superseded Workflow/Flow vocabulary remain at
+`fb382a7d45:.lf/wave/product/MEMORY.md`, **Workflow and Flow alignment**.
+That approval established no native/provider acceptance or chapter KR.
 
 ## Task conversation and Workflows (LOO-353, reconciled 2026-10-17)
 
@@ -311,8 +304,8 @@ Jack Heart (LOO-383) selected operating Wave conversations: move started Tasks,
 leave unstarted backlog alone, and report PR-linked work as waiting, moving or
 stuck. Leaving unarmed merges to Jack remained unreviewed. Current session/operate
 skills and Work APIs supersede the old wrapper and process-inspection recipe.
-Stopped execution is history, not permission to resume; an open conversation
-schedules nothing. Naming the Wave as next owner must not evade its own duty.
+Stopped execution is history, not permission to resume; progress observations
+grant no operating authority. Naming the Wave as next owner must not evade its own duty.
 Original decisions, continuation history and evidence limits:
 `28588f8910:.lf/wave/product/MEMORY.md`, this heading.
 The review established simulations and read-only model runs, not installed behavior.
@@ -797,11 +790,7 @@ caps, and keep missing ownership evidence explicit.
   planning publication; selection-time text can be stale by a transfer gap. Cancel
   asynchronous historical-reference reads on navigation so late results cannot
   replace the newer Task or repository selection.
-- Monitor needs its own AppKit responder: clearing focus to nil can select a visible
-  terminal. Hidden terminals release input; resize/polling must not steal search
-  focus. A retained native view owns focus requests and latest title. Verify ordinary
-  dispatched input stays out of both PTYs while Monitor is focused, then require
-  exact retained draft and child replies on return. PTY echo alone is insufficient.
+- Monitor-pane focus/PTY lessons (pane deleted): `580127761d:.lf/wave/product/MEMORY.md`.
 - Retired completion/Approve/Iterate UI lessons remain at
   `6c44d9792:wave/product/MEMORY.md`. Action errors must preserve live terminals;
   delayed results retain their originating workspace, and external disappearance
@@ -933,8 +922,17 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   provenance.
 - PM writes resolve stable provider edges, not names or Issue prefixes. Explicit Wave
   creation selects its current Project; standalone creation has none. Ordinary
-  Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
+  Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity lives in `config.yaml`;
   repository configuration owns the Linear Team.
+- LOO-500 (Jack Heart, 2026-10-28): CLI/Desktop share `wave add|remove|rename`;
+  unknown `connect` names use add first. Remove retires; open Tasks move to
+  parent/repository, started Tasks always move, `--delete-backlog` deletes only
+  unstarted Tasks. Live lists exclude retired Waves; `show` retains history.
+  Authored files commit on main; stale paths resolve by config id. November 2:
+  retries retain original/subtree IDs, provider bindings and file images in Machine
+  SQLite; live rows/paths cannot prove completion. Matching HEAD still requires
+  index reconciliation. CLI regressions cover reset failures, later edits and
+  replacement Waves; live Linear recovery and native interaction remain unproved.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;
@@ -954,8 +952,10 @@ lfd and resident-cron contracts remain in
 ## Swift data path — RegistryQuery is the single reader
 
 Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
-Unknown wire status stays explicit. AGENTS.md owns shared runtime vocabulary;
-earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
+Unknown wire status stays explicit. LOO-500 (2026-11-02) removed Desktop's
+filesystem placeholder scan: surviving files resurfaced retired Waves. Explicit
+writes register directories; reads list store rows only.
+AGENTS.md owns shared runtime vocabulary; earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
 `92d95edfe:wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
@@ -993,14 +993,27 @@ October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
 
 ### Task observation and retired Watch
 
+Jack Heart selected Session posts plus an expandable run page for LOO-711
+(2026-11-02): minimal default, combined position/readiness, Files owning the diff.
+The wait-only proposal is superseded. `db5cdbbd14` implements four native provider
+paths and grouped history, repairing `dd2bb7bc21`'s latest-run-only reports.
+Compare reportable facts by durable run identity and settle gaps per run: a newer
+helper must not hide an older worker's failure. Existing receipts retain compact
+observations across reconnect, suppress uncertain dispatch replay and exclude late
+acknowledgements from the observed baseline. Worker Runs receive no posts; posts
+grant no operating authority. Historical run completion never completes a Task.
+Missing summaries stay absent; prose joins the exact captured step separately
+from its exit. Focused checks prove components, not configured idle wake or draft
+retention; Claude hook inbox availability remains unverified. Preserve Session
+identity and drafts. One-second settling is a demo assumption, not Jack's choice.
+Gate and authored demo remain; provider restriction or an adjacent card is no
+substitute for delivery.
+
 Desktop launched two LOO-293 helpers while its worker still produced output.
 Missing `lf ps` rows or a finished launcher do not prove idle execution.
 
-LOO-293's bounded history, passive native output and configured proof remain;
-use current Task panes, not the deleted Watch/Monitor view. Join history by exact
-captured step, never skill name or current YAML. Earlier scope and retired
-FlowPosition mechanism: `2c23acbb8:wave/product/MEMORY.md`, **Task observation and
-Watch**. Integration is not acceptance.
+LOO-293's unproved native scope and retired Watch/FlowPosition history:
+`2c23acbb8:wave/product/MEMORY.md`, **Task observation and Watch**.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 
@@ -1132,10 +1145,6 @@ snapshots don't prove renderer restoration. Earlier tmux and LOO-280–283 notes
   (`37205c3fb6:wave/product/MEMORY.md`, Learnings).
 - **`loopflow-dev.py` builds from the worktree it runs in.** Repository
   discovery collapses linked worktrees to the canonical main checkout.
-- `cargo test -p loopflow dto_fixtures` filters by test name; use
-  `--test dto_fixtures` to run that integration file. Headless runs set
-  `LF_RUN_ID`, `LF_AS` and `LF_FLOW_ID`; Rust tests that launch or assert journal ids
-  must clear them or `cargo test -p loopflow` fails only under agent runs.
 - **Released migrations are immutable.** The Product/Intelligence `061` collision
   left existing databases missing a column. Test upgrades from the released frontier;
   AGENTS.md owns one draft per Task.

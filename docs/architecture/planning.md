@@ -39,6 +39,13 @@ Sync writes only changed fields; plan-only sends nothing. A missing default-bran
 ref or GOAL.md blocks mutation instead of clearing the provider summary.
 Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
+`wave_lifecycle_operations` retains Machine-local rename/removal effects: original
+Wave/subtree IDs, captured provider bindings, and exact pending authored changes.
+The lifecycle saves intent before planning edits, prepares file changes off-checkout,
+and commits saved after-images through a private index. Retries retain unfinished
+effects, exclude replacement identities and preserve later edits. These receipts
+never participate in Git planning exchange; Wave identity and retirement remain
+planning-writer facts.
 A Wave's default graph is a committed `.lf/graphs/` file or a builtin. A Wave
 records only the selected name, which travels with planning.
 Wave list, status and roadmap emit each Wave's `machine` from the reader's
@@ -267,7 +274,7 @@ The documented unconditional-update race remains a protocol limit.
 
 ```bash
 lf wave bind-project product <project-uuid> --json
-lf wave ensure product --json
+lf wave add product --json
 ```
 
 Validate one existing Project and select its accepted local record on the Wave's

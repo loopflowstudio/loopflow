@@ -34,53 +34,27 @@ struct WavesView: View {
         return portfolioService.repos
     }
 
-    /// Authored waves discovered on disk per repo path: `<repo>/.lf/wave/<name>/GOAL.md`.
-    /// Merged with registered waves so not-yet-launched waves are still listed.
-    @State private var authoredWavesByRepo: [String: [String]] = [:]
-    @State private var plansByWaveKey: [String: WavePlan] = [:]
 
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
+    @State private var removing: WaveViewModel?
+    @State private var renaming: WaveViewModel?
     @State private var didRestoreStickyRepo = false
 
-    /// All waves across every repo: registry rows merged with Waves authored on
-    /// disk that have not been served yet.
+    /// All Waves the store knows across every repo. One stable alphabetical list
+    /// per repository — the row's lens carries state, so rows never reorder as
+    /// processes start and stop.
     private var allWaves: [WaveViewModel] {
-        repos.flatMap { mergedWaves(for: $0) }
-    }
-
-    /// Registered waves plus idle placeholders for authored GOAL.md files that
-    /// have not been served yet. One stable alphabetical list — the row's lens
-    /// carries state, so rows never reorder as processes start and stop.
-    private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
-        let live = repoStates[repo.path]?.waves ?? []
-        let liveNames = Set(live.map(\.name))
-        let placeholders = (authoredWavesByRepo[repo.path] ?? [])
-            .filter { !liveNames.contains($0) }
-            .map { authoredPlaceholder(repoPath: repo.path, waveName: $0) }
-        return (live + placeholders).sorted {
-            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        repos.flatMap { repo in
+            repoStates[repo.path]?.waves ?? []
         }
     }
 
     /// The filtered Waves arranged as an outline: roots alphabetical, each parent
-    /// immediately followed by its children (indented). Today's Waves are flat,
-    /// but a future child Wave — a Project promoted to residency — indents under
-    /// its parent with the same lens and selection behavior.
+    /// immediately followed by its children (indented).
     private var outlinedWaves: [(wave: WaveViewModel, indent: Int)] {
         waveOutline(filteredWaves)
-    }
-
-    /// An idle, not-yet-launched row for a wave authored on disk.
-    private func authoredPlaceholder(repoPath: String, waveName: String) -> WaveViewModel {
-        WaveViewModel(api: Wave(
-            id: "\(repoPath)#\(waveName)",
-            name: waveName,
-            repo: repoPath,
-            status: .ready
-        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: waveName)],
-        isRegistered: false)
     }
 
     private var filteredWaves: [WaveViewModel] {
@@ -97,14 +71,7 @@ struct WavesView: View {
 
     private var selectedWave: WaveViewModel? {
         guard let selectedWaveId else { return nil }
-        return allWaves.first { waveSelectionId($0) == selectedWaveId }
-    }
-
-    private func waveSelectionId(_ wave: WaveViewModel) -> String {
-        Self.wavePlanKey(
-            repoPath: WaveOrigin.resolve(wave.repo),
-            waveName: wave.name
-        )
+        return allWaves.first { $0.id == selectedWaveId }
     }
 
     private var isAnyConnected: Bool {
@@ -131,16 +98,36 @@ struct WavesView: View {
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
-            if let wave = selectedWave, wave.isRegistered {
+            if let wave = selectedWave {
                 model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
             }
         }
         // Waves arrive with every planning frame.
         .onChange(of: model.planningSequence) { _, _ in
-            Task {
-                await syncRepoStates()
-                await refreshAuthoredWaves()
-            }
+            Task { await syncRepoStates() }
+        }
+        .sheet(item: $removing) { wave in
+            RemoveWaveSheet(
+                model: model,
+                name: wave.id,
+                displayName: wave.displayName,
+                repo: waveRepoPath(for: wave),
+                onRemoved: {
+                    if selectedWaveId == wave.id { selectedWaveId = nil }
+                    removing = nil
+                    Task { await syncRepoStates() }
+                },
+                onCancel: { removing = nil }
+            )
+        }
+        .sheet(item: $renaming) { wave in
+            RenameWaveSheet(
+                model: model, id: wave.id, currentName: wave.name, repo: waveRepoPath(for: wave),
+                onDone: {
+                    renaming = nil
+                    Task { await syncRepoStates() }
+                }
+            )
         }
         .sheet(isPresented: $isShowingCreate) {
             CreateWaveSheet(
@@ -153,14 +140,12 @@ struct WavesView: View {
         }
         .task {
             await refreshRepos()
-            await refreshAuthoredWaves()
             restoreStickyRepoSelectionIfNeeded()
             ensureRepoStates()
             await syncRepoStates()
         }
         .onChange(of: portfolioService.repos) { _, _ in
             Task {
-                await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
             }
@@ -168,7 +153,7 @@ struct WavesView: View {
         .onChange(of: selection) { _, _ in
             // Drop a wave selection that no longer matches the active repo filter.
             if let id = selectedWaveId,
-               !filteredWaves.contains(where: { waveSelectionId($0) == id }) {
+               !filteredWaves.contains(where: { $0.id == id }) {
                 selectedWaveId = nil
             }
             model.setRepoPath(roadmapRepoPath)
@@ -191,9 +176,11 @@ struct WavesView: View {
                         ForEach(outlinedWaves, id: \.wave.id) { entry in
                             WaveRow(
                                 wave: entry.wave,
-                                isSelected: selectedWaveId == waveSelectionId(entry.wave),
-                                onSelect: { selectedWaveId = waveSelectionId(entry.wave) },
-                                indentLevel: entry.indent
+                                isSelected: selectedWaveId == entry.wave.id,
+                                onSelect: { selectedWaveId = entry.wave.id },
+                                indentLevel: entry.indent,
+                                onRemove: { removing = entry.wave },
+                                onRename: { renaming = entry.wave }
                             )
                         }
                     }
@@ -374,7 +361,7 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
-                streamed: wave.isRegistered ? model.waveDetail(id: wave.id) : nil,
+                streamed: model.waveDetail(id: wave.id),
                 isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
                 transportError: model.projectCommandErrors[wave.id],
                 onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
@@ -383,7 +370,7 @@ struct WavesView: View {
                     openTask(waveRepoPath(for: wave), id)
                 }
             )
-            .id(waveSelectionId(wave))
+            .id(wave.id)
         } else {
             RoadmapView(model: model, onOpenWave: openRoadmapWave, onOpenTask: openTask)
         }
@@ -397,11 +384,8 @@ struct WavesView: View {
     private func openRoadmapWave(_ snapshot: WaveSnapshot) {
         guard let wave = allWaves.first(where: {
             $0.id == snapshot.id
-                || ($0.name == snapshot.name
-                    && WaveOrigin.resolve($0.repo).normalizedFilePath
-                        == WaveOrigin.resolve(snapshot.repo).normalizedFilePath)
         }) else { return }
-        selectedWaveId = waveSelectionId(wave)
+        selectedWaveId = wave.id
     }
 
     /// Resolve the canonical repository shared by Work and Session navigation.
@@ -439,29 +423,16 @@ struct WavesView: View {
 
     // MARK: - Data
 
-    private nonisolated static func wavePlanKey(repoPath: String, waveName: String) -> String {
-        PortfolioRepoState.wavePlanKey(repoPath: repoPath, waveName: waveName)
-    }
-
-    private func createWave(repoPath: String, name: String) async throws {
+    private func createWave(repoPath: String, name: String, objective: String) async throws -> WaveAdded {
+        let added = try await model.addWave(name: name, objective: objective, repo: repoPath)
         ensureRepoStates()
-        guard let state = repoStates[repoPath] else {
-            throw PortfolioRepoError.unknownRepo(repoPath)
-        }
-        try await state.createWave(name: name)
+        await repoStates[repoPath]?.refresh()
+        return added
     }
 
     private func refreshRepos() async {
         guard !AppTestMode.shouldBypassRegistry else { return }
         await portfolioService.refresh()
-    }
-
-    /// Enumerate each rail repo's authored waves — `<repo>/.lf/wave/<name>/GOAL.md`
-    /// directories — off the main thread, so the list can offer them as launchable
-    /// rows before they have a registry entry.
-    private func refreshAuthoredWaves() async {
-        if AppTestMode.shouldBypassRegistry { return }
-        authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: repos)
     }
 
     private func ensureRepoStates() {
@@ -497,7 +468,6 @@ struct WavesView: View {
                 waves = try await RegistryQueryLocal.shared.allWaves()
             }
             let plans = buildWavePlanCache(registryWaves: waves)
-            plansByWaveKey = plans
             for state in repoStates.values {
                 state.applyConnectedWaves(waves, plans: plans)
             }
@@ -524,7 +494,7 @@ struct WavesView: View {
         repoStates[repo.path] = state
         if selectedWaveId == nil,
            let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
-            selectedWaveId = waveSelectionId(selected)
+            selectedWaveId = selected.id
         }
     }
 
@@ -545,33 +515,21 @@ struct WavesView: View {
     /// Each Wave's Projects arrive with the roadmap in every planning frame;
     /// only the authored objective is read here, from its GOAL.md.
     private func buildWavePlanCache(registryWaves: [Wave]) -> [String: WavePlan] {
-        let authored = authoredWavesByRepo
-        var targets: [String: (repoPath: String, waveName: String)] = [:]
-        for wave in registryWaves {
-            let key = Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
-            targets[key] = (wave.repo, wave.name)
-        }
-        for (repoPath, waveNames) in authored {
-            for waveName in waveNames {
-                let key = Self.wavePlanKey(repoPath: repoPath, waveName: waveName)
-                targets[key] = (repoPath, waveName)
-            }
-        }
         var projects: [String: WorkEvidence<ProjectPlanningSnapshot>] = [:]
         for roadmap in model.roadmap.value?.waves ?? [] {
-            projects[Self.wavePlanKey(repoPath: roadmap.wave.repo, waveName: roadmap.wave.name)] = roadmap.projects
+            projects[roadmap.wave.id] = roadmap.projects
         }
 
         var plans: [String: WavePlan] = [:]
-        for (key, target) in targets {
+        for wave in registryWaves {
             let objective = WavePlanParser.objective(
-                repoRoot: URL(fileURLWithPath: target.repoPath),
-                waveName: target.waveName
+                repoRoot: URL(fileURLWithPath: wave.repo),
+                waveName: wave.name
             ) ?? ""
-            if let projects = projects[key] {
-                plans[key] = WavePlan(objective: objective, projects: projects)
+            if let projects = projects[wave.id] {
+                plans[wave.id] = WavePlan(objective: objective, projects: projects)
             } else if !objective.isEmpty {
-                plans[key] = WavePlan(objective: objective)
+                plans[wave.id] = WavePlan(objective: objective)
             }
         }
         return plans
@@ -611,24 +569,27 @@ struct WavesView: View {
               let requested = AppTestMode.selectBranch,
               let selected = allWaves.first(where: { $0.name == requested })
         else { return }
-        selectedWaveId = waveSelectionId(selected)
+        selectedWaveId = selected.id
     }
 }
 
-/// Minimal create-wave graph: pick a target repo, name the wave, submit. Creates
-/// the Wave files through `PortfolioRepoState.createWave`.
-private struct CreateWaveSheet: View {
+/// Minimal create-wave graph: pick a target repo, name the wave, submit. Adds
+/// the Wave through `lf wave add`. An add with leftovers (its files uncommitted
+/// on main) keeps the sheet open showing the receipt's lines; a clean add closes it.
+struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?
-    let onCreate: (_ repoPath: String, _ name: String) async throws -> Void
+    let onCreate: (_ repoPath: String, _ name: String, _ objective: String) async throws -> WaveAdded
     let onCancel: () -> Void
 
     @Environment(\.palette) private var palette
 
     @State private var selectedRepoPath: String = ""
     @State private var waveName = ""
+    @State private var objective = ""
     @State private var isCreating = false
     @State private var errorMessage: String?
+    @State private var leftovers: WaveAdded?
     @FocusState private var isNameFocused: Bool
 
     private var trimmedName: String {
@@ -636,6 +597,23 @@ private struct CreateWaveSheet: View {
     }
 
     var body: some View {
+        Group {
+            if let leftovers {
+                WaveAddedLeftovers(added: leftovers, onDone: onCancel)
+            } else {
+                form
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 420)
+        .background(palette.background)
+        .onAppear {
+            selectedRepoPath = initialRepoPath ?? repos.first?.path ?? ""
+            isNameFocused = true
+        }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("New wave")
                 .font(Typography.sectionTitle(20))
@@ -680,6 +658,23 @@ private struct CreateWaveSheet: View {
                     .disabled(isCreating)
             }
 
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("Objective (optional)")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+
+                TextField("What this Wave is for", text: $objective)
+                    .accessibilityIdentifier("new-wave-objective")
+                    .textFieldStyle(.plain)
+                    .font(Typography.body())
+                    .foregroundStyle(palette.text)
+                    .padding(Spacing.md)
+                    .background(palette.surfaceMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .onSubmit(submit)
+                    .disabled(isCreating)
+            }
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(Typography.caption())
@@ -707,13 +702,6 @@ private struct CreateWaveSheet: View {
                 .disabled(isCreating || trimmedName.isEmpty || selectedRepoPath.isEmpty)
             }
         }
-        .padding(Spacing.xl)
-        .frame(width: 420)
-        .background(palette.background)
-        .onAppear {
-            selectedRepoPath = initialRepoPath ?? repos.first?.path ?? ""
-            isNameFocused = true
-        }
     }
 
     private func submit() {
@@ -722,12 +710,13 @@ private struct CreateWaveSheet: View {
         errorMessage = nil
         let repoPath = selectedRepoPath
         let name = trimmedName
+        let objective = objective.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task {
             defer { isCreating = false }
             do {
-                try await onCreate(repoPath, name)
-                onCancel()
+                let added = try await onCreate(repoPath, name, objective)
+                if added.summary.isEmpty { onCancel() } else { leftovers = added }
             } catch {
                 errorMessage = error.localizedDescription
             }

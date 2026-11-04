@@ -54,8 +54,8 @@ impl Fixture {
     fn command_from(&self, program: &Path, args: &[&str]) -> Command {
         let mut command = Command::new(program);
         for (key, _) in std::env::vars_os() {
-            // An inherited cmux workspace would receive the fixture Session's name.
-            if ["LF_", "LOOPFLOW_", "CMUX_"]
+            // Fixtures must neither inherit native placement nor rename a real host's pane.
+            if ["LF_", "LOOPFLOW_", "CMUX_", "HERDR_", "REX_", "TMUX"]
                 .iter()
                 .any(|prefix| key.to_string_lossy().starts_with(prefix))
             {

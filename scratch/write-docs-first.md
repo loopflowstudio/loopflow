@@ -1,5 +1,26 @@
 # LOO-728 — integrate write-docs-first
 
+## Current delivery direction — independent main
+
+Jack Heart's November 4 [independent-main direction](main-delivery-direction.md)
+supersedes the stacked delivery requirements below. Preserve the accepted
+Desktop-only automatic presentation and saved-doc workflow. Extract those changes
+onto fresh main using its existing Desktop Files support; leave parent-dependent
+terminal/Rex additions, migration, installer and Wave-memory changes in preserved
+source/stack history. Preserve Task identity, PR #1817, source work and LOO-498.
+Managed Task placement, PR base and Git must agree before independent delivery.
+
+Demo decision pass 1 in Session `session_edb0e699d5c14fcc9223247d196d01d6`
+returns **iterate**: the Graph resumed at demo while HEAD remains the stacked
+`81cf57afe9` candidate. Checkpoint current edits, perform the extraction and
+managed detachment, reconcile this plan to the result, and validate against main.
+See [current demo evidence](docs-first-demo.md#current-decision-pass-1--independent-main-work-remains).
+Earlier checks and advance decisions below describe the prior stacked candidate;
+they do not prove the independent-main outcome. Attached Desktop proof remains
+limited as recorded. No new product judgment is required.
+
+## Prior stacked implementation and evidence
+
 Jack Heart requested integration on November 4, 2026, preserving source branch,
 checkout, conversation and draft PR #1810 at
 `5e6d3b1fc1ad23bb0fed51f4c0ad9815fed67648`. LOO-728 PR #1817 remains stacked
@@ -102,10 +123,10 @@ November 4 reconciliation confirms PR #1814 remains open at the integrated
 `df3b5e810d3841a19bc5911c332fb42f23193d46`; LOO-498 has active implementation
 work, but no newer published parent is available. The earlier request to sync
 and rebuild this parent is satisfied. PR #1817 remains open on the correct
-LOO-498 base, but its published head is still `c136addfad33b65a4080f609f12da2c1a663b85c`.
-The parent integration and accepted Desktop-only change at local
-`ef0ca500977a123076cf08f0e114b7fd59d36881`, plus reconciled notes, remain unpublished.
-Publication belongs to the caller's delivery step.
+LOO-498 base. Gate's fresh GitHub read confirms its published head is
+`81cf57afe949d3f4b8f639b01c786073d16d5b5f`, including the parent integration,
+accepted Desktop-only change and reconciled notes. The subsequent headless demo
+decision and gate evidence remain local; publication belongs to delivery.
 
 Parent delivery precedes supported shared-store promotion; the unmerged migration
 cannot be bypassed or landed under LOO-728's approval. The coherent installer is
@@ -126,7 +147,100 @@ assumptions and the proposed correction for the authorized Wave-memory owner.
 
 ## Validation
 
+Gate plan, November 4: compare against the integrated LOO-498 parent `df3b5e810d`,
+including the existing unstaged demo notes. `scripts/test.py --base df3b5e810d
+--list` selects architecture, Rust, website and headless Swift. Rust coverage:
+`open`, `desktop`, `task_tool`, `human_session`, `transport` and `work_open_tests`
+for file destinations, control placement and unchanged explicit opening;
+`graph::compiled`, `task_graph`, `skills::catalog`, prompt goldens and the two
+changed world scenarios for docs-first entry and loop preservation; documented
+commands and DTO fixtures for the public command/action boundary. The runner
+also builds the candidate CLI, checks formatting and runs all-target Clippy.
+Website checks use the candidate CLI; Swift builds Desktop and exercises its
+headless model/view suite and platform boundaries. Native probes remain skipped;
+Linux transport/reconnect and disposable installation proofs remain with CI.
+No installation, parent operation or display-host launch belongs to this gate.
+No new performance mechanism is introduced: the production signal remains time
+from the existing Files action receipt to document readiness; attached-view
+render latency is unmeasured here.
+
+Gate repair: the integrated parent's `host_workspaces`, `host_work_occurrences`,
+`wave_task_layouts` and Rex process edge were absent from the checked architecture
+inventory. `docs/architecture-reference.md` now records their existing owners,
+without changing the schema or native ownership contract. Check:
+`uv run python scripts/check_architecture.py` — passed after the map correction
+(22 APIs, 81 tables, 35 subprocess edges; zero unexplained drift).
+
+The first Rust pass ran 252 tests: 251 passed; the Desktop-placement fixture
+failed because `Fixture::command_from` cleared cmux but inherited the invoking
+Rex context. Its invalid-Desktop case therefore recorded the real ambient Rex
+placement. The transport fixture now clears Rex, Herdr and tmux context alongside
+LF/cmux. Rerun only `binary(transport_tests)` under the same ambient host, followed
+by formatting and all-target Clippy; retain other Rust and website passes.
+
+Gate check results (November 4; commands unset inherited `LF_*` and close stdin):
+
+- `scripts/test.py --base df3b5e810d --reuse-passing --rust-filter <planned modules above>` — initial run retained at `.lf/tmp/gate/run-10562`; its aggregate failed and is not relabeled green. The log contains the exact expanded filter and commands.
+- `cargo nextest run -p loopflow --no-fail-fast --test transport_tests` through `scripts/test_network.py` with the prepared candidate — 55/55 passed after fixture isolation; the other 197 selected Rust tests retain their pass. The two opt-in native work-opening probes were skipped.
+- `cd website && uv run python dev.py test` with candidate `LF_BIN` — 72 passed, including rendered docs, accessibility and README/index sync; 34.2s phase wall time.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` — app/test build passed in 55.7s; the full suite exited 1 after starting `ThemeTests.defaultConfigurationLoadsAfterInitialAppearance`, without a reported assertion or timeout. Its cause remains unresolved; full-suite completion is deferred to CI, not passed.
+- `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter ThemeTests/defaultConfigurationLoadsAfterInitialAppearance` through the headless/network/time-limit wrappers — 1 passed; CoreVideo explicitly reported no display link and used timer rendering. This isolated pass does not explain or erase the full-suite exit.
+- Same headless command with `--filter 'TaskFilesTests|DesktopPaneControlTests|DTOFixtureTests'` — 105 passed in 11.7s, including original-doc presentation, draft retention, rendered Markdown/HTML selection, saves and action DTOs; optional display diagnostics skipped.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py` — passed.
+- `cargo fmt --all` and `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed after the fixture repair; Clippy completed in 1m40s. `git diff --check` also passed.
+- `uv run python scripts/resource_envelope.py --json` — passed on remeasurement, 210.0 GiB free, no measurement issues. The initial resource failure was the shared 11.5 GiB uv cache inventory exceeding its 15s scan deadline, not a product-test timeout; transient scan latency's cause is unproven. No cleanup or budget change was needed for the remeasurement.
+
+Follow-up logs and the resource receipt are retained beside the original run as
+`recheck-transport.log`, `recheck-swift-theme.log`, `recheck-swift-files.log` and
+`recheck-resources.json`; `recheck-clippy.log` records the final lint. The affected headless Desktop checks establish the
+automated boundary; they neither establish attached Desktop acceptance nor
+clear the unexplained broader Swift run. Keep that limit in delivery context.
+
+Demo decision pass 2, November 4: the agent, explicitly standing in for Jack
+Heart, advanced the headless review after real-Task candidate commands proved
+the accepted no-Desktop fallback, missing-path failure and retry without changing
+either original document. The configured Desktop socket was unavailable before
+and after. This settles the decision at this step; it does not establish attached
+rendering, draft preservation or UI save/readback, nor change parent delivery or
+installation authority. Exact observations and rationale are in
+[docs-first-demo.md](docs-first-demo.md#earlier-decision-pass-2--headless-desktop-fallback).
+
+Earlier demo decision pass 1, November 4, Session `session_3cb2a0ef951d48a3a1cabc953b97685e`:
+advance under delegated judgment. The gate-built candidate also demonstrated
+Session-inferred original paths, absent-Desktop fallback and missing-path retry
+without a Task override or changed document bytes. Existing affected check logs
+were inspected, not rerun. Attached UI proof and the broader Swift suite limit
+remain open evidence limits. See [current demo evidence](docs-first-demo.md#current-decision-pass-1--configured-session-fallback).
+
+Current demo decision pass 1, November 4, Session
+`session_74d8335b541542b28c4f73e4d0ed5764`: advance under delegated judgment.
+The same configured Session command, missing-path failure and retry reproduced
+the accepted absent-Desktop behavior with unchanged original document hashes.
+No new implementation defect or product choice was found. Retained affected
+checks remain applicable; attached UI proof and the broader Swift exit remain
+unresolved evidence limits. No installation or parent operation was performed.
+
 The full pre-compression plan, checks and earlier archive references remain at
 `ef0ca500977a123076cf08f0e114b7fd59d36881:scratch/write-docs-first.md`.
+
+Gate follow-up, November 4, Session `session_cb859e7fee38428e82a5b669d7ce5417`:
+reviewed the complete parent-relative code and documentation diff plus the
+existing unstaged fixture and architecture repairs. No further in-scope defect
+was found. Original-file identity, controlling-viewer ownership, Desktop-only
+automatic presentation and implementation loop targets agree with the accepted
+experience. No production or test source changed in this pass, so the affected
+Rust, website, Files/pane/DTO and lint results above remain applicable.
+
+- `scripts/test.py --base df3b5e810d --list` — same affected suite inventory; no full-matrix execution.
+- Headless/network/time-limit wrappers around `swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter ThemeTests` — 21 passed in 0.418s; log and event stream: `.lf/tmp/gate/run-10562/recheck-swift-theme-suite.{log,jsonl}`.
+- `git diff --check` — passed.
+
+The theme-suite diagnostic narrows the earlier unexplained exit: it does not
+reproduce within that suite, including the previously unfinished test. The only
+nearby Loopflow crash report was a separate 14:14 Sparkle packaging fixture,
+before the Swift run's 14:21 start; it does not explain the failure. No timeout
+or assertion was recorded in the failing log. Broader Swift completion remains
+deferred to capable CI, with the original failed run preserved; neither focused
+pass clears it. No new display, host, installation or parent operation was run.
 
 Check (realign, November 4): `git diff --check` passes and `lf context` fits both limits; code inspection agrees with the Desktop-only skill and explicit current-host opening. Reused implement results: `cargo build -p loopflow --bin lf`, migration-history check, fmt, `cargo clippy --all-targets -- -D warnings`, and `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1` (20 passed, 2 native probes skipped; flaky mock-argv fixture removed), exact no-Desktop rerun and README/index sync passed. Unchanged graph/progression (13), two world scenarios, prompt goldens, action DTO and 55 headless Files/pane/DTO checks remain applicable. Gate owns broader affected suites; demo/review owns configured Desktop proof after compatible installation.

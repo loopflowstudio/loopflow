@@ -480,3 +480,41 @@ Clippy and current Desktop acceptance remain unverified. Do not publish or
 regenerate ready-for-review copy until the required checks and remaining
 acceptance hold. Preserve the installed registry, PR2 boundary and unrelated
 critique artifacts.
+
+### Review publication acceptance — November 4
+
+Jack Heart's remaining verification request was continued in this checkout.
+`lf sync` checkpointed the six existing Rust repairs and notes as `7c4547afda`
+without conflicts. The production source has not changed since that checkpoint.
+
+The changed-aware run passed architecture, inventory, formatting, CLI build,
+422 selected Rust tests, Clippy, 72 website tests, 680 headless Swift tests plus
+the isolated lifecycle test, and Swift boundary checks. Its command, filter and
+results are in `/tmp/loo714-publish-gate.log`. Migration-history validation also
+passed. The migration selection completed; the remote Graph preview passed in
+4.991 seconds and the repaired machine-alias assertion passed. The concurrent
+writer passed without a leak report. Historical Linux timeout/leak causes remain
+unproved; no timeout increase or speculative production repair was introduced.
+
+The additional consumer run exposed ambient personal-config reads in the standalone
+global-command fixtures and one Session launch fixture. Their in-process setup now
+uses the same disposable Home as their commands. Machine-alias assertions read
+file declarations; route assertions address clone paths; non-Git setters prove
+private file persistence using the typed account value. Only these two test files
+changed after the main gate. The other 81 consumer tests passed, including Task
+Graph behavior, Wave setup, subscriptions and served-read parity.
+
+Account selection, rental declarations, all four FFI tests and the repaired Session
+launch passed in `/tmp/loo714-publish-final.log`. Global commands then passed 43
+of 44 tests in `/tmp/loo714-publish-global.log`; correcting the remaining assertion
+to decode the accepted scalar account shorthand passed its focused regression in
+`/tmp/loo714-publish-last-regression.log`. These are scoped results at their recorded
+source boundaries, not a repeated aggregate gate after test-only edits.
+Current formatting, whitespace and `cargo clippy --all-targets --jobs 4 -- -D
+warnings` passed after those edits (`/tmp/loo714-publish-clippy.log`).
+
+Remaining delivery is review-only publication with updated file-backed-settings
+copy. Preserve scratch and the unrelated critique. Auto-Ship remains stopped;
+configured-provider and installed-app acceptance are not established by these
+disposable/headless tests. Automatic limit recovery remains PR2, so this Task stays
+open after publication.

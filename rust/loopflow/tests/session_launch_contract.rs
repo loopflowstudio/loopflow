@@ -655,6 +655,7 @@ mod support;
 #[test]
 fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings() {
     let fixture = Fixture::new("claude:sonnet");
+    let _env = support::EnvGuard::with_lf_home(&[], &fixture.home.path().join("machine"));
     fixture.settings("claude:sonnet", true, true);
     let base = String::from_utf8(
         Command::new("git")

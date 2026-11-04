@@ -47,21 +47,24 @@ Discuss the feedback, revised artifact paths and remaining work in the ongoing
 conversation. Save their exact paths and a short takeaway with the review evidence.
 The caller chooses further work; preserve their Session and Graph.
 
-For disposable demos, copy the complete runtime (whole app bundle when applicable)
-to a unique private root outside rebuildable output. Keep the private Machine,
-repository and provider history there. Use its `LF_HOME` and absolute copied CLI path
-as `LF_BIN` for launch, fixture commands and teardown. Record the root, Session,
-exact owner identities, teardown command and private-Machine history reopening
-instructions in the demo note. Keep the root intact through rebuilds while owners
-live; never mark a history-bearing root for automatic cleanup.
+For disposable demos, create two private roots outside rebuildable output before
+launch, using any location or release step the repository's cleanup guidance names.
+The durable root holds the private Machine, provider history and fixture repository.
+The runtime root holds the complete copied runtime (whole app bundle when applicable)
+and generated output. Absolute paths are fixed from the start; nothing is relocated.
+Use the durable root's `LF_HOME` and the absolute copied CLI path as `LF_BIN` for
+launch, fixture commands and teardown. Record both roots, Session, exact owner
+identities, teardown command and private-Machine history reopening instructions in
+the demo note. Keep both roots intact through rebuilds while owners live.
 
-After review, record whether drafts and pending requests are settled, retained,
-or explicitly disposable before stopping owners. Retained or unresolved input
-keeps its owner and complete fixture; saved history cannot recreate a dead editor.
-For eligible teardown, stop only verified demo owners through existing
-Session/process controls and confirm exit before removing generated output.
-Preserve durable history. If teardown is incomplete, keep the fixture and record
-remaining owners and the next teardown action. Closing a viewer is not teardown.
+When review ends, record each draft and pending request as settled or given up. The
+person present answers this on the demo page; that answer is the release. Closing a
+viewer, age or socket failure releases nothing, and without an answer both roots stay.
+If all input is settled, stop only verified demo owners through existing
+Session/process controls, confirm exit and remove the runtime root. If any input is
+given up, leave owners running and record the release and the input at risk: saved
+history cannot recreate a dead editor. Never delete durable history. If teardown is
+incomplete, keep the runtime root and record surviving owners and the next action.
 Use no competing cleaner or process-name signaling.
 
 On a headless surface, run the same demonstration autonomously. If required

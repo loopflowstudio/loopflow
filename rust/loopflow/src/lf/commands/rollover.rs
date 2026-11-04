@@ -5,7 +5,7 @@
 //! and version, and flags the ones a launch through the entry no longer runs
 //! (`installation::superseded`, the judgement owners and `lf resume` share) or
 //! that can't open the store any more. A superseded owner ends itself once its
-//! Sessions wait for a person and `lf resume` reopens them on the installed lf;
+//! Sessions hold no work or input and `lf resume` reopens them on the installed lf;
 //! rollover does that for every superseded owner at once, including owners that
 //! predate the policy: an idle owner with saved provider history is ended the
 //! way its lifetime policy ends it, and each of its Sessions resumes on the
@@ -387,7 +387,7 @@ fn disposition(
     owner_disposition(store, &process.id)
 }
 
-/// A Session execution owner moves when it is resumable and waits for a person.
+/// A Session execution owner moves when it is resumable and holds no work.
 /// One holding work stays even when its socket does not answer, as `lf resume`
 /// leaves it: ending it would lose what saved history cannot restore.
 fn owner_disposition(store: &SqliteStore, owner: &LfProcessId) -> Result<Disposition> {

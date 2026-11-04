@@ -32,6 +32,20 @@ its output and the repositories, and report:
   (`kept … (held open)` or `kept … (written in the last 4 hours)`);
 - each failed step with its error.
 
+## Demo runtimes
+
+A disposable demo on this Machine puts its runtime root at
+`~/.lf-machine/demos/<id>`: the copied app or CLI and generated output. Its durable
+root (private Machine, provider history, fixture repository) sits outside
+`~/.lf-machine/demos`, because the marker below covers the entire runtime root.
+
+The demo writes `.disposable-coding-demo` at the top of the runtime root when the
+person releases it, never at creation, containing exactly
+`disposable runtime; evidence stored elsewhere`. Writing it restarts the cleaner's
+retention window, so a long review cannot age out while it is live. An unmarked root
+is reported as retained. Reclaiming marked roots belongs to LOO-722's runner;
+`scripts/disk-cleanup.sh` here does not read the marker.
+
 ## Never
 
 - Remove anything yourself: no `rm`, no worktree, branch, source file or

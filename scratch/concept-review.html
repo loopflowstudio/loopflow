@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-725 — When is a demo finished?</title>
+<title>LOO-725 — What ends a demo?</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.6; }
   body { margin: 0 auto; max-width: 48rem; padding: 2rem 1.25rem 4rem; }
@@ -15,81 +15,85 @@
   pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: light-dark(#f1f3f5, #25282b); }
   .decision { border-left: .2rem solid light-dark(#8c5200, #e8b568); padding-left: 1rem; }
   .flow { padding-block: .7rem; border-bottom: 1px solid light-dark(#ddd, #444); }
+  blockquote { margin: 1.25rem 0; padding-left: 1rem; border-left: .2rem solid light-dark(#ccc, #555); }
+  blockquote small { display: block; margin-top: .3rem; }
   a { color: light-dark(#195a9b, #9bc9ff); }
 </style>
 <body>
 <header>LOO-725 · concept-review · 2026-11-04<br>
 Built from <a href="loo-725.md">scratch/loo-725.md</a>, <code>builtins/task/skill/demo.md</code>,
-<code>transport/README.md</code>, <code>transport/input.rs</code>,
-<code>store/sqlite/sessions.rs</code>, <code>ops/human_session.rs</code>,
-<code>lf/commands/rollover.rs</code>, and LOO-722’s <code>scripts/disk_cleanup.py</code>
-and recorded cleanup decisions. Rust source paths are beneath <code>rust/loopflow/src/</code>.</header>
+<code>transport/lifetime.rs</code>, <code>transport/input.rs</code>, LOO-722’s
+<code>scripts/disk_cleanup.py</code> and its comments <code>2693d72d</code>, <code>9ad44189</code>
+and <code>4f0b98a7</code>. Rust source paths are beneath <code>rust/loopflow/src/</code>.</header>
 
-<h1>When is a demo finished?</h1>
-<p class="decision"><strong>Open product choice.</strong> Decide how demo completion makes runtime
-files eligible for cleanup while preserving conversation history and settling editable input.
-The current root contains history; marking that whole root disposable contradicts its contents.</p>
-<p>Jack Heart selected stopping verified owners before reclaiming eligible output.
-He also requires durable history, editable drafts and pending requests to survive.
-Eligibility must settle that boundary before owner termination.</p>
+<h1>What ends a demo?</h1>
+<p class="decision"><strong>Your decisions already answer this; check the reading.</strong>
+Earlier reviews held two questions open. Your brief and <code>2693d72d</code> exclude one option
+of each, so the plan now moves to one prose repair of <code>demo.md</code>. No Rust changes.
+This is a reading of what you said, not a decision you made. Overturn it in demo review if it is wrong.</p>
+<blockquote>Pending drafts or quiet-but-live demo owners must not silently retain eligible disposable
+output forever; preserve durable conversation history and source.
+<small>— <code>2693d72d</code>, recording Jack Heart’s cleanup policy</small></blockquote>
+<p>The branch’s <code>demo.md</code> currently says the opposite: never mark a history-bearing root,
+and “retained or unresolved input keeps its owner and complete fixture.”</p>
 
 <h2>Actions → concepts → APIs</h2>
 <div class="flow"><strong>Type while storage is busy</strong><br>
 Queued bytes → <code>PendingInput</code> → <code>try_record_owner_input</code> → native editor.<br>
-<small>Implemented: retry after 100 ms; retain before delivery; keep control responsive.</small></div>
+<small>Existing on this branch. Retry after 100 ms; retain before delivery; control stays responsive.</small></div>
 <div class="flow"><strong>Detach, rebuild, return</strong><br>
 Same Session and live editor owner → <code>lf resume SESSION</code> → <code>owner_retention</code>.<br>
-<small>Before: a superseded unanswering owner could be cut off. Now: protected work keeps its owner,
-even if attachment fails. Source preservation is verified; usable installed recovery remains unproved.</small></div>
+<small>Existing on this branch. Protected work keeps its owner even if attachment fails; usable
+installed recovery remains unproved.</small></div>
 <div class="flow"><strong>Finish the demo</strong><br>
-Input disposition + eligible output → verified owner stop → final death recheck → LOO-722 cleanup.<br>
-<small>Proposed completion contract: specify when drafts/requests are settled or explicitly disposable.
-Closing a viewer supplies neither fact.</small></div>
+Record each draft and request → release the runtime root → verified owner stop → final death recheck → reclaim.<br>
+<small>Proposed. Replaces “until disposition”, which let unsettled input hold a root forever.</small></div>
 <div class="flow"><strong>Return after teardown</strong><br>
-Durable Session and provider history → <code>lf resume SESSION</code> in its private Machine.<br>
+Durable Session and provider history → <code>lf resume SESSION</code> in the durable private Machine.<br>
 <small>Required: no replay. Saved history cannot reconstruct a dead editor.</small></div>
 
 <h2>The directory boundary</h2>
-<p><strong>Existing demo instruction:</strong> keep the complete fixture intact and unmarked.</p>
+<p><strong>Existing on this branch:</strong> one root, permanent because it holds history.</p>
 <pre>private fixture/
   copied runtime
   private Machine + provider history
-  repository
+  repository</pre>
+<p><strong>Proposed:</strong> two roots, created before launch so no absolute path moves.</p>
+<pre>durable root/                runtime root/
+  private Machine              copied app or CLI
+  provider history             generated output
+  fixture repository           marker, written at release
 
-No automatic-cleanup marker while this root contains history.</pre>
-<p><strong>Proposed alternative, not accepted:</strong> choose stable history paths before launch,
-then make only the separate runtime eligible after recording completion.</p>
-<pre>durable private fixture/     disposable runtime/
-  Machine                     copied app or CLI
-  provider history            marker only after eligibility
-  repository
-
-LOO-722 stops verified owners before deleting eligible runtime.</pre>
-<p>The cleaner’s marker says <code>disposable runtime; evidence stored elsewhere</code>.
-Screenshots elsewhere are insufficient: the same Session must still reopen from durable history.
-Moving an existing Machine or provider directory may invalidate recorded absolute paths.</p>
+kept                         reclaimed after owners stop</pre>
 
 <h2>Normal path, failure, recovery</h2>
-<p>Type a draft, detach, rebuild, and resume the same editor. Complete the demo under the chosen
-disposition, stop verified owners, reclaim eligible runtime, then reopen the same saved conversation.</p>
-<p>If storage fails, keep queued input and retry without spinning. When access recovers, deliver
-it once. If cleanup is interrupted, surviving owners keep their files until teardown succeeds.</p>
-<p><strong>Counterexample:</strong> copy the transcript and kill the owner while a native request
-is pending. History survives; the original request does not. Directory separation alone cannot
-meet the accepted experience.</p>
-<p>No new Session state, schema, scheduler or cleaner is needed. Configured cleanup, rebuild
-and installed acceptance remain outstanding. This review changed no implementation or execution.</p>
+<p><strong>Settled input.</strong> Review ends with nothing pending. Stop verified owners, confirm exit,
+remove the runtime root, reopen the same history.</p>
+<p><strong>Unsettled input.</strong> The demo records it and releases the root but stops nothing, because
+the 24h minimum for owner termination still stands. On your Machine, writing the marker restarts the
+cleaner’s newest-write window; a demo with an unknown outcome waits seven days. After that the draft
+may be lost with its owner. History survives.</p>
+<p><strong>Interrupted teardown.</strong> The runtime root stays, and the note names survivors and the
+next action. Nothing is deleted underneath a surviving owner.</p>
+<p><strong>Abandoned review.</strong> Nothing releases the root. Its runtime stays valid and the cleaner
+reports it retained. That is visible, and it is not the incident’s path-loss condition, but it does not
+reclaim anything.</p>
+<p>Idle, replaced and superseded owners keep LOO-709’s protection. Only authorized cleanup of a
+released root ends a draft-holding owner. The marker stays out of the builtin skill: the cleaner is
+machine-local, so repository guidance under <code>.lf/</code> names it.</p>
 
-<h2>Unresolved decisions for review</h2>
-<p>This headless run requests no reply. These choices remain recorded for the next product review.</p>
+<h2>Questions for demo review</h2>
+<p>This headless run requests no reply and continues on the reading above.</p>
 <ol>
   <li><strong>Where does completed demo history live?</strong><br>
-  <strong>1a.</strong> Stable durable paths outside separately disposable runtime.<br>
-  <strong>1b.</strong> The complete unmarked fixture, retained until explicit teardown.</li>
-  <li><strong>What completes a demo with an editable draft or pending request?</strong><br>
-  <strong>2a.</strong> Settle it before completion.<br>
-  <strong>2b.</strong> Permit an explicit completion action declaring that input disposable.<br>
-  Both retain unresolved input and its owner until disposition; neither deletes durable history.</li>
+  <strong>1a.</strong> Stable durable root outside the disposable runtime (proposed).<br>
+  <strong>1b.</strong> Overturn: keep whole fixtures until explicit teardown.</li>
+  <li><strong>Can unsettled input hold a released root?</strong><br>
+  <strong>2a.</strong> No: record it, release, and let the 24h-minimum cleanup end its owner (proposed).<br>
+  <strong>2b.</strong> Overturn: input holds the root until someone disposes of it.</li>
+  <li><strong>Should an abandoned review eventually release itself?</strong><br>
+  <strong>3a.</strong> No: it stays retained and reported (proposed).<br>
+  <strong>3b.</strong> Yes: name the age at which it does.</li>
 </ol>
 </body>
 </html>

@@ -613,9 +613,8 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// What keeps execution owner `owner` running. None means its Sessions are
-    /// standalone interactive conversations waiting for a person; finished
-    /// Graphs hold nothing.
+    /// What keeps execution owner `owner` running. None means its standalone
+    /// interactive Sessions hold no work or native input; finished Graphs hold nothing.
     pub(crate) fn owner_retention(
         &self,
         owner: &crate::id::LfProcessId,

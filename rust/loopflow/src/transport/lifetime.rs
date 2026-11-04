@@ -5,7 +5,7 @@
 //! holding it (a turn, pending request, running Graph or headless Run). An owner
 //! whose lf executable is removed, replaced or superseded (a worktree deleted,
 //! a build relinked, Dev.app rebuilt, another installed build selected) ends once
-//! its Sessions wait for a person and its command has been quiet for one poll,
+//! its Sessions hold no work or input and its command has been quiet for one poll,
 //! even while viewed. Its attached viewers
 //! are told why and follow the resume command through the lf entry. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`

@@ -2330,6 +2330,131 @@ while True:
     fixture.ends(&owners[0]);
 }
 
+/// An upgrade preserves a running provider's saved callback contract and identity.
+#[test]
+fn retained_hooks_survive_upgrade() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys, time
+if sys.argv[1:] == ["--version"]:
+    print("2.1.302")
+    sys.exit(0)
+home = pathlib.Path(os.environ["HOME"])
+settings = json.loads(pathlib.Path(sys.argv[sys.argv.index("--settings") + 1]).read_text())
+# Keep the declaration an older lf installed, including its executable address.
+for groups in settings["hooks"].values():
+    for group in groups:
+        for handler in group["hooks"]:
+            handler["command"] = handler["command"].replace(os.environ["LF_BIN"], os.environ["HOOK_ENTRY"])
+stop = settings["hooks"]["Stop"][0]["hooks"][0]
+stop["command"] = stop["command"].replace("__context-block --moment stop", "__planning-check")
+def mark(name, text="ready"):
+    pending = home / (name + ".tmp")
+    pending.write_text(text)
+    pending.replace(home / name)
+def hook(event, group=0, **extra):
+    command = settings["hooks"][event][group]["hooks"][0]["command"]
+    payload = dict(session_id="retained-native-thread", hook_event_name=event, **extra)
+    result = subprocess.run(command, shell=True, input=json.dumps(payload).encode(), capture_output=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr.decode())
+    return result
+def wait(name):
+    deadline = time.monotonic() + 25
+    while not (home / name).exists():
+        if time.monotonic() > deadline: raise RuntimeError("missing " + name)
+        time.sleep(0.02)
+hook("SessionStart", source="startup")
+hook("UserPromptSubmit")
+hook("Stop", background_tasks=[], session_crons=[])
+hook("UserPromptSubmit")
+mark("before-upgrade", str(os.getpid()))
+wait("upgrade-ready")
+# These are the same in-memory declarations and inherited environment.
+hook("SessionStart", group=1, source="compact")
+hook("Stop", agent_id="child", background_tasks=[], session_crons=[])
+mark("child-stopped")
+wait("stop-parent")
+result = hook("Stop", background_tasks=[], session_crons=[])
+assert result.stderr == b"", result.stderr
+# A real delivery failure must not be turned into a successful retired hook.
+missing = home / "missing-delivery.json"
+env = dict(os.environ, LF_CONTEXT_DELIVERY=str(missing))
+failed = subprocess.run(stop["command"], shell=True, env=env,
+    input=json.dumps(dict(session_id="retained-native-thread", hook_event_name="Stop")).encode(), capture_output=True)
+assert failed.returncode != 0, failed
+assert str(missing).encode() in failed.stderr, failed.stderr
+mark("after-upgrade", str(os.getpid()))
+wait("finish-upgrade")
+"#,
+    );
+    let entry = fixture.home.path().join("bin/lf-entry");
+    // Model the old command spelling at the installed address, then replace
+    // that address while its provider stays alive. No installed Home is touched.
+    let candidate = env!("CARGO_BIN_EXE_lf");
+    std::fs::write(
+        &entry,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = __planning-check ]; then shift; exec '{candidate}' __context-block --moment stop \"$@\"; fi\nexec '{candidate}' \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = fixture.native(Path::new(candidate), &path, "retained request");
+    command.env("HOOK_ENTRY", &entry);
+    let owner = fixture.owner(command);
+    let mut viewer = fixture.viewer(&owner, false);
+    let before_pid = fixture.wait_file("before-upgrade");
+    let sql = fixture.sql();
+    let identity = || {
+        sql.query_row(
+            "SELECT s.id,s.provider_thread,p.id,p.pid,p.attachment_token,s.current_capture
+             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+             WHERE s.transport_lf_process_id=?1",
+            [&owner],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .unwrap()
+    };
+    let before = identity();
+    let yielded = || {
+        sql.query_row(
+            "SELECT yielded FROM session_activity WHERE session_id=?1",
+            [&before.0],
+            |r| r.get::<_, bool>(0),
+        )
+        .unwrap()
+    };
+    assert!(!yielded());
+    let replacement = entry.with_extension("next");
+    std::os::unix::fs::symlink(candidate, &replacement).unwrap();
+    std::fs::rename(replacement, &entry).unwrap();
+    std::fs::write(fixture.home.path().join("upgrade-ready"), "ready").unwrap();
+    fixture.wait_file("child-stopped");
+    assert!(!yielded(), "a subagent must not settle the retained turn");
+    std::fs::write(fixture.home.path().join("stop-parent"), "ready").unwrap();
+    assert_eq!(fixture.wait_file("after-upgrade"), before_pid);
+    assert!(yielded(), "the retained Stop hook must run, not be skipped");
+    assert_eq!(
+        identity(),
+        before,
+        "upgrade must retain the conversation and fence"
+    );
+    std::fs::write(fixture.home.path().join("finish-upgrade"), "ready").unwrap();
+    viewer.finish();
+    fixture.ends(&owner);
+}
+
 /// Native start/stop callbacks preserve silent work across both deadlines.
 #[test]
 fn silent_native_turns_survive_until_settlement() {

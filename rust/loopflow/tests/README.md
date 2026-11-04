@@ -63,6 +63,12 @@ prompt/stop callbacks from the generated hook settings, preserves silent work
 past the detached grace and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
+`transport_tests::retained_hooks_survive_upgrade` replaces a fixture lf entry
+while its native provider keeps the old `__planning-check` Stop declaration.
+It checks settlement, subagent exclusion, retained identity and real delivery
+errors. The alias uses the current ContextBlock handler; no second planning
+callback implementation exists. This fixture does not prove installed app/CLI
+coherence or a released-binary upgrade.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

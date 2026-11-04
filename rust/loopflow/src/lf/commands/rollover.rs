@@ -369,34 +369,28 @@ pub struct ListedProcess {
 #[derive(Debug)]
 enum Disposition {
     /// A resumable owner and the Sessions it holds.
-    Moves {
-        sessions: Vec<String>,
-    },
+    Moves(Vec<String>),
     /// A Graph runner, left running; its next step launches on the selected lf.
     NextStep,
     Stays(String),
 }
 
 /// Whether a superseded Process can move, and why not when it can't.
-async fn disposition(
-    shared: &SharedStore,
+fn disposition(
+    store: &SqliteStore,
     binary: &RunningBinary,
     process: &RunningLfProcess,
 ) -> Result<Disposition> {
-    if shared.sqlite.runs_graph(&process.id)? {
+    if store.runs_graph(&process.id)? {
         return Ok(graph_runner(binary));
     }
-    owner_disposition(shared, process).await
+    owner_disposition(store, process)
 }
 
 /// A Session execution owner moves when it is resumable and waits for a person.
 /// One holding work stays even when its socket does not answer, as `lf resume`
 /// leaves it: ending it would lose what saved history cannot restore.
-async fn owner_disposition(
-    shared: &SharedStore,
-    process: &RunningLfProcess,
-) -> Result<Disposition> {
-    let store = &shared.sqlite;
+fn owner_disposition(store: &SqliteStore, process: &RunningLfProcess) -> Result<Disposition> {
     let stays = |reason: &str| Ok(Disposition::Stays(reason.into()));
     let sessions = store.owner_sessions(&process.id)?;
     if sessions.is_empty() {
@@ -408,9 +402,8 @@ async fn owner_disposition(
         );
     }
     for session in &sessions {
-        let key = shared
-            .session(session)
-            .await?
+        let key = store
+            .session(session)?
             .and_then(|session| session.artifact_key);
         let saved = match key {
             Some(key) => store.input_provider_session(&key)?.is_some(),
@@ -422,7 +415,7 @@ async fn owner_disposition(
             )));
         }
     }
-    Ok(Disposition::Moves { sessions })
+    Ok(Disposition::Moves(sessions))
 }
 
 /// A Graph runner's steps resolve the installed entry at each launch, except
@@ -448,7 +441,7 @@ impl RolloverReport {
     fn place(&mut self, binary: String, process: &RunningLfProcess, disposition: Disposition) {
         let process = process.clone();
         match disposition {
-            Disposition::Moves { sessions } => self.moved.push(MovedOwner {
+            Disposition::Moves(sessions) => self.moved.push(MovedOwner {
                 process,
                 binary,
                 sessions: Vec::new(),
@@ -505,7 +498,7 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
     };
     for binary in inventory.superseded() {
         for process in &binary.processes {
-            let disposition = disposition(&store, binary, process).await?;
+            let disposition = disposition(&store.sqlite, binary, process)?;
             report.place(binary.describe(), process, disposition);
         }
     }
@@ -518,11 +511,11 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
         let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
             == ProcessIdentityEvidence::Live;
         let now = if still_running {
-            owner_disposition(&store, &owner.process).await?
+            owner_disposition(&store.sqlite, &owner.process)?
         } else {
             Disposition::Stays("exited before rollover reached it".into())
         };
-        let Disposition::Moves { sessions } = now else {
+        let Disposition::Moves(sessions) = now else {
             report.place(owner.binary, &owner.process, now);
             continue;
         };
@@ -634,7 +627,7 @@ mod tests {
         Disposition, RunningBinary, RunningLfProcess,
     };
     use crate::id::LfProcessId;
-    use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
+    use crate::store::sqlite::SqliteStore;
 
     fn process(pid: u32) -> RunningLfProcess {
         RunningLfProcess {
@@ -689,17 +682,13 @@ mod tests {
         assert_eq!(parse_version("error: unexpected argument"), None);
     }
 
-    #[tokio::test]
-    async fn a_graph_runner_moves_at_its_next_step_unless_its_steps_cannot_follow() {
+    #[test]
+    fn a_graph_runner_moves_at_its_next_step_unless_its_steps_cannot_follow() {
         let directory = tempfile::tempdir().unwrap();
-        let store: SharedStore = std::sync::Arc::new(
-            open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("lf.db")))
-                .await
-                .unwrap(),
-        );
+        let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
         let [runner, plain] = [process(1), process(2)];
         {
-            let conn = store.sqlite.conn.lock().unwrap();
+            let conn = store.conn.lock().unwrap();
             for (process, argv) in [(&runner, ["lf", "graph"]), (&plain, ["lf", "inspect"])] {
                 conn.execute(
                     "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,'fixture',?2,1)",
@@ -724,44 +713,28 @@ mod tests {
         let below_floor = binary("/home/.lf/bin/lf-270110a", true);
         let helper = binary("/Applications/Loopflow.app/Contents/MacOS/lf", false);
 
-        let of = |binary, process| {
-            let store = store.clone();
-            async move { disposition(&store, binary, process).await.unwrap() }
-        };
-        assert!(matches!(
-            of(&installed, &runner).await,
-            Disposition::NextStep
-        ));
-        let Disposition::Stays(reason) = of(&below_floor, &runner).await else {
+        let of = |binary, process| disposition(&store, binary, process).unwrap();
+        assert!(matches!(of(&installed, &runner), Disposition::NextStep));
+        let Disposition::Stays(reason) = of(&below_floor, &runner) else {
             panic!("a runner below the floor stays");
         };
         assert!(reason.contains("rerun the Graph"), "{reason}");
-        let Disposition::Stays(reason) = of(&helper, &runner).await else {
+        let Disposition::Stays(reason) = of(&helper, &runner) else {
             panic!("a Desktop helper runner stays");
         };
         assert!(reason.contains("update Desktop"), "{reason}");
-        assert!(matches!(
-            of(&installed, &plain).await,
-            Disposition::Stays(_)
-        ));
+        assert!(matches!(of(&installed, &plain), Disposition::Stays(_)));
     }
 
     /// Protected work stays with its owner even without a reachable socket.
-    #[tokio::test]
-    async fn an_owner_holding_work_stays_even_when_it_cannot_answer() {
+    #[test]
+    fn an_owner_holding_work_stays_even_when_it_cannot_answer() {
         let directory = tempfile::tempdir().unwrap();
-        let store: SharedStore = std::sync::Arc::new(
-            open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("lf.db")))
-                .await
-                .unwrap(),
-        );
+        let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
         let owner = process(7);
-        let session = store
-            .sqlite
-            .test_session("busy", &crate::session_record::new_artifact_key());
+        let session = store.test_session("busy", &crate::session_record::new_artifact_key());
         let input = session.input_key().unwrap().clone();
         store
-            .sqlite
             .retain_session_observation(
                 &session,
                 &crate::session::SessionObservation {
@@ -777,7 +750,7 @@ mod tests {
             )
             .unwrap();
         {
-            let conn = store.sqlite.conn.lock().unwrap();
+            let conn = store.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,'fixture','[\"lf\",\"session\",\"serve\"]',1)",
                 [&owner.id],
@@ -790,11 +763,9 @@ mod tests {
             .unwrap();
         }
         let attachment = store
-            .sqlite
             .claim_session_attachment(&session.id, None, &owner.id, false)
             .unwrap();
         store
-            .sqlite
             .record_session_activity(
                 &session.id,
                 &attachment,
@@ -808,22 +779,20 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            owner_disposition(&store, &owner).await.unwrap(),
+            owner_disposition(&store, &owner).unwrap(),
             Disposition::Stays(_)
         ));
         store
-            .sqlite
             .conn
             .lock()
             .unwrap()
             .execute("DELETE FROM session_activity", [])
             .unwrap();
         assert!(matches!(
-            owner_disposition(&store, &owner).await.unwrap(),
-            Disposition::Moves { ref sessions } if sessions == &[session.id.as_str().to_owned()]
+            owner_disposition(&store, &owner).unwrap(),
+            Disposition::Moves(ref sessions) if sessions == &[session.id.as_str().to_owned()]
         ));
         store
-            .sqlite
             .record_session_activity(
                 &session.id,
                 &attachment,
@@ -837,11 +806,10 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            owner_disposition(&store, &owner).await.unwrap(),
+            owner_disposition(&store, &owner).unwrap(),
             Disposition::Stays(_)
         ));
         store
-            .sqlite
             .conn
             .lock()
             .unwrap()
@@ -849,12 +817,8 @@ mod tests {
             .unwrap();
         // No active turn is needed to protect either a plain or edited draft.
         for bytes in [b"draft".as_slice(), b"\x7f"] {
-            assert!(store
-                .sqlite
-                .try_record_owner_input(&owner.id, bytes)
-                .unwrap());
-            let Disposition::Stays(reason) = owner_disposition(&store, &owner).await.unwrap()
-            else {
+            assert!(store.try_record_owner_input(&owner.id, bytes).unwrap());
+            let Disposition::Stays(reason) = owner_disposition(&store, &owner).unwrap() else {
                 panic!("rollover must preserve native editor input");
             };
             assert!(reason.contains("draft"), "{reason}");

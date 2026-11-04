@@ -321,15 +321,14 @@ LOO-402 owns broader presentation. Viewer absence is not provider death.
 Earlier emission assignment and partial-PTY-write evidence:
 `272f1271df:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
-Jack Heart added Desktop to LOO-720's Rex acceptance on November 3. Source
-reproduction found native launch leaving `lf/<process>` Working; provider root
-idle/done cannot replace another id, and fresh snapshots replayed it. The repair
-removes native launch emission, preserving headless reports. Desktop correctly
-prioritizes that extra record; changing summary order would hide bad evidence.
-Transport, observer/watch and Swift presentation fixtures establish
-boundaries, not configured emission or installed acceptance. Native
-reports still lack owner retention and detached detection. Release's entry-point
-lesson applies: startup and fresh reconnect need their own provider/host proof.
+Jack Heart added Desktop to LOO-720's Rex acceptance on November 3. Native
+launch left `lf/<process>` Working; root idle/done cannot replace another id.
+Removing it preserves headless reports and Desktop summary order. Fresh viewers
+also lost native reports. The owner now reduces validated Ghostty callbacks,
+answers detached detection and replays current records, including clear.
+Fixtures prove restoration, observer/watch and Swift presentation; they prove
+neither configured emission nor mounted Rex/Desktop acceptance. Release's
+entry-point lesson applies: startup and reconnect need provider/host proof.
 
 ## Session continuity (LOO-416/710, reconciled 2026-11-02)
 

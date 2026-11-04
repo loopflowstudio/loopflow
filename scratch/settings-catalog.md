@@ -418,3 +418,65 @@ registry repair was performed. Auto-Ship was explicitly confirmed stopped. Resum
 at pr-publish to finish affected checks, investigate the recorded leak diagnostic,
 and regenerate PR copy for review only. Do not merge or complete the Task; PR2
 limit recovery remains separate.
+
+### Publication verification — November 4
+
+`lf sync` completed without conflicts at `a649915811`. It checkpointed the
+existing capacity note. PR #1805 still has Auto-Ship stopped; publication,
+merge and Task completion have not been performed by this verification run.
+
+The first changed-aware run reached 472 Rust tests: 412 passed and 60 failed.
+Inspection found a fresh in-memory migration resolving a filesystem Home even
+when there were no capacity declarations to export, ambient personal settings
+entering fixtures, and machine/DTO fixtures still asserting the removed database
+preference shape. Repairs remain in this checkout. The concurrent-writer test
+passed without a leak diagnostic; its scoped threads are joined. The prior leak
+was not reproduced, so its cause remains unknown.
+
+The first run also passed architecture, test inventory, formatting, CLI build
+and 72 website tests. Migration-history validation and `git diff --check` passed.
+A disposable CLI walkthrough proved choice before fallback, targeted false,
+linked-worktree private writes and unset revealing the shared value. It launched
+no provider and changed no installed configuration. These passes have different
+source boundaries; they are not an aggregate current-tree gate pass.
+
+Three macOS gate attempts stopped required builds when `syspolicyd` exceeded
+the repository's sustained CPU limit (observations ranged from 203% to 1405%).
+The security service and resource budgets were left unchanged. Later website
+attempts also selected an older `lf` from PATH after the network wrapper cleared
+`LF_BIN`; future runs need this checkout's `target/debug` first on PATH, then
+the Rust toolchain. Logs: `/tmp/loo714-publication-checks.log`,
+`/tmp/loo714-publication-repair-checks.log`, and
+`/tmp/loo714-publication-final-checks.log`.
+
+The repository's disposable Linux upgrade proof passed: populated 0.14.3
+promotion retained Task/Session identity, history, edits, move and retry
+(`/tmp/loo714-repository-upgrade.log`). This proves no native-provider resume or
+macOS installation. Current-source Linux library, integration and FFI test
+binaries compiled; a later refresh was killed by SIGKILL without a compiler
+diagnostic. The identical-source binaries were checked in a disconnected
+container; results are in `/tmp/loo714-linux-cached-tests.log`. Configuration
+(72), prompt preparation (26), and the Wave agent/account launch (1) passed.
+Both fresh-database regression tests also passed when selected directly. The
+broad migration selection exceeded its 300-second diagnostic limit after its
+early cases passed; it is incomplete, not a passing migration suite.
+
+The same binaries passed all 48 DTO fixtures and 36 of 38 machine-command
+tests. The remote Graph preview failed with the existing 20-second SSH probe
+deadline, also when isolated; the cause of that delay remains unproved. Remote
+machine addition found two declarations rather than the stale expected one:
+retention keeps the origin's `mini` alongside the remote's newly saved `third`.
+The fixture now checks both labels and identities, preserving the assertion
+that the origin still has only `mini`. That final fixture edit has not been
+compiled or rerun. Formatting and whitespace checks pass after it.
+
+All six settings-launch tests and all four FFI tests passed. The temporary
+container was removed and its runner exited nonzero, preserving the incomplete
+migration selection and two machine-test failures. No verification process
+started by this run remains running. The six Rust-file repairs and this note
+remain uncommitted because required Clippy has not run.
+
+Clippy and current Desktop acceptance remain unverified. Do not publish or
+regenerate ready-for-review copy until the required checks and remaining
+acceptance hold. Preserve the installed registry, PR2 boundary and unrelated
+critique artifacts.

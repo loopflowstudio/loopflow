@@ -692,13 +692,16 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     for (path, content) in [
         (".lf/skills/probe.md", "Probe."),
         (".lf/graphs/proof.yaml", "- step: {name: probe}\n"),
-        (
-            ".lf/wave/task-pr-tests/config.yaml",
-            "linear:\n  initiative: initiative-task-pr-tests\nagent: claude:opus\n",
-        ),
     ] {
         repo.create_file(path, content);
     }
+    repo.create_file(
+        ".lf/wave/task-pr-tests/config.yaml",
+        &format!(
+            "id: {}\nlinear:\n  initiative: initiative-task-pr-tests\nagent: claude:opus\n",
+            registered.task.wave_id.as_ref().unwrap()
+        ),
+    );
     repo.stage_all();
     repo.commit("Set up the Wave once");
     for args in [

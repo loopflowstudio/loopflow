@@ -284,7 +284,6 @@ fn export(conn: &Connection) -> Result<Export> {
         |row| row.get(0),
     )?;
     if old_capacity {
-        let path = super::placement::home(conn)?.join("config.yaml");
         let mut query = conn.prepare("SELECT name,off FROM pools")?;
         for row in query.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
@@ -292,7 +291,7 @@ fn export(conn: &Connection) -> Result<Export> {
             let (name, off) = row?;
             super::settings::insert(
                 exports
-                    .entry(path.clone())
+                    .entry(super::placement::home(conn)?.join("config.yaml"))
                     .or_insert(Value::Mapping(Default::default())),
                 &["pools", &name],
                 serde_yaml_ng::to_value(super::placement::PoolDeclaration { off })?,
@@ -322,7 +321,7 @@ fn export(conn: &Connection) -> Result<Export> {
             };
             super::settings::insert(
                 exports
-                    .entry(path.clone())
+                    .entry(super::placement::home(conn)?.join("config.yaml"))
                     .or_insert(Value::Mapping(Default::default())),
                 &["ondemands", &name],
                 serde_yaml_ng::to_value(declaration)?,

@@ -230,7 +230,11 @@ fn prepare_prompt(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{prepare_process_prompt, PreparedProcessPrompt, ProcessPromptInput};
+    use crate::config::Config;
+    use crate::graph::Skill;
+    use crate::prompt::structured_reply::ClientContext;
+    use crate::prompt::Surface;
     use std::fs;
     use tempfile::tempdir;
 
@@ -381,6 +385,7 @@ Test skill body.
     #[test]
     #[cfg(unix)]
     fn context_delivery_keeps_native_and_symlink_sources_single() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         fs::write(tmp.path().join("STYLE.md"), "Provider-owned instructions.").unwrap();
         std::os::unix::fs::symlink("STYLE.md", tmp.path().join("AGENTS.md")).unwrap();
@@ -423,6 +428,7 @@ Test skill body.
 
     #[test]
     fn context_delivery_keeps_distinct_scopes_and_one_operating_document() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let operating = crate::builtins::LOOPFLOW_DOC;
         fs::write(tmp.path().join("LOOPFLOW.md"), operating).unwrap();
@@ -536,6 +542,7 @@ Test skill body.
 
     #[test]
     fn first_turn_contains_skill_then_exact_request_without_size_reduction() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let message = "😀 request\r\n".repeat(20_000);
         let prepared = prepare_process_prompt(
@@ -615,7 +622,7 @@ Test skill body.
 
     #[test]
     fn preferred_name_reaches_provider_prompts_on_every_surface() {
-        let _lock = crate::journal::test_env_lock();
+        let _home = crate::journal::TestLedgerGuard::new();
         let _name =
             crate::lf::commands::graph::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
@@ -659,6 +666,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_prefers_skill_agent_when_no_override() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_process_prompt(
@@ -677,6 +685,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_prefers_explicit_agent_override() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let _selection = select_agent("claude:sonnet");
         let tmp = create_repo_fixture();
         let config = default_test_config();
@@ -696,6 +705,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_includes_loopflow_by_default() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
@@ -718,6 +728,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_omits_loopflow_when_disabled() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
@@ -740,6 +751,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_uses_default_agent_when_no_user_config() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -770,6 +782,7 @@ Test skill body.
 
     #[test]
     fn builtin_skills_use_the_application_fallback() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = tempdir().expect("tempdir");
         for name in [
             "implement",
@@ -799,6 +812,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_user_config_overrides_default_agent() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -834,6 +848,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_uses_config_docs() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
         fs::write(tmp.path().join("docs/README.md"), "docs content").expect("write docs");
@@ -860,6 +875,7 @@ Test skill body.
 
     #[test]
     fn skill_frontmatter_docs_join_the_prompt_like_requested_docs() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("scripts")).expect("docs dir");
         fs::write(tmp.path().join("scripts/testing.md"), "run the runner").expect("write doc");
@@ -892,6 +908,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_injects_structured_replies_for_ui_context() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_process_prompt(
@@ -929,6 +946,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_uses_resolved_skill_skill_without_loading_by_name() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_process_prompt(
@@ -1018,6 +1036,7 @@ Test skill body.
 
     #[test]
     fn native_skill_uses_the_same_context_channel() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let _selection = select_agent("claude");
         let tmp = create_repo_fixture();
         fs::write(tmp.path().join("context.md"), "docs content").unwrap();
@@ -1057,6 +1076,7 @@ Test skill body.
 
     #[test]
     fn native_skill_arguments_stay_separate_from_work_direction() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let source = Skill {
             content: Some("Audit $ARGUMENTS using reference.md".into()),
@@ -1114,6 +1134,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_rejects_unsupported_opencode_variants() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let _selection = select_agent("opencode:anthropic/claude-sonnet-4-5");
         let tmp = create_repo_fixture();
         let config = default_test_config();
@@ -1134,6 +1155,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_rejects_unknown_harnesses() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let _selection = select_agent("retired-agent");
         let tmp = create_repo_fixture();
         let err = prepare_process_prompt(
@@ -1153,6 +1175,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_accepts_supported_opencode_variants() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let _selection = select_agent("opencode:moonshotai/kimi-k2");
         let tmp = create_repo_fixture();
         let config = default_test_config();
@@ -1174,6 +1197,7 @@ Test skill body.
 
     #[test]
     fn prepare_process_prompt_accepts_the_users_opencode_default() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let _selection = select_agent("opencode");
         let tmp = create_repo_fixture();
         let config = default_test_config();

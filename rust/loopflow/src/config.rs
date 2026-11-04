@@ -1219,6 +1219,7 @@ release:
 
     #[test]
     fn load_config_basic() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");
@@ -1234,6 +1235,7 @@ release:
 
     #[test]
     fn load_config_or_default_exists() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");

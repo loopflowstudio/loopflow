@@ -12,6 +12,8 @@ use serde_json::Value;
 
 struct Machines {
     root: tempfile::TempDir,
+    _person: support::ambient::EnvGuard,
+    _env: support::EnvGuard,
 }
 
 impl Machines {
@@ -42,7 +44,15 @@ exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
                 "#!/bin/sh\nexit 1\n",
             );
         }
-        let fixture = Self { root };
+        let env = support::EnvGuard::with_home(&[], Some(&home));
+        let person = support::ambient::EnvGuard::clear(&["LF_USER_NAME"]);
+        std::env::set_var("LF_HOME", &home);
+        std::env::set_var("LF_USER_NAME", "Jack");
+        let fixture = Self {
+            root,
+            _person: person,
+            _env: env,
+        };
         fixture.remote(
             loopflow::build_info::BUILD_VERSION,
             "home_11111111111111111111111111111111",
@@ -339,7 +349,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .output()
         .unwrap();
     assert_success(&set);
-    assert!(String::from_utf8_lossy(&set.stdout).contains("its Session runs on mini"));
+    assert!(String::from_utf8_lossy(&set.stdout).contains("lf.config.local.yaml"));
 
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
         "../../../tests/fixtures/dto/sessions.json"
@@ -417,9 +427,11 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
         .success());
     let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
     let retained: String = db
-        .query_row("SELECT id FROM machines WHERE route='mini'", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT id FROM machines WHERE id=?1",
+            [added["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(retained, added["id"].as_str().unwrap());
     // A replacement at the same destination can be explicitly added after removal.
@@ -663,9 +675,15 @@ fn selected_machine_login_stays_restricted_and_missing_login_stops_headless() {
     assert_success(&fixture.run(&["machine", "add", "mini"]));
     let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
     db.execute(
-        "INSERT INTO provider_accounts (provider, account_id, login_email, credential_state, routing_state, created_at, updated_at) VALUES ('codex', 'person', 'person@example.com', 'connected', 'automatic', 0, 0)",
+        "INSERT INTO provider_accounts (provider, account_id, credential_state, created_at, updated_at) VALUES ('codex', 'person', 'connected', 0, 0)",
         [],
     ).unwrap();
+    assert_success(&fixture.run(&[
+        "set",
+        "--global",
+        "accounts.codex.person.login_email",
+        "person@example.com",
+    ]));
     let remote = fixture.root.path().join("remote");
     fs::write(remote.join("connected"), "true").unwrap();
     executable(
@@ -831,12 +849,25 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
             loopflow::build_info::BUILD_VERSION
         ),
     );
-    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let mini = fixture.json(&["machine", "add", "mini", "--json"]);
     let added = fixture.json(&["--machine", "mini", "machine", "add", "third", "--json"]);
-    assert_eq!(added["label"], "third");
-    let remote_machines = fixture.json(&["--machine", "mini", "machine", "list", "--json"]);
-    assert_eq!(remote_machines.as_array().unwrap().len(), 1);
-    assert_eq!(remote_machines[0]["id"], added["id"]);
+    // The new alias belongs to the executor's saved profile. Direct remote work
+    // sees it; a forwarded request continues using the origin's declarations.
+    let output = fixture
+        .command(&["machine", "list", "--json"])
+        .env("HOME", &remote)
+        .env("LF_HOME", remote.join("store"))
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let remote_machines: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let remote_machines = remote_machines.as_array().unwrap();
+    assert_eq!(remote_machines.len(), 2);
+    for (label, id) in [("mini", &mini["id"]), ("third", &added["id"])] {
+        assert!(remote_machines
+            .iter()
+            .any(|machine| machine["label"] == label && &machine["id"] == id));
+    }
     let local = fixture.json(&["machine", "list", "--json"]);
     assert_eq!(local.as_array().unwrap().len(), 1);
     assert_eq!(local[0]["label"], "mini");
@@ -901,10 +932,10 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
     .unwrap();
     fs::write(remote.join("store/config.yaml"), "repo_root: ~/projects\n").unwrap();
     // A conflicting caller preference must not resolve the destination path.
-    fs::write(
-        fixture.root.path().join("local/config.yaml"),
-        "repo_root: /not-the-remote-root\n",
-    )
+    loopflow::config::files::update(&fixture.root.path().join("local/config.yaml"), |value| {
+        value["repo_root"] = "/not-the-remote-root".into();
+        Ok(())
+    })
     .unwrap();
     let local_db = fixture.root.path().join("local/loopflow.db");
     let remote_db = remote.join("store/loopflow.db");
@@ -1158,10 +1189,10 @@ fn graph_context_preview_reads_selected_machine_graph_without_executing_steps() 
         .unwrap()
         .success());
     fs::write(remote.join("store/config.yaml"), "repo_root: ~/projects\n").unwrap();
-    fs::write(
-        fixture.root.path().join("local/config.yaml"),
-        "repo_root: /caller-only\n",
-    )
+    loopflow::config::files::update(&fixture.root.path().join("local/config.yaml"), |value| {
+        value["repo_root"] = "/caller-only".into();
+        Ok(())
+    })
     .unwrap();
     fs::write(
         repo.join(".lf/config.yaml"),
@@ -1283,27 +1314,6 @@ struct SharedPlan {
     remote_path: std::path::PathBuf,
     destination: loopflow::planning_git::PlanningDestination,
     _repos: Vec<loopflow_test_support::TestRepo>,
-    _person: Person,
-}
-
-/// In-process writes name the same person as the fixture's `lf` commands,
-/// whose Git identity is the test repository's.
-struct Person(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
-
-impl Person {
-    fn jack() -> Self {
-        let guard = loopflow_test_support::env_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        std::env::set_var("LF_USER_NAME", "Jack");
-        Self(guard)
-    }
-}
-
-impl Drop for Person {
-    fn drop(&mut self) {
-        std::env::remove_var("LF_USER_NAME");
-    }
 }
 
 impl SharedPlan {
@@ -1373,7 +1383,6 @@ impl SharedPlan {
             remote_path,
             destination,
             _repos: repos,
-            _person: Person::jack(),
         }
     }
 

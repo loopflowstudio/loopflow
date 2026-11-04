@@ -364,9 +364,7 @@ pub fn generate_release(
     version_input: &str,
     progress: &impl Progress,
 ) -> OpsResult<String> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let target = default_release_target(repo);
     generate_release_with_target(repo, version_input, &target, progress)
@@ -396,9 +394,7 @@ fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
 }
 
 pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseStatusResult> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
@@ -442,9 +438,7 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
 
 /// Check the exact git range since the last target tag.
 pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseChangeSet> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     if target.completion == ReleaseCompletion::GithubRelease {
@@ -471,9 +465,7 @@ pub fn release_notes(
     target_name: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<String> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let checkout = crate::repo::discover_repo_root(repo)
@@ -636,9 +628,7 @@ pub fn release_publish(
     assets: &[PathBuf],
     finalize: bool,
 ) -> OpsResult<()> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let config = load_config_or_default(Some(&main_repo));
     let matching: Vec<_> = config
@@ -762,9 +752,7 @@ pub fn release_run(
 ) -> OpsResult<ReleaseRunOutcome> {
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let lock = &ReleaseLock::acquire(&main_repo, &target.name)?;
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".into()));
-    }
+    require_gh()?;
     let outcome = release_version(&main_repo, &target, version_input, progress, lock)?;
     if target.completion == ReleaseCompletion::GithubRelease {
         let stable = advance_stable(&main_repo, &target, progress, lock)?;
@@ -834,9 +822,7 @@ pub fn release_issues(
 /// File a regression against `version`, creating its label when this is the
 /// release's first. Returns the issue's URL.
 pub fn release_regress(repo: &Path, version: &str, title: &str) -> OpsResult<String> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
     let tag = version_tag(required_version(version)?);
     let label = format!("{REGRESSED_IN_PREFIX}{tag}");
     if !labels(repo)?.contains(&label) {
@@ -874,9 +860,7 @@ fn resolve_stable_target(
     repo: &Path,
     target_name: Option<&str>,
 ) -> OpsResult<(PathBuf, ReleaseTarget)> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     if target.completion != ReleaseCompletion::GithubRelease {
         return Err(OpsError::Message(format!(
@@ -4200,17 +4184,7 @@ fn ensure_commit_local(repo: &Path, revision: &str, lock: &ReleaseLock) -> OpsRe
     if commit_exists_locally(repo, revision) {
         return Ok(());
     }
-    let fetch = lock
-        .command("git")
-        .args(["fetch", "origin"])
-        .current_dir(repo)
-        .output()?;
-    if !fetch.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: "git fetch origin".into(),
-            stderr: String::from_utf8_lossy(&fetch.stderr).to_string(),
-        });
-    }
+    run_locked_stdout(lock, repo, "git", &["fetch", "origin"])?;
     if commit_exists_locally(repo, revision) {
         return Ok(());
     }
@@ -4790,6 +4764,14 @@ fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
         .current_dir(repo)
         .status()
         .is_ok_and(|status| status.success())
+}
+
+fn require_gh() -> OpsResult<()> {
+    if command_exists("gh") {
+        Ok(())
+    } else {
+        Err(OpsError::Message("gh CLI not found".to_string()))
+    }
 }
 
 fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {

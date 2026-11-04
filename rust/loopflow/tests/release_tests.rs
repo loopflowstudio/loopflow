@@ -1490,7 +1490,7 @@ fn an_open_regression_issue_holds_stable_below_the_release_it_regressed_in() {
             ("v0.9.2", 12, false),
             ("v0.9.1", 20, true),
         ],
-        Regressions::labelled("v0.9.3", regression_issue("OPEN", "", None)),
+        Regressions::labelled([("v0.9.3", regression_issue("OPEN", "", None))]),
     );
     assert_eq!(
         effects,
@@ -1506,7 +1506,7 @@ fn a_regression_closed_as_completed_releases_the_next_soaked_release() {
             ("v0.9.2", 12, false),
             ("v0.9.1", 20, true),
         ],
-        Regressions::labelled("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10))),
+        Regressions::labelled([("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10)))]),
     );
     assert_eq!(
         effects,
@@ -1518,7 +1518,7 @@ fn a_regression_closed_as_completed_releases_the_next_soaked_release() {
 fn a_release_published_before_the_fix_stays_held() {
     let effects = run_stable_advance(
         &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
-        Regressions::labelled("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10))),
+        Regressions::labelled([("v0.9.2", regression_issue("CLOSED", "COMPLETED", Some(10)))]),
     );
     assert_eq!(effects, "");
 }
@@ -1527,7 +1527,7 @@ fn a_release_published_before_the_fix_stays_held() {
 fn a_reopened_regression_holds_stable_again() {
     let effects = run_stable_advance(
         &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
-        Regressions::labelled("v0.9.2", regression_issue("OPEN", "REOPENED", Some(20))),
+        Regressions::labelled([("v0.9.2", regression_issue("OPEN", "REOPENED", Some(20)))]),
     );
     assert_eq!(effects, "");
 }
@@ -1536,7 +1536,7 @@ fn a_reopened_regression_holds_stable_again() {
 fn a_regression_closed_as_not_planned_holds_nothing() {
     let effects = run_stable_advance(
         &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
-        Regressions::labelled("v0.9.2", regression_issue("CLOSED", "NOT_PLANNED", Some(1))),
+        Regressions::labelled([("v0.9.2", regression_issue("CLOSED", "NOT_PLANNED", Some(1)))]),
     );
     assert_eq!(
         effects,
@@ -1570,7 +1570,7 @@ fn release_status_names_the_issue_holding_stable() {
             ("v0.9.2", 2, false),
             ("v0.9.1", 20, true),
         ],
-        Regressions::labelled("v0.9.3", regression_issue("OPEN", "", None)),
+        Regressions::labelled([("v0.9.3", regression_issue("OPEN", "", None))]),
     );
 
     let status = release_status(repo.path(), None).unwrap();
@@ -1588,21 +1588,24 @@ fn release_status_names_the_issue_holding_stable() {
 
 #[test]
 fn release_issues_filters_by_version_and_shows_the_hold() {
-    let mut earlier = regression_issue("OPEN", "", None);
-    earlier["number"] = 8.into();
+    let numbered = |number: u64, mut issue: serde_json::Value| {
+        issue["number"] = number.into();
+        issue
+    };
     let (repo, _log, _env) = stable_fixture(
         &[
             ("v0.9.3", 9, false),
             ("v0.9.2", 12, false),
             ("v0.9.1", 20, true),
         ],
-        Regressions::labelled("v0.9.3", regression_issue("OPEN", "", None))
-            .and("v0.9.2", earlier)
-            .and("v0.9.1", {
-                let mut fixed = regression_issue("CLOSED", "COMPLETED", Some(25));
-                fixed["number"] = 9.into();
-                fixed
-            }),
+        Regressions::labelled([
+            ("v0.9.3", regression_issue("OPEN", "", None)),
+            ("v0.9.2", numbered(8, regression_issue("OPEN", "", None))),
+            (
+                "v0.9.1",
+                numbered(9, regression_issue("CLOSED", "COMPLETED", Some(25))),
+            ),
+        ]),
     );
     let numbers = |version| -> Vec<u64> {
         release_issues(repo.path(), version, None)
@@ -1704,7 +1707,7 @@ fn release_promote_moves_stable_past_soak() {
 fn release_promote_stops_at_an_open_regression() {
     let (repo, log, _env) = stable_fixture(
         &[("v0.9.2", 12, false), ("v0.9.1", 20, true)],
-        Regressions::labelled("v0.9.2", regression_issue("OPEN", "", None)),
+        Regressions::labelled([("v0.9.2", regression_issue("OPEN", "", None))]),
     );
 
     let stable = release_promote(repo.path(), None, false, &NullProgress).unwrap();
@@ -1762,16 +1765,13 @@ enum Regressions {
 }
 
 impl Regressions {
-    fn labelled(version: &str, issue: serde_json::Value) -> Self {
-        Self::Labelled(vec![(format!("regressed-in:{version}"), issue)])
-    }
-
-    fn and(mut self, version: &str, issue: serde_json::Value) -> Self {
-        let Self::Labelled(issues) = &mut self else {
-            panic!("only labelled regressions take another issue");
-        };
-        issues.push((format!("regressed-in:{version}"), issue));
-        self
+    fn labelled<const N: usize>(issues: [(&str, serde_json::Value); N]) -> Self {
+        Self::Labelled(
+            issues
+                .into_iter()
+                .map(|(version, issue)| (format!("regressed-in:{version}"), issue))
+                .collect(),
+        )
     }
 
     /// The `label list` and `issue list` arms of a fake `gh` script.

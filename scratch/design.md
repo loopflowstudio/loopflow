@@ -1,104 +1,80 @@
 # LOO-691: releases resume after their PR merges, and regressions live on GitHub
 
-Jack Heart, 2026-11-04: fetch fix and GitHub regressions are one PR (#1780).
-Notion removal and planning parity moved to LOO-726. Jack chose the installed
-`lf` for host releases. Jack's dedicated machine already follows `dev`, so there is
-no release lag, and
-the separate release home is dropped.
-
-## Done
-
-Release fetches the revisions it builds or tags:
-`release_run_fetches_a_release_merge_it_has_not_seen`.
+Jack Heart, 2026-11-04: fetch fix, GitHub regressions and the `lf release`
+regression commands are one PR (#1780). Notion removal and planning parity moved
+to LOO-726. Jack chose the installed `lf` for host releases. Jack's dedicated
+machine already follows `dev`, so there is no release lag, and the separate
+release home is dropped.
 
 ## Experience
 
-A regression is a GitHub issue on the repository being released:
-
 ```bash
-gh label create regressed-in:v0.15.3
-gh issue create --title "Sessions lose their name" --label regressed-in:v0.15.3
+lf release regress v0.15.3 "Sessions lose their name"   # creates the label if needed, files the issue
+lf release issues v0.15.3                               # what it carries, and what each issue holds
+lf release issues                                       # every open regression
+lf release promote --dry-run                            # what would move, or what holds it
+lf release promote                                      # checks soak and regressions, then moves stable
 ```
 
-While that issue is open, `stable` stays below v0.15.3. Closing it as completed
-makes the first release published afterwards eligible once it soaks. Closing it
-as not planned or as a duplicate, or removing the label, drops the hold. Every Machine reads the
-same issues, so nothing depends on which Machine marked it or runs the release.
-Jack Heart chose the issue as the record: Tasks carry no regression field.
+A regression is a GitHub issue on the repository being released, labelled
+`regressed-in:vX.Y.Z`; the label is all it takes, so `gh issue edit --add-label`
+marks an existing bug. While that issue is open, `stable` stays below v0.15.3.
+Closing it as completed makes the first release published afterwards eligible
+once it soaks. Closing it as not planned or as a duplicate, or removing the
+label, drops the hold. Every Machine reads the same issues, so nothing depends on
+which Machine marked it or runs the release. `stable` stays GitHub's Latest
+marker and never moves back: a regression filed against the release `stable`
+already points at keeps newer releases held and leaves `stable` there. Jack Heart
+chose the issue as the record: Tasks carry no regression field.
 
-## Build
+## Done
 
-- `regressions()` in `ops/release.rs` reads the repository's issues carrying a
-  `regressed-in:vX.Y.Z` label through `gh`, in every state. Open holds; closed
-  as completed gives `fixed_at` = closed time; closed as not planned is no
-  regression. A label that does not parse as a version is ignored, as today.
-- Unreadable GitHub: the release publishes and `stable` holds, with the reason
-  in the run log and `lf release status` (`RegressionsUnread`). `lf release
-  check` fails when this Machine cannot read them, for `completion:
-  github-release` targets. `loo-691-combined` has this shape; reuse it.
-- Remove regressions from Task management: `--regressed-in` on `lf task
-  create|edit`, `regressed_in` on Task, `TaskUpdate`, DTOs and fixtures, Swift
-  (`WaveWorkMap.swift`), `Edit`/`WorkValue::TaskRegressedIn`,
-  `regression_tasks`, `planning_explain`, and their tests.
-- `tasks.regressed_in` shipped in v0.15.1. Nothing reads it now; do not drop it
-  here (destructive schema changes are staged). LOO-730 drops it 30 days after
-  the release carrying this.
-- Docs: `release/README.md` (mark, clear, soak) and the `release-run` skill.
-  Delete "It reads the release Machine's Tasks, never Linear."
+All in the branch, checked against the code 2026-11-04:
 
-## Proof
+- Release fetches the revisions it builds or tags:
+  `release_run_fetches_a_release_merge_it_has_not_seen`.
+- `regressions()` in `ops/release.rs` reads labelled issues through `gh`, in
+  every state. Unreadable GitHub: the release publishes, `stable` holds with the
+  reason in the run log and `lf release status` (`RegressionsUnread`), and
+  `lf release check` and `lf release promote` fail.
+- `lf release issues`, `regress` and `promote`. `lf release run` and `promote`
+  share `advance_stable`, including the publisher's `promote --tag`.
+- Regressions left Task management: `--regressed-in`, `regressed_in` on Task,
+  DTOs, fixtures and Swift. No schema migration.
+- `WorkValue::HistoricalTaskRegressedIn` carries `task_regressed_in` through the
+  plan exchange unread, the way `HistoricalTaskPaused` does, so stored
+  `planning_peer_changes` rows and released peers keep decoding. Jack Heart chose
+  this on 2026-11-04 over removing it: every `lf` since v0.15.1 stores the field,
+  and Git planning failed on it. Proved by
+  `a_stored_released_regression_row_leaves_peer_planning_readable` and
+  `a_released_regression_mark_round_trips_the_plan_ref_unread`.
+- `release/README.md` and the `release-run` skill lead with the commands.
+  `release/README.md` says the dedicated host follows `dev`.
 
-release_tests with the fake `gh`: an open labelled issue holds `stable`; closed
-as completed releases the next soaked release; closed as not planned does not
-hold; a failing `gh issue` read publishes, holds `stable` and fails `release
-check`.
+## Remaining
 
-Check: see the last line of this file; affected suites and Swift belong to gate.
+- Gate: affected suites and Swift.
+- The PR body predates the commands and names the abandoned column-drop Task.
+  pr-publish rewrites it with LOO-730, which deletes the variant, the
+  `task_regressed_in` rows and the column together, since scratch clears.
+- Unproved: a real release resuming on the dedicated host after its PR merges,
+  without a manual fetch. Needs this fix to reach that host through `dev`.
+- Unproved: the commands against real GitHub; only the fake `gh` has run them.
+  Checked 2026-11-04 with read-only `gh`: Issues are enabled on the repository, and
+  `state`/`stateReason` arrive as the `CLOSED`, `COMPLETED`, `NOT_PLANNED` and
+  `DUPLICATE` the code matches. Label creation and filing remain unproved.
 
 ## Not in this diff
 
 - Notion and planning parity (LOO-726).
-- Dropping `tasks.regressed_in` (LOO-730).
+- Dropping `tasks.regressed_in` (LOO-730), 30 days after the release carrying this.
+  LOO-730 also deletes `HistoricalTaskRegressedIn` and the `task_regressed_in` rows
+  in `planning_peer_changes`.
 
-## Next (Jack Heart, 2026-11-04)
+## Proposed Wave memory
 
-Decisions, in this PR:
+Standalone realign leaves `.lf/wave/` read-only. For `release/MEMORY.md`: `stable`
+holds come from `regressed-in:vX.Y.Z` GitHub issues, not any Machine's store;
+release state read from one Machine's Tasks fails silently on every other.
 
-1. **No regression code left in Tasks or the plan exchange.** Delete
-   `WorkValue::HistoricalTaskRegressedIn`, its `planning_write.rs` arms, the
-   `optional_task_column` read and
-   `a_released_regression_mark_round_trips_the_plan_ref_unread`. No schema
-   migration: `tasks.regressed_in` stays in migrated databases, unused and
-   unnamed by code. LOO-730 drops it 30 days after the release carrying this. Checked
-   2026-11-04: every repository with a plan ref is configured `provider: linear`.
-2. **`lf release` owns regressions and promotion.** `stable` stays GitHub's
-   Latest marker.
-
-```bash
-lf release issues v0.15.3          # what is reported against this release, and whether it holds stable
-lf release issues                  # every release with open regressions
-lf release regress v0.15.3 "Sessions lose their name"   # creates the label if needed, files the issue
-lf release promote                 # checks soak and regressions, then moves stable
-lf release promote --dry-run       # what would move, or what holds it
-```
-
-- `issues` reads through the existing `regressions()` reader, keeping each
-  issue's number, title, state and URL so it can list them; `--json` like the
-  other release reads where they have it.
-- `regress` validates the version, creates the label when missing, files the
-  issue through `gh`, and prints its URL. A marked existing issue stays
-  `gh issue edit --add-label`.
-- `promote` is `advance_stable` as a command, including the publisher's
-  `promote --tag`. `lf release run` calls the same path after each run: one
-  implementation. Unreadable regressions hold and fail the command with the
-  reason. It never moves `stable` back. `--dry-run` writes nothing.
-- Docs: lead `release/README.md` and the `release-run` skill with these
-  commands instead of raw `gh`, keeping a one-line note that a labelled issue is
-  all it takes.
-
-Proof: release_tests with the fake `gh` for each command: `issues` filters by
-version and shows the hold; `regress` creates a missing label once and files
-the issue; `promote` moves past soak, stops at an open regression, and
-`--dry-run` leaves Latest unchanged; `release run` still promotes.
-
-Check: `cargo test -p loopflow --test release_tests -- stable issues regress promote` 15/15; `--lib ops::release::` 48/48; clippy and affected suites deferred to lint/gate.
+Check: `cargo test -p loopflow --lib ops::release::` 48/48; `--test release_tests` 88/88; `planning_write::` 6/6 reused; clippy and affected suites deferred to lint/gate.

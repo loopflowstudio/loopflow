@@ -103,6 +103,9 @@ work_values! {
     (TaskUrl, "task_url", Option<String>),
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
+    // Regressions are GitHub issues. Stored journal rows and released peers still carry
+    // this field, so it round-trips unread until LOO-730 deletes the rows and column.
+    (HistoricalTaskRegressedIn, "task_regressed_in", Option<String>),
     (CommentTask, "comment_task", String),
     (HistoricalProjectWorkflow, "workflow", String),
     // Released peers recorded the Wave default here; it lives in the Wave config.yaml.

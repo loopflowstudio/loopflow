@@ -51,6 +51,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskUrl(_)
         | WorkValue::TaskBranch(_)
         | WorkValue::TaskTeam(_)
+        | WorkValue::HistoricalTaskRegressedIn(_)
         | WorkValue::Disposition(_) => "tasks",
         WorkValue::CommentTask(_) | WorkValue::CommentContent(_) => "task_comments",
     }
@@ -87,6 +88,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskUrl(_) => "planning_url",
         WorkValue::TaskBranch(_) => "planning_branch_name",
         WorkValue::TaskTeam(_) => "planning_team_id",
+        WorkValue::HistoricalTaskRegressedIn(_) => "regressed_in",
         WorkValue::CommentTask(_) => "task_id",
         WorkValue::HistoricalProjectWorkflow(_) => "workflow",
         WorkValue::Krs(_) => "krs",
@@ -172,6 +174,9 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         }
         if let Some(shipped_at) = optional_task_column(conn, id, "shipped_at")? {
             values.push(WorkValue::TaskShippedAt(shipped_at));
+        }
+        if let Some(regressed_in) = optional_task_column(conn, id, "regressed_in")? {
+            values.push(WorkValue::HistoricalTaskRegressedIn(regressed_in));
         }
     }
     for value in &values {
@@ -602,6 +607,87 @@ mod tests {
             })
             .unwrap();
         id
+    }
+
+    #[test]
+    fn a_released_regression_mark_round_trips_the_plan_ref_unread() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        a.bind_peer_planning("/repo", &route).unwrap();
+        b.bind_peer_planning("/repo", &route).unwrap();
+        let task = plan(&a);
+        let exchanged = |store: &SqliteStore| {
+            store
+                .export_peer_planning("/repo", &route.id())
+                .unwrap()
+                .changes
+                .into_values()
+                .filter(|change| change.edit.target == task.as_str())
+                .filter(|change| change.edit.change.field() == "task_regressed_in")
+                .map(|change| change.edit.change)
+                .collect::<Vec<_>>()
+        };
+        // Released peers refuse a Task that arrives without the field.
+        assert_eq!(exchanged(&a), [Edit::HistoricalTaskRegressedIn(None)]);
+
+        let released = Edit::HistoricalTaskRegressedIn(Some("v0.15.3".into()));
+        {
+            let mut conn = a.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            local(
+                &tx,
+                &WorkEdit::for_target(task.as_str(), std::slice::from_ref(&released)),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
+        b.import_peer_planning("/repo", &route.id(), "first", &journal)
+            .unwrap();
+
+        assert_eq!(b.task(&task).unwrap().unwrap().title, "Original");
+        assert!(exchanged(&b).contains(&released));
+    }
+
+    #[test]
+    fn a_stored_released_regression_row_leaves_peer_planning_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = plan(&store);
+        // The bytes every lf since v0.15.1 stores for a new Task.
+        let stored = format!(
+            r#"{{"edit":{{"target":"{task}","change":{{"field":"task_regressed_in","value":null}}}},"clock":1793827427857,"parents":[]}}"#
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE planning_peer_changes SET mutation=?1 WHERE field='task_regressed_in'",
+                [&stored],
+            )
+            .unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        store.bind_peer_planning("/repo", &route).unwrap();
+
+        let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
+
+        assert!(exported
+            .changes
+            .values()
+            .any(|change| change.clock == 1793827427857
+                && change.edit.change == Edit::HistoricalTaskRegressedIn(None)));
+        let status = store
+            .peer_planning_status("/repo", Some(&route.id()))
+            .unwrap();
+        assert_eq!(status.len(), 1);
     }
 
     #[test]

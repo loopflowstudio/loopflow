@@ -159,11 +159,11 @@ A regression is a GitHub issue on the repository being released, labelled with
 the release it regressed in; the label is all it takes. While it is open,
 `stable` stays below that release. Closing it as completed makes the first
 release published afterwards eligible once it soaks; releases in between still
-carry the bug and stay skipped. Closing it as not planned or as a duplicate, or removing the label,
-drops the hold. Every Machine reads the same issues. The run logs which issue
-holds `stable`. When GitHub can't be read, the release still publishes,
-`stable` stays put, and `lf release status` says why; `lf release check` and
-`lf release promote` fail.
+carry the bug and stay skipped. Closing it as not planned or as a duplicate, or
+removing the label, drops the hold. Every Machine reads the same issues. The run
+logs which issue holds `stable`. When GitHub can't be read, the release still
+publishes, `stable` stays put, and `lf release status` says why; `lf release
+check` and `lf release promote` fail.
 
 ## What we took from other projects
 

@@ -925,39 +925,36 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
 
 ### The `lf` / Machine spine
 
-`lf` owns commands and durable reads. Global `--machine` routes the command to
-the target machine's `lf`; observation grants no execution authority. The retired Discord,
-lfd and resident-cron contracts remain in
-[git history](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/product/MEMORY.md).
+Global `--machine` routes to that machine's `lf`; reads grant no execution authority.
+Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafabd:wave/product/MEMORY.md`.
 
 ## Swift data path — RegistryQuery is the single reader
 
-Jack Heart selected LOO-593's installed local Machine service through demo,
-without Auto-Ship (November 3, 2026). Roadmap read/watch and Session rename cross
-its private socket without FFI fallback; full cutover remains. RegistryQuery keeps
-domain DTOs; Rust reads, CLI commands and Session owners retain authority.
-Desktop UI automation stays app-owned.
+Jack Heart selected LOO-593's local Machine service through demo without Auto-Ship
+(November 3, 2026). Roadmap read/watch and rename use its private socket without
+FFI fallback; full cutover remains. RegistryQuery retains DTOs; Rust reads, CLI
+commands and execution owners keep authority. UI automation stays app-owned.
+Shared functions did not prevent lfd's lifecycle drift. Keep one installer, no
+new scheduler/retention owner. Unix peer trust cannot authenticate remote proxies.
 
-Shared functions did not prevent lfd's operation/lifecycle drift. Preserve one
-installation authority and execution owners, no new scheduler/retention.
-Never replay uncertain commands/input. Unix peer
-trust cannot authenticate a remote proxy.
+Jack Heart selected automatic exact-owner recovery with native status November 4.
+It preserves newer claims without restarting providers. Temporary surface mailboxes
+carry status/actions outside terminal bytes; closure cancels. Unavailable is not
+ended. Read-only preserves copy/Find/scroll handlers; plain CLI reconnect is deliberate.
 
-Jack Heart selected automatic Desktop recovery with native status November 4.
-Recovery retains the exact owner, preserves newer claims and starts no provider.
-Temporary surface mailboxes carry status/Retry outside terminal bytes; closure
-cancels. Unavailable is not ended. Read-only retains local copy/Find/scroll handlers;
-uncertain input is discarded. Plain CLI relays retain deliberate reconnect.
+November 4 concept review found unreachable Move here in retained panes. Its
+correction consumes a generation-bound action before replacing claims; input waits for acknowledgement. Lost replies
+recover non-replacing. Never replay takeover, uncertain input or commands.
+Rust/Swift checks cover takeover, newer claims and cancellation, not native interaction.
 
-Signed helper replacement retains owner, draft
-and Graph through submission and progression. LaunchServices runs the app-owned
-updater; external runners cannot model App Management. Recovery assertions require
-a new acknowledged generation. Same-build replacement proves neither version
-migration, rendered Desktop continuity, Linux replacement nor unchanged usage.
+Signed same-build replacement proves owner/draft/Graph continuity through submission.
+App-owned LaunchServices updates model App Management; external writes cannot.
+Require new acknowledged generations. Released-version migration, rendered Desktop
+continuity, Linux replacement and unchanged usage totals remain unproved.
 
-LOO-718 consumes the contract. ViewPlan selects the primary Session, not roadmap
-membership; owner lookup starts nothing. Remote carrier, unattended hosting and
-phone takeover UX remain open.
+LOO-718 consumes the contract. ViewPlan selects primary Sessions; roadmap cannot.
+Owner lookup starts nothing. Remote carrier, unattended hosting and phone takeover
+remain open.
 
 LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
 files resurfaced retired Waves. Writes register directories; reads list store

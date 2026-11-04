@@ -199,11 +199,27 @@ geometry meanwhile. Retry only repairs the connection. The native action cannot
 repeat while pending; stale status cannot re-enable it. Pane closure removes
 its pending mailbox action and the relay observes closure even while connected.
 
+Source reconciliation at `2b9ecd9790` confirms the in-pane action and consumed
+generation match this design; no further product choice is needed for this local
+correction. The inspected local upstream and LOO-718 refs remain `ac8e088f5f`
+and `983b271695`; this is not a fresh remote integration check.
+
+The November 4 headless concept review finds no further design change within
+Jack Heart's accepted local scope. Connection availability and permission to type
+remain separate: Retry repairs transport; Move here explicitly replaces claims
+on the same owner. The surface mailbox is disposable presentation, the owner
+grants control, and existing Session/Graph records retain execution identity.
+The lost-acknowledgement/newer-viewer counterexample is covered in the current
+source and focused proofs; it remains a constraint on later changes. Usage docs
+already describe this interaction; no skill instruction change is needed.
+The next experience proof is the rendered native path, including local reading
+during recovery and the visible Move here action, under Remaining acceptance.
+
 Focused proofs cover retained draft/provider/Graph, intercepted takeover reply
 followed by a newer claim, stale action rejection and closure before action
 consumption. Swift tests exercise the same mailbox and native presentation state.
 Rendered reading/copy/Find/scroll and clicking the visible button remain demo
-work; `scratch/concept-review.html` is the historical interaction sketch, not
+work; `scratch/concept-review.html` is the current interaction sketch, not
 rendered native evidence. Remote takeover UX remains outside the accepted slice.
 
 ## Installation and lifetime
@@ -259,7 +275,19 @@ Preserve these obligations:
   bounded; do not persist every snapshot or terminal byte. Exact additional
   latency/queue/reconnect metrics and retention remain implementation choices.
 
-Checks (November 4): `cargo test -p loopflow --test transport_tests machine_service_ -- --test-threads=1` — 11 passed, installed-replacement test opt-in/ignored; `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone` — app built, 3 passed headlessly (existing display-link deprecation and macOS deployment-target linker warnings); `cargo fmt`, `git diff --check` passed; `lf context` within both limits. Prior installed-replacement proof is recorded at `7670600cf5:scratch/mobile-backend.md`; gate owns broader regression, Xcode/Linux paths and telemetry, while demo owns rendered interaction and Desktop quit/reopen.
+Checks (November 4): reused `2b9ecd9790` evidence — `cargo test -p loopflow --test transport_tests machine_service_ -- --test-threads=1`: 11 passed, installed-replacement test opt-in/ignored; `scripts/test_desktop.sh --filter MachineConnectionTests -Xswiftc -gnone`: app built, 3 passed headlessly (existing display-link deprecation and deployment-target warnings); `cargo fmt` passed. Documentation reconciliation: `git diff --check` passed; `lf context` within both limits. Installed-replacement proof remains at `7670600cf5:scratch/mobile-backend.md`; gate owns broader regression, Xcode/Linux paths and telemetry, demo owns rendered interaction and Desktop quit/reopen.
+
+Publication verification (November 4): `lf sync --manual` completed without
+conflicts against `ac8e088f5f`. The current installed-replacement proof initially
+failed because `open -W` could not install its process watch before the short-lived
+app updater exited (`kevent: No such process`). The fixture now launches once
+through LaunchServices and waits for the updater's existing completion result,
+without retrying registration or replacement. The focused
+`installed_machine_service_preserves_owner_and_graph_across_replacement` test
+then passed (1 passed, `--include-ignored --test-threads=1`), proving the current
+relay through signed same-build replacement. `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, Ruff check/format and whitespace
+checks passed. This does not replace the remaining native demo or gate checks.
 
 ## Later work and parallel boundaries
 
@@ -296,11 +324,11 @@ and Session transport. This service bridges those owners.
 
 ## Evidence
 
-[Earlier lfd attempts](<reports/Lessons from earlier lfd attempts.md>) show that
+Archived “Lessons from earlier lfd attempts” shows that
 shared executors still suffered orchestration drift (#304), exec delegation never
 finished its cutover (#825), and shared functions could retain competing lifecycle
 owners. No inspected evidence proves a completed thin backend was tried and failed.
-[Installation research](<reports/Machine service installation and lifecycle.md>)
-distinguishes observed supervisor behavior from product claims. Source research is
-preserved at `0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/`; historical timeout
+“Machine service installation and lifecycle” distinguishes observed supervisor
+behavior from product claims. Both reports are preserved at
+`0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/reports/`; historical timeout
 values do not override current owner policy (two minutes of detached quiet by default).

@@ -17,26 +17,27 @@ Built from <a href="mobile-backend.md">mobile-backend.md</a>,
 <code>MachineConnection.swift</code>, <code>GhosttyTerminalView.swift</code>,
 <code>SessionsView.swift</code>, <code>WorkspacePanesView.swift</code>,
 <code>transport_tests.rs</code> and <code>swift/README.md</code>.</header>
-<h1>Make Move here work in the recovered pane</h1>
-<p><strong>Design changed; next implement direction.</strong> The accepted explicit takeover needs a visible action while the recovered terminal is read-only. No new product decision is required.</p>
-<p>Jack Heart selected automatic exact-owner recovery with native status and newer-viewer claim preservation. That recovery is implemented. The remaining mismatch: the native row points to Move here, but the action lives in placeholders and its handler returns while the terminal is live.</p>
+<h1>Recover the same Session; move input deliberately</h1>
+<p><strong>No further design change or open product choice in the accepted local slice.</strong> This headless concept review checks <code>2b9ecd9790</code> against Jack Heart's accepted recovery direction. The in-pane correction is implemented; the remaining work is evidence at the native surface, not another product decision.</p>
+<p>The consequential mismatch is resolved: a recovered read-only pane now offers Move here where the draft is visible. Retry repairs the connection; Move here explicitly requests control. Neither action starts a provider. <a href="mobile-backend.md">The working design</a> retains all gate and demo obligations.</p>
 <div class="path">
 <p><strong>Open Task</strong> → recorded primary Session → <code>read(view_plan)</code></p>
 <p><strong>Read and edit</strong> → existing execution owner → <code>session_owner → attach</code></p>
 <p><strong>Recover</strong> → same owner, free claims only → fresh screen or bounded output continuation</p>
-<p><strong>Move here · proposed correction</strong> → explicit claim on that owner → existing replacing <code>Attach</code>, then acknowledgement</p>
+<p><strong>Retry</strong> → unavailable connection → bounded exact-owner reconnect, without replacing claims</p>
+<p><strong>Move here · implemented</strong> → explicit claim on that owner → existing replacing <code>Attach</code>, then acknowledgement</p>
 </div>
 <h2>Before: a usable screen with an unreachable action</h2>
 <div class="example">
-<p><strong>Existing implementation</strong></p>
+<p><strong>Previous implementation · corrected</strong></p>
 <p class="status">Read-only — input is in another viewer. Use Move here to take control.</p>
 <pre>Unfinished provider draft:
 Explain the failing migration before changing…</pre>
-<p>The retained surface stays live. Move here is offered in the elsewhere/closed placeholders; the live Session path ignores that intent.</p>
+<p>The retained surface stayed live, but Move here was offered only in elsewhere/closed placeholders. The live Session path ignored that intent.</p>
 </div>
 <h2>After: act where the Session is visible</h2>
 <div class="example">
-<p><strong>Proposed correction · interaction sketch</strong></p>
+<p><strong>Current implementation · interaction sketch</strong></p>
 <p class="muted">This simulation changes only this page. It is not native demo evidence.</p>
 <p class="status" id="status" aria-live="polite">Read-only. Move here to type.</p>
 <pre>Unfinished provider draft:
@@ -46,8 +47,8 @@ Explain the failing migration before changing…</pre>
 <button type="button" id="lost" disabled>Simulate lost reply</button>
 <p id="result" aria-live="polite">Reading, copy, Find and scrolling stay available. Only this explicit action requests input and geometry from the same owner.</p>
 </div>
-<p><strong>Surface presence and input permission are separate.</strong> Keep the existing connection reading; add no persistent Session state. The native action reaches the relay already attached to this exact owner. The owner’s existing claim protocol remains authoritative.</p>
-<p>Use <code>Attach { control: true, replace: true, own: Take, … }</code> only for this explicit action. Pause input until acknowledgement, restore snapshot/parser state together, and consume the action once. Do not route it through provider preparation or automatically repeat it after connection loss.</p>
+<p><strong>Surface presence and input permission are separate.</strong> The native connection reading is disposable presentation, not persistent Session state. A generation-bound mailbox action reaches the existing relay. The owner grants input and geometry; existing Session and Graph records retain execution identity. Closing the pane removes its mailbox and cancels recovery.</p>
+<p>Move here sends <code>Attach { control: true, replace: true, own: Take, … }</code> once, consuming the action before transmission. Input waits for acknowledgement. The fresh screen and parser replace the retained display together while the stream offset stays intact. Recovery never repeats the takeover or uncertain typing.</p>
 <h2>Normal use, failure and recovery</h2>
 <ol>
 <li><strong>Normal:</strong> recovery returns read-only because a newer viewer controls the owner. Keep reading; choose Move here to edit the same draft. The other viewer loses its claim, while the provider and Graph remain.</li>
@@ -56,14 +57,15 @@ Explain the failing migration before changing…</pre>
 </ol>
 <p><strong>Counterexample:</strong> if a lost reply causes recovery to resend Move here and revoke a newer viewer, this design has failed. Likewise, closing and reopening a healthy viewer just to expose its action is not the intended interaction.</p>
 <h2>Keep the proven boundary and the remaining proof</h2>
-<p>The signed same-build helper replacement fixture exercises the installed owner/Graph path, retained draft and acknowledged recovery generation. The working design records its passing result. This review ran no tests.</p>
-<p>The next proof must use the retained native read-only pane’s action, then lose its acknowledgement before a newer claim. Actual Desktop quit/reopen, rendered reading/input behavior, Linux replacement, usage totals and the remaining gate obligations stay open. “Standalone” continues to mean the UI can close; the selected signed app supplies the Mac helper.</p>
+<p>The inspected Rust fixture intercepts the takeover acknowledgement after the owner applies it, then grants a newer viewer input and geometry. Recovery remains read-only and drops uncertain input. Swift tests cover the mailbox generation, pending state and closure. The working design records prior passing results; this documentation-only review reran no code tests.</p>
+<p>The signed same-build helper replacement fixture uses the installed owner/Graph path and verifies retained draft submission after a new acknowledged connection generation. It does not prove native behavior. The next demo must exercise the visible Move here action, reading/copy/Find/scroll during recovery, and actual Desktop quit/reopen. Linux replacement, usage totals and the remaining gate obligations stay open.</p>
+<p>“Standalone” means the UI can close while the service remains. The selected signed app supplies the Mac helper; existing execution owners retain their lifetime policy. Separate GUI-less distribution, remote takeover and unattended hosting remain later scope.</p>
 <p>Machine transports Work; existing Rust reads, CLI operations and Session/Graph owners keep authority. Desktop UI automation stays app-owned. No new wire contract, scheduler, retention policy or provider launch belongs in this correction.</p>
-<h2>Decision record</h2>
+<h2>Decision questions · resolved by accepted scope</h2>
 <ol>
-<li><strong>Where should explicit control be available?</strong><br>1a. Next implement direction: on the retained read-only pane, using the same owner.<br>1b. Requiring a close/reopen detour is rejected as inconsistent with the accepted interaction.</li>
+<li><strong>Where should explicit control be available?</strong><br>1a. On the retained read-only pane, using the same owner. Implemented; no close/reopen detour.</li>
 <li><strong>May recovery repeat a takeover?</strong><br>2a. No; an uncertain action is consumed once. This follows Jack Heart’s accepted no-replay and newer-claim requirements.</li>
-<li><strong>Is another product choice open for this correction?</strong><br>3a. No. Remote takeover UX and later-work decisions remain outside this slice.</li>
+<li><strong>Is another product choice open for this correction?</strong><br>3a. No. No implementation direction changes in this review. Remote takeover UX and later-work decisions remain outside this slice.</li>
 </ol>
 <footer>Design record: <a href="mobile-backend.md">scratch/mobile-backend.md</a>. This step changes documentation only. No publication, merge or Auto-Ship approval; loop-or-next decides the next Graph step.</footer>
 </main>

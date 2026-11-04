@@ -90,7 +90,6 @@ def _probe(executable: Path, action: str, plist: str, candidate: Path | None = N
     _run(
         "open",
         "-n",
-        "-W",
         "--stdout",
         str(log),
         "--stderr",
@@ -102,10 +101,18 @@ def _probe(executable: Path, action: str, plist: str, candidate: Path | None = N
         str(candidate) if candidate else "",
         str(result),
     )
-    if not result.exists() or result.read_text() != "0":
-        raise RuntimeError(
-            log.read_text() if log.exists() else "Registrar did not report its result"
-        )
+    # A short-lived updater may exit before `open -W` installs its process
+    # watch. Its own result records completion without that launch/wait race.
+    deadline = time.monotonic() + 30
+    outcome = ""
+    while time.monotonic() < deadline:
+        outcome = result.read_text() if result.exists() else ""
+        if outcome:
+            break
+        time.sleep(0.05)
+    if outcome != "0":
+        diagnostic = log.read_text().strip() if log.exists() else ""
+        raise RuntimeError(diagnostic or f"Registrar did not succeed: {outcome or 'no result'}")
 
 
 def _pid(path: Path, prior: str | None = None) -> str:

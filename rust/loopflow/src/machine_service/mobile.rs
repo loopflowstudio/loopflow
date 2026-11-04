@@ -29,6 +29,47 @@ pub struct Configuration {
     pub owner: Owner,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Status {
+    pub configuration: Option<Configuration>,
+    pub ready: bool,
+    pub error: Option<String>,
+}
+
+pub fn status() -> Result<Status> {
+    match super::client::connect(Operation::MobileStatus) {
+        Ok((_, response)) => match response.result {
+            Reply::MobileStatus { status } => Ok(status),
+            Reply::Error { message, .. } => anyhow::bail!(message),
+            _ => anyhow::bail!("Update the Machine service to read mobile readiness"),
+        },
+        Err(error) if service_is_stopped(&error) => {
+            let configuration = configured()?;
+            let error = configuration
+                .as_ref()
+                .filter(|config| config.enabled)
+                .map(|_| {
+                    "The Machine service is not running. Choose Set up again to start it.".into()
+                });
+            Ok(Status {
+                configuration,
+                ready: false,
+                error,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn service_is_stopped(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<std::io::Error>().is_some_and(|io| {
+        matches!(
+            io.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+        )
+    })
+}
+
 impl Configuration {
     pub(super) fn port(&self) -> Result<u16> {
         reqwest::Url::parse(&self.endpoint)?
@@ -48,7 +89,7 @@ pub fn configured() -> Result<Option<Configuration>> {
         .context("Read mobile setup")
 }
 
-fn save(configuration: &Configuration) -> Result<()> {
+pub(super) fn save(configuration: &Configuration) -> Result<()> {
     crate::config::update_global_config_at(&crate::store::lf_home_dir(), |value| {
         let mapping = value
             .as_mapping_mut()
@@ -100,40 +141,35 @@ pub fn enable() -> Result<Configuration> {
         owner,
     };
     super::installation::ensure()?;
-    let selected = match configure(Some(proposed)) {
-        Ok(Some(selected)) => selected,
-        result => {
-            // A lost response may still have started the listener. Close
-            // admission before reporting a setup that was never saved.
-            let _ = configure(None);
-            return result?.context("The Machine did not start its mobile listener");
-        }
-    };
-    if let Err(error) = save(&selected) {
-        let _ = configure(None);
-        return Err(error);
+    configure(Some(proposed))?.context("The Machine did not start its mobile listener")
+}
+
+pub(super) fn save_disabled() -> Result<Option<Configuration>> {
+    let mut configuration = configured()?;
+    if let Some(config) = &mut configuration {
+        config.enabled = false;
+        save(config)?;
     }
-    Ok(selected)
+    Ok(configuration)
 }
 
 pub fn disable() -> Result<()> {
     let _lock = lock()?;
-    if let Some(mut config) = configured()? {
-        config.enabled = false;
-        save(&config)?;
-    }
-    if let Err(error) = configure(None) {
-        let stopped = error.downcast_ref::<std::io::Error>().is_some_and(|io| {
-            matches!(
-                io.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-            )
-        });
-        if !stopped {
-            return Err(error);
+    match configure(None) {
+        Ok(_) => Ok(()),
+        Err(error) if service_is_stopped(&error) => {
+            save_disabled()?;
+            // Startup binds the local socket before reading saved approval.
+            // If it raced our first probe, stop that live snapshot too. A later
+            // startup will read the disabled setting without opening a listener.
+            match configure(None) {
+                Ok(_) => Ok(()),
+                Err(error) if service_is_stopped(&error) => Ok(()),
+                Err(error) => Err(error),
+            }
         }
+        Err(error) => Err(error),
     }
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -228,7 +264,7 @@ impl Host {
                 .as_str()
                 .map(|s| s.trim_end_matches('.'))
                 == Some(&self.dns),
-            "Tailscale Machine address changed; enable mobile access again"
+            "Tailscale address changed. Choose Set up again, then scan the new QR code."
         );
         Ok((owner, ips))
     }

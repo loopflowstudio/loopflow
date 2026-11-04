@@ -42,13 +42,7 @@ pub(super) async fn run() -> Result<()> {
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     // Both carriers dispatch the same operations after their own admission.
     // Remote access never connects to the private socket as a proxy Unix user.
-    let remote_configuration = match super::mobile::configured() {
-        Ok(saved) => saved.filter(|config| config.enabled),
-        Err(error) => {
-            tracing::warn!(%error, "Mobile configuration is unavailable; local service remains ready");
-            None
-        }
-    };
+    let remote_configuration = super::mobile::configured();
     let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
         remote_configuration,
@@ -187,11 +181,27 @@ async fn operation(
     remote_control: Option<mpsc::Sender<super::remote::Control>>,
 ) -> Result<()> {
     let reply = match operation {
+        Operation::MobileStatus => {
+            if let Some(control) = remote_control {
+                let (reply, result) = tokio::sync::oneshot::channel();
+                control
+                    .send(super::remote::Control::Status { reply })
+                    .await?;
+                Reply::MobileStatus {
+                    status: result.await?,
+                }
+            } else {
+                Reply::Error {
+                    code: ErrorCode::Unsupported,
+                    message: "Mobile setup is available on the Machine itself".into(),
+                }
+            }
+        }
         Operation::ConfigureRemote { configuration } => {
             if let Some(control) = remote_control {
                 let (reply, result) = tokio::sync::oneshot::channel();
                 control
-                    .send(super::remote::Control {
+                    .send(super::remote::Control::Configure {
                         configuration,
                         reply,
                     })

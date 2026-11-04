@@ -22,7 +22,7 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                     if *status {
                         println!(
                             "{}",
-                            serde_json::to_string(&crate::machine_service::mobile::configured()?)?
+                            serde_json::to_string(&crate::machine_service::mobile::status()?)?
                         );
                     } else if *off {
                         crate::machine_service::mobile::disable()?;

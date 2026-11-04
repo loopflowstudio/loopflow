@@ -41,8 +41,16 @@ camera access. The QR contains only that address; it does not expire or grant ac
 Setup finds the installed host CLI, obtains the existing Machine service and
 binds HTTPS to the Machine's Tailscale addresses on one available port. No Serve
 or Funnel configuration changes. Its endpoint, approved node/user identity and
-enabled setting live in Machine config.yaml. The supervisor restores that same
-approval; mobile failures leave local Desktop running.
+enabled setting live in Machine config.yaml. The service saves approval before
+serving phones, so losing the setup reply still leaves one recoverable address.
+The supervisor restores that same approval; mobile failures leave local Desktop
+running.
+
+`mobile --status` reports the saved `configuration`, actual listener `ready` state
+and any current `error`. It reads the existing service without starting it. Saved
+approval alone does not mean the Machine is reachable. Desktop displays the QR
+when ready, preserves the address when unavailable, and can recover an uncertain
+setup result by reading status without replaying the command.
 
 For each connection, the host's `tailscale whois --json` identifies the actual TCP
 peer. Only another untagged device belonging to the approved owner is admitted.

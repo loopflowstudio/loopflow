@@ -21,6 +21,8 @@ pub struct Request {
 pub enum Operation {
     Bootstrap,
     /// Same-user local socket only.
+    MobileStatus,
+    /// Same-user local socket only.
     ConfigureRemote {
         configuration: Option<super::mobile::Configuration>,
     },
@@ -54,6 +56,9 @@ pub struct Response {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
+    MobileStatus {
+        status: super::mobile::Status,
+    },
     Remote {
         configuration: Option<super::mobile::Configuration>,
     },
@@ -115,6 +120,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/machine/session_start.json"),
             include_str!("../../../../tests/fixtures/dto/machine/session_page.json"),
             include_str!("../../../../tests/fixtures/dto/machine/configure_remote.json"),
+            include_str!("../../../../tests/fixtures/dto/machine/mobile_status_request.json"),
         ] {
             let request: Request = serde_json::from_str(raw).unwrap();
             let actual = serde_json::to_value(&request).unwrap();
@@ -129,6 +135,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/machine/owner.json"),
             include_str!("../../../../tests/fixtures/dto/machine/reading.json"),
             include_str!("../../../../tests/fixtures/dto/machine/remote.json"),
+            include_str!("../../../../tests/fixtures/dto/machine/mobile_status.json"),
         ] {
             let response: Response = serde_json::from_str(raw).unwrap();
             assert_eq!(

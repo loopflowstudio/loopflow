@@ -4655,7 +4655,13 @@ fn mobile_host(fixture: &Fixture, status: &Value, pem: &str) {
         r#"#!/bin/sh
 case "$1" in
 status) cat "$HOME/tailscale-status.json" ;;
-cert) cat "$HOME/tailscale-certificate.pem" ;;
+cert)
+  if [ -f "$HOME/hold-certificate" ]; then
+    printf ready > "$HOME/certificate-requested"
+    while [ -f "$HOME/hold-certificate" ]; do sleep 0.02; done
+  fi
+  cat "$HOME/tailscale-certificate.pem" ;;
+
 whois) cat "$HOME/tailscale-peer.json" ;;
 *) exit 1 ;;
 esac
@@ -4708,11 +4714,37 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
     );
     assert_eq!(initial["result"]["kind"], "reading");
     let proposed = json!({"enabled":true,"endpoint":"https://fixture.tail.ts.net:0","owner":{"node":"node1","user":1}});
-    let (_, enabled) = service.request(
-        "enable",
-        json!({"kind":"configure_remote","configuration":proposed}),
+    // Delay the external certificate response so the caller can disconnect
+    // after admission, before setup finishes. Closing before admission would
+    // merely drop an unauthenticated request, not lose an admitted result.
+    let hold = fixture.home.path().join("hold-certificate");
+    std::fs::write(&hold, "").unwrap();
+    let mut abandoned = UnixStream::connect(fixture.endpoint("machine")).unwrap();
+    machine_send(
+        &mut abandoned,
+        json!({"version":1,"id":"lost-enable","operation":{
+        "kind":"configure_remote","configuration":proposed}}),
     );
-    let config = enabled["result"]["configuration"].clone();
+    assert_eq!(fixture.wait_file("certificate-requested"), "ready");
+    drop(abandoned);
+    std::fs::remove_file(hold).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let config = loop {
+        let (_, reply) = service.request("status", json!({"kind":"mobile_status"}));
+        if reply["result"]["status"]["ready"] == true {
+            assert!(reply["result"]["status"]["error"].is_null());
+            break reply["result"]["status"]["configuration"].clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Lost reply left setup unavailable: {reply}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let saved = fixture.home.path().join("config.yaml");
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"], config);
     let port = reqwest::Url::parse(config["endpoint"].as_str().expect("enabled endpoint"))
         .unwrap()
         .port()
@@ -4755,6 +4787,9 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
         json!({"kind":"configure_remote","configuration":null}),
     );
     assert!(reader.read().is_err());
+    let (_, off) = service.request("status", json!({"kind":"mobile_status"}));
+    assert_eq!(off["result"]["status"]["ready"], false);
+    assert_eq!(off["result"]["status"]["configuration"]["enabled"], false);
     machine_send(&mut watch, json!({"id":9}));
     assert_eq!(machine_receive(&mut watch)["result"]["frame"]["answers"], 9);
     assert_eq!(
@@ -4781,14 +4816,30 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
         10
     );
     assert_eq!(service.ready(), instance);
+    let (_, unavailable) = service.request("status", json!({"kind":"mobile_status"}));
+    assert_eq!(unavailable["result"]["status"]["ready"], false);
+    assert_eq!(
+        unavailable["result"]["status"]["configuration"]["enabled"],
+        true
+    );
+    assert!(unavailable["result"]["status"]["error"].is_string());
     std::fs::write(&status_path, status.to_string()).unwrap();
-    let saved = fixture.home.path().join("config.yaml");
-    std::fs::write(
-        &saved,
-        serde_yaml_ng::to_string(&json!({"mobile":config})).unwrap(),
-    )
-    .unwrap();
+    // The original saved approval recovers automatically; the caller does not
+    // need to turn access on again after a transient Tailscale outage.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let (_, restored) = service.request("status", json!({"kind":"mobile_status"}));
+        if restored["result"]["status"]["ready"] == true {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Same-account connection did not recover"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
     service.restart();
+    service.ready();
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -4808,27 +4859,61 @@ fn machine_service_mobile_changes_preserve_local_connections_and_saved_disable()
     )
     .unwrap();
     assert!(connect().is_err());
-    let mut disabled = config.clone();
-    disabled["enabled"] = json!(false);
-    std::fs::write(
-        &saved,
-        serde_yaml_ng::to_string(&json!({"mobile":disabled})).unwrap(),
-    )
-    .unwrap();
+    service.request(
+        "off",
+        json!({"kind":"configure_remote","configuration":null}),
+    );
     service.restart();
+    service.ready();
     assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
     // A saved approval does not migrate to a new Tailscale owner after restart.
-    std::fs::write(
-        &saved,
-        serde_yaml_ng::to_string(&json!({"mobile":config})).unwrap(),
-    )
-    .unwrap();
+    service.request(
+        "enable",
+        json!({"kind":"configure_remote","configuration":config}),
+    );
     let mut changed = status;
     changed["Self"]["UserID"] = json!(2);
     changed["User"]["2"] = json!({"LoginName":"other@example.com"});
     std::fs::write(status_path, changed.to_string()).unwrap();
     service.restart();
+    service.ready();
     assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let (_, blocked) = service.request("status", json!({"kind":"mobile_status"}));
+        let mobile = &blocked["result"]["status"];
+        if let Some(error) = mobile["error"].as_str() {
+            assert!(error.contains("Tailscale account changed"), "{error}");
+            assert_eq!(mobile["ready"], false);
+            assert_eq!(mobile["configuration"]["owner"]["user"], 1);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Changed account was not reported"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(service);
+    let offline = fixture
+        .command(&["machine", "service", "mobile", "--status"])
+        .output()
+        .unwrap();
+    assert!(offline.status.success());
+    let offline: Value = serde_json::from_slice(&offline.stdout).unwrap();
+    assert_eq!(offline["configuration"]["enabled"], true);
+    assert_eq!(offline["ready"], false);
+    assert!(offline["error"].is_string());
+    assert!(fixture
+        .command(&["machine", "service", "mobile", "--off"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"]["enabled"], false);
+    assert!(!fixture.home.path().join("machine-service.plist").exists());
 }
 
 #[test]

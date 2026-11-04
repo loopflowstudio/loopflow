@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use super::mobile::{Configuration, Host};
+use super::mobile::{Configuration, Host, Status};
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
@@ -22,20 +22,35 @@ use tokio_tungstenite::{accept_hdr_async_with_config, WebSocketStream};
 const CHUNK: usize = 64 * 1024;
 
 #[derive(Debug)]
-pub(super) struct Control {
-    pub configuration: Option<Configuration>,
-    pub reply: oneshot::Sender<Result<Option<Configuration>, String>>,
+pub(super) enum Control {
+    Configure {
+        configuration: Option<Configuration>,
+        reply: oneshot::Sender<Result<Option<Configuration>, String>>,
+    },
+    Status {
+        reply: oneshot::Sender<Status>,
+    },
 }
 
 pub(super) async fn manage(
-    initial: Option<Configuration>,
+    initial: Result<Option<Configuration>>,
     mut requests: mpsc::Receiver<Control>,
     instance: Arc<String>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
 ) -> Result<()> {
-    let mut desired = initial;
-    let mut active: Option<Configuration> = None;
+    let mut status = match initial {
+        Ok(configuration) => Status {
+            configuration,
+            ready: false,
+            error: None,
+        },
+        Err(error) => Status {
+            configuration: None,
+            ready: false,
+            error: Some(error.to_string()),
+        },
+    };
     let mut listeners = JoinSet::new();
     let mut reported_failure = false;
     let mut retry = tokio::time::interval(Duration::from_secs(5));
@@ -43,49 +58,69 @@ pub(super) async fn manage(
         tokio::select! {
             request = requests.recv() => {
                 let Some(request) = request else { return Ok(()) };
-                if let (Some(requested), Some(current)) = (&request.configuration, &active) {
-                    if requested.owner == current.owner && requested.endpoint == current.endpoint {
-                        let _ = request.reply.send(Ok(active.clone()));
-                        continue;
+                let (requested, reply) = match request {
+                    Control::Status { reply } => { let _ = reply.send(status.clone()); continue; }
+                    Control::Configure { configuration, reply } => (configuration, reply),
+                };
+                if status.ready {
+                    if let (Some(requested), Some(current)) = (&requested, &status.configuration) {
+                        if requested.owner == current.owner && requested.endpoint == current.endpoint {
+                            let _ = reply.send(Ok(status.configuration.clone()));
+                            continue;
+                        }
                     }
                 }
+                // Persist off before replacing a listener. Close admission even
+                // if persistence fails, and report that failure to the caller.
+                let disabled = tokio::task::spawn_blocking(super::mobile::save_disabled).await?;
                 listeners.abort_all();
                 while listeners.join_next().await.is_some() {}
-                active = None;
-                desired = request.configuration;
+                status.ready = false;
+                if let Some(config) = &mut status.configuration { config.enabled = false; }
                 reported_failure = false;
-                let result = if let Some(config) = desired.clone() {
-                    match bind(config).await {
-                        Ok(bound) => {
-                            active = Some(bound.config.clone());
-                            desired = active.clone();
-                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone()));
-                            Ok(active.clone())
-                        }
-                        Err(error) => { desired = None; Err(error.to_string()) }
-                    }
-                } else { Ok(None) };
-                let _ = request.reply.send(result);
+                let result: Result<Option<Configuration>> = async {
+                    status.configuration = disabled.context("Mobile access stopped, but disabled state could not be saved")?;
+                    let Some(requested) = requested else { return Ok(None) };
+                    let bound = bind(requested).await?;
+                    let selected = bound.config.clone();
+                    tokio::task::spawn_blocking(move || super::mobile::save(&selected)).await?
+                        .context("Could not save mobile access; no listener was enabled")?;
+                    status.configuration = Some(bound.config.clone());
+                    status.ready = true;
+                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone()));
+                    Ok(status.configuration.clone())
+                }.await;
+                status.error = result.as_ref().err().map(|error| format!("{error:#}"));
+                let _ = reply.send(result.map_err(|error| format!("{error:#}")));
             }
             ended = listeners.join_next(), if !listeners.is_empty() => {
-                tracing::warn!(?ended, "Mobile listener stopped; local service remains ready");
-                active = None;
+                let error = match ended {
+                    Some(Ok(Err(error))) => error.to_string(),
+                    Some(Err(error)) => error.to_string(),
+                    _ => "Mobile connection stopped; reconnecting".into(),
+                };
+                tracing::warn!(%error, "Mobile listener stopped; local service remains ready");
+                status.ready = false;
+                status.error = Some(error);
                 reported_failure = false;
             }
-            _ = retry.tick(), if active.is_none() && desired.is_some() => {
-                if let Some(config) = desired.clone() {
+            _ = retry.tick(), if !status.ready && status.configuration.as_ref().is_some_and(|config| config.enabled) => {
+                if let Some(config) = status.configuration.clone() {
                     match bind(config).await {
                         Ok(bound) => {
-                            active = Some(bound.config.clone());
-                            desired = active.clone();
+                            status.configuration = Some(bound.config.clone());
+                            status.ready = true;
+                            status.error = None;
                             reported_failure = false;
                             listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone()));
                         }
-                        Err(error) if !reported_failure => {
-                            tracing::warn!(%error, "Mobile listener could not start; retrying the saved approval");
-                            reported_failure = true;
+                        Err(error) => {
+                            if !reported_failure {
+                                tracing::warn!(%error, "Mobile listener could not start; retrying the saved approval");
+                                reported_failure = true;
+                            }
+                            status.error = Some(error.to_string());
                         }
-                        Err(_) => {}
                     }
                 }
             }
@@ -107,11 +142,11 @@ async fn bind(mut config: Configuration) -> Result<Listener> {
         let (owner, addresses) = host.identity()?;
         anyhow::ensure!(
             owner == expected.owner,
-            "Tailscale account changed; enable mobile access again"
+            "Tailscale account changed. Restore the intended account, or choose Set up again to approve the current account."
         );
         anyhow::ensure!(
             reqwest::Url::parse(&expected.endpoint)?.host_str() == Some(&host.dns),
-            "Tailscale address changed; enable mobile access again"
+            "Tailscale address changed. Choose Set up again, then scan the new QR code."
         );
         let tls = host.certificate()?;
         Ok::<_, anyhow::Error>((host, addresses, tls))
@@ -166,7 +201,7 @@ async fn maintain(host: Host, config: Configuration, tls: mpsc::Sender<TlsAccept
         .await??;
         anyhow::ensure!(
             owner == config.owner,
-            "Tailscale account changed; enable mobile access again"
+            "Tailscale account changed. Restore the intended account, or choose Set up again to approve the current account."
         );
         if let Some(certificate) = certificate {
             tls.send(certificate).await?;
@@ -397,6 +432,7 @@ mod tests {
         }
         for (version, operation, expected) in [
             (VERSION + 1, Operation::Bootstrap, "incompatible"),
+            (VERSION, Operation::MobileStatus, "unsupported"),
             (
                 VERSION,
                 Operation::ConfigureRemote {

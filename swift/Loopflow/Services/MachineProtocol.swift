@@ -23,8 +23,15 @@ public struct MachineMobileConfiguration: Codable, Sendable {
     public let owner: Owner
 }
 
+public struct MachineMobileStatus: Codable, Sendable {
+    public let configuration: MachineMobileConfiguration?
+    public let ready: Bool
+    public let error: String?
+}
+
 public enum MachineOperation: Encodable, Sendable {
     case bootstrap
+    case mobileStatus
     case configureRemote(configuration: MachineMobileConfiguration?)
     case sessionOwner(session: String)
     case read(ServedRead)
@@ -43,6 +50,7 @@ public enum MachineOperation: Encodable, Sendable {
             try box.encode("session_owner", forKey: .kind)
             try box.encode(session, forKey: .session)
         case .bootstrap: try box.encode("bootstrap", forKey: .kind)
+        case .mobileStatus: try box.encode("mobile_status", forKey: .kind)
         case .read(let query):
             try box.encode("read", forKey: .kind)
             try box.encode(query, forKey: .query)
@@ -67,6 +75,7 @@ public struct MachineResponse: Decodable, Sendable {
 }
 
 public enum MachineReply: Decodable, Sendable {
+    case mobileStatus(MachineMobileStatus)
     case remote(configuration: MachineMobileConfiguration?)
     case bootstrap(version: Int, build: String, executableSHA256: String, machine: JSONValue, capabilities: [String], maxFrame: Int, maxConnections: Int)
     case read(String)
@@ -77,13 +86,14 @@ public enum MachineReply: Decodable, Sendable {
     case error(code: String, message: String)
 
     private enum Keys: String, CodingKey {
-        case kind, version, build, machine, capabilities, output, generation, frame, stderr, code, message, owner, configuration
+        case kind, version, build, machine, capabilities, output, generation, frame, stderr, code, message, owner, configuration, status
         case traceID = "trace_id"
         case maxFrame = "max_frame", maxConnections = "max_connections", executableSHA256 = "executable_sha256"
     }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .kind) {
+        case "mobile_status": self = .mobileStatus(try box.decode(MachineMobileStatus.self, forKey: .status))
         case "remote": self = .remote(configuration: try box.decodeIfPresent(MachineMobileConfiguration.self, forKey: .configuration))
         case "bootstrap":
             self = .bootstrap(version: try box.decode(Int.self, forKey: .version), build: try box.decode(String.self, forKey: .build),

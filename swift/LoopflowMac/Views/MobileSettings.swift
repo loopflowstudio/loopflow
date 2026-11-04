@@ -14,13 +14,22 @@ struct MobileSettings: View {
                 Text("Open Tasks and continue their Sessions from Loopflow on your iPhone. Sign in to the same Tailscale account on both devices.")
                     .foregroundStyle(palette.textSecondary)
                 if let configuration = setup.configuration, configuration.enabled {
-                    Label("Private mobile access is enabled", systemImage: "network")
+                    Label(setup.ready ? "Ready to connect" : "Mobile connection unavailable",
+                          systemImage: setup.ready ? "network" : "network.slash")
                     if let image = setup.image {
                         Image(nsImage: image).interpolation(.none).resizable()
                             .frame(width: 256, height: 256)
                             .accessibilityLabel("Machine address QR code")
                     }
-                    Text("In Loopflow on your iPhone, choose Scan QR code, then Connect Machine.")
+                    if setup.ready {
+                        Text("In Loopflow on your iPhone, choose Scan QR code, then Connect Machine.")
+                    } else {
+                        Text("Your Machine address is saved. Restore the connection, then refresh to show its QR code.")
+                            .foregroundStyle(palette.textSecondary)
+                        Button("Set up again") { setup.enable() }.disabled(setup.busy)
+                        Text("Uses this Machine’s signed-in Tailscale account.")
+                            .font(.caption).foregroundStyle(palette.textSecondary)
+                    }
                     Text(configuration.endpoint).font(.caption).textSelection(.enabled)
                         .foregroundStyle(palette.textSecondary)
                     HStack {
@@ -48,7 +57,7 @@ struct MobileSettings: View {
                         .font(.caption).foregroundStyle(palette.textSecondary)
                 }
                 if let activity = setup.activity { ProgressView(activity).controlSize(.small) }
-                if let error = setup.error {
+                if let error = setup.error ?? setup.status?.error {
                     Text(error).foregroundStyle(palette.failure).textSelection(.enabled)
                 }
                 Button("Refresh", systemImage: "arrow.clockwise") { setup.refresh() }.disabled(setup.busy)
@@ -66,8 +75,11 @@ struct MobileSettings: View {
 final class MobileSetup {
     typealias Configuration = MachineMobileConfiguration
 
-    var configuration: Configuration?
+    var status: MachineMobileStatus?
+    var configuration: Configuration? { status?.configuration }
     var image: NSImage?
+    private var statusIsCurrent = false
+    var ready: Bool { statusIsCurrent && status?.ready == true }
     var activity: String?
     var busy: Bool { activity != nil }
     var error: String?
@@ -75,33 +87,50 @@ final class MobileSetup {
 
     func refresh() { perform("Checking mobile access…") { try await self.read() } }
 
-    func enable() {
-        perform("Preparing mobile access…") {
-            _ = try await Self.command(["mobile"])
-            try await self.read()
-        }
-    }
+    func enable() { change(enabled: true) }
 
-    func disable() {
-        perform("Turning off mobile access…") {
-            _ = try await Self.command(["mobile", "--off"])
-            try await self.read()
-        }
-    }
+    func disable() { change(enabled: false) }
 
     func close() { operation?.cancel() }
 
+    private func change(enabled: Bool) {
+        perform(enabled ? "Preparing mobile access…" : "Turning off mobile access…") {
+            do { _ = try await Self.command(enabled ? ["mobile"] : ["mobile", "--off"]) }
+            catch {
+                try Task.checkCancellation()
+                let failure = error
+                // The command may have committed before losing its reply.
+                // Recover the current state without replaying the command.
+                do { try await self.read() }
+                catch { throw failure }
+                let confirmed = self.status?.error == nil && (enabled
+                    ? self.ready && self.configuration?.enabled == true
+                    : !self.ready && self.configuration?.enabled != true)
+                guard confirmed else { throw failure }
+                return
+            }
+            try await self.read()
+        }
+    }
+
     private func read() async throws {
-        let status = try await Self.command(["mobile", "--status"])
-        let value = try JSONDecoder().decode(Configuration?.self, from: Data(status.utf8))
-        let code: NSImage?
-        if let value, value.enabled {
-            let address = try MachineAddress.decode(value.endpoint)
-            code = try Self.qrCode(Data(address.absoluteString.utf8))
-        } else { code = nil }
-        try Task.checkCancellation()
-        configuration = value
-        image = code
+        do {
+            let data = try await Self.command(["mobile", "--status"])
+            let value = try JSONDecoder().decode(MachineMobileStatus.self, from: Data(data.utf8))
+            let code: NSImage?
+            if value.ready, let configuration = value.configuration {
+                let address = try MachineAddress.decode(configuration.endpoint)
+                code = try Self.qrCode(Data(address.absoluteString.utf8))
+            } else { code = nil }
+            try Task.checkCancellation()
+            status = value
+            statusIsCurrent = true
+            image = code
+        } catch {
+            statusIsCurrent = false
+            image = nil
+            throw error
+        }
     }
 
     private static func command(_ arguments: [String]) async throws -> String {

@@ -1021,3 +1021,41 @@ captures are `scratch/demo-assets/machine-qr-first.png` and
 `scratch/demo-assets/machine-address-confirmation.png`. Existing demo edits were
 preserved. The superseded patch was moved out of scratch; current code is the
 single implementation.
+
+## Setup durability and readiness — November 4
+
+Jack Heart's ongoing priority is a polished, reliable phone experience. The
+Machine service now saves approval before serving phones. Losing the setup
+reply leaves the same recoverable address after restart. Status separates saved
+approval from listener readiness; Desktop shows the QR only after a successful
+read confirms readiness and keeps the address and explanation when unavailable.
+A failed setup command reads status without replaying the command.
+
+Review resolved two ownership gaps: the CLI no longer owns the final persistence
+step, and Desktop no longer treats enabled configuration as proof of readiness.
+Offline disable saves off without starting the service, then probes once more to
+close the concurrent-startup window. Listener replacement persists off first and
+closes admission even if persistence fails. Local Work and Session lifetime stay
+with their existing owners. Status is a snapshot refreshed on opening settings or
+using Refresh; it is not a reachability guarantee from the phone.
+
+The lifecycle proof now disconnects the caller after certificate retrieval begins,
+before setup completes. An earlier test disconnected before Unix admission and
+therefore never requested setup; the certificate gate makes the intended failure
+precise. Restart checks now wait for local service readiness before sending their
+next command. The final test covers lost replies, durable addresses, same-account
+automatic recovery, changed-account rejection, live disable and offline disable.
+
+- `cargo test -p loopflow --lib machine_service::`: 7 pass; `/tmp/mobile-readiness-rust.log`.
+- `cargo test -p loopflow --test transport_tests machine_service_mobile_changes_preserve_local_connections_and_saved_disable -- --exact`: pass; `/tmp/mobile-readiness-lifecycle.log`.
+- `scripts/test_desktop.sh --filter 'MachineProtocolTests|MobilePairingTests'`: 11 pass; `/tmp/mobile-readiness-desktop.log`.
+- iOS Simulator app build: pass; `/tmp/mobile-readiness-ios.log`.
+- Installed-host isolated enable/status/off workflow: pass, stable address and local incarnation, live readiness and disabled state verified; `/tmp/mobile-direct-setup.py`.
+- `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-readiness-clippy.log`.
+- `cargo fmt -- --check` and `git diff --check`: pass.
+
+Remaining setup edges: explicit setup should recover an occupied saved port and
+obsolete mobile configuration while preserving unrelated settings. Physical-phone
+network transitions and installed Desktop update survival remain acceptance work.
+The preceding native editing proof still applies to unchanged phone/carrier code;
+no new physical-device, real-provider, voice or VoiceOver claim is made.

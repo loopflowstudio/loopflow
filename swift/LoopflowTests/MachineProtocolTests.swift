@@ -40,6 +40,16 @@ struct MachineProtocolTests {
         guard case .remote(let configuration) = response.result else { Issue.record("Missing remote configuration"); return }
         #expect(configuration?.endpoint == "https://host.tail.ts.net:8443")
     }
+    @Test func mobileReadinessDoesNotTreatSavedApprovalAsALiveConnection() throws {
+        let request = MachineRequest(version: 1, id: "mobile-status-1", operation: .mobileStatus)
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("mobile_status_request")))
+        let response = try JSONDecoder().decode(MachineResponse.self, from: fixture("mobile_status"))
+        guard case .mobileStatus(let status) = response.result else { Issue.record("Missing mobile readiness"); return }
+        #expect(status.configuration?.enabled == true)
+        #expect(!status.ready)
+        #expect(status.error == "Sign in to Tailscale on this Machine")
+    }
+
     private func fixture(_ name: String) throws -> Data {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()

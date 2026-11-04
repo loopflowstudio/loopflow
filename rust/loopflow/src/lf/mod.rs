@@ -1330,7 +1330,7 @@ pub enum MachineServiceCommand {
         /// Stop remote access without stopping local Sessions.
         #[arg(long, conflicts_with = "status")]
         off: bool,
-        /// Read saved mobile configuration without enabling access.
+        /// Report saved approval and live mobile readiness without enabling access.
         #[arg(long)]
         status: bool,
     },

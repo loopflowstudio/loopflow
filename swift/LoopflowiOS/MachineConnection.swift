@@ -36,17 +36,7 @@ final class MachineConnection {
     }
 
     static func socketURL(endpoint: URL, path: String) throws -> URL {
-        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
-              components.scheme == "https", components.host?.hasSuffix(".ts.net") == true,
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil,
-              components.path.isEmpty || components.path == "/" else {
-            throw RegistryQueryError("Use the HTTPS address provided by this Machine’s Tailscale setup")
-        }
-        components.scheme = "wss"
-        components.path = path
-        guard let url = components.url else { throw RegistryQueryError("Invalid Machine address") }
-        return url
+        try MachinePairingTicket.socketURL(endpoint: endpoint, path: path)
     }
 
     func close() {

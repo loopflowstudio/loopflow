@@ -30,6 +30,7 @@ Remote callers use the separate device admission below.
 ```sh
 lf machine service pair --name 'My iPhone' --output /private/tmp/loopflow-phone.json
 lf machine service devices
+lf machine service mobile --status
 lf machine service revoke DEVICE_ID
 lf machine service mobile --off
 ```
@@ -57,8 +58,9 @@ Device grants remain revocable independently of endpoint enablement.
 
 For isolated integration or an already configured host, `run --remote-port PORT`
 and `pair --endpoint HTTPS_ORIGIN` remain explicit manual controls. Normal pairing
-requires neither. Desktop setup controls and QR transfer are still forthcoming;
-this command is the shared host setup operation they will call.
+requires neither. Desktop Settings → Mobile calls the same setup operation and
+shows a QR code for the iPhone app. It also lists phones and removes access.
+`mobile --status` reads the saved configuration without enabling anything.
 
 The private setup file contains a one-use ticket valid for ten minutes. It is
 credential material: transfer it directly to the intended phone, never commit it

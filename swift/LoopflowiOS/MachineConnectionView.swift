@@ -4,9 +4,10 @@ import UniformTypeIdentifiers
 
 struct MachineConnectionView: View {
     @State private var credential: MachineCredential?
-    @State private var ticket: PairingTicket?
+    @State private var ticket: MachinePairingTicket?
     @State private var pairing = false
     @State private var importing = false
+    @State private var scanning = false
     @State private var error: String?
     @Environment(\.colorScheme) private var colorScheme
     private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
@@ -35,8 +36,8 @@ struct MachineConnectionView: View {
                                 .foregroundStyle(theme.palette.textSecondary)
                             VStack(alignment: .leading, spacing: 14) {
                                 Label("Sign in to Tailscale on both devices.", systemImage: "1.circle")
-                                Label("Create a phone setup ticket on your Machine.", systemImage: "2.circle")
-                                Label("Import the file or paste its contents here.", systemImage: "3.circle")
+                                Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
+                                Label("Choose Pair a phone, then scan its code here.", systemImage: "3.circle")
                             }
                             .font(Typography.body(15))
                             if let ticket {
@@ -51,13 +52,31 @@ struct MachineConnectionView: View {
                                     }.frame(maxWidth: .infinity, minHeight: 44)
                                 }
                                 .buttonStyle(.borderedProminent)
+                                .tint(theme.palette.accent)
+                                .foregroundStyle(theme.palette.accentText)
                                 .disabled(pairing)
-                            }
-                            HStack(spacing: 16) {
-                                Button("Import setup file", systemImage: "doc") { importing = true }
-                                PasteButton(payloadType: String.self) { values in
-                                    if let value = values.first { accept(Data(value.utf8)) }
+                                Button("Scan another code") { scanning = true }.disabled(pairing)
+                            } else {
+                                Button { scanning = true } label: {
+                                    Label("Scan pairing code", systemImage: "qrcode.viewfinder")
+                                        .frame(maxWidth: .infinity, minHeight: 44)
                                 }
+                                .buttonStyle(.borderedProminent)
+                                .tint(theme.palette.accent)
+                                .foregroundStyle(theme.palette.accentText)
+                            }
+                            DisclosureGroup("Other ways to connect") {
+                                Text("In Desktop’s Mobile settings, choose Share setup file.")
+                                    .font(Typography.caption(13))
+                                    .foregroundStyle(theme.palette.textSecondary)
+                                    .padding(.top, 8)
+                                HStack(spacing: 16) {
+                                    Button("Import setup file", systemImage: "doc") { importing = true }
+                                    PasteButton(payloadType: String.self) { values in
+                                        if let value = values.first { accept(Data(value.utf8)) }
+                                    }
+                                }
+                                .padding(.top, 8)
                             }
                             .disabled(pairing)
                             if let error {
@@ -80,6 +99,13 @@ struct MachineConnectionView: View {
         }
         .tint(theme.palette.accentInk)
         .foregroundStyle(theme.palette.text)
+        .sheet(isPresented: $scanning) {
+            MachineCodeScanner { scanned in
+                ticket = scanned
+                error = nil
+                scanning = false
+            }
+        }
         .task {
             do { credential = try MachineKeychain.load() }
             catch { self.error = error.localizedDescription }
@@ -104,15 +130,15 @@ struct MachineConnectionView: View {
 
     private func accept(_ data: Data) {
         do {
-            ticket = try PairingTicket.decode(data)
+            ticket = try MachinePairingTicket.decode(data)
             error = nil
         } catch {
             ticket = nil
-            self.error = "This is not a valid Loopflow setup ticket. Import the JSON file created by your Machine."
+            self.error = "This is not a valid Loopflow setup ticket. Scan a new code or import the file created by your Machine."
         }
     }
 
-    private func pair(_ ticket: PairingTicket) async {
+    private func pair(_ ticket: MachinePairingTicket) async {
         pairing = true
         error = nil
         defer { pairing = false; self.ticket = nil }

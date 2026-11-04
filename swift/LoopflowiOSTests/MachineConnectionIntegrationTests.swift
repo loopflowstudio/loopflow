@@ -19,7 +19,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         }
         let data = try Data(contentsOf: setup)
         try FileManager.default.removeItem(at: setup)
-        let ticket = try PairingTicket.decode(data)
+        let ticket = try MachinePairingTicket.decode(data)
         let proofURL = setup.deletingLastPathComponent().appending(path: "session.json")
         let proof: SessionProof?
         if FileManager.default.fileExists(atPath: proofURL.path) {

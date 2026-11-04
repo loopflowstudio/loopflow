@@ -20,7 +20,7 @@ pub struct Configuration {
     pub endpoint: String,
 }
 
-pub(super) fn configured() -> Result<Option<Configuration>> {
+pub fn configured() -> Result<Option<Configuration>> {
     let value =
         crate::config::read_global_config_at(&crate::store::lf_home_dir().join("config.yaml"))?;
     value
@@ -370,11 +370,25 @@ mod tests {
 
     #[test]
     fn setup_preserves_other_routes_and_never_selects_funnel() {
-        let config = Configuration {
-            enabled: true,
-            port: 49250,
-            endpoint: "https://host.tail.ts.net:8443".into(),
-        };
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/machine/mobile_configuration.json"
+        ))
+        .unwrap();
+        let config: Configuration = serde_json::from_value(fixture.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&config).unwrap(), fixture);
+        let devices = vec![super::super::admission::Device {
+            id: super::super::admission::DeviceId("test-phone".into()),
+            name: "My iPhone".into(),
+            created_at: 1793740000,
+            revoked_at: None,
+        }];
+        assert_eq!(
+            serde_json::to_value(devices).unwrap(),
+            serde_json::from_str::<serde_json::Value>(include_str!(
+                "../../../../tests/fixtures/dto/machine/devices.json"
+            ))
+            .unwrap()
+        );
         assert_eq!(
             select_port(&json!({}), Some(&config), "host.tail.ts.net").unwrap(),
             8443,

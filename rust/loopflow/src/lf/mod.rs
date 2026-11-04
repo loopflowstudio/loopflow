@@ -1316,8 +1316,11 @@ pub enum MachineServiceCommand {
     /// Configure private mobile access using this host's signed-in Tailscale installation.
     Mobile {
         /// Stop remote access and remove only Loopflow's unchanged Serve route.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "status")]
         off: bool,
+        /// Read saved mobile configuration without enabling access.
+        #[arg(long)]
+        status: bool,
     },
     /// Set up host Tailscale and write a one-use phone ticket (valid for ten minutes).
     Pair {

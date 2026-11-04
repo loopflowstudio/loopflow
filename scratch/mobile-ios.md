@@ -68,12 +68,11 @@ grant restores the software keyboard even if the earlier attachment hid it.
    passive reconnect, competing control/geometry and owner exit now pass over
    actual Tailscale WSS. The proof uses a real owner and a local stand-in program;
    it does not establish provider-specific IME behavior or manual Desktop UX.
-2. Put the automatic host setup operation into Desktop and add QR transfer on
-   iOS. The CLI now discovers signed-in host Tailscale, preserves existing routes,
-   enables the carrier in place and saves remote settings for supervised restart.
-   File import/paste works, but requiring a CLI command and file transfer is still
-   unfinished onboarding. Check first-certificate provisioning latency and real
-   permission/sign-in failures rather than assuming a running CLI means readiness.
+2. Finish installed Desktop-to-phone onboarding acceptance. Desktop now delegates
+   automatic host setup and device management to the CLI and displays the existing
+   ticket as a QR code; iOS validates scans before explicit Connect. Verify actual
+   camera scanning, first-certificate provisioning latency and real permission/
+   sign-in failures. A running CLI alone does not establish readiness.
 3. Replace per-repository sequential Task reads with a measured efficient path and
    connect shared replacement subscriptions. Keep stale/error state honest and
    cancel offscreen work. Do not create a second Work projection or event log.
@@ -196,3 +195,35 @@ https://tailscale.com/docs/reference/tailscale-cli/serve
 https://github.com/tailscale/tailscale/blob/main/ipn/serve.go
 These establish persistent background routes and separate foreground configuration;
 Loopflow’s ownership/persistence behavior is verified by its own tests above.
+
+### Desktop pairing and phone scanning — November 4, 01:27
+
+Jack Heart's automatic host-Tailscale direction now extends to Desktop Settings →
+Mobile. The view delegates setup, device listing and revocation to the existing
+CLI. A private temporary ticket file is read into a QR image and immediately
+removed; the QR disappears on observed pairing, expiry or closing settings.
+An explicit Share setup file action offers the same ticket through the system
+share sheet for phones without camera access. No ticket enters a URL, diagnostic
+log or automatic pasteboard write. Hiding a code does not
+revoke it: the server still owns its one-use, ten-minute lifetime.
+
+iOS scans only QR codes, validates the existing bounded setup format and shows
+the Machine before explicit Connect. File import/paste remains available without
+camera permission. Scanning stops when the sheet closes or the app backgrounds.
+Desktop and iOS share ticket validation and endpoint construction. No second
+pairing protocol or Machine installation path is introduced.
+
+Validation: Desktop compiled and both pairing tests passed, including decoding the
+actual generated QR image with Vision and decoding Rust’s configuration/device
+fixtures. The signed native suite passed 25 tests with the opt-in network test
+skipped (`Test-LoopflowiOS-2026.11.04_01-22-39--0800.xcresult`). Subsequent button/
+fallback-copy edits built successfully. The route fixture test, all-target Clippy
+and diff whitespace check passed. CLI status was exercised with unset and disabled
+private configurations; neither enabled access, and conflicting flags were rejected.
+
+Simulator screenshots in `demo-assets/mobile-qr-onboarding*.png` establish light
+and dark initial layout and the corrected button contrast. Computer-use returned
+`cgWindowNotFound`; no camera, share-sheet or Desktop settings interaction was
+operated. Physical camera scanning, file sharing and installed app interaction
+remain acceptance work. Apple’s API requirements:
+https://developer.apple.com/documentation/visionkit/scanning-data-with-the-camera

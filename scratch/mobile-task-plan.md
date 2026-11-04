@@ -34,7 +34,12 @@ through actual host Tailscale against an isolated registry, including native
 editing of a real retained owner, competing viewers and passive reconnect. Manual
 Desktop handoff and a separate physical phone remain unproven. mobile-ios.md records
 current evidence and remaining work. The same-user Unix socket is never proxied
-for remote admission. Automatic setup and installed remote enablement remain open.
+for remote admission. Automatic host setup now discovers signed-in Tailscale,
+preserves unrelated Serve routes and enables/disables the carrier without dropping
+local Desktop connections. Its saved configuration survives service restart.
+Desktop Mobile settings and iOS QR scanning use the same ticket format; generated
+QR decoding and native builds pass. Physical camera/share-sheet use, installed
+Desktop interaction and composed installed update survival remain unproven.
 Terminal activity #1809 is included through main sync at ac8e088f5f; other
 coordination references below do not assert delivery status.
 

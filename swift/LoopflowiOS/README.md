@@ -21,17 +21,19 @@ A fresh keyboard grant restores the software keyboard even if it was hidden in
 the previous attachment. Theme colors are installed only when the theme changes.
 
 Disable `--fixture` to connect to a Machine. Sign into host Tailscale on both
-devices, enable the Machine service’s private HTTPS carrier, then import or paste
-its one-use setup file and choose **Connect Machine**.
-[Machine setup commands](../../rust/loopflow/src/machine_service/README.md#pair-a-phone-through-host-tailscale)
-now detect and configure signed-in host Tailscale automatically. Desktop setup
-controls and QR transfer remain unfinished; setup-file import/paste is available. The app saves the device grant in Keychain, pins the Machine identity
+devices. In Desktop, open Settings → Mobile → **Pair a phone**. On iPhone, choose
+**Scan pairing code**, scan the Desktop code, then confirm **Connect Machine**.
+Desktop detects and configures signed-in host Tailscale automatically. Camera
+access is optional: **Other ways to connect** offers setup-file import/paste for
+the same [Machine setup commands](../../rust/loopflow/src/machine_service/README.md#pair-a-phone-through-host-tailscale).
+The app saves
+the device grant in Keychain, pins the Machine identity
 on first bootstrap, reads actual open Tasks and attaches their recorded Session
 owners. It installs no CLI on the phone and never starts a provider.
 
 The connected Machine’s hostname replaces the fixture label in both screens.
-**Forget Machine** removes the phone’s saved credential; use the Machine’s device
-revocation command to withdraw its server grant. Backgrounding closes the
+**Forget Machine** removes the phone’s saved credential; use Desktop’s **Remove
+access** or the Machine’s device revocation command to withdraw its server grant. Backgrounding closes the
 attachment; **Reconnect** restores the same Session as an observer.
 Input and geometry require a fresh grant. Failed input is never queued or retried.
 If opening or reconnecting fails, **Reconnect** stays on the Session screen.

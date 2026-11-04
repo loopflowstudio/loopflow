@@ -172,6 +172,7 @@ struct LoopflowApp: App {
                 Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
                     .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
+                MobileSettings().tabItem { Label("Mobile", systemImage: "iphone") }
             }.modifier(AppAppearance(appearance: appearance))
         }
         Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }

@@ -20,8 +20,13 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 MachineServiceCommand::Run { remote_port } => {
                     return crate::machine_service::run(*remote_port)
                 }
-                MachineServiceCommand::Mobile { off } => {
-                    if *off {
+                MachineServiceCommand::Mobile { off, status } => {
+                    if *status {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&crate::machine_service::mobile::configured()?)?
+                        );
+                    } else if *off {
                         crate::machine_service::mobile::disable()?;
                         println!("Mobile access is off");
                     } else {

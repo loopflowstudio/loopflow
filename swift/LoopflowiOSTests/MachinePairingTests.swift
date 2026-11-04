@@ -18,7 +18,7 @@ final class MachinePairingTests: XCTestCase {
     }
     func testTicketPreservesThePrivateEndpointAndRejectsOtherDestinations() throws {
         let token = String(repeating: "a", count: 64)
-        let ticket = try PairingTicket.decode(data(endpoint: "https://machine.example.ts.net:8443", token: token))
+        let ticket = try MachinePairingTicket.decode(data(endpoint: "https://machine.example.ts.net:8443", token: token))
         let url = try MachineConnection.socketURL(endpoint: ticket.endpoint, path: "/v1/pair")
         XCTAssertEqual(url.absoluteString, "wss://machine.example.ts.net:8443/v1/pair")
         XCTAssertNil(URLComponents(url: url, resolvingAgainstBaseURL: false)?.query)
@@ -26,16 +26,16 @@ final class MachinePairingTests: XCTestCase {
                          "https://machine.example.ts.net.attacker.com", "https://user@machine.example.ts.net",
                          "https://machine.example.ts.net/path", "https://machine.example.ts.net?token=secret",
                          "https://machine.example.ts.net#fragment"] {
-            XCTAssertThrowsError(try PairingTicket.decode(data(endpoint: endpoint, token: token)))
+            XCTAssertThrowsError(try MachinePairingTicket.decode(data(endpoint: endpoint, token: token)))
         }
     }
 
     func testTicketsRejectUnsupportedVersionsMissingFieldsAndOversizedImports() throws {
-        XCTAssertThrowsError(try PairingTicket.decode(data(version: 2)))
-        XCTAssertThrowsError(try PairingTicket.decode(data(token: "too-short")))
-        XCTAssertThrowsError(try PairingTicket.decode(data(token: String(repeating: "z", count: 64))))
-        XCTAssertThrowsError(try PairingTicket.decode(Data(#"{"version":1}"#.utf8)))
-        XCTAssertThrowsError(try PairingTicket.decode(Data(repeating: 32, count: 4097)))
+        XCTAssertThrowsError(try MachinePairingTicket.decode(data(version: 2)))
+        XCTAssertThrowsError(try MachinePairingTicket.decode(data(token: "too-short")))
+        XCTAssertThrowsError(try MachinePairingTicket.decode(data(token: String(repeating: "z", count: 64))))
+        XCTAssertThrowsError(try MachinePairingTicket.decode(Data(#"{"version":1}"#.utf8)))
+        XCTAssertThrowsError(try MachinePairingTicket.decode(Data(repeating: 32, count: 4097)))
     }
 
     func testKeychainPreservesNewGrantThenConfirmedMachineIdentity() throws {

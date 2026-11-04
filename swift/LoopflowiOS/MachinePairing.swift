@@ -2,22 +2,6 @@ import Foundation
 import Loopflow
 import Security
 
-struct PairingTicket: Decodable {
-    let version: Int
-    let endpoint: URL
-    let ticket: String
-
-    @MainActor static func decode(_ data: Data) throws -> Self {
-        guard data.count <= 4096 else { throw RegistryQueryError("This is not a Loopflow setup ticket") }
-        let result = try JSONDecoder().decode(Self.self, from: data)
-        guard result.version == 1, validMachineToken(result.ticket) else {
-            throw RegistryQueryError("Create a new setup ticket with the current Machine service")
-        }
-        _ = try MachineConnection.socketURL(endpoint: result.endpoint, path: "/v1/pair")
-        return result
-    }
-}
-
 private struct PairingReply: Decodable {
     struct Device: Decodable {
         let id: String
@@ -36,7 +20,7 @@ private struct PairingReply: Decodable {
 
 @MainActor
 enum MachinePairing {
-    static func redeem(_ ticket: PairingTicket) async throws -> MachineCredential {
+    static func redeem(_ ticket: MachinePairingTicket) async throws -> MachineCredential {
         let enrollment = try MachineConnection(endpoint: ticket.endpoint, token: ticket.ticket, path: "/v1/pair")
         let timeout = enrollment.deadline()
         defer { timeout.cancel(); enrollment.close() }

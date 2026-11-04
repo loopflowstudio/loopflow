@@ -8,18 +8,18 @@ use serde::Serialize;
 use super::{OpenArgs, OpenHost};
 
 #[derive(Debug, Serialize)]
-struct FilePresentation {
+struct FilePresentation<'a> {
     host: Option<OpenHost>,
-    paths: Vec<PathBuf>,
+    paths: &'a [PathBuf],
     opening: bool,
 }
 
 /// Unlike Work opening, file presentation has no installed-app or terminal fallback.
-fn host(requested: OpenHost) -> Option<OpenHost> {
+fn host(requested: OpenHost, viewed: Option<OpenHost>) -> Option<OpenHost> {
     if requested != OpenHost::Auto {
         return (requested != OpenHost::Terminal).then_some(requested);
     }
-    super::viewed_placement().map(|(host, _)| host).or_else(|| {
+    viewed.or_else(|| {
         [
             (super::in_rex(), OpenHost::Rex),
             (super::in_herdr(), OpenHost::Herdr),
@@ -33,37 +33,46 @@ fn host(requested: OpenHost) -> Option<OpenHost> {
 }
 
 pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Result<()> {
-    let current = host(args.host);
+    let viewed = super::viewed_placement();
+    let current = host(args.host, viewed.as_ref().map(|(host, _)| *host));
     let (targets, _) = match super::targets(cli, args) {
         Ok(targets) => targets,
-        Err(_) if current.is_none() => return report(cli, args, None, args.files.clone(), explain),
+        Err(_) if current.is_none() => return report(cli, args, None, &args.files, explain),
         Err(error) => return Err(error),
     };
     let target = targets
         .first()
         .context("File presentation has no selected Work")?;
     // A background Graph step presents to the Task's currently viewed conversation.
-    let viewed = super::viewed_placement()
-        .or_else(|| target.primary.as_deref().and_then(super::session_placement));
+    let viewed = viewed.or_else(|| target.primary.as_deref().and_then(super::session_placement));
     let selected = if args.host == OpenHost::Auto {
         viewed.as_ref().map(|(host, _)| *host).or(current)
     } else {
         current
     };
     let Some(host) = selected else {
-        return report(cli, args, None, args.files.clone(), explain);
+        return report(cli, args, None, &args.files, explain);
     };
     let placement = viewed
         .as_ref()
         .filter(|(viewed, _)| *viewed == host)
         .map(|(_, id)| id.as_str());
-    let directory = std::env::current_dir()?;
-    let checkout = crate::repo::discover_repo_root(&directory)?.unwrap_or(directory);
     let cwd = match &target.task {
-        Some(task) => task.worktree()?.as_path(),
-        None if args.url.is_none() => &checkout,
-        None => target.cwd(),
+        Some(task) => task.worktree()?.clone(),
+        None if args.url.is_none() => {
+            let directory = std::env::current_dir()?;
+            crate::repo::discover_repo_root(&directory)?.unwrap_or(directory)
+        }
+        None => target.cwd().to_path_buf(),
     };
+    // Desktop reads remote paths through Files; native editors need a local checkout.
+    let remote = host == OpenHost::Desktop && target.execution_machine.is_some();
+    if !remote {
+        anyhow::ensure!(
+            target.execution_machine.is_none() && target.execution_unavailable.is_none(),
+            "Present files on the Task's recorded Machine; no local editor was opened"
+        );
+    }
     let mut paths = Vec::new();
     for path in &args.files {
         let path = if path.is_absolute() {
@@ -71,14 +80,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
         } else {
             cwd.join(path)
         };
-        // Desktop reads on the recorded Machine through its existing Files transport.
-        let path = if host == OpenHost::Desktop && target.execution_machine.is_some() {
+        let path = if remote {
             path
         } else {
-            anyhow::ensure!(
-                target.execution_machine.is_none() && target.execution_unavailable.is_none(),
-                "Present files on the Task's recorded Machine; no local editor was opened"
-            );
             path.canonicalize()
                 .with_context(|| format!("Cannot open {}", path.display()))?
         };
@@ -87,42 +91,51 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
         }
     }
     if explain {
-        return report(cli, args, Some(host), paths, true);
+        return report(cli, args, Some(host), &paths, true);
+    }
+    if host == OpenHost::Desktop {
+        let root = if remote {
+            cwd.clone()
+        } else {
+            cwd.canonicalize()?
+        };
+        let relative = paths
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .context("Desktop Files target is outside this checkout")
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let context = super::work_context(
+            &cwd,
+            target.task.as_ref().map(|task| task.identifier.as_str()),
+            target.wave.as_deref(),
+            None,
+        )?;
+        let opened = super::super::desktop::present_files(&context, &relative)?;
+        return report(cli, args, opened.then_some(host), &paths, false);
     }
     for path in &paths {
-        if host == OpenHost::Desktop {
-            let relative = path
-                .strip_prefix(cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()))
-                .context("Desktop Files target is outside this checkout")?;
-            let context = super::work_context(
-                cwd,
-                target.task.as_ref().map(|task| task.identifier.as_str()),
-                target.wave.as_deref(),
-                None,
-            )?;
-            if !super::super::desktop::present_file(&context, relative)? {
-                return report(cli, args, None, paths.clone(), explain);
-            }
-            continue;
-        }
-        let argv = file_argv(target, cwd, path)?;
+        let argv = file_argv(target, &cwd, path)?;
         match host {
-            OpenHost::Rex => super::workspace::present_file(args, cwd, path, argv, placement)?,
-            OpenHost::Herdr => super::workspace::present_herdr_file(cwd, path, argv, placement)?,
-            OpenHost::Tmux | OpenHost::Cmux => terminal_file(host, cwd, &argv, placement)?,
+            OpenHost::Rex => super::workspace::present_file(args, &cwd, path, argv, placement)?,
+            OpenHost::Herdr => super::workspace::present_herdr_file(&cwd, path, argv, placement)?,
+            OpenHost::Tmux | OpenHost::Cmux => terminal_file(host, &cwd, &argv, placement)?,
             OpenHost::Auto | OpenHost::Desktop | OpenHost::Terminal => {
                 unreachable!("resolved file host")
             }
         }
     }
-    report(cli, args, Some(host), paths, explain)
+    report(cli, args, Some(host), &paths, false)
 }
 
 fn file_argv(target: &super::Resolved, cwd: &Path, path: &Path) -> Result<Vec<String>> {
     if let Some(task) = &target.task {
+        // The tool's --checkout retains the recorded spelling; only path comparison
+        // uses the canonical root (e.g. /var versus /private/var on macOS).
         let root = cwd.canonicalize()?;
         let relative = path
-            .strip_prefix(&root)
+            .strip_prefix(root)
             .context("File is outside the Task checkout")?;
         return super::workspace::viewer_argv(
             cwd,
@@ -204,7 +217,7 @@ fn report(
     cli: &crate::lf::Cli,
     args: &OpenArgs,
     host: Option<OpenHost>,
-    paths: Vec<PathBuf>,
+    paths: &[PathBuf],
     explain: bool,
 ) -> Result<()> {
     let result = FilePresentation {

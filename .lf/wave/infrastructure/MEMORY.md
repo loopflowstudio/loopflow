@@ -124,17 +124,19 @@ colors. Lesson: `#[serde(flatten)]` of a struct with its own `id` onto the
 request envelope's `id` silently broke every status report, and the owner drops
 a connection whose frame fails to parse; a `wire.rs` unit test pins the key names.
 
-Land order per Jack Heart's comment: LOO-705 (successor on the Moved message)
-first, then LOO-708/LOO-709, then LOO-712 re-homes `successor` on the `control`
-event. The successor is the full `[entry, "session", "resume", session_id]`
-command, not an entry path or replay of viewer argv: LOO-708's thin viewer argv
-would reattach to the ended owner. LOO-712 now carries that command end to end;
-focused fixtures prove terminal restoration before following, exact argv and
-successor exit/error propagation. LOO-705's superseded-install detection and
-retry policy still require dependency integration. Release's entry-point lesson
-applies: shell fixtures prove the wire and handoff, not installed rollover or
-the requested live Claude walkthrough. Desktop consumption, measured SSH
-reconnect and the 1 MB wire bound outside the fixture remain unproved.
+LOO-708/709/710/712 are integrated at `aef0c0a5cd` (November 3).
+The `control` event carries `[entry, "session", "resume", session_id]`;
+replaying thin-viewer argv would reattach to an ended owner. Fixtures prove
+terminal restoration, exact argv and successor exit/error propagation, not
+installed rollover, live Claude, Desktop, measured SSH reconnect or the 1 MB
+bound outside fixtures. LOO-705 detection/retry acceptance stays separate.
+Earlier land ordering: `272f1271df:.lf/wave/infrastructure/MEMORY.md`, this heading.
+
+## Documentation before implementation (LOO-728, 2026-11-04)
+
+Jack Heart selected actual docs in the current host through Files/editor policy,
+without copies, launches or approval stops. Loops return to implementation and
+reread saved edits. Headless checks establish no configured-host acceptance.
 
 ## Waited landing (LOO-503, 2026-10-17)
 

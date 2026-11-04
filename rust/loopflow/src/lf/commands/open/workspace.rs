@@ -114,8 +114,7 @@ impl Rex {
             let windows = rex.windows(&location.session)?;
             let caller_exists = windows
                 .iter()
-                .flat_map(|window| window["layers"].as_array().into_iter().flatten())
-                .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
+                .flat_map(blocks)
                 .any(|block| block["block_id"] == location.block);
             anyhow::ensure!(
                 caller_exists,
@@ -199,6 +198,14 @@ fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {
         Some(Value::Null) => Ok(Vec::new()),
         _ => bail!("Host inventory omitted {key}; absence is unknown"),
     }
+}
+
+fn blocks(window: &Value) -> impl Iterator<Item = &Value> {
+    window["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
 }
 
 pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
@@ -895,26 +902,14 @@ pub(super) fn present_file(
     let windows = rex.windows(&caller.session)?;
     let window = windows
         .iter()
-        .find(|window| {
-            window["layers"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
-                .any(|block| block["block_id"] == caller.block)
-        })
+        .find(|window| blocks(window).any(|block| block["block_id"] == caller.block))
         .context("Current Rex window is unavailable")?;
     let marker = format!(
         "Files · {} [lf-file:{}]",
         path.file_name().unwrap_or_default().to_string_lossy(),
         identity(&path.to_string_lossy())
     );
-    let already_open = window["layers"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
-        .any(|block| block["label"] == marker);
+    let already_open = blocks(window).any(|block| block["label"] == marker);
     if !already_open {
         rex.call(
             "session.new_split",

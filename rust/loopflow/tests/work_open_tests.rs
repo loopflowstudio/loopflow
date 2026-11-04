@@ -110,13 +110,15 @@ fn files_without_a_host_are_a_noop_even_outside_a_repository() {
 }
 
 #[test]
-fn opening_a_file_in_tmux_runs_the_configured_editor_on_the_original_file() {
+fn opening_files_in_tmux_edits_each_original_once() {
     let repo = TestRepo::new();
     let checkout = repo.create_named_worktree("docs-first");
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let path = checkout.join("guide with spaces.md");
     std::fs::write(&path, "intended behavior").unwrap();
+    let other = checkout.join("reference.md");
+    std::fs::write(&other, "reference").unwrap();
     let marker = bin.path().join("edited");
     let script = bin.path().join("tmux");
     std::fs::write(
@@ -126,7 +128,17 @@ fn opening_a_file_in_tmux_runs_the_configured_editor_on_the_original_file() {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let editor = format!("printf '%s\\n' > '{}'", marker.display());
+    let editor = format!("printf '%s\\n' >> '{}'", marker.display());
+    let files = [
+        "open",
+        "--file",
+        "guide with spaces.md",
+        "--file",
+        "reference.md",
+        "--file",
+        "./guide with spaces.md",
+        "--json",
+    ];
     let preview = json(&lf_with(
         home.path(),
         &checkout,
@@ -136,13 +148,7 @@ fn opening_a_file_in_tmux_runs_the_configured_editor_on_the_original_file() {
             ("TMUX_PANE", "%1"),
             ("VISUAL", &editor),
         ],
-        &[
-            "--explain",
-            "open",
-            "--file",
-            "guide with spaces.md",
-            "--json",
-        ],
+        &[&["--explain"][..], &files].concat(),
     ));
     assert_eq!(preview["opening"], false);
     assert!(!marker.exists());
@@ -155,13 +161,17 @@ fn opening_a_file_in_tmux_runs_the_configured_editor_on_the_original_file() {
             ("TMUX_PANE", "%1"),
             ("VISUAL", &editor),
         ],
-        &["open", "--file", "guide with spaces.md", "--json"],
+        &files,
     ));
     assert_eq!(result["opening"], true);
     assert_eq!(result["host"], "tmux");
     assert_eq!(
-        std::fs::read_to_string(marker).unwrap().trim(),
-        path.canonicalize().unwrap().to_str().unwrap()
+        std::fs::read_to_string(marker).unwrap(),
+        format!(
+            "{}\n{}\n",
+            path.canonicalize().unwrap().display(),
+            other.canonicalize().unwrap().display()
+        )
     );
     assert_eq!(std::fs::read_to_string(path).unwrap(), "intended behavior");
     assert!(!repo.path().join("scratch").exists());

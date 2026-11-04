@@ -1029,9 +1029,9 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
 }
 
 /// Reuse the Files surface without launching Desktop or changing conversation ownership.
-pub(super) fn present_file(
+pub(super) fn present_files(
     resolution: &crate::ops::context::ContextExplanation,
-    path: &std::path::Path,
+    paths: &[&std::path::Path],
 ) -> Result<bool> {
     let mut desktop = match DesktopConnection::open() {
         Ok(desktop) => desktop,
@@ -1057,19 +1057,21 @@ pub(super) fn present_file(
     let pane = scope
         .pane(window, None, PaneNeed::for_action("files"))
         .map_err(DesktopError::target)?;
-    let _: DesktopActionReceipt = desktop.call(
-        "perform",
-        DesktopActionRequest {
-            repository: window.repository.clone(),
-            window: window.window.clone(),
-            pane: Some(pane.target(window)),
-            action: "files".into(),
-            args: std::collections::BTreeMap::from([(
-                "path".into(),
-                path.to_string_lossy().into_owned(),
-            )]),
-        },
-    )?;
+    for path in paths {
+        let _: DesktopActionReceipt = desktop.call(
+            "perform",
+            DesktopActionRequest {
+                repository: window.repository.clone(),
+                window: window.window.clone(),
+                pane: Some(pane.target(window)),
+                action: "files".into(),
+                args: std::collections::BTreeMap::from([(
+                    "path".into(),
+                    path.to_string_lossy().into_owned(),
+                )]),
+            },
+        )?;
+    }
     Ok(true)
 }
 

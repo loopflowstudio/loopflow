@@ -4,7 +4,7 @@ use super::{save_in, SqliteStore};
 use crate::durable::Author;
 use crate::id::LfProcessId;
 use crate::steer::{NativeBoundary, SteerAdapter, SteerContext};
-use crate::store::sqlite::sessions::OwnerRetention;
+use crate::store::sqlite::sessions::OwnerRetention::{LiveTurn, NativeInput};
 use crate::store::StoreError;
 
 fn rendered(text: &str) -> SteerContext {
@@ -66,20 +66,14 @@ fn native_input_acknowledgements_cannot_cross_provider_replacement() {
     let first = store.session_attachment("session").unwrap().unwrap();
     let owner = first.lf_process_id.as_ref().unwrap();
     store.record_owner_input(owner, b"draft\r").unwrap();
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::NativeInput)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(NativeInput));
     assert!(store
         .acknowledge_native_input(&adapter, "other-thread", "one", Some("draft"))
         .is_err());
     store
         .acknowledge_native_input(&adapter, "native", "one", Some("draft"))
         .unwrap();
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::NativeInput)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(NativeInput));
     let next = store
         .claim_session_attachment("session", Some(&first), owner, false)
         .unwrap();
@@ -97,10 +91,7 @@ fn native_input_acknowledgements_cannot_cross_provider_replacement() {
     assert!(store
         .acknowledge_native_input(&adapter, "native", "two", None)
         .is_err());
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::NativeInput)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(NativeInput));
     store.clear_owner_input(owner).unwrap();
     assert_eq!(store.owner_retention(owner).unwrap(), None);
 }
@@ -140,26 +131,17 @@ fn pending_requests_hold_the_owner_until_the_current_attachment_settles_them() {
                 [],
             )
             .unwrap();
-        assert_eq!(
-            store.owner_retention(owner).unwrap(),
-            Some(OwnerRetention::LiveTurn)
-        );
+        assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     }
     let next = store
         .claim_session_attachment("session", Some(&first), owner, false)
         .unwrap();
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     activity.pending_input = 0;
     store
         .record_session_activity("session", &first, &activity)
         .unwrap();
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     store
         .record_session_activity("session", &next, &activity)
         .unwrap();
@@ -182,10 +164,7 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
     store
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     let next = store
         .claim_session_attachment("session", Some(&first), owner, false)
         .unwrap();
@@ -200,19 +179,13 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
             [],
         ).unwrap();
     }
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     // The provider itself survived; its stop belongs to its current attachment.
     store
         .record_native_turn(&adapter, "native", true, Some(1))
         .unwrap();
     // A viewed prompt also cannot settle its provider-owned watch.
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     store
         .record_native_turn(&adapter, "native", true, Some(0))
         .unwrap();
@@ -226,17 +199,11 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
     store
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     assert!(store
         .record_native_turn(&adapter, "child", true, Some(0))
         .is_err());
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     let replacement = store
         .replace_session_agent_process("session", &next, None, || Ok(true))
         .unwrap();
@@ -254,17 +221,11 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
     store
         .record_native_turn(&current, "native", true, Some(1))
         .unwrap();
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     assert!(store
         .record_native_turn(&adapter, "native", true, Some(0))
         .is_err());
-    assert_eq!(
-        store.owner_retention(owner).unwrap(),
-        Some(OwnerRetention::LiveTurn)
-    );
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
     store
         .record_native_turn(&current, "native", true, Some(0))
         .unwrap();

@@ -616,7 +616,7 @@ impl SqliteStore {
         // A running Graph started inside an owner, as from a terminal, holds
         // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
         // every Process.
-        let reason: Option<i64> = conn.query_row(
+        Ok(conn.query_row(
             &format!(
                 "WITH RECURSIVE graph_ancestors(id) AS (
                      SELECT p.parent_lf_process_id FROM graph_processes f
@@ -624,35 +624,37 @@ impl SqliteStore {
                          WHERE p.completed_at IS NULL
                      UNION SELECT p.parent_lf_process_id FROM processes p
                          JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT CASE
-                 WHEN ?1 IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
+                 SELECT ?1 IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
                      OR EXISTS(SELECT 1 FROM agent_sessions s
                          JOIN processes g ON g.id={SESSION_GRAPH}
                          WHERE s.transport_lf_process_id=?1 AND g.completed_at IS NULL)
-                     THEN 1
-                 WHEN NOT EXISTS(SELECT 1 FROM agent_sessions s
+                     AS running_graph,
+                 NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
-                     THEN 2
-                 WHEN EXISTS(SELECT 1 FROM agent_sessions s
+                     AS missing_session,
+                 EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.interactive=0)
-                     THEN 3
-                 WHEN EXISTS(SELECT 1 FROM agent_sessions s
+                     AS headless_run,
+                 EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1
                          AND s.completed_at IS NULL AND {TURN_LIVE})
-                     THEN 4
-                 END"
+                     AS live_turn"
             ),
             [owner.as_str()],
-            |row| row.get(0),
-        )?;
-        Ok(match reason {
-            None => None,
-            Some(1) => Some(OwnerRetention::RunningGraph),
-            Some(2) => Some(OwnerRetention::MissingSession),
-            Some(3) => Some(OwnerRetention::HeadlessRun),
-            Some(4) => Some(OwnerRetention::LiveTurn),
-            Some(value) => return Err(invalid(format!("unknown owner retention reason {value}"))),
-        })
+            |row| {
+                Ok(if row.get("running_graph")? {
+                    Some(OwnerRetention::RunningGraph)
+                } else if row.get("missing_session")? {
+                    Some(OwnerRetention::MissingSession)
+                } else if row.get("headless_run")? {
+                    Some(OwnerRetention::HeadlessRun)
+                } else if row.get("live_turn")? {
+                    Some(OwnerRetention::LiveTurn)
+                } else {
+                    None
+                })
+            },
+        )?)
     }
 
     /// The unfinished Sessions execution owner `owner` holds, by id.

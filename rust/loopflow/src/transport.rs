@@ -42,8 +42,9 @@ const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Continuous output tells the lifetime policy once per pause, not per read.
 const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
-/// A failed store must not spin on the PTY's write readiness.
-const INPUT_RETRY: Duration = Duration::from_secs(2);
+/// A failed store must not spin on the PTY's write readiness, and a transient
+/// write lock must not visibly delay typing.
+const INPUT_RETRY: Duration = Duration::from_millis(100);
 
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
@@ -1146,7 +1147,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     Err(error) => {
                         let message = error.to_string();
                         if input_failure.as_ref() != Some(&message) {
-                            tracing::warn!(%error, owner = %id, "cannot retain terminal input; retrying in 2s before delivery");
+                            tracing::warn!(%error, owner = %id, "cannot retain terminal input; retrying before delivery");
                             input_failure = Some(message);
                         }
                         input_retry_at = Some(Instant::now() + INPUT_RETRY);

@@ -77,9 +77,10 @@ receipt. Runs remain unavailable through the same shared admission policy.
 
 Sustained output now exercises MobileWorkspace and native editing, and a stalled
 viewer recovers after foreground liveness detection; see the dated proof below.
-Continue with actual service/network interruption while editing, including idle
-Task-watch recovery. The current proof covers deliberate slow-consumer backpressure,
-not a separately operated Desktop restart or a physical phone changing networks.
+Foreground service interruption while editing and idle Task-watch recovery now
+pass over the actual carrier. Continue with installed Desktop lifecycle and
+physical phone/network acceptance; those differ from stopping the isolated
+foreground test service.
 
 The mounted-terminal sustained-output proof now passes; retain its failure-stage
 diagnostics. Two earlier batching experiments failed at output/recovery deadlines
@@ -619,3 +620,41 @@ Logs: `/tmp/mobile-busy-heartbeat-final.log`,
 Final native regression suite passed at 05:14:24: 53 ordinary tests passed,
 one opt-in integration test skipped without its fixture ticket. The separate live
 carrier pass above supplies that proof. Log: `/tmp/mobile-stream-liveness-native.log`.
+
+### Live service interruption — November 4, 05:25
+
+The opt-in native/host-Tailscale fixture now stops and restarts only
+its isolated foreground Machine service while a phone has an unfinished terminal
+draft and a separate idle Task-list consumer. The Simulator requests each transition
+through a unique test-only Documents directory; no product control endpoint exists.
+It verifies visible disconnection, preserved draft/cached Tasks, honest failed
+offline retry, fresh Task readings and passive same-Session recovery. The enclosing fixture
+checks exact input and provider counts after continuation. This is not installed
+launchd update survival or physical network-change evidence.
+
+The first run timed out waiting for the host to see the phone's request: Xcode
+moved the Simulator's data container during installation. The runner now follows
+that move; no product change was needed. The native wait helper prints its actual
+stage before throwing because XCTest can replace it with a socket-deinit error.
+Failure log: `/tmp/mobile-interruption-first-native.log`.
+
+The corrected real-carrier proof passed at
+`Test-LoopflowiOS-2026.11.04_05-24-36--0800.xcresult` (51.218 seconds). Both terminal
+and idle list detected this explicit service exit within the first 20 ms polling
+interval; this is not a bound for silent network loss. Offline retry preserved
+both surfaces. Restart changed the service instance, restored the same draft and
+Task identities, and left the phone observing. Outage/observer input never reached
+the child. The enclosing fixture still counted only three intended provider starts
+and exactly the expected lines. The 32 MiB/512 native edited input proof also passed
+(p95 response 16.0 ms; maximum 567.6 ms), including stalled-viewer recovery. That
+maximum remains evidence against a universal latency guarantee.
+
+Logs: `/tmp/mobile-service-interruption-final.log`,
+`/tmp/mobile-service-interruption-final-native.log`. The temporary Tailscale route
+was removed and empty Serve configuration verified. Ordinary native regressions
+were unchanged from their 53-test pass; this changed opt-in test ran rather than
+skipping. No physical phone, actual-provider history, installed Desktop restart or
+launchd executable replacement is established by this fixture.
+
+Final checks: cargo fmt, all-target Clippy with warnings denied and diff whitespace
+passed. The current Simulator integration directory is empty after cleanup.

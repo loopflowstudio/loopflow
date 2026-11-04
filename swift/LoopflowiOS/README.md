@@ -170,8 +170,9 @@ and reconnect have also passed through a real retained owner, including a newer
 viewer holding input and 120×40 geometry. The child receives the combined draft
 exactly once and no reconnect starts a provider. These peers use the actual
 protocol; this is not yet a manual Desktop-to-physical-phone demonstration.
-Rendering under sustained output is exercised in Simulator; real-network outages
-and physical-phone use remain acceptance work. Contextual approvals/Stop stay absent until the
+Native input under sustained output and foreground service interruption are
+exercised in Simulator; physical network changes and phone use remain acceptance
+work. Contextual approvals/Stop stay absent until the
 backend supplies trustworthy state and action semantics; terminal prompts remain
 answerable through ordinary typing.
 
@@ -198,19 +199,30 @@ one-use setup ticket directly into the app container, then runs the native XCTes
 It stops its owner/service and deletes its registry afterward. The native test
 opens the Task’s Session in UIKit, edits the existing draft, disconnects, lets a
 second viewer take control, reconnects passively at the owner’s geometry, then
-explicitly takes control and submits. It then creates a Task through the native
+explicitly takes control and submits. While that draft is unfinished, the host
+runner kills its isolated Machine service. The terminal and a separate idle Task
+watch must report disconnection, preserve their last contents and reject offline
+input. Retry while offline must fail honestly. After the service restarts, refresh
+and reconnect restore current Tasks and the same draft without taking control.
+Only the test runner handles those service transitions; the app has no remote
+service-control API. The test also explicitly reopens the saved Session after
+its first provider exits, then creates a Task through the native
 creation model, recovers the same receipt, opens its recorded terminal, and types
 into it. It also saves that request for later, reloads it and opens it while
-preserving a separate unsent draft. Rust asserts exactly two provider launches (one existing, one explicitly
-created) and both exact submissions. The native log is `swift/.build/mobile-acceptance.log`. Remove
+preserving a separate unsent draft. Rust asserts exactly three provider launches
+(initial, explicit continuation, new Task) and every exact submission. The native
+log is `swift/.build/mobile-acceptance.log`. Remove
 only the temporary Serve route afterward; never reset unrelated host routes.
 
 The same acceptance includes a 32 MiB output stream paced by an active viewer.
 A second viewer stops reading, disconnects under the owner's bounded policy, then
 reattaches to the current screen without taking control. The active viewer feeds
-the mounted native terminal and verifies its final screen, recording feed count
-and synchronous feed duration. This does not measure GPU frame cadence, typing
-latency under load or phone energy. The carrier also checks that an expired read
+the mounted native terminal through MobileWorkspace and verifies its final screen.
+Every 64 KiB, native text input inserts, deletes and submits one acknowledgement;
+the remote program checks all 512 lines exactly. It records feed duration,
+main-actor scheduling intervals and input-to-next-output latency. These are
+Simulator measurements, not physical typing, GPU frame cadence or phone energy.
+The carrier also checks that an expired read
 reports a timeout and an explicitly canceled read stays cancellation.
 
 `MachineConnectionIntegrationTests` skips unless the installed simulator app’s

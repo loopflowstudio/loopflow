@@ -13,6 +13,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let session: String
         let creationRepository: String?
         let outputSession: String?
+        let serviceControl: String?
     }
     private var window: UIWindow?
 
@@ -327,6 +328,10 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         controller.terminal.insertText(" + phone")
         try await wait("Phone editing did not reach the owner") { screen().contains("desktop draft + phone") }
 
+        if let control = proof.serviceControl {
+            try await exerciseServiceInterruption(control, client: client, workspace: workspace, controller: controller)
+        }
+
         workspace.suspend()
         controller.update(theme: .light)
         // A newer viewer takes control while the phone is disconnected. Use the
@@ -382,10 +387,74 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         try await wait("Reopened provider did not receive native input") { workspace.state == .ended }
     }
 
+    private func exerciseServiceInterruption(_ control: String, client: RemoteMobileClient,
+                                             workspace: MobileWorkspace,
+                                             controller: SessionTerminalController) async throws {
+        let directory = URL.documentsDirectory.appending(path: "LoopflowIntegration/\(control)")
+        // A separate list consumer proves an idle Work watch detects the same
+        // outage without requiring a refresh or terminal traffic to expose it.
+        let listing = MobileWorkspace(client: client)
+        defer { listing.stopTaskUpdates() }
+        await listing.startTaskUpdates()
+        try await wait("Task watch did not become current before interruption") { !listing.isLoadingTasks }
+        XCTAssertNil(listing.tasksError)
+        let cached = listing.tasks.map(\.work)
+        XCTAssertFalse(cached.isEmpty)
+        func disconnected() -> Bool {
+            if case .disconnected = workspace.state { return true }
+            return false
+        }
+        func screen() -> String { controller.terminal.accessibilityPageContent() ?? "" }
+        let began = ProcessInfo.processInfo.systemUptime
+        try Data().write(to: directory.appending(path: "stop"), options: .atomic)
+        try await wait("Host runner did not stop the isolated service") {
+            FileManager.default.fileExists(atPath: directory.appending(path: "stopped").path)
+        }
+        try await wait("Service loss did not disconnect both the terminal and idle Task watch", seconds: 30) {
+            disconnected() && listing.tasksError != nil
+        }
+        print("Mobile service-loss detection: \(ProcessInfo.processInfo.systemUptime - began) seconds")
+        XCTAssertEqual(listing.tasks.map(\.work), cached)
+        XCTAssertFalse(listing.isLoadingTasks)
+        XCTAssertTrue(screen().contains("desktop draft + phone"))
+        controller.update(theme: .light)
+        controller.terminal.insertText(" must not survive outage\n")
+        await workspace.reconnect()
+        XCTAssertTrue(disconnected(), "Offline retry must not resume the provider or appear connected")
+        await listing.refresh()
+        XCTAssertNotNil(listing.tasksError)
+        XCTAssertEqual(listing.tasks.map(\.work), cached)
+
+        try Data().write(to: directory.appending(path: "start"), options: .atomic)
+        try await wait("Host runner did not restart the isolated service", seconds: 25) {
+            FileManager.default.fileExists(atPath: directory.appending(path: "started").path)
+        }
+        await listing.refresh()
+        try await wait("Task watch did not recover a current reading") {
+            !listing.isLoadingTasks && listing.tasksError == nil
+        }
+        XCTAssertEqual(listing.tasks.map(\.work), cached)
+        await workspace.reconnect()
+        try await wait("Service restart did not restore the same unfinished draft") {
+            workspace.state == .viewing && screen().contains("desktop draft + phone")
+        }
+        XCTAssertFalse(screen().contains("must not survive outage"))
+        controller.update(theme: .light)
+        controller.terminal.insertText(" must not send as observer\n")
+        XCTAssertEqual(workspace.state, .viewing)
+        // The enclosing proof continues this draft and checks the exact remote
+        // line and provider launch count, including these suppressed inputs.
+    }
+
     private func wait(_ reason: String, seconds: TimeInterval = 10, until predicate: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !predicate() {
-            guard Date() < deadline else { throw RegistryQueryError(reason) }
+            guard Date() < deadline else {
+                // XCTest can misattribute a torn-down WebSocket's deinit error;
+                // preserve the acceptance stage before propagating the failure.
+                print("Mobile acceptance timeout: \(reason)")
+                throw RegistryQueryError(reason)
+            }
             try await Task.sleep(for: .milliseconds(20))
         }
     }

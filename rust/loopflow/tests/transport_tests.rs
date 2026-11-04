@@ -4383,7 +4383,7 @@ printf 'output-final\r\n'
         supervised: false,
         remote_port: Some(port),
     };
-    service.child = Some(
+    let launch = || {
         fixture
             .command(&[
                 "machine",
@@ -4398,23 +4398,27 @@ printf 'output-final\r\n'
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .unwrap(),
-    );
-    service.ready();
+            .unwrap()
+    };
+    service.child = Some(launch());
+    let first_instance = service.ready();
 
-    let container = Command::new("xcrun")
-        .args([
-            "simctl",
-            "get_app_container",
-            &simulator,
-            "com.loopflow.ios.dev",
-            "data",
-        ])
-        .output()
-        .unwrap();
-    assert!(container.status.success());
-    let container = PathBuf::from(String::from_utf8(container.stdout).unwrap().trim());
-    let setup_dir = container.join("Documents/LoopflowIntegration");
+    let integration_directory = || {
+        let container = Command::new("xcrun")
+            .args([
+                "simctl",
+                "get_app_container",
+                &simulator,
+                "com.loopflow.ios.dev",
+                "data",
+            ])
+            .output()
+            .unwrap();
+        assert!(container.status.success());
+        PathBuf::from(String::from_utf8(container.stdout).unwrap().trim())
+            .join("Documents/LoopflowIntegration")
+    };
+    let mut setup_dir = integration_directory();
     std::fs::create_dir_all(&setup_dir).unwrap();
     let setup = setup_dir.join("setup.json");
     let pairing = fixture
@@ -4436,9 +4440,12 @@ printf 'output-final\r\n'
         "{}",
         String::from_utf8_lossy(&pairing.stderr)
     );
+    let control_name = format!("service-{}", uuid::Uuid::new_v4());
+    let mut control = setup_dir.join(&control_name);
+    std::fs::create_dir(&control).unwrap();
     std::fs::write(
         setup_dir.join("session.json"),
-        json!({"session":session,"outputSession":output_session,"creationRepository":fixture.repo.path().canonicalize().unwrap()})
+        json!({"session":session,"outputSession":output_session,"creationRepository":fixture.repo.path().canonicalize().unwrap(),"serviceControl":control_name})
             .to_string(),
     )
     .unwrap();
@@ -4451,7 +4458,7 @@ printf 'output-final\r\n'
             test.env_remove(key);
         }
     }
-    let result = test
+    let mut native = test
         .current_dir(root)
         .args([
             "test",
@@ -4473,11 +4480,48 @@ printf 'output-final\r\n'
         .stdin(Stdio::null())
         .stdout(log.try_clone().unwrap())
         .stderr(log)
-        .status()
+        .spawn()
         .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut stopped = false;
+    let mut restarted = false;
+    let mut locate_after = Instant::now();
+    let result = loop {
+        if let Some(result) = native.try_wait().unwrap() {
+            break result;
+        }
+        // Xcode may reinstall the app into a new data container while preserving
+        // its Documents. Follow that move instead of retaining the pre-build path.
+        if !control.exists() && Instant::now() >= locate_after {
+            setup_dir = integration_directory();
+            control = setup_dir.join(&control_name);
+            locate_after = Instant::now() + Duration::from_secs(1);
+        }
+        if control.join("stop").exists() && !stopped {
+            let mut child = service.child.take().unwrap();
+            child.kill().unwrap();
+            child.wait().unwrap();
+            stopped = true;
+            std::fs::write(control.join("stopped"), "").unwrap();
+        }
+        if control.join("start").exists() && !restarted {
+            assert!(stopped);
+            service.child = Some(launch());
+            assert_ne!(service.ready(), first_instance);
+            restarted = true;
+            std::fs::write(control.join("started"), "").unwrap();
+        }
+        if Instant::now() >= deadline {
+            native.kill().unwrap();
+            break native.wait().unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
     // Failed runs must not leave a one-use grant available to another test.
     let _ = std::fs::remove_file(setup);
+    let _ = std::fs::remove_file(setup_dir.join("setup.json"));
     let _ = std::fs::remove_file(setup_dir.join("session.json"));
+    let _ = std::fs::remove_dir_all(control);
     let created_owners: Vec<String> = fixture.sql()
         .prepare("SELECT DISTINCT transport_lf_process_id FROM agent_sessions WHERE transport_lf_process_id IS NOT NULL")
         .unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
@@ -4489,6 +4533,10 @@ printf 'output-final\r\n'
         result.success(),
         "Native acceptance failed; inspect {}",
         log_path.display()
+    );
+    assert!(
+        stopped && restarted,
+        "Native proof must cross a real service interruption"
     );
     fixture.ends(&owner);
     assert_eq!(

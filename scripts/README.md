@@ -26,6 +26,59 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+## Scheduled disk cleanup
+
+```bash
+scripts/disk-cleanup.sh --dry-run   # measured candidates and retention reasons
+scripts/disk-cleanup.sh            # reclaim idle generated output and old caches
+scripts/disk-cleanup.sh install    # launchd, hourly at minute 17
+scripts/disk-cleanup.sh uninstall  # remove only this schedule
+```
+
+Install from the main checkout after landing. Existing launchd jobs using this
+shell path pick up changes on their next invocation. Installation replaces only
+the old marked cron entry and leaves running cleanup jobs alone. The runner uses
+macOS's system Python and standard library, with no model or package resolution.
+Launchd starts it in a clean environment; it invokes `~/.local/bin/lf` explicitly.
+Desktop/helper pairing remains owned by `lf install`.
+
+The cleaner inventories ignored, untracked `target`, `.build`, `DerivedData`,
+`node_modules` and `.venv` roots within three levels of checkouts directly under
+`~/src` (`LOOPFLOW_SRC` overrides it). It removes whole idle roots, or independent
+Cargo debug/release profiles when the target root is retained. Open output and
+builders in a checkout retain output; an idle shell in the checkout does not.
+Tracked files, symlink roots/ancestors, recent output and unknown inspection are
+retained. Direct builds starting during cleanup can still race inspection;
+run them after cleanup when reusing an otherwise idle output root.
+
+Generated output normally needs four idle hours. Below the shared resource
+policy's 64 GiB target it needs one hour; below the 32 GiB reserve, fifteen
+minutes. Pressure never weakens preservation checks. Largest candidates go first,
+and recovering free space restores normal retention. The inventory shows the
+cost of separate worktree builds, repeated writes and live executables.
+
+Home captures, logs, retired copies and older backups retain their seven-day
+policy, including the newest backup per database and active/recent sidecars.
+Account homes and live SQLite stores are untouched. Whole Library cache entries
+need seven idle days; Trash needs thirty. The installed CLI still owns worktree,
+branch and monitor pruning; uv owns its cache pruning. Native maintenance runs
+after generated-output cleanup, so a stalled native step cannot starve it.
+
+A nonblocking kernel lock is shared with verification recovery and releases on
+exit or process death. Content inspection is limited to thirty seconds per
+candidate, child commands to two minutes, and the whole run to thirty minutes
+(`--budget-seconds` overrides it). Timeouts kill and reap the child process group.
+Failed inspections, removals or log writes produce a nonzero exit while
+independent cleanup continues. Unavailable activity inspection stops deletion.
+Partial removals receive no credit as freed allocation.
+
+Read `~/Library/Logs/loopflow-disk-cleanup.log` and the adjacent `.json` receipt
+for retained reasons, failures, removed allocated bytes and actual free-space
+delta. Individual removals append to `~/.lf/logs/disk.log`. The runner and launchd
+text logs retain roughly 5–10 MiB between runs. APFS sharing and concurrent writes
+mean removed allocation and the free-space delta can differ. Launchd's stdout/stderr
+also goes to `~/Library/Logs/loopflow-disk-cleanup-launchd.log`.
+
 ## Changed-aware runner
 
 ```bash
@@ -111,7 +164,8 @@ Cargo can replace a held profile lock during clean; native locks do not provide
 universal exclusion. Detected activity always retains output.
 
 Recovery also prunes old disposable gate output and entries accepted by
-`uv cache prune`. Cleanup runs before verification, not on an independent timer.
+`uv cache prune`. Verification recovery runs before builds; the machine cleaner
+has its own launchd schedule.
 A busy uv cache is reported immediately
 without waiting for its reader locks, including the parent `uv run`. Other cleanup
 and above-reserve verification continue. To reclaim uv entries, run

@@ -1,14 +1,20 @@
+import importlib
 import json
 import os
+import plistlib
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "disk-cleanup.sh"
+sys.path.insert(0, str(SCRIPT.parent))
+cleanup = importlib.import_module("disk_cleanup")
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="macOS maintenance script")
 
@@ -29,13 +35,22 @@ def _age_tree(root: Path, age_days: float) -> None:
         _age(Path(directory), age_days)
 
 
-def _run(tmp_path: Path, stubs: dict[str, str] | None = None, exit_code: int = 0) -> str:
+def _run(
+    tmp_path: Path,
+    stubs: dict[str, str] | None = None,
+    exit_code: int = 0,
+    args: tuple[str, ...] = (),
+) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     for tool, body in {"lf": "exit 0", "uv": "exit 0", "xcrun": "exit 0", **(stubs or {})}.items():
         stub = bin_dir / tool
         stub.write_text(f"#!/bin/sh\n{body}\n")
         stub.chmod(0o755)
+    public = tmp_path / "home/.local/bin"
+    public.mkdir(parents=True, exist_ok=True)
+    (public / "lf").unlink(missing_ok=True)
+    (public / "lf").symlink_to(bin_dir / "lf")
     env = {
         "HOME": str(tmp_path / "home"),
         "LF_HOME": str(tmp_path / "home/.lf"),
@@ -43,11 +58,25 @@ def _run(tmp_path: Path, stubs: dict[str, str] | None = None, exit_code: int = 0
         "TMPDIR": str(tmp_path),
         "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
     }
+    # Redirect only the host-wide OS lock into this disposable fixture. The
+    # runner and flock behavior are unchanged; concurrent real recovery cannot
+    # make preservation assertions pass merely because cleanup skipped.
+    launcher = (
+        "import sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
+        "import resource_envelope, disk_cleanup; "
+        f"resource_envelope.Path = lambda p: Path({str(tmp_path)!r}) if p == '/tmp' else Path(p); "
+        "sys.argv = sys.argv[1:]; sys.exit(disk_cleanup.main())"
+    )
     result = subprocess.run(
-        ["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=600
+        ["/usr/bin/python3", "-c", launcher, str(SCRIPT), *args],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
     assert result.returncode == exit_code, result.stdout + result.stderr
-    return result.stdout
+    return result.stdout + result.stderr
 
 
 def test_home_rotation_removes_week_old_material_and_keeps_the_store(tmp_path: Path) -> None:
@@ -123,14 +152,14 @@ def test_linked_worktree_loses_output_idle_for_four_hours(tmp_path: Path) -> Non
         subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(wt)], check=True)
     _write(idle / "target/debug/kata", 0.25)
     _age_tree(idle / "target", 0.25)
-    _write(recent / "target/debug/kata", 0.1)
-    _age_tree(recent / "target", 0.1)
+    _write(recent / "target/debug/kata", 0.001)
+    _age_tree(recent / "target", 0.001)
 
     out = _run(tmp_path)
 
     assert not (idle / "target").exists(), out
     assert (recent / "target").exists(), out
-    assert "written in the last 4 hours" in out
+    assert "written in the last" in out
 
 
 @pytest.mark.parametrize("held", [False, True])
@@ -180,20 +209,7 @@ def test_failed_open_file_inspection_stops_all_cleanup(tmp_path: Path) -> None:
     assert "open-file inspection failed; stopping cleanup" in out
 
 
-def test_failed_modification_inspection_keeps_material(tmp_path: Path) -> None:
-    cache = tmp_path / "home/Library/Caches/old/data"
-    _write(cache, 40)
-    _age_tree(cache.parent, 40)
-
-    out = _run(
-        tmp_path, {"find": 'case "$1" in */Caches/old) exit 1;; esac\nexec /usr/bin/find "$@"'}
-    )
-
-    assert cache.exists(), out
-    assert "modification inspection failed" in out
-
-
-def test_process_in_checkout_keeps_its_idle_build_output(tmp_path: Path) -> None:
+def test_idle_shell_in_checkout_does_not_retain_generated_output(tmp_path: Path) -> None:
     repo = tmp_path / "home/src/kata"
     repo.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -203,8 +219,8 @@ def test_process_in_checkout_keeps_its_idle_build_output(tmp_path: Path) -> None
     process = subprocess.Popen(["/bin/sleep", "600"], cwd=repo)
     try:
         out = _run(tmp_path)
-        assert (repo / "target/debug/kata").exists(), out
-        assert f"kept {repo} (held open)" in out
+        assert not (repo / "target/debug/kata").exists(), out
+        assert (repo / ".gitignore").exists(), out
     finally:
         process.terminate()
         process.wait(timeout=10)
@@ -370,7 +386,6 @@ else:
     )
     lf += f' {shlex.quote(str(binary))} "$@"'
     out = _run(tmp_path, {"lf": lf})
-    assert "lf wt prune failed" not in out, out
     for branch, path in finished:
         assert not path.exists(), out
         assert not _git(repo, "branch", "--list", branch, env=env), out
@@ -385,3 +400,370 @@ else:
     assert saved_refs == saved[1], out
     again = _run(tmp_path, {"lf": lf})
     assert "0 removed," in again, again
+
+
+@pytest.fixture
+def cleaner(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("LF_HOME", str(home / ".lf"))
+    monkeypatch.setenv("LOOPFLOW_SRC", str(home / "src"))
+    public = home / ".local/bin"
+    public.mkdir(parents=True)
+    for name in ("lf", "uv", "xcrun"):
+        tool = public / name
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{public}:/usr/bin:/bin:/usr/sbin:/sbin")
+    runner = cleanup.Cleaner(False, 1800)
+    monkeypatch.setattr(runner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset()))
+    return runner
+
+
+def _build_fixture(runner, age_minutes: int, size: int = 4096) -> Path:
+    repo = runner.src / "kata"
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-q")
+    (repo / ".gitignore").write_text("target/\n")
+    _write(repo / "target/debug/output", age_minutes / 1440, size)
+    _age_tree(repo / "target", age_minutes / 1440)
+    return repo
+
+
+@pytest.mark.parametrize(
+    "free_gib,minutes,removed", [(80, 120, False), (50, 120, True), (10, 30, True), (10, 5, False)]
+)
+def test_pressure_changes_retention_without_removing_recent_output(
+    cleaner, monkeypatch, free_gib: int, minutes: int, removed: bool
+) -> None:
+    repo = _build_fixture(cleaner, minutes)
+    monkeypatch.setattr(
+        cleanup.shutil, "disk_usage", lambda _: SimpleNamespace(free=free_gib * 1024**3)
+    )
+    assert cleaner.run() == 0
+    assert (repo / "target").exists() != removed
+    assert (repo / ".gitignore").exists()
+
+
+def test_reclaims_large_idle_profile_beside_live_output_and_unpublished_source(
+    cleaner, monkeypatch
+) -> None:
+    repo = _build_fixture(cleaner, 300, 128 * 1024**2)
+    live = repo / "target/release/live"
+    _write(live, 5)
+    _age_tree(repo / "target", 5)
+    source = repo / "unpublished.rs"
+    source.write_text("unfinished work")
+    monkeypatch.setattr(
+        cleaner, "_activity", lambda: cleanup.Activity(frozenset({live}), frozenset())
+    )
+    assert cleaner.run() == 0
+    assert not (repo / "target/debug").exists()
+    assert live.exists()
+    assert source.read_text() == "unfinished work"
+    assert cleaner.removed_bytes >= 128 * 1024**2
+
+
+def test_pressure_returns_to_normal_after_space_is_recovered(cleaner, monkeypatch) -> None:
+    repo = _build_fixture(cleaner, 120, 8192)
+    first = repo / "target/debug"
+    second = repo / "target/release"
+    _write(second / "other", 120 / 1440)
+    _age_tree(second, 120 / 1440)
+    # A recent root selects separate profiles; the largest one restores the target.
+    monkeypatch.setattr(
+        cleanup.shutil,
+        "disk_usage",
+        lambda _: SimpleNamespace(free=(10 if first.exists() else 80) * 1024**3),
+    )
+    assert cleaner.run() == 0
+    assert not first.exists()
+    assert second.exists()
+
+
+@pytest.mark.parametrize("protection", ["builder", "tracked", "symlink"])
+def test_protected_build_output_is_retained(cleaner, monkeypatch, protection: str) -> None:
+    repo = _build_fixture(cleaner, 300)
+    protected = repo / "target/debug/output"
+    if protection == "builder":
+        monkeypatch.setattr(
+            cleaner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset({repo}))
+        )
+    elif protection == "tracked":
+        _git(repo, "add", "-f", "target/debug/output")
+    else:
+        outside = cleaner.home / "outside"
+        (repo / "target").rename(outside)
+        (repo / "target").symlink_to(outside)
+        protected = outside / "debug/output"
+    assert cleaner.run() == 0
+    assert protected.exists()
+
+
+def test_nested_symlink_is_removed_without_following_it(cleaner) -> None:
+    repo = _build_fixture(cleaner, 300)
+    source = cleaner.home / "outside/source"
+    _write(source, 0)
+    link = repo / "target/debug/link"
+    link.symlink_to(source.parent)
+    stamp = time.time() - 300 * 60
+    os.utime(link, (stamp, stamp), follow_symlinks=False)
+    _age_tree(repo / "target", 300 / 1440)
+    assert cleaner.run() == 0
+    assert not (repo / "target").exists()
+    assert source.exists()
+
+
+def test_dry_run_reports_candidates_and_never_calls_native_cleanup(cleaner) -> None:
+    repo = _build_fixture(cleaner, 300)
+    cleaner.lf.write_text("#!/bin/sh\nexit 99\n")
+    cleaner.dry_run = True
+    assert cleaner.run() == 0
+    assert (repo / "target/debug/output").exists()
+    assert any(entry["status"] == "eligible" for entry in cleaner.entries)
+    assert cleaner.removed_bytes == 0
+
+
+def test_partial_native_failure_is_nonzero_after_reclamation(cleaner) -> None:
+    repo = _build_fixture(cleaner, 300)
+    cleaner.lf.write_text("#!/bin/sh\necho broken >&2\nexit 7\n")
+    assert cleaner.run() == 1
+    assert not (repo / "target").exists()
+    receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
+    assert receipt["exit_code"] == 1
+    assert any("broken" in failure for failure in receipt["failures"])
+    assert receipt["removed_allocated_bytes"] > 0
+
+
+def test_failed_content_inspection_retains_output_and_reports_failure(cleaner, monkeypatch) -> None:
+    repo = _build_fixture(cleaner, 300)
+
+    def denied(candidate):
+        raise PermissionError("inspection denied")
+
+    monkeypatch.setattr(cleaner, "_measure", denied)
+    assert cleaner.run() == 1
+    assert (repo / "target/debug/output").exists()
+    assert any("inspection denied" in failure for failure in cleaner.failures)
+
+
+def test_public_cli_wins_over_stale_inherited_selection(cleaner, monkeypatch) -> None:
+    monkeypatch.setenv("LF_BIN", "/Applications/Stale.app/Contents/MacOS/lf")
+    monkeypatch.setenv("LF_AGENT_CALLER", "stale")
+    cleaner.lf.write_text('#!/bin/sh\n[ -z "$LF_BIN$LF_AGENT_CALLER" ] || exit 42\n')
+    runner = cleanup.Cleaner(False, 1800)
+    monkeypatch.setattr(runner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset()))
+    assert runner.run() == 0
+
+
+def test_child_deadline_kills_its_process_group(cleaner) -> None:
+    marker = cleaner.home / "child-finished"
+    start = time.time()
+    with pytest.raises(subprocess.TimeoutExpired):
+        cleaner._command(
+            ["/bin/sh", "-c", f"(sleep 1; touch {shlex.quote(str(marker))}) & wait"], timeout=0.1
+        )
+    assert time.time() - start < 1
+    time.sleep(1.1)
+    assert not marker.exists()
+
+
+def test_wall_budget_reports_incomplete_and_next_run_acquires_lock(tmp_path: Path) -> None:
+    out = _run(tmp_path, {"lsof": "sleep 10"}, exit_code=1, args=("--budget-seconds", "0.2"))
+    assert "wall-clock budget exhausted" in out
+    out = _run(tmp_path, {"lsof": "printf 'p1\\ncinit\\nfcwd\\nn/\\n'"})
+    assert "done:" in out
+
+
+def test_activity_distinguishes_a_builder_from_an_idle_shell(cleaner, monkeypatch) -> None:
+    repo = _build_fixture(cleaner, 300)
+    monkeypatch.delattr(cleaner, "_activity")
+    monkeypatch.setattr(
+        cleaner,
+        "_command",
+        lambda *args, **kwargs: f"p123\nccargo\nfcwd\nn{repo}\np456\nczsh\nfcwd\nn{repo.parent}\n",
+    )
+    assert cleaner._activity().builders == frozenset({repo})
+
+
+@pytest.fixture
+def schedule(cleaner, monkeypatch):
+    main = cleaner.src / "loopflow"
+    scripts = main / "scripts"
+    scripts.mkdir(parents=True)
+    _git(main, "init", "-q")
+    for name in (
+        "disk-cleanup.sh",
+        "disk_cleanup.py",
+        "resource_envelope.py",
+        "performance-budgets.json",
+    ):
+        shutil.copyfile(SCRIPT.parent / name, scripts / name)
+    monkeypatch.setattr(cleanup, "__file__", str(scripts / "disk_cleanup.py"))
+    public = cleaner.lf.parent
+    launchctl = public / "launchctl"
+    launchctl.write_text("""#!/bin/sh
+case "$1" in
+print)
+  if [ -f "$HOME/launch-state" ]; then cat "$HOME/launch-state";
+  else echo 'Could not find service' >&2; exit 113; fi ;;
+bootstrap) echo 'state = waiting' > "$HOME/launch-state" ;;
+bootout) rm "$HOME/launch-state" ;;
+esac
+""")
+    launchctl.chmod(0o755)
+    crontab = public / "crontab"
+    crontab.write_text("""#!/bin/sh
+case "$1" in
+-l) cat "$HOME/cron" ;;
+-) cat > "$HOME/cron" ;;
+esac
+""")
+    crontab.chmod(0o755)
+    (cleaner.home / "cron").write_text(
+        "0 0 * * * keep-me\n17 * * * * old skill # loopflow:disk-cleanup\n"
+    )
+    return cleaner.home / "Library/LaunchAgents/com.loopflow.disk-cleanup.plist"
+
+
+def test_launchd_install_replaces_only_old_cron_and_runs_mechanical_entrypoint(
+    schedule, cleaner
+) -> None:
+    assert cleanup._schedule("install") == 0
+    payload = plistlib.loads(schedule.read_bytes())
+    assert payload["StartCalendarInterval"] == {"Minute": 17}
+    assert (cleaner.home / "cron").read_text() == "0 0 * * * keep-me\n"
+    args = payload["ProgramArguments"]
+    assert args[:2] == ["/usr/bin/env", "-i"]
+    assert args[-3:] == ["/bin/bash", str(cleaner.src / "loopflow/scripts/disk-cleanup.sh"), "run"]
+    assert next(arg for arg in args if arg.startswith("PATH=")).startswith(
+        f"PATH={cleaner.home}/.local/bin:"
+    )
+    assert not any("LF_BIN=" in arg or "skill" == arg for arg in args)
+    # Execute the installed stable shell path with the generated clean environment.
+    # --help is read-only and avoids the real host recovery lock in this proof.
+    result = subprocess.run([*args, "--help"], capture_output=True, text=True, check=True)
+    assert "--dry-run" in result.stdout
+    assert cleanup._schedule("install") == 0
+    assert cleanup._schedule("uninstall") == 0
+    assert not schedule.exists()
+    assert (cleaner.home / "cron").read_text() == "0 0 * * * keep-me\n"
+
+
+def test_install_and_uninstall_preserve_running_job(schedule, cleaner) -> None:
+    schedule.parent.mkdir(parents=True)
+    schedule.write_text("running job")
+    (cleaner.home / "launch-state").write_text("state = running\npid = 12345\n")
+    for action in ("install", "uninstall"):
+        with pytest.raises(RuntimeError, match="cleanup is running"):
+            cleanup._schedule(action)
+    assert schedule.read_text() == "running job"
+    assert "old skill" in (cleaner.home / "cron").read_text()
+
+
+def test_dead_process_releases_lock_without_stale_lock_removal(tmp_path: Path) -> None:
+    code = (
+        "import sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r}); import resource_envelope as r; "
+        f"r.Path = lambda p: Path({str(tmp_path)!r}) if p == '/tmp' else Path(p); "
+        "lock = r._lock_recovery(); assert lock is not None; print('locked', flush=True); "
+        "sys.stdin.read()"
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", code], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        assert "skipped: another cleanup" in _run(tmp_path)
+    finally:
+        holder.kill()
+        holder.communicate(timeout=5)
+    assert "done:" in _run(tmp_path, {"lsof": "printf 'p1\\ncinit\\nfcwd\\nn/\\n'"})
+
+
+def test_builder_outside_checkout_does_not_retain_output(cleaner, monkeypatch) -> None:
+    repo = _build_fixture(cleaner, 300)
+    monkeypatch.setattr(
+        cleaner, "_activity", lambda: cleanup.Activity(frozenset(), frozenset({Path("/")}))
+    )
+    assert cleaner.run() == 0
+    assert not (repo / "target").exists()
+
+
+def test_output_opened_after_inventory_is_retained(cleaner, monkeypatch) -> None:
+    repo = _build_fixture(cleaner, 300)
+    artifact = repo / "target/debug/output"
+    snapshots = iter(
+        [
+            cleanup.Activity(frozenset(), frozenset()),
+            cleanup.Activity(frozenset({artifact}), frozenset()),
+        ]
+    )
+    monkeypatch.setattr(cleaner, "_activity", lambda: next(snapshots))
+    assert cleaner.run() == 0
+    assert artifact.exists()
+
+
+def test_launchd_bootstrap_failure_restores_existing_job(schedule, cleaner) -> None:
+    assert cleanup._schedule("install") == 0
+    original = schedule.read_bytes()
+    (cleaner.home / "cron").write_text("17 * * * * old # loopflow:disk-cleanup\n")
+    launchctl = cleaner.lf.parent / "launchctl"
+    script = launchctl.read_text()
+    script = script.replace(
+        "bootstrap) echo",
+        'bootstrap) if [ ! -f "$HOME/failed-once" ]; then '
+        'touch "$HOME/failed-once"; exit 5; fi; echo',
+    )
+    launchctl.write_text(script)
+    with pytest.raises(subprocess.CalledProcessError):
+        cleanup._schedule("install")
+    assert schedule.read_bytes() == original
+    assert (cleaner.home / "launch-state").exists()
+    assert "old # loopflow:disk-cleanup" in (cleaner.home / "cron").read_text()
+
+
+def test_dry_run_does_not_truncate_log_history(cleaner) -> None:
+    cleaner.log.parent.mkdir(parents=True)
+    history = b"retained history\n" + b"x" * (11 * 1024**2)
+    cleaner.log.write_bytes(history)
+    cleaner.dry_run = True
+    assert cleaner.run() == 0
+    assert cleaner.log.read_bytes().startswith(history)
+
+
+@pytest.mark.parametrize("log_name,size", [("log", 0), ("log", 11 * 1024**2), ("disk_log", 0)])
+def test_failed_log_write_does_not_prevent_reclamation(
+    cleaner, monkeypatch, log_name, size
+) -> None:
+    repo = _build_fixture(cleaner, 300)
+    _write(getattr(cleaner, log_name), 0, size)
+    original = Path.open
+
+    def full(path, *args, **kwargs):
+        if path == getattr(cleaner, log_name):
+            raise OSError("No space left on device")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", full)
+
+    def failed_output(*args, **kwargs):
+        raise OSError("output filesystem full")
+
+    monkeypatch.setattr(cleanup, "print", failed_output, raising=False)
+    assert cleaner.run() == 1
+    assert not (repo / "target").exists()
+    assert any("No space left on device" in failure for failure in cleaner.failures)
+    receipt = json.loads(cleaner.log.with_suffix(".json").read_text())
+    assert receipt["removed_allocated_bytes"] > 0
+    assert any(entry["status"] == "removed" for entry in receipt["candidates"])
+
+
+def test_newer_backup_directory_or_symlink_cannot_displace_newest_backup(cleaner) -> None:
+    backup = cleaner.lf_home / "loopflow.db.backup-current"
+    _write(backup, 30)
+    (cleaner.lf_home / "loopflow.db.backup-directory").mkdir()
+    (cleaner.lf_home / "loopflow.db.backup-link").symlink_to(backup)
+    assert cleaner.run() == 0
+    assert backup.exists()

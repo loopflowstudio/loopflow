@@ -1,4 +1,0 @@
-The following is a diff from the previous accessibility tree for Window: "repo" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
-~			5 text Help: Status acceptance fixture, Value: Status acceptance fixture Summary · Disposable local-only UI acceptance fixture for LOO-720. No Graph execution. baf01f Done LOO-720 Demo on visitor-10-60-67-245
-~			72 text Help: Program (claude-code): Done, Value: Done, ID: pane-strip-shell
-The focused UI element is 52 container Description: baf01f Disposable status acceptance, active, ID: sessions-surface

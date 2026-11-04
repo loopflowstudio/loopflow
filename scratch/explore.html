@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-672 visions</title>
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --line: #e3dfd6;
+  --panel: #ffffff; --term: #15161a; --termfg: #d7d4cc; --accent: #2f6fdb;
+  --live: #2e8b57; --warm: #c98a12; --cold: #8a8a8a; --soft: #f1eee7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141412; --fg: #e9e6df; --muted: #9a958b; --line: #2c2b28;
+    --panel: #1b1b19; --term: #0d0e10; --termfg: #cfccc4; --accent: #7aa7ff;
+    --live: #5fc28a; --warm: #e3b04b; --cold: #777; --soft: #22221f;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+h1 { font-size: 1.6rem; margin: 0 0 .3rem; line-height: 1.25; }
+h2 { font-size: 1.25rem; margin: 3rem 0 .4rem; }
+h3 { font-size: 1rem; margin: 1.6rem 0 .3rem; }
+p { margin: .6rem 0; }
+.meta { color: var(--muted); font-size: .88rem; }
+.meta code { font-size: .82rem; }
+code { font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ask { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1rem; margin: 1.6rem 0; }
+.truth { font-size: 1.05rem; font-style: italic; margin: .2rem 0 1rem; }
+.vision { border-top: 1px solid var(--line); padding-top: .4rem; }
+.tradeoffs { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; font-size: .94rem; }
+.tradeoffs div { background: var(--soft); border-radius: 8px; padding: .7rem .9rem; }
+.tradeoffs b { display: block; margin-bottom: .2rem; }
+@media (max-width: 560px) { .tradeoffs { grid-template-columns: 1fr; } }
+.today { color: var(--muted); font-size: .9rem; }
+.today::before { content: "Today: "; font-weight: 600; }
+
+/* simulator */
+.sim { display: grid; grid-template-columns: 180px 1fr; border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; background: var(--panel); margin: 1rem 0 .4rem; }
+@media (max-width: 560px) { .sim { grid-template-columns: 1fr; } }
+.nav { border-right: 1px solid var(--line); padding: 6px 0; font-size: .88rem; }
+@media (max-width: 560px) { .nav { border-right: 0; border-bottom: 1px solid var(--line); } }
+.nav button { all: unset; display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 12px; cursor: pointer; box-sizing: border-box; }
+.nav button:hover { background: var(--soft); }
+.nav button[aria-current="true"] { background: var(--soft); font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--cold); }
+.dot.live { background: var(--live); } .dot.warm { background: var(--warm); }
+.dot.ring { background: transparent; border: 1.5px solid var(--cold); }
+.pane { position: relative; min-height: 230px; background: var(--term); color: var(--termfg);
+  font: 12.5px/1.5 ui-monospace, Menlo, monospace; padding: 12px 14px; overflow: hidden; }
+.pane .line { white-space: pre-wrap; }
+.pane .you { color: #8fb8ff; }
+.pane.dim .body { opacity: .28; }
+.pane .over { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.card { background: var(--panel); color: var(--fg); border-radius: 10px; padding: 14px 16px;
+  max-width: 330px; font: 14px/1.45 -apple-system, sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+.card .cmd { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); display: block; margin: 2px 0 8px; }
+.card button { font: inherit; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--soft); color: var(--fg); cursor: pointer; margin-right: 6px; }
+.card button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+.status { position: absolute; right: 10px; top: 8px; font: 12px -apple-system, sans-serif; color: #9a958b; }
+.transcript { font: 13.5px/1.5 -apple-system, sans-serif; background: var(--panel); color: var(--fg); }
+.transcript .turn { margin: 0 0 8px; }
+.transcript .who { font-weight: 600; }
+.transcript .tool { color: var(--muted); font: 12px ui-monospace, Menlo, monospace; }
+.transcript .composer { position: absolute; left: 12px; right: 12px; bottom: 10px; border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; color: var(--muted); background: var(--bg); cursor: text; }
+.meter { display: flex; flex-wrap: wrap; gap: .3rem 1.4rem; font-size: .88rem; color: var(--muted); margin-bottom: .4rem; }
+.meter b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.legend { font-size: .82rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+table { border-collapse: collapse; width: 100%; font-size: .92rem; margin: 1rem 0; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; }
+ol.q > li { margin: 1rem 0; }
+ol.q ol { list-style: lower-alpha; margin-top: .3rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>LOO-672 · Task conversations are ready without clicking Open</h1>
+<p class="meta">Explore step · 2026-11-02 · built from <code>scratch/loo-672-ready-conversations.md</code>,
+<code>scratch/questions.md</code>, <code>rust/loopflow/src/transcript/</code> and LOO-618 (#1767, merged).
+Path: <code>scratch/explore.html</code></p>
+
+<div class="ask">
+<p><b>The decision:</b> what you see when you switch to a Task whose conversation isn't on screen.
+All three visions drop the Open click, land you at the bottom, and handle takeover the same way
+(at the end). They differ in what runs in the background and in what memory pays for.</p>
+<p>Click Tasks in each switcher. The meter shows what's running.</p>
+</div>
+
+<p class="today">you select a Task, see "Not running here", and click Open. After a reboot you do
+that for each Task. 82 Claude processes were using 24.3 GB, and Desktop was at 2.5 GB with about 15 terminals.</p>
+
+<!-- A -->
+<section class="vision">
+<h2>A · Bounded live terminals</h2>
+<p class="truth">Every Task is a real terminal. The recent ones are instant, and older ones come back in a few seconds.</p>
+<p>This is the draft plan. Desktop keeps the 8 most recently selected terminals. Rust lets 8 more
+idle conversations keep running with no terminal. Everything else ends quietly and resumes from
+Claude's history when you select it, with "Resuming…" shown over the last screen.
+After a reboot, <code>lf resume --all</code> brings back only what was within those limits.</p>
+<div class="sim" id="simA"></div>
+<div class="meter" id="meterA"></div>
+<div class="legend"><span><i class="dot live"></i>terminal + agent</span><span><i class="dot warm"></i>agent only</span><span><i class="dot"></i>ended, resumes from history</span></div>
+<div class="tradeoffs">
+<div><b>Appeal</b>Nothing new to learn: every conversation looks the same as it does today. The work is small: Swift selection, a pane cap, and a count on the existing 24-hour idle limit.</div>
+<div><b>Cost and risk</b>A Task outside the 16 shows "Resuming…" for 2–5 s. Memory is up to 16 agents (about 8 GB worst case). Text you typed but didn't send in an ended conversation is lost.</div>
+</div>
+</section>
+
+<!-- B -->
+<section class="vision">
+<h2>B · Read now, live when you type</h2>
+<p class="truth">Every conversation opens instantly as readable history. An agent runs only while it's working or you're typing to it.</p>
+<p>Rust already reads every harness's native transcript (<code>transcript/</code>, used today by
+<code>-a</code> handoff). Switching to a Task shows that history at the bottom immediately, rendered
+natively and live-updating while a turn runs. Clicking into the composer or typing resumes the agent
+behind it, and the view becomes the terminal. When you leave, the terminal goes away after a short grace,
+and the agent ends once it's idle. A reboot costs nothing, because nothing needs resuming until you type.</p>
+<div class="sim" id="simB"></div>
+<div class="meter" id="meterB"></div>
+<div class="legend"><span><i class="dot live"></i>agent working or being typed to</span><span><i class="dot ring"></i>history only (no process)</span></div>
+<div class="tradeoffs">
+<div><b>Appeal</b>Memory scales with what's active (a few agents), not with how many Tasks are open. Twenty or a hundred Tasks cost the same. Switching is always instant, and reboot recovery disappears as a problem.</div>
+<div><b>Cost and risk</b>It adds a second rendering: a native transcript view next to the terminal. Your first keystroke waits 2–5 s on a resume unless the composer drafts while it starts. Terminal-only UI (permission prompts, menus) appears only once the conversation is live.</div>
+</div>
+</section>
+
+<!-- C -->
+<section class="vision">
+<h2>C · Never see "Resuming"</h2>
+<p class="truth">Desktop keeps live whatever you're likely to open next, so every switch is instant and stays a real terminal.</p>
+<p>Desktop keeps the Tasks you're likely to need running: ones waiting on you, ones with a turn
+in progress, and the recent ones. When you hover or arrow onto a Task, it starts warming (resume without a turn)
+before you commit. After a reboot, every open Task resumes in the background, one at a time in order of
+recency, until the budget is full. Anything past the budget falls back to A's "Resuming…".</p>
+<div class="sim" id="simC"></div>
+<div class="meter" id="meterC"></div>
+<div class="legend"><span><i class="dot live"></i>terminal + agent</span><span><i class="dot warm"></i>warmed agent</span><span><i class="dot"></i>ended</span></div>
+<div class="tradeoffs">
+<div><b>Appeal</b>The one that feels like magic: real terminals everywhere, and the wait happens before you click. Notifications ("waiting on you") warm up their Task automatically.</div>
+<div><b>Cost and risk</b>It uses the most memory (a budget of about 12 warm agents) plus prediction logic to tune. Hover-warming spends a Claude start on Tasks you only glanced at. The reboot catch-up is a burst of CPU. It also stretches the brief's "prefetch prepares nothing" rule: no turn starts, but processes do.</div>
+</div>
+</section>
+
+<!-- shared -->
+<section class="vision">
+<h2>The same in every vision: takeover</h2>
+<p>Another terminal runs <code>lf resume LOO-672</code>, so LOO-618's default takeover moves the conversation there.
+The Desktop pane keeps its last screen, dimmed, and explains itself. Desktop never takes it back without a click.</p>
+<div class="sim" id="simT"></div>
+<p class="today">the pane is replaced by "Active in another terminal" and a Move here button. A viewer that gets replaced
+inside the same session process is dropped silently, with no notice at all.</p>
+<p>In B the dimmed screen can keep updating, because the other client is still writing the same history. So you
+can watch it work from Desktop without taking it back.</p>
+</section>
+
+<section class="vision">
+<h2>Side by side</h2>
+<table>
+<tr><th></th><th>A</th><th>B</th><th>C</th></tr>
+<tr><td>Switch to a recent Task</td><td>instant terminal</td><td>instant history</td><td>instant terminal</td></tr>
+<tr><td>Switch to an old Task</td><td>2–5 s "Resuming…"</td><td>instant history; 2–5 s on first keystroke</td><td>instant if predicted, else 2–5 s</td></tr>
+<tr><td>Agents running, 20+ Tasks</td><td>≤ 16</td><td>active turns + the one you're typing to</td><td>≤ 12 warm + active turns</td></tr>
+<tr><td>After reboot</td><td>16 resume in background</td><td>nothing to do</td><td>all resume, throttled, to budget</td></tr>
+<tr><td>New code</td><td>small (Swift rule, caps)</td><td>transcript view + live tail</td><td>A + prediction + warming</td></tr>
+</table>
+</section>
+
+<section class="vision">
+<h2>Questions</h2>
+<ol class="q">
+<li>Which world?
+  <ol><li>A, bounded live terminals</li><li>B, read now, live when you type</li><li>C, never see Resuming</li><li>a mix (say which parts, e.g. B's instant history for cold Tasks with A's terminals for recent ones)</li></ol></li>
+<li>If B: your first keystroke into a cold conversation…
+  <ol><li>goes into a native composer that sends once the agent is live</li><li>opens the terminal right away and buffers keys until Claude is ready</li></ol></li>
+<li>Takeover: while another terminal holds the conversation, the Desktop pane…
+  <ol><li>freezes its last screen under the overlay</li><li>keeps updating read-only under the overlay</li></ol></li>
+<li>After a reboot, conversations nobody looks at…
+  <ol><li>resume in the background up to the budget</li><li>stay ended until you select them</li></ol></li>
+</ol>
+</section>
+
+</main>
+<script>
+const TASKS = [
+  { id: "LOO-672", t: "Ready conversations", waiting: true },
+  { id: "LOO-673", t: "Desktop polish" },
+  { id: "LOO-649", t: "Release stream", running: true },
+  { id: "LOO-627", t: "New Task: one" },
+  { id: "LOO-604", t: "One lf API" },
+  { id: "LOO-656", t: "Store frontier" },
+  { id: "LOO-602", t: "Normalized transcript" },
+  { id: "LOO-588", t: "Steer delivery" },
+];
+const HIST = {
+  "LOO-672": [["you","pursue"],["tool","Edit swift/LoopflowMac/WorkModel.swift"],["agent","Selection now reveals the Task conversation. Next: the overlay."]],
+  "LOO-649": [["you","cut 0.15.2"],["tool","Bash lf release check"],["agent","Running checks… 14/22 passed."]],
+};
+const hist = id => HIST[id] || [["you","where does this stand?"],["tool","Bash lf task status " + id],["agent","Gate passed; the PR is ready for your review."]];
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+function termBody(id) {
+  return hist(id).map(([w, s]) =>
+    w === "you" ? `<div class="line you">› ${esc(s)}</div>` :
+    w === "tool" ? `<div class="line">  ⏺ ${esc(s)}</div>` :
+    `<div class="line">${esc(s)}</div>`).join("") + `<div class="line">\n› <span style="opacity:.6">▌</span></div>`;
+}
+function transcriptBody(id) {
+  return hist(id).map(([w, s]) =>
+    w === "tool" ? `<div class="turn tool">${esc(s)}</div>` :
+    `<div class="turn"><span class="who">${w === "you" ? "You" : "Claude"}</span> ${esc(s)}</div>`).join("");
+}
+
+function sim(rootId, meterId, vision) {
+  const root = document.getElementById(rootId), meter = document.getElementById(meterId);
+  // state per task: "live" (terminal+agent), "agent" (agent only), "hist" (none)
+  const st = {}; TASKS.forEach(k => st[k.id] = k.running ? (vision === "B" ? "work" : "agent") : "hist");
+  let recent = [], sel = null, phase = "", hoverWarm = null, typing = false;
+  if (vision === "C") TASKS.forEach(k => { if (k.waiting) st[k.id] = "agent"; });
+
+  function enforce() {
+    if (vision === "A") {
+      const terms = recent.slice(0, 8), agents = recent.slice(8, 16);
+      TASKS.forEach(k => {
+        if (k.running) { st[k.id] = terms.includes(k.id) ? "live" : "agent"; return; }
+        st[k.id] = terms.includes(k.id) ? "live" : agents.includes(k.id) ? "agent" : (st[k.id] === "hist" ? "hist" : "hist");
+      });
+    }
+    if (vision === "C") {
+      TASKS.forEach(k => {
+        const keep = k.running || k.waiting || recent.slice(0, 6).includes(k.id) || hoverWarm === k.id;
+        st[k.id] = recent.slice(0, 3).includes(k.id) ? "live" : keep ? "agent" : "hist";
+      });
+    }
+    if (vision === "B") {
+      TASKS.forEach(k => { st[k.id] = k.running ? "work" : (k.id === sel && typing) ? "work" : "hist"; });
+    }
+  }
+  function dotClass(id) {
+    const s = st[id];
+    if (vision === "B") return s === "work" ? "live" : "ring";
+    return s === "live" ? "live" : s === "agent" ? "warm" : "";
+  }
+  function select(id) {
+    const before = st[id];
+    sel = id; typing = false;
+    recent = [id, ...recent.filter(x => x !== id)];
+    if (vision === "B") phase = "history";
+    else if (before === "live") phase = "instant";
+    else if (before === "agent") phase = "attach";
+    else phase = "resuming";
+    enforce(); render();
+    if (phase === "resuming" || phase === "attach") {
+      const p = phase;
+      setTimeout(() => { if (sel === id && phase === p) { phase = "instant"; render(); } }, p === "attach" ? 400 : 1800);
+    }
+  }
+  function type() {
+    if (!sel || vision !== "B") return;
+    typing = true; phase = "waking"; enforce(); render();
+    setTimeout(() => { if (typing && phase === "waking") { phase = "terminal"; render(); } }, 1600);
+  }
+  function render() {
+    const nav = TASKS.map(k => `<button data-id="${k.id}" aria-current="${k.id === sel}">
+      <i class="dot ${dotClass(k.id)}"></i>${k.id} <span style="color:var(--muted);font-weight:400">${esc(k.t)}</span></button>`).join("");
+    let pane;
+    if (!sel) pane = `<div class="pane"><div class="body" style="opacity:.5">Select a Task.</div></div>`;
+    else if (vision === "B" && (phase === "history" || phase === "waking")) {
+      pane = `<div class="pane transcript"><div class="status">${phase === "waking" ? "Starting Claude…" : st[sel] === "work" ? "working · live" : "history"}</div>
+        <div class="body">${transcriptBody(sel)}</div>
+        <div class="composer" data-type>${phase === "waking" ? "drafting… sends when live" : "Type to continue…"}</div></div>`;
+    } else {
+      const status = { instant: "live", attach: "attaching…", resuming: "Resuming…", terminal: "live" }[phase] || "";
+      pane = `<div class="pane ${phase === "resuming" ? "dim" : ""}"><div class="status">${status}</div><div class="body">${termBody(sel)}</div></div>`;
+    }
+    root.innerHTML = `<nav class="nav">${nav}</nav>${pane}`;
+    root.querySelectorAll("[data-id]").forEach(b => {
+      b.onclick = () => select(b.dataset.id);
+      if (vision === "C") b.onmouseenter = () => { if (st[b.dataset.id] === "hist") { hoverWarm = b.dataset.id; enforce(); render(); } };
+    });
+    const c = root.querySelector("[data-type]"); if (c) c.onclick = type;
+    const vals = Object.values(st);
+    const terms = vision === "B" ? (phase === "terminal" ? 1 : 0) : vals.filter(s => s === "live").length;
+    const agents = vals.filter(s => s !== "hist").length;
+    const gb = (agents * 0.42 + terms * 0.15 + (vision === "B" ? 0.3 : 0.4)).toFixed(1);
+    meter.innerHTML = `<span>terminals <b>${terms}</b></span><span>agents running <b>${agents}</b></span><span>≈ memory <b>${gb} GB</b></span>` +
+      (vision === "C" ? `<span>hover a grey Task to warm it</span>` : vision === "B" && sel ? `<span>click the composer to type</span>` : "");
+  }
+  render();
+}
+sim("simA", "meterA", "A");
+sim("simB", "meterB", "B");
+sim("simC", "meterC", "C");
+
+// takeover demo
+(function () {
+  const root = document.getElementById("simT");
+  let state = "taken";
+  function render() {
+    const nav = `<nav class="nav"><button aria-current="true"><i class="dot ${state === "taken" ? "" : "live"}"></i>LOO-672 <span style="color:var(--muted);font-weight:400">Ready conversations</span></button></nav>`;
+    let pane;
+    if (state === "taken") pane = `<div class="pane dim"><div class="body">${termBody("LOO-672")}</div>
+      <div class="over"><div class="card">
+        <b>Continued in cmux · workspace loo-672</b><br><span style="color:var(--muted)">on this Machine, 2 min ago</span>
+        <p style="margin:.7rem 0 .2rem"><button class="primary" data-a="back">Take back</button><button data-a="fork">Fork</button></p>
+        <span class="cmd">lf resume LOO-672</span><span class="cmd">lf resume LOO-672 --fork</span>
+      </div></div></div>`;
+    else if (state === "back") pane = `<div class="pane"><div class="status">live · cmux was told it moved here</div><div class="body">${termBody("LOO-672")}</div></div>`;
+    else pane = `<div class="pane"><div class="status">new conversation forked from LOO-672 · cmux keeps running</div><div class="body">${termBody("LOO-672")}</div></div>`;
+    root.innerHTML = nav + pane + "";
+    root.querySelectorAll("[data-a]").forEach(b => b.onclick = () => { state = b.dataset.a; render(); setTimeout(() => { state = "taken"; render(); }, 3500); });
+  }
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1381,7 +1381,6 @@ impl ConfigCommand {
             Self::User { .. } | Self::Show { .. } | Self::Catalog { .. } => false,
             Self::Import { .. } => true,
             Self::Migrate { accept } => *accept,
-            Self::File { value, unset, .. } => value.is_some() || *unset,
             Self::Retained { replace, keep } => *replace || *keep,
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
             Self::Planning { cmd } => match cmd {
@@ -2594,18 +2593,6 @@ pub enum ConfigCommand {
         /// Replace conflicting declarations explicitly
         #[arg(long)]
         replace: bool,
-    },
-    /// Read or edit one declaration in an explicitly selected configuration file
-    File {
-        path: PathBuf,
-        key: String,
-        value: Option<String>,
-        #[arg(long, conflicts_with = "value")]
-        unset: bool,
-        #[arg(long, value_enum, default_value = "global")]
-        scope: crate::config::settings::SettingScope,
-        #[arg(long, id = "config_shared")]
-        shared: bool,
     },
     /// Inspect origin profile retention and explicitly keep or replace divergent files
     Retained {

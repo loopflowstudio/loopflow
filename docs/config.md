@@ -229,6 +229,13 @@ location. It explains why candidates won, lost, contributed or cleared earlier
 values. A fallback remains identifiable as `default_agent`. CLI and Desktop read
 the same resolution used to prepare a launch.
 
+In Desktop Configuration, choose My global preferences, My project preferences or
+Shared project preferences. Select a project checkout and Wave for My Wave
+preferences or Shared Wave preferences. Apply shows the destination file and when
+the change takes effect. Explain uses that same checkout, Wave and setting target;
+Unset removes only that declaration and shows what now applies. Changing the
+destination reloads its declaration.
+
 The catalogue lists supported keys, value types, destinations and lifecycle.
 A successful write reports where it was saved and whether it applies immediately,
 on a later launch or only after a domain action. Saving a preference does not

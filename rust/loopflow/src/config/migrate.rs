@@ -410,7 +410,7 @@ fn cutover(
     }
     let home = super::placement::home(conn)?;
     let global = home.join("config.yaml");
-    let global_value = super::read_global_config_at(&global)?;
+    let global_value = super::files::read(&global)?;
     if let Some(repos) = global_value.get("repos").and_then(Value::as_mapping) {
         for (repo, value) in repos {
             let repo = repo
@@ -480,7 +480,7 @@ fn cutover(
             continue;
         }
         let private = super::files::private_path(&repo)?;
-        if overlaps(&super::read_global_config_at(&private)?, &db_global) {
+        if overlaps(&super::files::read(&private)?, &db_global) {
             conflicts.push(private.display().to_string());
         }
     }
@@ -488,7 +488,7 @@ fn cutover(
     for (path, incoming) in exports {
         guards.push(super::files::lock(&path)?);
         let before = super::files::read_text(&path)?;
-        let mut value = super::read_global_config_at(&path)?;
+        let mut value = super::files::read(&path)?;
         if overlaps(&value, &incoming) {
             conflicts.push(path.display().to_string());
         }
@@ -619,8 +619,7 @@ mod tests {
         .unwrap();
         preflight(&conn, &mut Vec::new()).unwrap();
         let recovery =
-            crate::config::read_global_config_at(&home.path().join("settings-recovery.yaml"))
-                .unwrap();
+            crate::config::files::read(&home.path().join("settings-recovery.yaml")).unwrap();
         assert_eq!(
             recovery["repo"]["missing/clone"]["account"]["codex"][0],
             "one"
@@ -629,8 +628,7 @@ mod tests {
             recovery["repo"]["missing/clone"]["account"]["codex"][1],
             "two"
         );
-        let global =
-            crate::config::read_global_config_at(&home.path().join("config.yaml")).unwrap();
+        let global = crate::config::files::read(&home.path().join("config.yaml")).unwrap();
         assert!(global.get("account").is_none());
         assert_eq!(global["pools"]["workers"]["off"], true);
         assert_eq!(global["ondemands"]["code"]["max_machines"], 3);

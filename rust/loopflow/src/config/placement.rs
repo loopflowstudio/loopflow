@@ -45,6 +45,14 @@ impl From<PlacementInput> for Placement {
     }
 }
 
+/// Expand a shorthand before editing one field so the other destination survives.
+pub(crate) fn expand_shorthand(value: &mut Value) -> Result<()> {
+    if value.is_string() {
+        *value = serde_yaml_ng::to_value(serde_yaml_ng::from_value::<Placement>(value.clone())?)?;
+    }
+    Ok(())
+}
+
 /// Ordered account references; exact IDs, login emails and unambiguous prefixes
 /// are resolved against the executor's account observations at launch.
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
@@ -136,7 +144,7 @@ pub(crate) fn location(
 
 pub(crate) fn read(conn: &Connection, scope: Option<&DefaultScope>) -> Result<Value> {
     let (path, prefix) = location(conn, scope)?;
-    let mut value = super::read_global_config_at(&path)?;
+    let mut value = super::files::read(&path)?;
     super::remote::apply_document(&path, &mut value)?;
     for part in prefix {
         value = value.get(part).cloned().unwrap_or(Value::Null);

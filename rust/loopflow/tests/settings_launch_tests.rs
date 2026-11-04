@@ -1025,3 +1025,91 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
         ]
     );
 }
+
+#[test]
+fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path());
+    repo.create_file(".lf/skills/probe.md", "Report settings.\n");
+    repo.create_file(".lf/config.yaml", "agent: claude:shared\n");
+    repo.create_file(
+        ".lf/wave/product/config.yaml",
+        "id: 8ae21a68-8940-4553-a3ab-135133925e35\n",
+    );
+    repo.stage_all();
+    repo.commit("Authored settings");
+    let child = home.path().join("child");
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args(["worktree", "add", "-b", "child"])
+        .arg(&child)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let run = |args: &[&str]| success(command(&child, home.path(), args));
+    run(&["set", "--global", "default_agent", "codex:global"]);
+    let global = fs::read(home.path().join("config.yaml")).unwrap();
+    run(&["set", "skills.probe.agent", "codex:project"]);
+    run(&[
+        "--wave",
+        "product",
+        "set",
+        "skills.probe.agent",
+        "claude:wave",
+    ]);
+    run(&[
+        "--wave",
+        "8ae21a68-8940-4553-a3ab-135133925e35",
+        "set",
+        "--shared",
+        "chrome",
+        "true",
+    ]);
+    let check = |wave: Option<&str>, expected: &str| {
+        let mut args = Vec::new();
+        if let Some(wave) = wave {
+            args.extend(["--wave", wave]);
+        }
+        args.extend(["config", "show", "--skill", "probe", "--json"]);
+        let inspection: serde_json::Value = serde_json::from_slice(&run(&args).stdout).unwrap();
+        let config = loopflow::config::load_wave_config(Some(&child), wave)
+            .unwrap()
+            .unwrap();
+        let prepared = loopflow::prompt::process::prepare_process_prompt(
+            &config,
+            loopflow::prompt::process::ProcessPromptInput {
+                repo_root: child.clone(),
+                skill: Some("probe".into()),
+                wave: wave.map(str::to_owned),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(prepared.config.agent(), expected);
+        assert_eq!(prepared.config.chrome, wave.is_some());
+        assert_eq!(inspection[0]["settings"]["agent"]["value"], expected);
+    };
+    check(None, "codex:project");
+    check(Some("product"), "claude:wave");
+    check(Some("8ae21a68-8940-4553-a3ab-135133925e35"), "claude:wave");
+    let private = repo.path().join("lf.config.local.yaml");
+    let before = fs::read(&private).unwrap();
+    let rejected = command(&child, home.path(), &["set", "user.name", "Wrong scope"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("does not apply"));
+    assert_eq!(fs::read(&private).unwrap(), before);
+    run(&["--wave", "product", "unset", "skills.probe.agent"]);
+    check(Some("product"), "codex:project");
+    run(&["unset", "skills.probe.agent"]);
+    check(None, "claude:shared");
+    run(&["unset", "--shared", "agent"]);
+    check(None, "codex:global");
+    assert_eq!(fs::read(home.path().join("config.yaml")).unwrap(), global);
+    assert!(!child.join("lf.config.local.yaml").exists());
+}

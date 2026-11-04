@@ -24,7 +24,7 @@ pub fn show(
     step: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let output = inspect(repo, wave, skill, graph, step)?;
+    let output = crate::config::api::inspect(repo, wave, skill, graph, step)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -56,72 +56,6 @@ pub fn show(
     Ok(())
 }
 
-/// The CLI and in-process Desktop read share this inspection.
-pub fn inspect(
-    repo: &std::path::Path,
-    wave: Option<&str>,
-    skill: Option<&str>,
-    graph: Option<&str>,
-    step: Option<&str>,
-) -> anyhow::Result<Vec<serde_json::Value>> {
-    anyhow::ensure!(
-        skill.is_none() || graph.is_none(),
-        "choose --skill or --graph"
-    );
-    anyhow::ensure!(step.is_none() || graph.is_some(), "--step requires --graph");
-    let config = crate::config::load_wave_config(Some(repo), wave)?.unwrap_or_default();
-    let mut selections = Vec::new();
-    if let Some(graph) = graph {
-        fn collect(
-            steps: &[crate::graph::ConcreteStep],
-            target: Option<(&str, &str)>,
-            out: &mut Vec<crate::graph::Skill>,
-        ) {
-            for step in steps {
-                match step {
-                    crate::graph::ConcreteStep::Skill(skill)
-                        if target.is_none_or(|(graph, id)| {
-                            skill.skill.occurrence.as_ref().is_some_and(|occurrence| {
-                                occurrence.graph == graph && occurrence.id.as_deref() == Some(id)
-                            })
-                        }) =>
-                    {
-                        out.push(skill.skill.clone())
-                    }
-                    crate::graph::ConcreteStep::Xor(branch) => {
-                        if target.is_none() {
-                            out.push(branch.router.clone());
-                        }
-                        for path in branch.paths.values() {
-                            collect(&path.steps, target, out);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let definition = crate::graph::load_authored_graph(graph, repo)?;
-        collect(
-            &crate::graph::compile_graph(&definition, repo)?,
-            step.map(|id| (definition.name.as_str(), id)),
-            &mut selections,
-        );
-        anyhow::ensure!(!selections.is_empty(), "no matching agent steps in {graph}");
-    } else if let Some(skill) = skill {
-        selections.push(crate::graph::load_skill(skill, repo)?);
-    }
-    let mut output = Vec::new();
-    for selection in if selections.is_empty() {
-        vec![None]
-    } else {
-        selections.iter().map(Some).collect()
-    } {
-        let resolved = crate::config::settings::resolve(&config, selection)?;
-        output.push(serde_json::json!({"skill": selection.map(|s| &s.name), "occurrence": selection.and_then(|s| s.occurrence.as_ref()), "settings": resolved.settings}));
-    }
-    Ok(output)
-}
-
 /// The catalogue is available before a store or provider is installed.
 pub fn catalog(json: bool) -> anyhow::Result<()> {
     if json {
@@ -147,29 +81,5 @@ pub fn catalog(json: bool) -> anyhow::Result<()> {
             );
         }
     }
-    Ok(())
-}
-
-pub fn file(
-    path: &std::path::Path,
-    key: &str,
-    value: Option<&str>,
-    unset: bool,
-    scope: crate::config::settings::SettingScope,
-    shared: bool,
-) -> anyhow::Result<()> {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&crate::config::api::run(
-            crate::config::api::Request::File {
-                path: path.to_owned(),
-                key: key.into(),
-                value: value.map(str::to_owned),
-                unset,
-                scope,
-                shared,
-            }
-        )?)?
-    );
     Ok(())
 }

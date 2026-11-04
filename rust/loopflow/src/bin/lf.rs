@@ -1677,27 +1677,6 @@ fn run() -> anyhow::Result<()> {
                         );
                     }
                     Some(Commands::Config {
-                        cmd:
-                            loopflow::lf::ConfigCommand::File {
-                                path,
-                                key,
-                                value,
-                                unset,
-                                scope,
-                                shared,
-                            },
-                    }) => {
-                        return loopflow::lf::commands::config::file(
-                            path,
-                            key,
-                            value.as_deref(),
-                            *unset,
-                            *scope,
-                            *shared,
-                        );
-                    }
-
-                    Some(Commands::Config {
                         cmd: loopflow::lf::ConfigCommand::Catalog { json },
                     }) => {
                         journal::mark_effect_free_read();
@@ -2868,21 +2847,6 @@ fn execute_command(
                 Ok(())
             }
 
-            loopflow::lf::ConfigCommand::File {
-                path,
-                key,
-                value,
-                unset,
-                scope,
-                shared,
-            } => loopflow::lf::commands::config::file(
-                path,
-                key,
-                value.as_deref(),
-                *unset,
-                *scope,
-                *shared,
-            ),
             loopflow::lf::ConfigCommand::Retained { replace, keep } => {
                 loopflow::lf::commands::config::retained(*replace, *keep)
             }

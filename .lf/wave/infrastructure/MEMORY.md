@@ -194,7 +194,7 @@ Task worktrees, machine/account declarations and origin-owned remote preferences
 Remote requests use the origin profile; direct remote work uses saved preferences.
 Retention preserves independent remote edits, separately from execution authority.
 Runtime identity, account observations, secrets and history remain domain-owned.
-The source cut is implemented; live file-change propagation remains incomplete.
+The source cut and shared file-change observation are implemented.
 
 Every applicable `agent` choice precedes all `default_agent` fallbacks. Within each
 class the accepted order is CLI > environment > personal files > repository/Wave
@@ -214,15 +214,14 @@ order, belong to independent clones; linked worktrees share. Legacy routes mater
 after collision checks. Unavailable destinations retain non-executing exports for
 explicit import; future clones inherit nothing. Reads need no checkout registration.
 
-File cutover removes SQLite revision triggers. Fresh reads prove no live propagation:
-Git watches miss ignored private/global files. Shared configuration observation remains
-required. Adoption receipts must describe the projection after the write.
+File cutover removes SQLite triggers; Git misses ignored configuration. Capture read
+dependencies, including absent paths and worker reads, and observe them separately
+from planning. Subscription fixtures prove edits/replacement/removal without DB
+writes, retaining coalescing. Adoption receipts describe the written projection.
 
-Release's entry-point lesson: resolver tests prove no installation. Exporting
-declarations as CLI flags changes authority.
-Focused preparation, file migration and retention fixtures are source evidence;
-complete acceptance and configured installation remain unproved. Publication is review
-only. Automatic limit recovery stays PR2:
+Release's entry-point lesson: source fixtures prove no installation. Exporting
+declarations as CLI flags changes authority. Full acceptance and configured behavior
+remain unproved. Publication is review only. Automatic limit recovery stays PR2:
 routing and retry must agree, and failed preparation cannot reattribute an old
 thread. November 2's weekly rejection demonstrated that split, not recovery.
 

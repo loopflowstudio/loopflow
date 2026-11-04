@@ -596,6 +596,14 @@ fn config_layers_with(
     wave: Option<&str>,
     personal_values: &PersonalSettings,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
+    let wave = match (repo_root, wave) {
+        (Some(repo), Some(wave)) => Some(
+            files::wave_name(repo, wave)
+                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
+        ),
+        (_, wave) => wave.map(str::to_owned),
+    };
+    let wave = wave.as_deref();
     let mut layers = Vec::new();
     if let Some(repo_root) = repo_root {
         let repo_path = repo_root.join(".lf/config.yaml");
@@ -686,6 +694,14 @@ fn personal_file_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
+    let wave = match (repo_root, wave) {
+        (Some(repo), Some(wave)) => Some(
+            files::wave_name(repo, wave)
+                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
+        ),
+        (_, wave) => wave.map(str::to_owned),
+    };
+    let wave = wave.as_deref();
     if let Some(layers) = remote::layers(repo_root, wave)
         .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
     {
@@ -757,25 +773,6 @@ pub fn load_global_config() -> Result<Option<Config>, LoadError> {
 /// Repository lookup belongs to the selected Machine, never repository config.
 pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
     Ok(load_global_config()?.and_then(|config| config.repo_root))
-}
-
-/// Read a Machine-local configuration mapping; absent or empty is an empty mapping.
-pub(crate) fn read_global_config_at(path: &Path) -> anyhow::Result<serde_yaml_ng::Value> {
-    let text = files::read_text(path)?;
-    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text)? {
-        serde_yaml_ng::Value::Null => Ok(serde_yaml_ng::Value::Mapping(Default::default())),
-        value if value.is_mapping() => Ok(value),
-        _ => anyhow::bail!("{} must contain a configuration mapping", path.display()),
-    }
-}
-
-/// Change `home`'s config.yaml under its lock, persisting it only when `change`
-/// succeeds, without exposing partial YAML.
-pub(crate) fn update_global_config_at<T>(
-    home: &Path,
-    change: impl FnOnce(&mut serde_yaml_ng::Value) -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
-    files::update(&home.join("config.yaml"), change)
 }
 
 fn global_config_path() -> PathBuf {

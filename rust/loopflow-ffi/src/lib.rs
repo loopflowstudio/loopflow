@@ -260,7 +260,8 @@ pub unsafe extern "C" fn lf_string_free(string: *mut c_char) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{lf_frame_free, lf_pull, lf_read, lf_string_free, lf_subscribe, lf_unsubscribe};
+    use std::ffi::{c_void, CStr, CString};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -287,6 +288,7 @@ mod tests {
 
     #[test]
     fn a_failed_read_is_an_error_not_a_result() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let read = CString::new(r#"{"read":"task_file","issue":"NONE-1","path":"a"}"#).unwrap();
@@ -298,6 +300,7 @@ mod tests {
 
     #[test]
     fn a_wakeup_is_followed_by_a_frame_to_pull() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let (sender, wakes) = mpsc::channel::<()>();
@@ -323,5 +326,288 @@ mod tests {
         unsafe { lf_unsubscribe(subscription) };
         // SAFETY: no wakeup follows lf_unsubscribe.
         drop(unsafe { Box::from_raw(context) });
+    }
+}
+
+#[cfg(test)]
+mod configuration_tests {
+    use super::{lf_config, lf_string_free};
+    use loopflow::config::api::Request;
+    use loopflow::config::files::Destination;
+    use loopflow_test_support::TestRepo;
+    use serde_json::{json, Value};
+    use std::ffi::{CStr, CString};
+    use std::path::Path;
+
+    fn request(request: Request) -> Result<Value, String> {
+        let request = CString::new(serde_json::to_string(&request).unwrap()).unwrap();
+        let mut error = std::ptr::null_mut();
+        // SAFETY: live NUL-terminated request and writable error; both returned strings are freed.
+        unsafe {
+            let result = lf_config(request.as_ptr(), &mut error);
+            if !error.is_null() {
+                let message = CStr::from_ptr(error).to_string_lossy().into_owned();
+                lf_string_free(error);
+                return Err(message);
+            }
+            assert!(!result.is_null());
+            let value = serde_json::from_slice(CStr::from_ptr(result).to_bytes()).unwrap();
+            lf_string_free(result);
+            Ok(value)
+        }
+    }
+
+    fn edit(
+        destination: &Destination,
+        key: &str,
+        value: Option<&str>,
+        unset: bool,
+    ) -> Result<Value, String> {
+        request(Request::Declaration {
+            destination: destination.clone(),
+            key: key.into(),
+            value: value.map(str::to_owned),
+            unset,
+        })
+    }
+
+    fn check(
+        destination: &Destination,
+        repo: &Path,
+        wave: Option<&str>,
+        key: &str,
+        expected: &str,
+    ) {
+        let explained = request(Request::Explain {
+            destination: destination.clone(),
+            key: key.into(),
+        })
+        .unwrap();
+        let config = loopflow::config::load_wave_config(Some(repo), wave)
+            .unwrap()
+            .unwrap();
+        let skill = if key.starts_with("graphs.") {
+            let graph = loopflow::graph::load_authored_graph("release", repo).unwrap();
+            let steps = loopflow::graph::compile_graph(&graph, repo).unwrap();
+            let loopflow::graph::ConcreteStep::Skill(step) = &steps[0] else {
+                panic!("expected skill")
+            };
+            step.skill.clone()
+        } else {
+            loopflow::graph::load_skill("probe", repo).unwrap()
+        };
+        let prepared = loopflow::prompt::process::prepare_process_prompt(
+            &config,
+            loopflow::prompt::process::ProcessPromptInput {
+                repo_root: repo.to_owned(),
+                wave: wave.map(str::to_owned),
+                resolved_skill: Some(skill),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(prepared.config.agent(), expected);
+        assert_eq!(
+            explained["inspections"][0]["settings"]["agent"]["value"],
+            expected
+        );
+    }
+
+    #[test]
+    fn destinations_bind_ffi_save_explanation_and_launch_across_worktrees_and_wave_renames() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", home.path());
+        let repo = TestRepo::new();
+        repo.create_file(".lf/skills/probe.md", "Probe settings.\n");
+        repo.create_file(
+            ".lf/graphs/release.yaml",
+            "- step: {name: probe, id: work}\n",
+        );
+        let id = "8ae21a68-8940-4553-a3ab-135133925e35";
+        repo.create_file(".lf/wave/old/config.yaml", &format!("id: {id}\n"));
+        repo.stage_all();
+        repo.commit("Authored fixture");
+        let child = home.path().join("child");
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["worktree", "add", "-b", "child"])
+            .arg(&child)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let global = Destination::PersonalGlobal {};
+        let private = Destination::PersonalRepository {
+            repository: child.clone(),
+        };
+        let shared = Destination::SharedRepository {
+            repository: child.clone(),
+        };
+        let wave = Destination::PersonalWave {
+            repository: child.clone(),
+            wave: "old".into(),
+        };
+        let other = Destination::PersonalWave {
+            repository: child.clone(),
+            wave: "different".into(),
+        };
+        std::fs::create_dir_all(child.join(".lf/wave/different")).unwrap();
+        std::fs::write(
+            child.join(".lf/wave/different/config.yaml"),
+            "id: 9ae21a68-8940-4553-a3ab-135133925e35\n",
+        )
+        .unwrap();
+        edit(&global, "default_agent", Some("codex:global"), false).unwrap();
+        let global_before = std::fs::read(home.path().join("config.yaml")).unwrap();
+        edit(&shared, "agent", Some("claude:shared"), false).unwrap();
+        let saved = edit(&private, "skills.probe.agent", Some("codex:private"), false).unwrap();
+        assert_eq!(
+            saved["path"],
+            json!(repo
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join("lf.config.local.yaml"))
+        );
+        assert!(!child.join("lf.config.local.yaml").exists());
+        check(
+            &private,
+            &child,
+            None,
+            "skills.probe.agent",
+            "codex:private",
+        );
+        check(
+            &private,
+            repo.path(),
+            None,
+            "skills.probe.agent",
+            "codex:private",
+        );
+        edit(&other, "skills.probe.agent", Some("claude:other"), false).unwrap();
+        edit(&wave, "skills.probe.agent", Some("claude:wave"), false).unwrap();
+        check(
+            &wave,
+            &child,
+            Some("old"),
+            "skills.probe.agent",
+            "claude:wave",
+        );
+        let private_before = std::fs::read(repo.path().join("lf.config.local.yaml")).unwrap();
+        assert!(edit(&private, "user.name", Some("Wrong scope"), false)
+            .unwrap_err()
+            .contains("does not apply"));
+        assert!(edit(&shared, "user.name", Some("Wrong owner"), false).is_err());
+        assert_eq!(
+            std::fs::read(repo.path().join("lf.config.local.yaml")).unwrap(),
+            private_before
+        );
+        std::fs::rename(child.join(".lf/wave/old"), child.join(".lf/wave/new")).unwrap();
+        std::fs::create_dir_all(child.join(".lf/wave/old")).unwrap();
+        std::fs::write(
+            child.join(".lf/wave/old/config.yaml"),
+            "id: 7ae21a68-8940-4553-a3ab-135133925e35\n",
+        )
+        .unwrap();
+        let renamed = Destination::PersonalWave {
+            repository: child.clone(),
+            wave: id.into(),
+        };
+        assert_eq!(
+            edit(&renamed, "skills.probe.agent", None, false).unwrap()["value"],
+            "claude:wave"
+        );
+        check(
+            &renamed,
+            &child,
+            Some("new"),
+            "skills.probe.agent",
+            "claude:wave",
+        );
+        check(
+            &wave,
+            &child,
+            Some("old"),
+            "skills.probe.agent",
+            "codex:private",
+        );
+        edit(&renamed, "skills.probe.agent", None, true).unwrap();
+        check(
+            &renamed,
+            &child,
+            Some("new"),
+            "skills.probe.agent",
+            "codex:private",
+        );
+        check(
+            &other,
+            &child,
+            Some("different"),
+            "skills.probe.agent",
+            "claude:other",
+        );
+        let shared_wave = Destination::SharedWave {
+            repository: child.clone(),
+            wave: id.into(),
+        };
+        let saved = edit(&shared_wave, "chrome", Some("false"), false).unwrap();
+        assert_eq!(
+            saved["path"],
+            json!(child
+                .canonicalize()
+                .unwrap()
+                .join(".lf/wave/new/config.yaml"))
+        );
+        edit(
+            &private,
+            "graphs.release.steps.work.agent",
+            Some("claude:occurrence"),
+            false,
+        )
+        .unwrap();
+        check(
+            &private,
+            &child,
+            None,
+            "graphs.release.steps.work.agent",
+            "claude:occurrence",
+        );
+        edit(&private, "graphs.release.steps.work.agent", None, true).unwrap();
+        edit(&private, "skills.probe.agent", None, true).unwrap();
+        check(
+            &private,
+            &child,
+            None,
+            "skills.probe.agent",
+            "claude:shared",
+        );
+        edit(&shared, "agent", None, true).unwrap();
+        check(
+            &private,
+            &child,
+            None,
+            "skills.probe.default_agent",
+            "codex:global",
+        );
+        assert_eq!(
+            std::fs::read(home.path().join("config.yaml")).unwrap(),
+            global_before
+        );
+        assert!(!home.path().join("loopflow.db").exists());
+        let clone = TestRepo::new();
+        assert_eq!(
+            loopflow::config::load_config(Some(clone.path()))
+                .unwrap()
+                .unwrap()
+                .agent(),
+            "codex:global"
+        );
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
     }
 }

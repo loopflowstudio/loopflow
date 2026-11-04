@@ -35,17 +35,17 @@ fn code(max: u32) -> OnDemand {
 
 #[test]
 fn file_edits_change_admission_without_rewriting_live_rentals() {
+    let _env = loopflow_test_support::env_lock().lock().unwrap();
     let (home, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
     store.add_ondemand(&code(1)).unwrap();
     let admitted = store.admit_rental("code", None, None, false).unwrap();
-    let path = home.path().join("config.yaml");
-    crate::config::api::run(crate::config::api::Request::File {
-        path,
+    crate::config::api::run(crate::config::api::Request::Declaration {
+        destination: crate::config::files::Destination::PersonalGlobal {},
         key: "ondemands.code.max_machines".into(),
         value: Some("0".into()),
         unset: false,
-        scope: crate::config::settings::SettingScope::Global,
-        shared: false,
     })
     .unwrap();
     assert_eq!(store.ondemand("code").unwrap().unwrap().max_machines, 0);

@@ -36,16 +36,12 @@ future clones do not inherit automatically. This intentionally changes scope and
 removes the earlier migration contradiction. Implementation can resume after the
 docs-first checkpoint, keeping Auto-Ship stopped and limit recovery separate.
 
-## Duplicate implement run stopped (2026-11-02 14:25)
+## Duplicate run evidence — November 2
 
-A second `code` Graph (process 768383a6, `lf graph code`) was launched in this
-worktree by an exploratory shell command from the primary implement agent
-(`lf help graph; lf graph code | head -40`). Its implement step found two
-implement agents on one checkout, made no code changes, and stopped its own
-Graph (PID 83352) so it would not run compress/sync/pr-publish against the
-primary run's live edits. The primary run (Graph f6f522e2, `lf task run
-LOO-714`) owns this step. `lf help graph <name>` explains a graph without
-launching it; `lf graph <name>` runs it.
+A second Graph accidentally launched by `lf graph code` was stopped without
+edits. The incident and process IDs remain at
+`a7a64269c6:scratch/questions.md`. `lf help graph <name>` inspects a definition;
+`lf graph <name>` executes it. Preserve the current Graph's ownership.
 
 ## Resume fallback (November 3)
 
@@ -67,3 +63,9 @@ Configuration observation: reuse the watch reader's one-second tick to compare
 the files actually read, including missing paths. This avoids platform-specific
 file event loss and inode replacement races; expensive Work reads retain their
 existing coalescing and rest policy. Bounded Task workers inherit the observation.
+
+Destination edit assumption (November 3): preserve Appearance's configured-file
+transaction as a fixed `theme` operation through the common writer. The ordinary
+editor accepts only typed destinations; no file/source/scope assertions remain.
+The removed `config file` command was introduced on this branch and has no
+documented external compatibility obligation.

@@ -88,6 +88,14 @@ applicability/lifecycle reason, not an adapter that advertises an omission.
 | Actual saved Task layout | Persisted live workspace state |
 | Remote delivery origin/version/last-applied evidence | Operational metadata, never a preference override |
 
+Ordinary edits carry one typed destination: personal global, personal/shared
+repository or personal/shared Wave, with the checkout and Wave selector where
+needed. The file owner derives the path, source, scope and key prefix together.
+CLI and Desktop share it for read, write and unset; explanation uses the same
+selection and work target. Clients display the resolved locator but cannot assert
+an independent file path or scope. Appearance retains its configured theme-file
+transaction through the common writer; recovery imports retain explicit file access.
+
 File edits preserve unrelated keys/comments, validate before replacement and
 serialize compare-and-write. The same invalidation path covers CLI, Desktop and
 external file edits. Resolve private files through Git metadata, not a database

@@ -9,6 +9,8 @@ use anyhow::{ensure, Context, Result};
 use serde_yaml_ng::Value;
 use yaml_edit::{Mapping, YamlFile};
 
+use super::{settings::SettingScope, ConfigSource};
+
 pub const PRIVATE_FILE: &str = "lf.config.local.yaml";
 
 pub fn private_path(repo: &Path) -> Result<PathBuf> {
@@ -28,41 +30,171 @@ pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<String> {
         .with_context(|| format!("Wave {name} needs its authored id before private settings can follow it through renames"))
 }
 
-pub fn destination(
-    repo: &Path,
-    wave: Option<&str>,
-    global: bool,
-    shared: bool,
-) -> Result<(PathBuf, Vec<String>)> {
-    ensure!(
-        !(global && (wave.is_some() || shared)),
-        "--global selects personal global settings"
-    );
-    if global {
-        return Ok((crate::store::lf_home_dir().join("config.yaml"), vec![]));
-    }
-    if shared {
-        return Ok((
-            match wave {
-                Some(wave) => {
-                    ensure!(
-                        !wave.split('/').any(|part| part == "..") && !Path::new(wave).is_absolute(),
-                        "invalid Wave name"
-                    );
-                    repo.join(".lf/wave").join(wave).join("config.yaml")
-                }
-                None => repo.join(".lf/config.yaml"),
+/// A user edit selects an owner, never a file plus an independently asserted scope.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum Destination {
+    PersonalGlobal {},
+    PersonalRepository { repository: PathBuf },
+    SharedRepository { repository: PathBuf },
+    PersonalWave { repository: PathBuf, wave: String },
+    SharedWave { repository: PathBuf, wave: String },
+}
+
+#[derive(Debug)]
+pub(crate) struct ResolvedDestination {
+    pub path: PathBuf,
+    pub prefix: Vec<String>,
+    pub source: super::ConfigSource,
+    pub scope: super::settings::SettingScope,
+    pub repository: Option<PathBuf>,
+    pub wave: Option<String>,
+}
+
+impl Destination {
+    pub fn from_cli(repo: &Path, wave: Option<&str>, global: bool, shared: bool) -> Result<Self> {
+        ensure!(
+            !(global && (wave.is_some() || shared)),
+            "--global selects personal global settings"
+        );
+        let repository = repo.to_owned();
+        Ok(match (global, shared, wave) {
+            (true, _, _) => Self::PersonalGlobal {},
+            (_, false, None) => Self::PersonalRepository { repository },
+            (_, true, None) => Self::SharedRepository { repository },
+            (_, false, Some(wave)) => Self::PersonalWave {
+                repository,
+                wave: wave.into(),
             },
-            vec![],
-        ));
+            (_, true, Some(wave)) => Self::SharedWave {
+                repository,
+                wave: wave.into(),
+            },
+        })
     }
-    let path = private_path(repo)?;
-    Ok((
-        path,
-        wave.map(|name| wave_key(repo, name).map(|id| vec!["waves".into(), id]))
-            .transpose()?
-            .unwrap_or_default(),
-    ))
+
+    pub(crate) fn resolve(&self) -> Result<ResolvedDestination> {
+        let (repository, wave, source) = match self {
+            Self::PersonalGlobal {} => {
+                return Ok(ResolvedDestination {
+                    path: super::global_config_path(),
+                    prefix: vec![],
+                    source: ConfigSource::Personal,
+                    scope: SettingScope::Global,
+                    repository: None,
+                    wave: None,
+                })
+            }
+            Self::PersonalRepository { repository } => (repository, None, ConfigSource::Personal),
+            Self::SharedRepository { repository } => (repository, None, ConfigSource::Repository),
+            Self::PersonalWave { repository, wave } => {
+                (repository, Some(wave), ConfigSource::Personal)
+            }
+            Self::SharedWave { repository, wave } => {
+                (repository, Some(wave), ConfigSource::Repository)
+            }
+        };
+        ensure!(!repository.as_os_str().is_empty(), "select a repository");
+        let repository =
+            crate::git::worktree_root(repository).unwrap_or_else(|_| repository.clone());
+        let wave = wave.map(|wave| wave_name(&repository, wave)).transpose()?;
+        if source == ConfigSource::Repository {
+            if let Some(wave) = wave
+                .as_deref()
+                .filter(|wave| crate::id::WaveId::parse(wave).is_ok())
+            {
+                anyhow::bail!(
+                    "Wave {wave} has no authored shared destination in {}",
+                    repository.display()
+                );
+            }
+        }
+        let scope = if wave.is_some() {
+            SettingScope::Wave
+        } else {
+            SettingScope::Repository
+        };
+        let (path, prefix) = if source == ConfigSource::Personal {
+            (
+                private_path(&repository)?,
+                wave.as_deref()
+                    .map(|wave| wave_key(&repository, wave).map(|id| vec!["waves".into(), id]))
+                    .transpose()?
+                    .unwrap_or_default(),
+            )
+        } else {
+            (
+                match &wave {
+                    Some(wave) => crate::work::wave::config::config_path(&repository, wave),
+                    None => repository.join(".lf/config.yaml"),
+                },
+                vec![],
+            )
+        };
+        Ok(ResolvedDestination {
+            path,
+            prefix,
+            source,
+            scope,
+            repository: Some(repository),
+            wave,
+        })
+    }
+}
+
+// Resolve UUID selectors from authored files, without requiring a Work database.
+pub(crate) fn wave_name(repo: &Path, selector: &str) -> Result<String> {
+    ensure!(
+        !selector.trim().is_empty()
+            && !Path::new(selector).is_absolute()
+            && !selector
+                .split('/')
+                .any(|part| part == ".." || part.is_empty()),
+        "invalid Wave name"
+    );
+    let Ok(id) = crate::id::WaveId::parse(selector) else {
+        return Ok(selector.into());
+    };
+    let root = repo.join(".lf/wave");
+    let mut names = Vec::new();
+    if root.exists() {
+        for entry in ignore::WalkBuilder::new(&root)
+            .hidden(false)
+            .ignore(false)
+            .git_ignore(false)
+            .git_exclude(false)
+            .git_global(false)
+            .build()
+        {
+            let entry = entry?;
+            if entry.file_name() != "config.yaml"
+                || !entry.file_type().is_some_and(|kind| kind.is_file())
+            {
+                continue;
+            }
+            let name = entry
+                .path()
+                .parent()
+                .context("Wave file has a parent")?
+                .strip_prefix(&root)?
+                .to_string_lossy()
+                .into_owned();
+            if crate::work::wave::config::try_read_wave_config(repo, &name)?
+                .and_then(|config| config.id)
+                .as_ref()
+                == Some(&id)
+            {
+                names.push(name);
+            }
+        }
+    }
+    ensure!(
+        names.len() <= 1,
+        "Wave {id} has multiple authored destinations"
+    );
+    // An orphaned private UUID remains directly addressable for recovery/unset.
+    Ok(names.pop().unwrap_or_else(|| selector.into()))
 }
 
 fn git(repo: &Path, args: &[&str]) -> Result<std::process::Output> {
@@ -140,6 +272,19 @@ pub(crate) fn read_text(path: &Path) -> Result<String> {
     }
 }
 
+/// Read an authored configuration mapping; absent or empty files are empty mappings.
+pub(crate) fn read(path: &Path) -> Result<Value> {
+    parse_document(&read_text(path)?, path)
+}
+
+fn parse_document(text: &str, path: &Path) -> Result<Value> {
+    match serde_yaml_ng::from_str::<Value>(text)? {
+        Value::Null => Ok(Value::Mapping(Default::default())),
+        value if value.is_mapping() => Ok(value),
+        _ => anyhow::bail!("{} must contain a configuration mapping", path.display()),
+    }
+}
+
 pub(crate) fn atomic_write(path: &Path, text: &str) -> Result<()> {
     let parent = path.parent().context("configuration has a parent")?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
@@ -189,21 +334,7 @@ pub fn update<T>(path: &Path, change: impl FnOnce(&mut Value) -> Result<T>) -> R
     }
     let _lock = lock(path)?;
     let original = read_text(path)?;
-    let before: Value = if original.trim().is_empty() {
-        Value::Mapping(Default::default())
-    } else {
-        serde_yaml_ng::from_str(&original)?
-    };
-    let before = if before.is_null() {
-        Value::Mapping(Default::default())
-    } else {
-        before
-    };
-    ensure!(
-        before.is_mapping(),
-        "{} must contain a mapping",
-        path.display()
-    );
+    let before = parse_document(&original, path)?;
     let mut after = before.clone();
     let result = change(&mut after)?;
     if after == before {
@@ -284,6 +415,14 @@ pub fn remove(root: &mut Value, path: &[&str]) -> bool {
 /// Set or remove an authored key; report whether it was set or found for removal.
 pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<bool> {
     update(path, |document| {
+        if parts.len() >= 2 && parts[parts.len() - 2] == "machine" {
+            if let Some(placement) = parts[..parts.len() - 1]
+                .iter()
+                .try_fold(&mut *document, |value, key| value.get_mut(*key))
+            {
+                super::placement::expand_shorthand(placement)?;
+            }
+        }
         let changed = match value {
             Some(value) => {
                 if parts.len() >= 2 && parts[parts.len() - 2] == "machine" {
@@ -321,40 +460,6 @@ pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<
     })
 }
 
-pub fn set(
-    repo: &Path,
-    wave: Option<&str>,
-    global: bool,
-    shared: bool,
-    key: &str,
-    value: Option<&str>,
-) -> Result<PathBuf> {
-    let scope = if global {
-        super::settings::SettingScope::Global
-    } else if wave.is_some() {
-        super::settings::SettingScope::Wave
-    } else {
-        super::settings::SettingScope::Repository
-    };
-    super::settings::validate_scope(
-        key,
-        if shared {
-            super::ConfigSource::Repository
-        } else {
-            super::ConfigSource::Personal
-        },
-        scope,
-    )?;
-    let value = value
-        .map(|text| super::settings::parse_value(key, text))
-        .transpose()?;
-    let (file, mut prefix) = destination(repo, wave, global, shared)?;
-    prefix.extend(key.split('.').map(str::to_owned));
-    let path: Vec<_> = prefix.iter().map(String::as_str).collect();
-    edit(&file, &path, value)?;
-    Ok(file)
-}
-
 /// Explicitly adopt authored recovery declarations into the addressed clone or global file.
 pub fn import(
     repo: &Path,
@@ -364,7 +469,7 @@ pub fn import(
     pointer: &str,
     replace: bool,
 ) -> Result<PathBuf> {
-    let document = super::read_global_config_at(source)?;
+    let document = read(source)?;
     let json = serde_json::to_value(document)?;
     let incoming: Value = serde_json::from_value(
         json.pointer(pointer)
@@ -375,22 +480,16 @@ pub fn import(
     let incoming = incoming
         .as_mapping()
         .context("import selects a settings mapping")?;
-    let scope = if global {
-        super::settings::SettingScope::Global
-    } else if wave.is_some() {
-        super::settings::SettingScope::Wave
-    } else {
-        super::settings::SettingScope::Repository
-    };
+    let destination = Destination::from_cli(repo, wave, global, false)?.resolve()?;
     for (key, value) in incoming {
         let key = key.as_str().context("setting key must be text")?;
         if key == "skills" || key == "graphs" {
             continue;
         }
-        super::settings::validate_scope(key, super::ConfigSource::Personal, scope)?;
+        super::settings::validate_scope(key, destination.source, destination.scope)?;
         super::settings::validate_value(&[key], value)?;
     }
-    let (path, prefix) = destination(repo, wave, global, false)?;
+    let (path, prefix) = (destination.path, destination.prefix);
     update(&path, |document| {
         for (key, value) in incoming {
             let key = key.as_str().context("setting key must be text")?;
@@ -418,7 +517,7 @@ pub(crate) fn copy_wave(
     if source == target || !source.exists() {
         return Ok(None);
     }
-    let value = super::read_global_config_at(&source)?
+    let value = read(&source)?
         .get("waves")
         .and_then(|waves| waves.get(id.as_str()))
         .cloned();
@@ -460,7 +559,20 @@ pub(crate) fn finish_wave_move(
 
 #[cfg(test)]
 mod tests {
-    use super::{private_path, set, update};
+    use super::{private_path, update};
+
+    fn set(
+        repo: &std::path::Path,
+        wave: Option<&str>,
+        global: bool,
+        shared: bool,
+        key: &str,
+        value: Option<&str>,
+    ) -> anyhow::Result<std::path::PathBuf> {
+        let destination = super::Destination::from_cli(repo, wave, global, shared)?;
+        Ok(crate::config::api::declaration(&destination, key, value, value.is_none())?.path)
+    }
+
     #[test]
     fn recovery_import_keeps_order_and_requires_explicit_replacement() {
         let dir = tempfile::tempdir().unwrap();
@@ -471,7 +583,7 @@ mod tests {
         super::import(&repo, None, false, &recovery, "/repo/old", false).unwrap();
         let path = private_path(&repo).unwrap();
         assert_eq!(
-            crate::config::read_global_config_at(&path).unwrap()["account"]["codex"][0],
+            crate::config::files::read(&path).unwrap()["account"]["codex"][0],
             "one"
         );
         set(
@@ -486,9 +598,48 @@ mod tests {
         assert!(super::import(&repo, None, false, &recovery, "/repo/old", false).is_err());
         super::import(&repo, None, false, &recovery, "/repo/old", true).unwrap();
         assert_eq!(
-            crate::config::read_global_config_at(&path).unwrap()["account"]["codex"][0],
+            crate::config::files::read(&path).unwrap()["account"]["codex"][0],
             "one"
         );
+    }
+
+    #[test]
+    fn editing_shorthand_placement_preserves_the_other_destination() {
+        let repo = tempfile::tempdir().unwrap();
+        let path = set(repo.path(), None, false, false, "machine", Some("worker")).unwrap();
+        set(
+            repo.path(),
+            None,
+            false,
+            false,
+            "machine.session",
+            Some("laptop"),
+        )
+        .unwrap();
+        let read = || {
+            serde_yaml_ng::from_value::<crate::config::placement::Placement>(
+                super::read(&path).unwrap()["machine"].clone(),
+            )
+            .unwrap()
+        };
+        assert_eq!(read().tasks.as_deref(), Some("worker"));
+        assert_eq!(read().session.as_deref(), Some("laptop"));
+        set(repo.path(), None, false, false, "machine", Some("worker")).unwrap();
+        set(repo.path(), None, false, false, "machine.tasks", None).unwrap();
+        assert!(read().tasks.is_none());
+        assert_eq!(read().session.as_deref(), Some("worker"));
+        set(
+            repo.path(),
+            None,
+            false,
+            false,
+            "machine.capacity",
+            Some("pool"),
+        )
+        .unwrap();
+        assert!(read().tasks.is_none());
+        assert_eq!(read().capacity.as_deref(), Some("pool"));
+        assert_eq!(read().session.as_deref(), Some("worker"));
     }
 
     #[test]
@@ -665,24 +816,20 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            crate::config::read_global_config_at(&target_path).unwrap()["waves"][id.as_str()]
-                ["agent"],
+            crate::config::files::read(&target_path).unwrap()["waves"][id.as_str()]["agent"],
             "codex"
         );
         super::edit(&source_path, &parts, Some("claude".into())).unwrap();
         super::finish_wave_move(source.path(), &id, &copied).unwrap();
         assert_eq!(
-            crate::config::read_global_config_at(&source_path).unwrap()["waves"][id.as_str()]
-                ["agent"],
+            crate::config::files::read(&source_path).unwrap()["waves"][id.as_str()]["agent"],
             "claude"
         );
         super::edit(&source_path, &parts, Some("codex".into())).unwrap();
         super::finish_wave_move(source.path(), &id, &copied).unwrap();
-        assert!(
-            crate::config::read_global_config_at(&source_path).unwrap()["waves"]
-                .get(id.as_str())
-                .is_none()
-        );
+        assert!(crate::config::files::read(&source_path).unwrap()["waves"]
+            .get(id.as_str())
+            .is_none());
     }
 
     #[test]
@@ -709,7 +856,7 @@ mod tests {
                 });
             }
         });
-        let value = crate::config::read_global_config_at(&path).unwrap();
+        let value = crate::config::files::read(&path).unwrap();
         assert_eq!(value["yolo"], false);
         assert_eq!(value["chrome"], false);
         assert_eq!(value["agent"], "claude");
@@ -732,23 +879,23 @@ mod tests {
         )
         .unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
-        let request = crate::config::api::Request::File {
-            path: path.clone(),
+        let request = crate::config::api::Request::Declaration {
+            destination: super::Destination::PersonalRepository {
+                repository: repo.path().to_owned(),
+            },
             key: "planning.provider".into(),
             value: Some("linear".into()),
             unset: false,
-            scope: crate::config::settings::SettingScope::Repository,
-            shared: false,
         };
         assert!(crate::config::api::run(request).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-        crate::config::api::run(crate::config::api::Request::File {
-            path: path.clone(),
+        crate::config::api::run(crate::config::api::Request::Declaration {
+            destination: super::Destination::PersonalRepository {
+                repository: repo.path().to_owned(),
+            },
             key: "chrome".into(),
             value: Some("false".into()),
             unset: false,
-            scope: crate::config::settings::SettingScope::Repository,
-            shared: false,
         })
         .unwrap();
         assert!(

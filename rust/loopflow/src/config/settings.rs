@@ -9,9 +9,7 @@ use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, clap::ValueEnum,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingScope {
     Global,
@@ -589,12 +587,9 @@ pub fn resolve_layers(
             if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
                 map.entry(Value::String("graph".into())).or_insert(graph);
             }
-            if let Some(value) = map.get_mut("machine").filter(|value| value.is_string()) {
-                *value = serde_yaml_ng::to_value(
-                    serde_yaml_ng::from_value::<super::placement::Placement>(value.clone())
-                        .map_err(|error| invalid(error.to_string()))?,
-                )
-                .expect("placement serializes");
+            if let Some(value) = map.get_mut("machine") {
+                super::placement::expand_shorthand(value)
+                    .map_err(|error| invalid(error.to_string()))?;
             }
             if let Some(accounts) = map.get_mut("account").and_then(Value::as_mapping_mut) {
                 for value in accounts.values_mut() {

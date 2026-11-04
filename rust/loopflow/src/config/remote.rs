@@ -106,11 +106,11 @@ pub fn outgoing(repo: Option<&Path>, origin: &str) -> Result<Profile> {
         return Ok(profile);
     }
     let global_path = crate::store::lf_home_dir().join("config.yaml");
-    let global = project(&super::read_global_config_at(&global_path)?);
+    let global = project(&super::files::read(&global_path)?);
     let repository_path = repo.map(super::files::private_path).transpose()?;
     let repository_values = repository_path
         .as_deref()
-        .map(super::read_global_config_at)
+        .map(super::files::read)
         .transpose()?
         .map(|value| project(&value))
         .unwrap_or(Value::Mapping(Default::default()));
@@ -292,7 +292,7 @@ pub(crate) fn layers(
     };
     let home = crate::store::lf_home_dir();
     let global = home.join("config.yaml");
-    let mut local = super::read_global_config_at(&global)?;
+    let mut local = super::files::read(&global)?;
     let portable = project(&local);
     remove_projection(&mut local, &portable);
     let mut layers = vec![
@@ -320,7 +320,7 @@ pub(crate) fn layers(
             == profile.repository
     }) {
         let path = super::files::private_path(repo)?;
-        let mut local = super::read_global_config_at(&path)?;
+        let mut local = super::files::read(&path)?;
         let portable = project(&local);
         remove_projection(&mut local, &portable);
         let mut value = profile.repository_values.clone();
@@ -381,7 +381,7 @@ pub fn inspect(replace: bool, keep: bool) -> Result<serde_json::Value> {
     let mut records = read_receipts(&metadata)?;
     let mut output = Vec::new();
     for (path, record) in &mut records {
-        let mut current = project(&super::read_global_config_at(path)?);
+        let mut current = project(&super::files::read(path)?);
         if record.status == "conflict" && replace {
             current = super::files::update(path, |document| {
                 replace_projection(document, &record.incoming);
@@ -505,7 +505,7 @@ mod tests {
         let records = super::read_receipts(&super::receipts(dir.path())).unwrap();
         assert_eq!(records[&path].incoming, competing.global);
         assert_eq!(
-            project(&crate::config::read_global_config_at(&path).unwrap()),
+            project(&crate::config::files::read(&path).unwrap()),
             first.global
         );
     }
@@ -520,13 +520,13 @@ mod tests {
         retain(dir.path(), &path, &next, &next.global).unwrap();
         retain(dir.path(), &path, &first, &first.global).unwrap();
         assert_eq!(
-            project(&crate::config::read_global_config_at(&path).unwrap()),
+            project(&crate::config::files::read(&path).unwrap()),
             next.global
         );
         std::fs::write(&path, "theme: custom\nlogs: {linear_requests: true}\n").unwrap();
         let later = profile("agent: codex", 3);
         retain(dir.path(), &path, &later, &later.global).unwrap();
-        let saved = crate::config::read_global_config_at(&path).unwrap();
+        let saved = crate::config::files::read(&path).unwrap();
         assert!(saved.get("agent").is_none());
         assert_eq!(saved["theme"], "custom");
         assert_eq!(saved["logs"]["linear_requests"], true);

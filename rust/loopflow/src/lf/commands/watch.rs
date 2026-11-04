@@ -935,9 +935,21 @@ mod tests {
         };
         agent("claude");
 
-        crate::config::files::set(&checkout, None, true, false, "agent", Some("codex")).unwrap();
+        crate::config::api::declaration(
+            &crate::config::files::Destination::from_cli(&checkout, None, true, false).unwrap(),
+            "agent",
+            Some("codex"),
+            false,
+        )
+        .unwrap();
         agent("codex");
-        crate::config::files::set(&checkout, None, false, false, "agent", Some("pi")).unwrap();
+        crate::config::api::declaration(
+            &crate::config::files::Destination::from_cli(&checkout, None, false, false).unwrap(),
+            "agent",
+            Some("pi"),
+            false,
+        )
+        .unwrap();
         agent("pi");
         let private = crate::config::files::private_path(&checkout).unwrap();
         assert_eq!(

@@ -402,7 +402,7 @@ impl Read {
                 skill,
                 graph,
                 step,
-            } => pretty(&super::config::inspect(
+            } => pretty(&crate::config::api::inspect(
                 directory,
                 wave.as_deref(),
                 skill.as_deref(),

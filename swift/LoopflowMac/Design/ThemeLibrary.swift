@@ -116,8 +116,7 @@ enum ThemeConfig {
     }
 
     private static func request(_ url: URL, value: String?) -> [String: Any] {
-        ["action": "file", "path": url.path, "key": "theme", "value": value as Any? ?? NSNull(),
-         "unset": false, "scope": "global", "shared": false]
+        ["action": "theme", "path": url.path, "value": value as Any? ?? NSNull()]
     }
 
 }

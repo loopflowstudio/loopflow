@@ -303,11 +303,7 @@ fn edit_placement(
             .cloned()
             .unwrap_or(serde_yaml_ng::Value::Mapping(Default::default()));
         let previous = placement.clone();
-        if placement.is_string() {
-            placement = serde_yaml_ng::to_value(serde_yaml_ng::from_value::<
-                crate::config::placement::Placement,
-            >(placement)?)?;
-        }
+        crate::config::placement::expand_shorthand(&mut placement)?;
         edit(&mut placement);
         crate::config::settings::insert(document, &path, placement.clone());
         Ok(previous != placement)

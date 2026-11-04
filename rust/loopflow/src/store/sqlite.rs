@@ -1511,7 +1511,7 @@ impl SqliteStore {
             .map(|scope| {
                 let (path, prefix) = crate::config::placement::route_location(&conn, scope)
                     .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-                let mut document = crate::config::read_global_config_at(&path)
+                let mut document = crate::config::files::read(&path)
                     .map_err(|error| StoreError::InvalidData(error.to_string()))?;
                 crate::config::remote::apply_document(&path, &mut document)
                     .map_err(|error| StoreError::InvalidData(error.to_string()))?;
@@ -1546,7 +1546,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (path, prefix) = crate::config::placement::route_location(&conn, scope)
             .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-        let mut document = crate::config::read_global_config_at(&path)
+        let mut document = crate::config::files::read(&path)
             .map_err(|e| StoreError::InvalidData(e.to_string()))?;
         crate::config::remote::apply_document(&path, &mut document)
             .map_err(|e| StoreError::InvalidData(e.to_string()))?;
@@ -2715,7 +2715,7 @@ mod account_observation_tests {
         };
         assert_reads(&expected);
         let path = directory.path().join("config.yaml");
-        let mut declarations = crate::config::read_global_config_at(&path).unwrap();
+        let mut declarations = crate::config::files::read(&path).unwrap();
         declarations["accounts"]["claude"]["primary"]["plan"] = "edited".into();
         std::fs::write(&path, serde_yaml_ng::to_string(&declarations).unwrap()).unwrap();
         expected.plan = Some("edited".into());

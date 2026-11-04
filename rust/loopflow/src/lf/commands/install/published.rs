@@ -298,7 +298,7 @@ fn opens_store(store: &Path, catalog: &str) -> Result<bool> {
 /// The stream recorded in `home`'s config.yaml.
 fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
     let config = home.join("config.yaml");
-    let Some(name) = crate::config::read_global_config_at(&config)?
+    let Some(name) = crate::config::files::read(&config)?
         .get("stream")
         .and_then(|value| value.as_str().map(str::to_string))
     else {
@@ -313,7 +313,7 @@ fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
 }
 
 fn record_stream(home: &Path, stream: Stream) -> Result<()> {
-    crate::config::update_global_config_at(home, |config| {
+    crate::config::files::update(&home.join("config.yaml"), |config| {
         config["stream"] = stream.as_str().into();
         Ok(())
     })

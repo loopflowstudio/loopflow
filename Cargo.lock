@@ -1500,6 +1500,7 @@ name = "loopflow-ffi"
 version = "0.15.1"
 dependencies = [
  "loopflow",
+ "loopflow-test-support",
  "serde",
  "serde_json",
  "tempfile",

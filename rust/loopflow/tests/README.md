@@ -76,6 +76,13 @@ natural helper exit permits continuation, persistent helpers refuse it without
 signals or settlement, and both retain Task/history/steers. These stand-ins use
 candidate wire/schema; released-version, permanently broken transport and
 installed-provider recovery still need separate proof.
+Use published 0.15.1 for the released boundary: its owner speaks newline JSON
+and predates native-input tracking. Prove attachment and retention of an unsent
+draft before allowing its provider to be replaced; an absent input record does
+not establish that an older provider's editor is empty.
+Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
+a shallow checkout orders all slugs as drafts and can reject the released store
+before reaching the interaction under test.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

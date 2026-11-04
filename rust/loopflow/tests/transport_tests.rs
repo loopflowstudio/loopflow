@@ -3232,7 +3232,7 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
             [&session],
         )
         .unwrap();
-    let viewed = || -> bool {
+    let viewed = || -> Option<bool> {
         fixture
             .sql()
             .query_row("SELECT viewed FROM processes WHERE id=?1", [&owner], |r| {
@@ -3242,7 +3242,7 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     };
     let desktop = fixture.viewer(&owner, true);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !viewed() {
+    while viewed() != Some(true) {
         assert!(Instant::now() < deadline, "owner never recorded its viewer");
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -3250,7 +3250,7 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     desktop.socket.shutdown(std::net::Shutdown::Both).unwrap();
     drop(desktop);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while viewed() {
+    while viewed() != Some(false) {
         assert!(Instant::now() < deadline, "the viewer never left");
         std::thread::sleep(Duration::from_millis(20));
     }

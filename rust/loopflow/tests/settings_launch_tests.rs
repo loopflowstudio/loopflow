@@ -1144,6 +1144,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     assert!(!table.contains("context_budgets.memory_bytes"));
     assert!(!table.contains("\u{1b}[") && !table.contains("{\"kind\""));
     assert!(!table.contains("an applicable agent choice wins"));
+    assert!(!table.contains("default_agent"));
     let explanation = show(&["--explain"]);
     assert!(
         explanation.contains("selected") && explanation.contains("an applicable agent choice wins")
@@ -1151,10 +1152,15 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     assert!(
         explanation.contains(".lf/config.yaml") && explanation.contains("$LF_HOME/config.yaml")
     );
+    assert!(explanation.contains("\n  agent = claude\n"));
+    assert!(explanation.contains("\n      default_agent = codex"));
+    assert!(!explanation.contains("\n  default_agent"));
     let all = show(&["--all"]);
     assert!(all.contains("context_budgets.memory_bytes"));
+    assert!(!all.contains("default_agent") && !all.contains("settings hidden"));
     let json: serde_json::Value = serde_json::from_str(&show(&["--json"])).unwrap();
     assert_eq!(json[0]["settings"]["agent"]["value"], "claude");
+    assert_eq!(json[0]["settings"]["default_agent"]["value"], "codex");
     assert_eq!(json[0]["settings"]["chrome"]["value"], false);
     assert!(json[0]["settings"]["context_budgets.memory_bytes"].is_object());
     assert_eq!(
@@ -1164,4 +1170,37 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
             .len(),
         3
     );
+
+    repo.create_file(".lf/config.yaml", "{}\n");
+    let fallback = show(&["--explain"]);
+    assert!(fallback.contains("\n  agent = codex\n"));
+    assert!(fallback.contains("\n      default_agent = codex · Personal global\n"));
+    assert!(!fallback.contains("\n  default_agent"));
+
+    repo.create_file(
+        ".lf/graphs/config-table-flow.yaml",
+        "- config-table-proof\n- step: {name: config-table-proof, id: revision}\n",
+    );
+    let output = command(
+        repo.path(),
+        home.path(),
+        &[
+            "config",
+            "show",
+            "--graph",
+            "config-table-flow",
+            "--explain",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph = String::from_utf8(output.stdout).unwrap();
+    assert!(graph.contains("\nconfig-table-flow / config-table-proof\n"));
+    assert!(graph.contains("\nconfig-table-flow / revision · config-table-proof\n"));
+    assert!(!graph.contains("unnamed step"));
 }

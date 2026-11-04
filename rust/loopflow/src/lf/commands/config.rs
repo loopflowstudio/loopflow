@@ -149,10 +149,10 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
         let skill = item["skill"].as_str().unwrap_or("Configuration");
         let occurrence = &item["occurrence"];
         let title = match occurrence["graph"].as_str() {
-            Some(graph) => format!(
-                "{graph} / {} · {skill}",
-                occurrence["id"].as_str().unwrap_or("unnamed step")
-            ),
+            Some(graph) => match occurrence["id"].as_str() {
+                Some(id) => format!("{graph} / {id} · {skill}"),
+                None => format!("{graph} / {skill}"),
+            },
             None => skill.to_owned(),
         };
         out.push_str(&format!("\n{}{}{}\n\n", colors.bold, title, colors.reset));
@@ -161,6 +161,7 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
         };
         let visible: Vec<_> = settings
             .iter()
+            .filter(|(key, _)| key.as_str() != "default_agent")
             .filter(|(key, setting)| {
                 options.all
                     || key.as_str() == "agent"
@@ -195,7 +196,8 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
                 colors.cyan, colors.reset, colors.green, colors.reset
             ));
         }
-        let hidden = settings.len() - visible.len();
+        let hidden =
+            settings.len() - usize::from(settings.contains_key("default_agent")) - visible.len();
         if hidden > 0 {
             out.push_str(&format!(
                 "\n  {}{hidden} built-in settings hidden · --all to include them{}\n",

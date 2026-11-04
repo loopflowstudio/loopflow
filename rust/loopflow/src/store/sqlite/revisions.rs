@@ -94,6 +94,9 @@ mod tests {
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf ops people`.
         "github_people",
+        // Native opening locators/receipts do not change shared Work or layouts.
+        "host_workspaces",
+        "host_work_occurrences",
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",
         "machines",

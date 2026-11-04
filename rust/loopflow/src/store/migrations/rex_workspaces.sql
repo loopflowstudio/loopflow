@@ -6,7 +6,8 @@ CREATE TABLE wave_task_layouts (
     PRIMARY KEY (repository_id, wave_id)
 );
 
--- Only native occurrence identity and observations, never active split geometry.
+-- Locators survive native renames; pending writes prevent duplicate creation.
+-- These records establish neither host retention nor ownership of native layouts.
 CREATE TABLE host_workspaces (
     id TEXT PRIMARY KEY,
     repository_id TEXT NOT NULL,
@@ -15,16 +16,15 @@ CREATE TABLE host_workspaces (
     selection_json TEXT NOT NULL,
     copy_name TEXT,
     container_id TEXT,
-    observation TEXT NOT NULL,
+    creation_pending INTEGER NOT NULL CHECK (creation_pending IN (0,1)),
     updated_at INTEGER NOT NULL
 );
 CREATE TABLE host_work_occurrences (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL REFERENCES host_workspaces(id),
-    work_json TEXT NOT NULL,
+    task_id TEXT NOT NULL,
     destination_id TEXT,
-    observation TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
+    creation TEXT NOT NULL CHECK (creation IN ('pending', 'passive', 'tools_pending', 'complete'))
 );
 
 CREATE TRIGGER store_revision_wave_task_layouts_insert AFTER INSERT ON wave_task_layouts
@@ -34,22 +34,4 @@ CREATE TRIGGER store_revision_wave_task_layouts_update AFTER UPDATE ON wave_task
 BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;
 
 CREATE TRIGGER store_revision_wave_task_layouts_delete AFTER DELETE ON wave_task_layouts
-BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;
-
-CREATE TRIGGER store_revision_host_workspaces_insert AFTER INSERT ON host_workspaces
-BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;
-
-CREATE TRIGGER store_revision_host_workspaces_update AFTER UPDATE ON host_workspaces
-BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;
-
-CREATE TRIGGER store_revision_host_workspaces_delete AFTER DELETE ON host_workspaces
-BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;
-
-CREATE TRIGGER store_revision_host_work_occurrences_insert AFTER INSERT ON host_work_occurrences
-BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;
-
-CREATE TRIGGER store_revision_host_work_occurrences_update AFTER UPDATE ON host_work_occurrences
-BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;
-
-CREATE TRIGGER store_revision_host_work_occurrences_delete AFTER DELETE ON host_work_occurrences
 BEGIN UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning'; END;

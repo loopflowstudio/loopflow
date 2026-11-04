@@ -75,8 +75,9 @@ fn folder(path: &Path) -> String {
 /// A host CLI stand-in that records its argv and prints `reply`.
 fn host(bin: &Path, name: &str, reply: &str, status: i32) -> PathBuf {
     let log = bin.join(format!("{name}.log"));
+    let reply = reply.replace('\'', "'\"'\"'");
     let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncat <<'REPLY'\n{reply}\nREPLY\nexit {status}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nprintf '%s\\n' '{reply}'\nexit {status}\n",
         log.display()
     );
     let path = bin.join(name);
@@ -1037,6 +1038,141 @@ esac
         created.matches("Task & workflow").count(),
         1,
         "A Task without a conversation needs one workflow pane, beside its shell"
+    );
+    assert_eq!(sessions(home.path()), 0);
+}
+
+// The peer exposes inventory independently of replies, including writes whose reply is lost.
+fn rex_peer(bin: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let script = bin.join("rex");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+while [ "$1" != "whoami" ] && [ "$1" != "call" ]; do shift; done
+if [ "$1" = whoami ]; then
+  echo '{{"endpoint":"unix:///fixture/rex.sock","principal":{{"transport":"unix"}}}}'
+  exit
+fi
+method="$2"
+printf '%s\n' "$3" >> '{bin}/'"$method.requests"
+cat '{bin}/'"$method.reply"
+"#,
+            bin = bin.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for (method, reply) in [
+        ("session.list", serde_json::json!({"sessions":[]})),
+        ("session.view", serde_json::json!({"windows":[]})),
+        (
+            "session.create",
+            serde_json::json!({"session_id":"session:fixture"}),
+        ),
+        (
+            "session.new_window",
+            serde_json::json!({"window_id":"window:fixture"}),
+        ),
+    ] {
+        std::fs::write(bin.join(format!("{method}.reply")), reply.to_string()).unwrap();
+    }
+}
+
+#[test]
+fn rex_lost_recreation_reply_never_reuses_a_deleted_locator_as_retry_permission() {
+    // Both the container and the Task tab can disappear between explicit opens.
+    for method in ["session.create", "session.new_window"] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::with_lf_home(&[], home.path());
+        register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+        rex_peer(bin.path());
+        let args = [
+            "open",
+            "--task",
+            "INF-123",
+            "--host",
+            "rex",
+            "--no-focus",
+            "--json",
+        ];
+        json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+        if method == "session.new_window" {
+            std::fs::write(
+                bin.path().join("session.list.reply"),
+                r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}"#,
+            )
+            .unwrap();
+        }
+        // Inventory confirms the old destination is gone; its replacement succeeds
+        // natively but the server's reply cannot be read.
+        std::fs::write(bin.path().join(format!("{method}.reply")), "lost reply").unwrap();
+        let failed = lf(home.path(), repo.path(), Some(bin.path()), &args);
+        assert!(!failed.status.success());
+        let retry = lf(home.path(), repo.path(), Some(bin.path()), &args);
+        assert!(!retry.status.success());
+        let report: Value = serde_json::from_slice(&retry.stdout).unwrap();
+        assert!(report["receipts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("unknown"));
+        let requests =
+            std::fs::read_to_string(bin.path().join(format!("{method}.requests"))).unwrap();
+        assert_eq!(
+            requests.lines().count(),
+            2,
+            "{method}: a lost reply must not create a third destination"
+        );
+        assert_eq!(sessions(home.path()), 0);
+    }
+}
+
+#[test]
+fn rex_recovers_a_lost_creation_by_marker_then_reuses_its_renamed_native_id() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let args = [
+        "open",
+        "--task",
+        "INF-123",
+        "--host",
+        "rex",
+        "--copy",
+        "review",
+        "--no-focus",
+        "--json",
+    ];
+    std::fs::write(bin.path().join("session.new_window.reply"), "lost reply").unwrap();
+    assert!(!lf(home.path(), repo.path(), Some(bin.path()), &args)
+        .status
+        .success());
+    std::fs::write(
+        bin.path().join("session.list.reply"),
+        r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed session"}]}"#,
+    )
+    .unwrap();
+    let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
+    let request: Value = serde_json::from_str(created.trim()).unwrap();
+    for label in [request["window_label"].as_str().unwrap(), "My arrangement"] {
+        std::fs::write(
+            bin.path().join("session.view.reply"),
+            serde_json::json!({"windows":[{"window_id":"window:recovered","label":label}]})
+                .to_string(),
+        )
+        .unwrap();
+        let report = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+        assert_eq!(report["receipts"][0]["destination"], "window:recovered");
+    }
+    assert_eq!(
+        std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap(),
+        created
     );
     assert_eq!(sessions(home.path()), 0);
 }

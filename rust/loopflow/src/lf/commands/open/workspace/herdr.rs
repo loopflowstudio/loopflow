@@ -6,8 +6,7 @@ use serde_json::{json, Value};
 
 use super::super::{Opened, RouteError};
 use super::{
-    array, identity, layout, now, scope, HostOccurrence, HostWorkspace, Presentation, Resolved,
-    SqliteStore,
+    array, identity, layout, now, scope, HostWorkspace, Presentation, Resolved, SqliteStore,
 };
 
 // Herdr's bounded adapter uses its documented local socket protocol. Layouts
@@ -44,7 +43,7 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
         selection: selected,
         copy_name: None,
         container_id: None,
-        observation: "new".into(),
+        creation_pending: false,
         updated_at: now(),
     });
     let items = array(
@@ -53,7 +52,7 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
     )?;
     if let Some(container) = &workspace.container_id {
         if items.iter().any(|item| item["workspace_id"] == *container) {
-            anyhow::ensure!(workspace.observation == "retained", "Herdr layout creation is uncertain; inspect its retained workspace before retrying");
+            anyhow::ensure!(!workspace.creation_pending, "Herdr layout creation is uncertain; inspect its retained workspace before retrying");
             if focus {
                 herdr_call(
                     &socket,
@@ -63,10 +62,9 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
             }
             return Ok(Opened::opening(Some(container.clone())));
         }
-        workspace.observation = "closed".into();
     }
     anyhow::ensure!(
-        workspace.observation != "unknown",
+        !workspace.creation_pending || workspace.container_id.is_some(),
         "Herdr creation is uncertain; no duplicate workspace was attempted"
     );
     let (native, _) = layout(
@@ -79,7 +77,8 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
             ..Presentation::default()
         },
     )?;
-    workspace.observation = "unknown".into();
+    workspace.container_id = None;
+    workspace.creation_pending = true;
     store.save_host_workspace(&workspace)?;
     let created = herdr_call(
         &socket,
@@ -95,25 +94,15 @@ fn herdr(target: &Resolved, focus: bool) -> Result<Opened> {
         .context("Herdr create omitted tab identity")?;
     workspace.container_id = Some(container.clone());
     store.save_host_workspace(&workspace)?;
-    let applied = herdr_call(
+    herdr_call(
         &socket,
         "layout.apply",
         json!({"tab_id":tab,"root":herdr_layout(&native)?,"focus":false}),
     )?;
-    let tab = applied["layout"]["tab_id"]
-        .as_str()
-        .context("Herdr layout reply omitted its new tab identity")?;
-    workspace.observation = "retained".into();
+    // Herdr reopens the whole workspace; its replacement tab ID is not a locator.
+    workspace.creation_pending = false;
     workspace.updated_at = now();
     store.save_host_workspace(&workspace)?;
-    store.save_host_occurrence(&HostOccurrence {
-        id: identity(&format!("{id}\n{}", task.id)),
-        workspace_id: id,
-        work: content.work.clone(),
-        destination_id: Some(tab.into()),
-        observation: "retained".into(),
-        updated_at: now(),
-    })?;
     if focus {
         herdr_call(
             &socket,

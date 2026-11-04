@@ -8,6 +8,36 @@ The guide is [docs/workspaces.md](../docs/workspaces.md), the design is
 
 ## Disposable database demo — November 4, 2026
 
+### Real-data snapshot and subsequent design review
+
+A consistent SQLite backup now lives at
+`/private/tmp/loo498-real-demo-j8rn_nmv/lf/loopflow.db`. The temporary branch
+build uses the truthful first-parent migration order through the supported
+`LOOPFLOW_MIGRATION_ORDER` build input. A fresh target with the compiler cache
+disabled repaired missing dependency metadata; the build and snapshot Task
+read passed. This does not diagnose the original automatic catalog discovery.
+
+Opening LOO-498 created Rex session
+`session:01a1a7c1-f4fb-7ec1-bd1c-c7f87bcf9504`, window
+`window:01a1a7c1-f577-7e6f-9fa3-22f9a30a9d7d`. Reopening preserved the identical
+native layout and created zero additional shells. Task view contains the real
+brief; the shell prompt shows the real Task checkout. The initial conversation
+observer failed because its copied Home lacked the owner's socket. A symlink
+for this one owner socket in the private Home's transport directory connects
+the existing read-only observer to the live conversation. Only the exited demo
+observer block was replaced; the new block
+`block:01a1a7c4-3dec-7829-a19a-8d7c0465131a` displays live conversation output
+without claiming input. This manual fixture wiring is not configured-path proof.
+No new provider or Task Graph was launched. The command wrapper is
+`/private/tmp/loo498-real-demo-j8rn_nmv/lf-demo`.
+
+Rex accessibility showed the named real-data session in the sidebar. Jack
+interrupted the expansion click; no successful selection/after screenshot or
+native Split result was obtained. Jack then questioned LF storing Rex layouts
+and selected the one-way template boundary now recorded in `rex-workspace.md`
+and `docs/workspaces.md`. This design review takes precedence over further demo
+automation; the snapshot is evidence, not accepted daily-work usability.
+
 ### Dev stream compatibility clarification
 
 Jack Heart subsequently said synthetic Tasks are insufficient to evaluate the

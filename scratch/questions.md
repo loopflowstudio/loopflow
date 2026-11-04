@@ -1,4 +1,24 @@
-# LOO-498 — unresolved restoration and host evidence
+# LOO-498 — design simplification review
+
+**Build authorized, November 4:** Jack Heart approved implementation after
+clarifying: LF cleans up Desktop-owned shells only; it does not close Rex shells.
+Retained Rex terminals for Task Sessions prevent Task cleanup regardless of focus.
+Confirmed final removal releases the Rex hold subject to normal cleanup conditions;
+unknown host state is not release. Remove Rex away detection and native settlement
+from the implementation plan. Continue the existing feature Graph to demo, without
+Auto-Ship or merge approval.
+
+The smaller design is recorded in [rex-workspace.md](rex-workspace.md). Native
+movement/template copies replacing named-copy management remains an unaccepted
+optional proposal; preserve existing behavior during this build. Passive arrivals,
+Wave defaults, Task view, agent host routing and native-split cwd remain required.
+
+**November 4 accepted direction:** Jack Heart selected one-way template launching.
+LF layout state belongs to Loopflow; Rex may consume a best-effort rendering but
+cannot write its edits back. Rex owns native mutations, persistence and restore.
+This supersedes the older full-restoration question below; see the current
+ownership correction in `rex-workspace.md`. The durable host-ID/observation
+records still need an implementation audit; no layout mirroring is intended.
 
 **Demo correction, November 3:** [workspace-demo.md](workspace-demo.md) records
 that the configured LF opening failed at database-schema compatibility. The
@@ -16,16 +36,10 @@ Jack Heart's November 3 build approval supersedes the mistaken-launch stop.
 The current scope, implementation and remaining work are in `rex-workspace.md`;
 no separate Task-view scope, Auto-Ship or merge approval was added.
 
-Two product choices remain only if supported host evidence cannot resolve them:
-
-- After Rex restores a block as a new login shell, how should explicit restoration
-  recover familiar tools without replacing subsequent native work: an explicit
-  replacement/new occurrence, or an accepted narrower restore contract? Neither
-  is accepted. Stable block IDs do not establish command continuity.
-- What Rex release policy should express leaving a Task if public APIs cannot
-  observe use/away reliably? Attached clients and active-window inventory are
-  insufficient; unknown cannot start destructive retirement. The accepted
-  fifteen-minute completed-and-away policy remains, not indefinite retention.
+The former question about Rex away detection is superseded: retention of a Task
+Session terminal is sufficient. No foreground-use signal or Rex retirement policy
+is required. The remaining engineering question is reliable terminal-to-Session
+association through host disconnect/restart, without treating unknown as closed.
 
 **Native split capability review, November 3.** Jack Heart's native-split
 requirement is contradicted by the installed Rex revision-8 API: new native
@@ -43,13 +57,16 @@ REX_SESSION/REX_BLOCK but no REX_SERVER. Current-viewer placement remains the
 right path for recorded viewers; unknown custom endpoints cannot be guessed from
 opaque block IDs. No running-app/socket scan or global host configuration was added.
 
-Reconciliation assumption, November 3: LOO-717's published implementation and revised
-coordination comment `30bf4970-3bb1-481f-8200-83a6734cb26e` establish the intended
-integration API, not delivered integration in LOO-498. The inspected source now
-requires native settlement separately from away/closed policy. No new cleanup
-owner fills the gap; materialization observations are not lifetime holds.
-PR #1811 is open at demo; publication does not establish lifecycle acceptance.
-Non-default-server bare open and remote following remain engineering work under
-accepted scope. Arrival activation adds tools once beside the original passive
-pane; follower recovery preserves old native tabs and uses an OS lock for process
-liveness. These are implementation choices, not new restoration or retention policy.
+Historical November 3 LOO-717 coordination required native settlement. Jack
+Heart's November 4 decision above supersedes that requirement for Rex. Inspect
+the current shared lifetime implementation and integrate retention only; do not
+reintroduce native Rex closure from historical API notes.
+
+**Implementation dependency checked November 4:** LOO-717 remains open in
+PR #1811 at demo. Its current `rust/loopflow/src/transport/README.md` still
+requires `--native-settled` on every presence write, and native resource closure
+before checkout retirement. This checkout has no Task presence API. Integration
+cannot satisfy the newly accepted no-Rex-settlement boundary through that
+contract. The shared owner needs to provide retention/release without assigning
+Rex closure responsibility to LF; no parallel retention store or cleanup loop
+was added here. Independent locator/creation simplification proceeds.

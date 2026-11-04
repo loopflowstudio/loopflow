@@ -799,6 +799,7 @@ fn view_plan(
                     watch_workspace: None,
                     no_focus: false,
                     local_workspace: false,
+                    arrive_task: None,
                     url: None,
                     host: super::open::OpenHost::Desktop,
                     available: false,

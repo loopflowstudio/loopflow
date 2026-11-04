@@ -1004,33 +1004,34 @@ fn rex_reopens_native_task_window_without_creating_a_session_or_replaying_tools(
     let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let script = bin.path().join("rex");
-    let marker = bin.path().join("window");
-    let log = bin.path().join("create");
-    std::fs::write(&script, format!(r#"#!/bin/sh
-case "$*" in
-  *whoami*) echo '{{"endpoint":"unix:///fixture/rex.sock","principal":{{"transport":"unix"}}}}' ;;
-  *session.list*) echo '{{"sessions":[{{"session_id":"session:fixture","label":"fixture"}}]}}' ;;
-  *session.create*) echo '{{"session_id":"session:fixture"}}' ;;
-  *session.view*)
-    if [ -f '{marker}' ]; then echo '{{"windows":[{{"window_id":"window:fixture","label":"Task"}}]}}'; else echo '{{"windows":[]}}'; fi ;;
-  *session.new_window*) printf '%s\n' "$*" >> '{log}'; touch '{marker}'; echo '{{"window_id":"window:fixture"}}' ;;
-  *session.focus_window*) echo '{{"revision":1}}' ;;
-  *client.list*) echo '{{"clients":[]}}' ;;
-  *) echo unexpected >&2; exit 1 ;;
-esac
-"#,marker=marker.display(),log=log.display())).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let args = ["open", "--task", "INF-123", "--host", "rex", "--json"];
+    rex_peer(bin.path());
+    let args = [
+        "open",
+        "--task",
+        "INF-123",
+        "--host",
+        "rex",
+        "--no-focus",
+        "--json",
+    ];
     let first = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    std::fs::write(
+        bin.path().join("session.list.reply"),
+        r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        bin.path().join("session.view.reply"),
+        r#"{"windows":[{"window_id":"window:fixture","label":"My tools"}]}"#,
+    )
+    .unwrap();
     let second = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
     assert_eq!(first["receipts"][0]["destination"], "window:fixture");
     assert_eq!(
         first["receipts"][0]["destination"],
         second["receipts"][0]["destination"]
     );
-    let created = std::fs::read_to_string(log).unwrap();
+    let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
     assert_eq!(created.lines().count(), 1);
     assert!(!created.contains("resume"));
     assert!(created.contains("task") && created.contains("view"));
@@ -1078,6 +1079,358 @@ cat '{bin}/'"$method.reply"
     ] {
         std::fs::write(bin.join(format!("{method}.reply")), reply.to_string()).unwrap();
     }
+}
+
+#[test]
+fn rex_remote_arrival_is_passive_reused_and_preserves_conversation_input() {
+    use std::os::unix::process::CommandExt;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let provider = NativeServer(
+        Command::new("/bin/sleep")
+            .arg("3600")
+            .process_group(0)
+            .spawn()
+            .unwrap(),
+    );
+    let primary = live_conversation(
+        home.path(),
+        &provider.0,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        repo.path(),
+        "Unfinished input",
+        1,
+        0,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE session_activity SET pending_input=1 WHERE session_id=?1",
+        [&primary],
+    )
+    .unwrap();
+    let attachment = || {
+        db.query_row(
+        "SELECT p.id,p.attachment_token,p.attached_lf_process_id,a.pending_input FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id JOIN session_activity a ON a.session_id=s.id WHERE s.id=?1",
+        [&primary], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?))
+    ).unwrap()
+    };
+    let original = attachment();
+    let args = [
+        "open",
+        "--wave",
+        "task-pr-tests",
+        "--host",
+        "rex",
+        "--local-workspace",
+        "--arrive-task",
+        registered.task.id.as_str(),
+        "--json",
+    ];
+    let first = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert_eq!(first["receipts"][0]["destination"], "window:fixture");
+    let launches = bin.path().join("session.new_window.requests");
+    let created = std::fs::read_to_string(&launches).unwrap();
+    let request: Value = serde_json::from_str(created.trim()).unwrap();
+    assert_eq!(request["focus"], false);
+    assert_eq!(
+        request["layout"]["block"]["options"]["cwd"],
+        repo.path().to_str().unwrap()
+    );
+    let command = request["layout"]["block"]["options"]["command"]
+        .as_array()
+        .unwrap();
+    assert!(command.windows(2).any(|pair| pair == ["task", "view"]));
+    assert!(!command.iter().any(|arg| arg == "resume" || arg == "shell"));
+    assert_eq!(
+        created.lines().count(),
+        1,
+        "arrival creates no follower or ordinary tools"
+    );
+    std::fs::write(
+        bin.path().join("session.list.reply"),
+        r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        bin.path().join("session.view.reply"),
+        r#"{"windows":[{"window_id":"window:fixture","label":"My work"}]}"#,
+    )
+    .unwrap();
+    let second = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert_eq!(
+        second["receipts"][0]["destination"],
+        first["receipts"][0]["destination"]
+    );
+    assert_eq!(std::fs::read_to_string(&launches).unwrap(), created);
+    assert!(!bin.path().join("session.focus_window.requests").exists());
+    assert!(!bin.path().join("session.new_split.requests").exists());
+    assert_eq!(attachment(), original);
+    assert_eq!(sessions(home.path()), 1);
+
+    // Reconciliation respects explicit native closure, even after its caller restarts.
+    std::fs::write(bin.path().join("session.view.reply"), r#"{"windows":[]}"#).unwrap();
+    let closed = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert_eq!(closed["receipts"][0]["status"], "failed");
+    assert!(closed["receipts"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("explicitly closed"));
+    assert_eq!(std::fs::read_to_string(&launches).unwrap(), created);
+    assert_eq!(attachment(), original);
+}
+
+#[test]
+fn rex_remote_arrival_rejects_wrong_machine() {
+    use loopflow::durable::MachineId;
+    use loopflow::store::sqlite::SqliteStore;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let peer = MachineId::new();
+    store
+        .add_machine(&peer, "remote.invalid", "Remote")
+        .unwrap();
+    store.claim_task(&registered.task.id).unwrap();
+    store.handoff_task(&registered.task.id, &peer).unwrap();
+    assert_eq!(
+        store
+            .task_execution_route(&registered.task.id)
+            .unwrap()
+            .machine_id,
+        peer
+    );
+    let args = [
+        "open",
+        "--wave",
+        "task-pr-tests",
+        "--host",
+        "rex",
+        "--local-workspace",
+        "--arrive-task",
+        registered.task.id.as_str(),
+        "--json",
+    ];
+    let wrong = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert_eq!(wrong["receipts"][0]["status"], "failed");
+    assert!(wrong["receipts"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("another Machine"));
+    assert!(!bin.path().join("session.create.requests").exists());
+    assert_eq!(sessions(home.path()), 0);
+}
+
+#[test]
+fn rex_remote_arrival_requires_a_started_task_and_an_available_checkout() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let args = [
+        "open",
+        "--wave",
+        "task-pr-tests",
+        "--host",
+        "rex",
+        "--local-workspace",
+        "--arrive-task",
+        registered.task.id.as_str(),
+        "--json",
+    ];
+    db.execute(
+        "UPDATE tasks SET worktree=NULL WHERE id=?1",
+        [registered.task.id.as_str()],
+    )
+    .unwrap();
+    let backlog = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert!(backlog["receipts"].as_array().unwrap().is_empty());
+    assert!(!bin.path().join("session.create.requests").exists());
+    db.execute(
+        "UPDATE tasks SET worktree=?2 WHERE id=?1",
+        rusqlite::params![
+            registered.task.id.as_str(),
+            repo.path().join("missing").to_str().unwrap()
+        ],
+    )
+    .unwrap();
+    let missing = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert_eq!(missing["receipts"][0]["status"], "failed");
+    assert!(missing["receipts"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("checkout is unavailable"));
+    assert!(!bin.path().join("session.new_window.requests").exists());
+    assert_eq!(sessions(home.path()), 0);
+}
+
+#[test]
+fn rex_remote_follower_routes_locally_unstarted_tasks_without_fallback() {
+    use loopflow::durable::MachineId;
+    use loopflow::store::sqlite::SqliteStore;
+    use loopflow::work::selection::{Selection, SelectionExpression, SelectionId};
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let peer = MachineId::new();
+    store
+        .add_machine(&peer, "remote.invalid", "Remote")
+        .unwrap();
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    store.claim_task(&registered.task.id).unwrap();
+    store.handoff_task(&registered.task.id, &peer).unwrap();
+    assert_eq!(
+        store
+            .task_execution_route(&registered.task.id)
+            .unwrap()
+            .machine_id,
+        peer
+    );
+    // Remote checkout state is not copied into the local plan.
+    db.execute(
+        "UPDATE tasks SET worktree=NULL WHERE id=?1",
+        [registered.task.id.as_str()],
+    )
+    .unwrap();
+    let selected = Selection {
+        id: SelectionId("workspace".into()),
+        expression: SelectionExpression::Wave {
+            wave: registered.task.wave_id.clone().unwrap(),
+        },
+    };
+    db.execute(
+        "INSERT INTO host_workspaces(id,repository_id,host,server,selection_json,copy_name,container_id,creation_pending,updated_at)
+         VALUES('follow-remote',?1,'rex','unix:///fixture/rex.sock',?2,'review','session:fixture',0,1)",
+        rusqlite::params![registered.task.repository_id.as_str(), serde_json::to_string(&selected).unwrap()],
+    ).unwrap();
+    rex_peer(bin.path());
+    std::fs::write(
+        bin.path().join("session.list.reply"),
+        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
+    )
+    .unwrap();
+    let requests = host(bin.path(), "ssh", "", 1);
+    let args = [
+        "open",
+        "--host",
+        "rex",
+        "--watch-workspace",
+        "follow-remote",
+    ];
+    let output = lf(home.path(), repo.path(), Some(bin.path()), &args);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent = std::fs::read_to_string(&requests).unwrap();
+    assert!(
+        sent.contains("remote.invalid") && sent.contains(peer.as_str()),
+        "{sent}"
+    );
+    assert!(
+        sent.contains("--arrive-task") && sent.contains(registered.task.id.as_str()),
+        "{sent}"
+    );
+    assert!(
+        sent.contains("--local-workspace") && sent.contains("--copy") && sent.contains("review")
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no local fallback"));
+    assert!(!bin.path().join("session.new_window.requests").exists());
+    assert_eq!(sessions(home.path()), 0);
+
+    // A destination follower never forwards the request back to another Machine.
+    std::fs::remove_file(&requests).unwrap();
+    let mut local = args.to_vec();
+    local.push("--local-workspace");
+    assert!(lf(home.path(), repo.path(), Some(bin.path()), &local)
+        .status
+        .success());
+    assert!(!requests.exists());
+}
+
+#[test]
+fn rex_follower_keeps_other_arrivals_when_a_wave_cannot_be_prepared() {
+    use loopflow::work::selection::{Selection, SelectionExpression, SelectionId};
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let checkout = repo.create_named_worktree("standalone");
+    let standalone =
+        support::register_sibling_task(&registered, "INF-124", "standalone", &checkout);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET project_id=NULL WHERE id=?1",
+        [standalone.id.as_str()],
+    )
+    .unwrap();
+    let selected = Selection {
+        id: SelectionId("workspace".into()),
+        expression: SelectionExpression::Repository,
+    };
+    db.execute(
+        "INSERT INTO host_workspaces(id,repository_id,host,server,selection_json,copy_name,container_id,creation_pending,updated_at)
+         VALUES('follow-partial',?1,'rex','unix:///fixture/rex.sock',?2,NULL,'session:fixture',0,1)",
+        rusqlite::params![registered.task.repository_id.as_str(), serde_json::to_string(&selected).unwrap()],
+    ).unwrap();
+    rex_peer(bin.path());
+    std::fs::write(
+        bin.path().join("session.list.reply"),
+        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(bin.path().join("session.create.reply"), "lost reply").unwrap();
+    let output = lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[
+            "open",
+            "--host",
+            "rex",
+            "--watch-workspace",
+            "follow-partial",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("outcome is unknown"));
+    let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
+    let request: Value = serde_json::from_str(created.trim()).unwrap();
+    assert_eq!(request["session_id"], "session:fixture");
+    assert_eq!(
+        request["layout"]["block"]["options"]["cwd"],
+        checkout.to_str().unwrap()
+    );
+    assert!(created.contains(standalone.id.as_str()));
+    assert_eq!(sessions(home.path()), 0);
 }
 
 #[test]

@@ -1613,6 +1613,9 @@ pub struct OpenArgs {
     /// Resolve only this Machine's part of a routed native workspace
     #[arg(long, hide = true)]
     pub local_workspace: bool,
+    /// Add one newly started Task passively within a routed workspace selection
+    #[arg(long, hide = true, requires = "local_workspace")]
+    pub arrive_task: Option<String>,
 }
 
 /// The Work an invocation names: every available conversation, an address,

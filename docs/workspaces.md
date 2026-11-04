@@ -29,8 +29,8 @@ that the app is visible or the conversation ready for input.
 ## A Task is a tab with its tools
 
 In Rex, each Task has a tab containing splits. A Wave is a Rex session containing
-its conversation and Task tabs. Switch tabs to move between Tasks; rearrange
-splits using Rex's normal controls.
+its existing conversation, when present, and Task tabs. Switch tabs to move between
+Tasks; rearrange splits using Rex's normal controls.
 
 Loopflow stores its own layouts and templates. Opening in Rex asks it to
 recreate the selected layout as faithfully as its tools allow. After creation,
@@ -51,6 +51,9 @@ The tools have the same purpose across hosts:
 Conversation and Shell are terminals in both Desktop and Rex. Desktop supplies
 native views for Files, Changes and Task/workflow; terminal hosts use the chosen
 programs and LF's terminal view.
+
+Opening a Conversation in Rex observes its live output or saved history.
+Use `lf resume <session-id>` when you want to take conversation input.
 
 ```bash
 lf task view LOO-498
@@ -122,6 +125,12 @@ The current Rex implementation follows Tasks through its Workspace tab. Closing
 that tab stops following; opening the workspace again restores following.
 Closing a Task tab leaves that occurrence closed during following. An exited
 follower is replaced in a new Workspace tab; its old native tab stays intact.
+
+The follower asks a remote Task's recorded Machine whether it has started, even
+when the local plan has no checkout for it. Remote arrivals use the same passive
+Task view and reuse rules. A failed connection leaves the source workspace intact;
+reconciliation retries without creating local replacement shells. Configured
+two-Machine interaction still needs demonstration.
 
 ## New splits belong to the selected Task
 
@@ -220,7 +229,7 @@ arrival/activation, follower recovery, and Herdr Task creation/reuse. It still o
   without claiming to restore Rex edits or replaying commands into existing work.
 - Bare-open discovery on arbitrary non-default Rex servers, plus the actual
   agent-tool path after a viewer move. A direct native-shell test is not that proof.
-- Following newly relevant remote Tasks and configured remote/app acceptance.
+- Configured remote arrival, recovery and app acceptance across two Machines.
 - Retained Rex Task Session terminals preventing cleanup, with reliable release
   observation and no LF-initiated closure of Rex shells.
 - Complete move/handoff and return/reopen demonstrations.

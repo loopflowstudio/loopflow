@@ -581,31 +581,29 @@ Home, preserving historical authors and review authority.
 LOO-297's read failed without Linear credentials; local absence is not remote
 absence, so repairs need a fresh authorized read. These records changed no Task.
 
-## Native host workspaces (LOO-498/717, accepted 2026-11-03)
+## Native host workspaces (LOO-498/717, revised 2026-11-04)
 
 Jack Heart selected Rex first, bounded Herdr second, shared Work/conversation
-identity and tools/defaults. Hosts own shells/layouts; no Rex relay or Desktop
-split-tree mirror. Existing occurrence → Task intent → Wave default → builtin;
-started Tasks arrive passively, backlog is explicit. Bare open must use current
-viewer placement through agent calls/resume/move. Native new splits must use the
-source Task's worktree root/Machine, respecting explicit directories. Revision-8
-Rex API probes instead start shells in HOME for two source Task directories;
-initial pane cwd does not establish split defaults. No scoped setter was found.
+identity and tools/defaults. November 4: LF templates flow one way; Rex owns native
+edits, shells and restoration. Reopen preserves the destination; confirmed absence
+permits template launch. IDs/creation receipts preserve rename reuse and uncertain
+creation, never prove retention or authorize replay. Named-copy removal is unaccepted.
+Started Tasks arrive passively; backlog is explicit. Bare open must follow current
+viewer placement through agent calls/resume/move. Native splits must use the source
+Task's worktree/Machine. Revision-8 API probes instead start in HOME; no scoped setter
+was found. The app's Split action remains unproved.
 
-Jack accepted equal-host retention: hosts release, LF honors holds. Eligible idle
-agents end at two minutes; completed-and-away shells/checkout at fifteen total.
-Return cancels; requested work finishes first. Dirty/untracked files do not veto
-eligible cleanup; unfinished checkouts/branches survive Close. Deleted-checkout
-reconstruction is excluded; moved/unmerged refs remain unresolved.
-LOO-717 owns lifetime; LOO-498 integrates occurrences. Away+native-settled preserves
-grace, never means explicit Close. Retained/unknown revokes settlement; persisted
-revisions fence returns. Integration remains unproved.
+Jack's November 4 correction supersedes Rex away/native-settlement: retained Task
+Session terminals prevent cleanup regardless of focus; confirmed final removal
+releases that hold, unknown does not. LF cleans Desktop-owned shells only.
+LOO-717 owns shared lifetime; its older settlement API is not the revised Rex
+contract. Requested work finishes first; unfinished checkouts survive Close.
+Deleted-checkout reconstruction is excluded. Desktop keeps two-minute eligible-idle
+and fifteen-minute completed-and-away cleanup; return cancels. Dirty files do not
+veto eligible cleanup; changed committed refs retain their safeguards.
 
-Isolated Rex restart retained block IDs but replaced cat with a login shell:
-identity authorizes no replay. Client attachment/active-window snapshots prove no
-use/away event; unknown cannot authorize cleanup. Direct-shell fixtures prove no
-agent handoff, full restore or remote/provider acceptance. Jack requested
-documentation before implementation/publication; gaps cannot weaken acceptance.
+Restart kept IDs but replaced cat with a login shell. Agent/remote acceptance and
+retention remain unproved. Jack's documentation-first contract: docs/workspaces.md.
 
 
 ## Workspace redesign decisions

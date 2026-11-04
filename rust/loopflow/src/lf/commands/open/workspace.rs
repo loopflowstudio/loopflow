@@ -23,8 +23,8 @@ use crate::store::sqlite::{
     SqliteStore,
 };
 use crate::work::selection::{
-    Selection, SelectionExpression, SelectionId, SelectionState, ViewContent, ViewPlan,
-    WorkWorkspaceKey, WorkWorkspaceKind,
+    Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, ViewContent,
+    ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 
 fn now() -> i64 {
@@ -38,6 +38,30 @@ fn selection(expression: SelectionExpression) -> Selection {
         id: SelectionId("workspace".into()),
         expression,
     }
+}
+
+fn workspace_plan(
+    store: &SqliteStore,
+    repository: &RepositoryId,
+    selected: Selection,
+) -> Result<ViewPlan> {
+    // Working-set projections know only local execution. Include backlog in the
+    // inventory so the recorded remote Machine can decide whether its Task started.
+    let inventory = Selection {
+        id: selected.id.clone(),
+        expression: match &selected.expression {
+            SelectionExpression::Repository => SelectionExpression::Filter {
+                filter: SelectionFilter::Kind(WorkWorkspaceKind::Task),
+            },
+            SelectionExpression::Wave { wave } => SelectionExpression::Filter {
+                filter: SelectionFilter::Wave(wave.to_string()),
+            },
+            expression => expression.clone(),
+        },
+    };
+    let mut plan = store.plan_selection(repository, inventory)?;
+    plan.selection = selected;
+    Ok(plan)
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -68,6 +92,22 @@ struct Presentation<'a> {
     omit_shells: bool,
     session: Option<&'a str>,
     diff: bool,
+}
+
+#[derive(Clone, Copy)]
+enum Follow {
+    Local,
+    All,
+}
+
+fn following(args: &OpenArgs) -> Option<Follow> {
+    if args.arrive_task.is_some() {
+        None
+    } else if args.local_workspace {
+        Some(Follow::Local)
+    } else {
+        Some(Follow::All)
+    }
 }
 impl Rex {
     fn call(&self, method: &str, args: Value) -> Result<Value> {
@@ -204,7 +244,7 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         "A workspace copy needs a name"
     );
     if let Some(id) = &args.watch_workspace {
-        return follow(id);
+        return follow(id, args);
     }
     let (targets, mut unknown) = super::targets(cli, args)?;
     crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
@@ -269,7 +309,7 @@ fn open_machines(
         .as_deref()
         .context("Repository has no Work identity")?;
     let selected = scope(store, target)?;
-    let plan = store.plan_selection(&RepositoryId::parse(repository)?, selected.clone())?;
+    let plan = workspace_plan(store, &RepositoryId::parse(repository)?, selected.clone())?;
     let local = store.local_machine()?.id;
     let mut local_tasks = Vec::new();
     let mut peers = BTreeSet::new();
@@ -278,11 +318,19 @@ fn open_machines(
     for content in plan
         .contents
         .iter()
-        .filter(|content| eligible(content, target.task.is_some()))
+        .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
+        .filter(|content| target.task.is_some() || !content.states.contains(&SelectionState::Done))
+        .filter(|content| {
+            args.arrive_task
+                .as_ref()
+                .is_none_or(|id| *id == content.work.id)
+        })
     {
         match store.task_execution_route(&TaskId::parse(&content.work.id)?) {
             Ok(route) if route.machine_id == local => {
-                local_tasks.push(content);
+                if eligible(content, target.task.is_some() && args.arrive_task.is_none()) {
+                    local_tasks.push(content);
+                }
             }
             Ok(route) => {
                 peers.insert(route.machine_id.to_string());
@@ -293,6 +341,10 @@ fn open_machines(
             )),
         }
     }
+    anyhow::ensure!(
+        args.arrive_task.is_none() || peers.is_empty(),
+        "Arriving Task belongs to another Machine; no local fallback"
+    );
     if !args.local_workspace {
         for peer in peers {
             let mut remote_args = args.clone();
@@ -372,6 +424,9 @@ fn remote_open(
     if args.no_focus {
         argv.push("--no-focus".into());
     }
+    if let Some(task) = &args.arrive_task {
+        argv.extend(["--arrive-task".into(), task.clone()]);
+    }
     let bytes = tokio::runtime::Runtime::new()?
         .block_on(super::super::ssh::request(&machine, &argv, None))?;
     serde_json::from_slice(&bytes)
@@ -429,7 +484,7 @@ fn ensure_container(
     rex: &Rex,
     workspace: &mut HostWorkspace,
     label: &str,
-    follow: bool,
+    follow: Option<Follow>,
     cwd: &Path,
 ) -> Result<()> {
     let _opening = Opening::lock_key(&format!("host-workspace:{}", workspace.id))?;
@@ -496,8 +551,8 @@ fn ensure_container(
         workspace.updated_at = now();
         store.save_host_workspace(workspace)?;
     }
-    if follow {
-        ensure_follower(rex, workspace, cwd)?;
+    if let Some(follow) = follow {
+        ensure_follower(rex, workspace, cwd, follow)?;
     }
     Ok(())
 }
@@ -548,7 +603,7 @@ fn open(
         rex,
         &mut root,
         &target.label,
-        !explicit,
+        if explicit { None } else { following(args) },
         &target.repository_path,
     )?;
     let mut receipts = Vec::new();
@@ -567,6 +622,7 @@ fn open(
                 task.wave_id.as_ref(),
                 &target.repository_path,
                 &mut groups,
+                following(args),
             )?
         };
         let result = materialize(
@@ -576,7 +632,7 @@ fn open(
             content,
             &target.repository_path,
             Presentation {
-                passive: false,
+                passive: args.arrive_task.is_some(),
                 omit_shells: args.copy.is_some() && !args.new_shells,
                 session: target.session.as_deref(),
                 diff: args.diff || target.url.diff,
@@ -592,7 +648,7 @@ fn open(
         match result {
             Ok((window, created, shells)) => {
                 receipt.destination = Some(window.clone());
-                let focus = !args.no_focus && receipts.is_empty();
+                let focus = !args.no_focus && args.arrive_task.is_none() && receipts.is_empty();
                 let showing = if focus {
                     rex.focus(
                         destination
@@ -642,6 +698,7 @@ fn task_workspace(
     wave: Option<&WaveId>,
     repo: &Path,
     groups: &mut HashMap<WaveId, HostWorkspace>,
+    follow: Option<Follow>,
 ) -> Result<HostWorkspace> {
     if !matches!(root.selection.expression, SelectionExpression::Repository) {
         return Ok(root.clone());
@@ -663,7 +720,7 @@ fn task_workspace(
         .get_wave(wave)?
         .map(|wave| wave.slug().to_owned())
         .unwrap_or_else(|| wave.to_string());
-    ensure_container(store, rex, &mut group, &label, true, repo)?;
+    ensure_container(store, rex, &mut group, &label, follow, repo)?;
     groups.insert(wave.clone(), group.clone());
     Ok(group)
 }
@@ -819,7 +876,7 @@ fn follower_file(id: &str) -> Result<std::fs::File> {
         .open(directory.join(format!("{}.follower", identity(id))))?)
 }
 
-fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path) -> Result<()> {
+fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path, follow: Follow) -> Result<()> {
     use fs2::FileExt;
     let mut file = follower_file(&workspace.id)?;
     match file.try_lock_exclusive() {
@@ -835,7 +892,11 @@ fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path) -> Result<(
     );
     file.write_all(b"pending")?;
     file.sync_all()?;
-    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":block("Workspace",cwd,viewer_argv(cwd,&["open","--host","rex","--watch-workspace", &workspace.id])?)}))?;
+    let mut words = vec!["open", "--host", "rex", "--watch-workspace", &workspace.id];
+    if matches!(follow, Follow::Local) {
+        words.push("--local-workspace");
+    }
+    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":block("Workspace",cwd,viewer_argv(cwd,&words)?)}))?;
     Ok(())
 }
 
@@ -860,7 +921,7 @@ fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
     Ok(argv)
 }
 
-fn follow(id: &str) -> Result<()> {
+fn follow(id: &str, args: &OpenArgs) -> Result<()> {
     use fs2::FileExt;
     let follower = follower_file(id)?;
     // The creator briefly owns this lock until the native launch returns.
@@ -888,13 +949,15 @@ fn follow(id: &str) -> Result<()> {
             let repository = repository.clone();
             async move {
                 let store = super::super::watch::require_store(store)?;
-                Ok(store.sqlite.plan_selection(&repository, selected)?)
+                workspace_plan(&store.sqlite, &repository, selected)
             }
         },
         super::super::watch::Transport::Pull(Box::new(|| {})),
     )?
     .context("Workspace watch did not start")?;
     let mut arrived = BTreeSet::new();
+    let mut refresh = std::time::Instant::now();
+    let mut request_id = 0_u64;
     loop {
         workspace = store
             .host_workspace(id)?
@@ -914,53 +977,40 @@ fn follow(id: &str) -> Result<()> {
                     continue;
                 }
                 let plan: ViewPlan = serde_json::from_value(frame["body"].clone())?;
-                let local = store.local_machine()?.id;
                 let mut groups = HashMap::new();
                 for content in plan
                     .contents
                     .iter()
-                    .filter(|content| eligible(content, false))
+                    .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
+                    .filter(|content| !content.states.contains(&SelectionState::Done))
                 {
                     if arrived.contains(&content.work.id) {
                         continue;
                     }
-                    let route = store.task_execution_route(&TaskId::parse(&content.work.id)?)?;
-                    if route.machine_id != local {
-                        continue;
-                    }
-                    let task = store
-                        .task(&TaskId::parse(&content.work.id)?)?
-                        .context("Task is unavailable")?;
-                    let destination = task_workspace(
+                    match arrive(
                         &store,
                         &rex,
                         &workspace,
-                        task.wave_id.as_ref(),
-                        Path::new(&repo),
-                        &mut groups,
-                    )?;
-                    match materialize(
-                        &store,
-                        &rex,
-                        &destination,
                         content,
                         Path::new(&repo),
-                        Presentation {
-                            passive: true,
-                            omit_shells: workspace.copy_name.is_some(),
-                            ..Presentation::default()
-                        },
+                        &mut groups,
+                        args,
                     ) {
-                        Ok((_, created, _)) => {
+                        Ok(true) => {
                             arrived.insert(content.work.id.clone());
-                            if created {
-                                println!("Added {}", content.title);
-                            }
                         }
+                        Ok(false) => {}
                         Err(error) => eprintln!("{}: {error:#}", content.title),
                     }
                 }
             }
+        }
+        // Remote starts and recovered connections need not change this Machine's
+        // Work snapshot. Re-read periodically; creation receipts fence retries.
+        if refresh.elapsed() >= std::time::Duration::from_secs(15) {
+            request_id += 1;
+            subscription.request(format!("{{\"id\":{request_id}}}").as_bytes());
+            refresh = std::time::Instant::now();
         }
         let mut fd = libc::pollfd {
             fd: 0,
@@ -978,6 +1028,83 @@ fn follow(id: &str) -> Result<()> {
             return Ok(());
         }
     }
+}
+
+/// Report arrival only after materialization; failed/unknown receipts remain retryable.
+fn arrive(
+    store: &SqliteStore,
+    rex: &Rex,
+    workspace: &HostWorkspace,
+    content: &ViewContent,
+    repo: &Path,
+    groups: &mut HashMap<WaveId, HostWorkspace>,
+    args: &OpenArgs,
+) -> Result<bool> {
+    let task_id = TaskId::parse(&content.work.id)?;
+    let route = store
+        .task_execution_route(&task_id)
+        .context("execution Machine unavailable")?;
+    if route.machine_id != store.local_machine()?.id {
+        if args.local_workspace {
+            return Ok(false);
+        }
+        let arrival = OpenArgs {
+            copy: workspace.copy_name.clone(),
+            no_focus: true,
+            arrive_task: Some(content.work.id.clone()),
+            ..args.clone()
+        };
+        let report = remote_open(
+            store,
+            route.machine_id.as_str(),
+            &workspace.repository_id,
+            &workspace.selection,
+            &arrival,
+        )
+        .with_context(|| format!("Machine {}; no local fallback", route.machine_id))?;
+        let delivered = report
+            .receipts
+            .iter()
+            .any(|receipt| receipt.status != OpenStatus::Failed && receipt.destination.is_some());
+        for receipt in report.receipts {
+            println!(
+                "{}: {}",
+                receipt.label,
+                receipt.reason.as_deref().unwrap_or("opened")
+            );
+        }
+        super::print_unknown(&report.unknown);
+        return Ok(delivered);
+    }
+    if !eligible(content, false) {
+        return Ok(false);
+    }
+    let task = store.task(&task_id)?.context("Task is unavailable")?;
+    let destination = task_workspace(
+        store,
+        rex,
+        workspace,
+        task.wave_id.as_ref(),
+        repo,
+        groups,
+        following(args),
+    )?;
+    let (_, created, _) = materialize(
+        store,
+        rex,
+        &destination,
+        content,
+        repo,
+        Presentation {
+            passive: true,
+            omit_shells: workspace.copy_name.is_some(),
+            ..Presentation::default()
+        },
+    )?;
+    if created {
+        println!("Added {}", content.title);
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

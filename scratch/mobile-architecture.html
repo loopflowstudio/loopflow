@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loopflow · Mobile architecture</title>
+<style>
+:root{color-scheme:light dark;--bg:#f7f6f2;--paper:#fffefa;--ink:#242b2a;--muted:#626c69;--line:#ccd3cd;--accent:#17624d;--soft:#e8f0e9;--proposed:#946024;--proposal:#fbf2e1;--future:#635e83;--futurebg:#efedf6;--selected:#263f35;--selectedtext:#fff;--focus:#c36531}
+@media(prefers-color-scheme:dark){:root{--bg:#171d1b;--paper:#202724;--ink:#e6ece5;--muted:#aab7ae;--line:#46564b;--accent:#9ed3b1;--soft:#273b2e;--proposed:#e7bb7c;--proposal:#393326;--future:#c4bfdf;--futurebg:#302e3d;--selected:#d5e8d9;--selectedtext:#1a2b20;--focus:#efb180}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}button,select{font:inherit;color:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--focus);outline-offset:4px}.page{width:min(1080px,100% - 48px);margin:auto}.mast{display:flex;justify-content:space-between;align-items:center;padding:24px 0;border-bottom:1px solid var(--line);font-size:13px;letter-spacing:.06em}.brand{font-weight:700;letter-spacing:.18em;text-transform:uppercase}.mast nav{display:flex;gap:20px}.hero{padding:64px 0 42px;max-width:820px}.eyebrow{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:650}.hero h1{font:500 clamp(37px,5.6vw,64px)/1.09 Georgia,serif;letter-spacing:-.035em;margin:18px 0 24px;max-width:780px}.hero p{font-size:19px;line-height:1.6;max-width:720px}.direction{font-size:14px!important;color:var(--muted);padding-left:18px;border-left:2px solid var(--accent)}.section-label{display:flex;align-items:baseline;gap:16px;margin:12px 0 16px}.section-label span{color:var(--muted);font:13px ui-monospace,monospace}.section-label h2{margin:0;font-size:23px;letter-spacing:-.025em}.map-shell{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:24px 0 30px}.controls{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap}.segments{display:flex;gap:4px;flex-wrap:wrap;padding:4px;background:var(--paper);border:1px solid var(--line);border-radius:9px}.segments button{border:0;padding:9px 14px;background:transparent;border-radius:5px;font-size:14px}.segments button[aria-pressed=true]{background:var(--selected);color:var(--selectedtext)}.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.legend span:before{content:"";display:inline-block;vertical-align:middle;width:16px;height:9px;margin-right:6px;border:1px solid var(--line);background:var(--paper)}.legend .p:before{border:1px dashed var(--proposed);background:var(--proposal)}.legend .f:before{border:1px dotted var(--future);background:var(--futurebg)}.map-caption{font-size:14px;color:var(--muted);margin:16px 0 24px;min-height:46px;max-width:900px}.diagram{max-width:930px;margin:auto}.row{display:grid;grid-template-columns:1fr 1fr;gap:20px}.node{display:block;text-align:left;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:16px 19px;width:100%;min-width:0;position:relative;transition:border-color .15s,box-shadow .15s}.node strong{display:block;font-size:17px;font-weight:650;line-height:1.3}.node small{display:block;font-size:12px;color:var(--muted);line-height:1.5;margin-top:5px}.node .tag{display:block;font:10px/1.4 ui-monospace,monospace;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;color:var(--muted)}.node.proposed{background:var(--proposal);border:1px dashed var(--proposed)}.node.proposed .tag{color:var(--proposed)}.node.future{background:var(--futurebg);border:1px dotted var(--future)}.node.future .tag{color:var(--future)}.node.selected{box-shadow:0 0 0 2px var(--accent);border-color:var(--accent)}.node.affected{box-shadow:0 0 0 2px var(--focus);border-color:var(--focus)}.connector{font-size:12px;color:var(--muted);text-align:center;padding:10px 4px;line-height:1.6}.connector:before{content:'↓';display:block;font-size:24px;line-height:1.1;color:var(--accent);font-weight:400}.connector.horizontal:before{content:'→'}.host{padding:20px;background:var(--soft);border:1px solid var(--line);border-radius:12px}.host-title{display:flex;justify-content:space-between;gap:12px;margin-bottom:17px;font-size:13px;color:var(--accent)}.host-title strong{font-weight:700}.host-title span{color:var(--muted);font-size:12px}.host .entry{display:grid;grid-template-columns:1fr 42px 1.25fr;align-items:stretch}.host .entry .connector{display:flex;align-items:center;justify-content:center;padding:0}.host .entry .connector:before{content:'→';font-size:24px}.branch{display:grid;grid-template-columns:1fr 1fr;gap:20px}.branch .connector{padding:9px 0}.footnote{font-size:12px;color:var(--muted);margin:16px 0 0}.future-lane{margin-top:25px;padding:22px 0 0;border-top:1px dashed var(--future)}.future-lane h3{font-size:13px;font-weight:650;color:var(--future);margin:0 0 15px}.hub-grid{display:grid;grid-template-columns:1fr 65px 1.2fr 85px 1fr;align-items:center}.hub-grid .connector{padding:0}.hub-grid .connector:before{content:'→'}.hub-grid .node{min-height:120px}.inspect{display:grid;grid-template-columns:170px 1fr;gap:25px;margin:24px auto 0;max-width:930px;border-top:1px solid var(--line);padding:20px 0 0;min-height:148px}.inspect .eyebrow{font-size:11px}.inspect h3{font-size:17px;margin:6px 0}.inspect p{font-size:14px;margin:0;line-height:1.6}.inspect .evidence{display:block;margin-top:10px;font-size:12px}.scenario{margin-top:22px;padding:18px 20px;border-left:3px solid var(--accent);background:var(--paper)}.scenario-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}.scenario select{max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:7px}.scenario h3{font-size:17px;line-height:1.35;margin:18px 0 8px}.scenario p{font-size:14px;margin:0;max-width:830px}.path{font:12px/1.6 ui-monospace,monospace;color:var(--accent);margin-top:12px;overflow-wrap:anywhere}.jump{display:flex;gap:20px;flex-wrap:wrap;margin:27px 0 0;font-size:14px}.reading{max-width:800px;margin:64px auto 80px}.reading h1{display:none}.reading>p:first-of-type{font-size:12px;color:var(--muted)}.reading h2{font:500 30px/1.2 Georgia,serif;letter-spacing:-.02em;margin:54px 0 22px;scroll-margin-top:25px}.reading h2:first-of-type{margin-top:36px}.reading p{margin:17px 0}.reading table{border-collapse:collapse;width:100%;font-size:14px;margin:25px 0}.reading td,.reading th{border-bottom:1px solid var(--line);text-align:left;vertical-align:top;padding:13px 12px 13px 0;line-height:1.55}.reading th{font-size:12px;color:var(--muted);font-weight:650}.reading tr:last-child td{border-bottom:0}.reading td:first-child{min-width:135px}.reading code{font-size:.86em;background:var(--soft);padding:2px 4px;border-radius:3px;overflow-wrap:anywhere}.reading li{padding-left:3px;margin:12px 0}.reading ul{padding-left:21px}.reading strong{font-weight:650}.reading .table-wrap{overflow:auto}.reading h2~p{max-width:760px}.footer{border-top:1px solid var(--line);padding:26px 0 35px;color:var(--muted);font-size:12px}.footer a{margin-left:12px}.skip{position:absolute;left:-9999px}.skip:focus{left:20px;top:10px;padding:10px;background:var(--paper);z-index:5}
+@media(max-width:700px){.page{width:calc(100% - 30px)}.mast{font-size:11px}.mast nav{gap:12px}.hero{padding:42px 0 26px}.hero p{font-size:17px}.section-label h2{font-size:21px}.controls{gap:15px}.map-caption{min-height:0}.host{padding:13px}.node{padding:13px 12px}.node strong{font-size:15px}.row,.branch{gap:12px}.host-title{display:block}.host-title span{display:block;margin-top:3px}.host .entry{grid-template-columns:1fr}.host .entry .connector:before{content:'↓';padding:5px}.inspect{grid-template-columns:1fr;gap:8px;min-height:0}.hub-grid{grid-template-columns:1fr}.hub-grid .node{min-height:0}.hub-grid .connector:before{content:'↓';padding:6px}.reading{margin-top:42px}.reading h2{font-size:27px}.reading table{font-size:13px}.reading td:first-child{min-width:100px}.segments button{padding:8px 10px;font-size:13px}.legend{gap:12px}}
+@media(max-width:380px){.row,.branch{grid-template-columns:1fr}.mast nav a:last-child{display:none}.node small{font-size:12px}}
+@media print{.controls,.scenario-controls,.jump,.mast nav{display:none}.page{width:100%}.hero{padding:15px 0}.node{break-inside:avoid}.reading{max-width:none}.reading h2{break-after:avoid}.map-shell{break-inside:avoid}.scenario{break-inside:avoid}}
+</style>
+</head>
+<body><a class="skip" href="#answers">Skip to research answers</a>
+<div class="page">
+<header class="mast"><span class="brand">Loopflow / Field notes</span><nav aria-label="Page"><a href="#map">System map</a><a href="mobile-prototypes.html">iOS prototypes ↗</a></nav></header>
+<section class="hero"><div class="eyebrow">Mobile architecture · Research · 03 November 2026</div><h1>A terminal in your pocket.<br>Execution on your Machine.</h1><p>Connect directly to your work over Tailscale. Keep Sessions alive independently of the screen viewing them. Leave room for a public hub without making it a dependency.</p><p class="direction"><strong>Selected:</strong> native Swift · terminal core · host Tailscale · no custom relay.<br><strong>Proposed:</strong> private Machine API, HTTPS/WSS and one-scan pairing. The hub is future scope.</p></section>
+<section id="map" aria-labelledby="map-title"><div class="section-label"><span>01 / SYSTEM</span><h2 id="map-title">Where everything belongs</h2></div>
+<div class="map-shell"><div class="controls"><div class="segments" role="group" aria-label="Architecture view"><button data-mode="today" aria-pressed="false">Today</button><button data-mode="mobile" aria-pressed="true">Mobile proposal</button><button data-mode="hub" aria-pressed="false">Future hub</button></div><div class="legend" aria-label="Legend"><span>Existing</span><span class="p">Proposed</span><span class="f">Future</span></div></div>
+<p class="map-caption" id="map-caption"></p><div class="diagram" id="diagram"></div>
+<div class="inspect" id="inspect" aria-live="polite"><div><div class="eyebrow">Select any component</div><h3 id="detail-title"></h3></div><div><p id="detail-body"></p><span class="evidence" id="detail-source"></span></div></div>
+<div class="scenario"><div class="scenario-controls"><label for="scenario">Walk through a situation</label><select id="scenario"><option value="attach">Open a Session</option><option value="takeover">Take control on the phone</option><option value="disconnect">Phone loses connectivity</option><option value="restart">Machine service restarts</option><option value="reboot">Host reboots</option><option value="webhook">A duplicate webhook arrives</option></select></div><div aria-live="polite"><h3 id="scenario-title"></h3><p id="scenario-body"></p><div class="path" id="scenario-path"></div></div></div>
+<div class="jump"><a href="#answers">Read the seven architectural answers ↓</a><a href="mobile-prototypes.html">Try the selected Task → Session MVP ↗</a><a href="mobile-system.md">Source note</a></div></div></section>
+<main class="reading" id="answers"><h1>A terminal in your pocket, execution on your Machine</h1>
+<p>Architecture research for Jack Heart · 2026-11-03 · No Task selected · Checkout <code>2bc29a72e0</code></p>
+<p><strong>Recommended architecture:</strong> a native Swift terminal connects over host-installed Tailscale to a private Loopflow Machine service. The service runs independently of Desktop and exposes existing Rust operations and Session attachments. Execution remains in separate owners. A future public hub receives webhooks and can become an explicitly authorized client of that same Machine boundary.</p>
+<p>Jack selected native Swift, a terminal as the core experience, host Tailscale and no custom relay. Jack requested automatic setup and architectural room for an optional hub, without building hub features now. HTTPS/WSS, the pairing protocol, service packaging and the precise screen design below remain recommendations to validate.</p>
+<h2 id="the-server-question-answered">The server question, answered</h2>
+<p>The proposed server belongs to <strong>a Machine: one OS account and Loopflow data directory</strong>. It can run on the Mac used for Desktop or on a remote host without Desktop. Two accounts on one computer can be two Machines. A network address is a route to that authority, not its identity. <a href="../docs/architecture/machines.md">Current Machine contract</a></p>
+<p>Today, Desktop calls Rust through a local library and launches CLI operations. Its own Unix socket automates the GUI and dies with the app. Detached Session owners already retain execution; remote CLI commands already run through SSH. There is no general network Machine API in this checkout. <a href="../swift/LoopflowMac/Services/RegistryQueryLocal.swift">Local query adapter</a>, <a href="../swift/LoopflowMac/DesktopServer.swift">Desktop socket</a>, <a href="../rust/loopflow/src/transport/README.md">Session transport</a></p>
+<p>This restores a responsibility of <strong>lfd</strong>. Standalone hosting, launchd, mobile pairing and a thin command adapter have all existed before. The earlier deletions show maintenance and ownership difficulties alongside sustained product intent. The difference to prove this time is that the network frontend can disappear without changing the identity or lifetime of running work. Naming it “thin” proves nothing. <a href="lfd-history.md">Historical evidence</a></p>
+<h2 id="1-give-each-component-a-clear-owner">1. Give each component a clear owner</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Owns</th>
+<th>Boundary to preserve</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>iPhone / iPad</td>
+<td>Terminal presentation, navigation, local selection and scroll position, paired credential</td>
+<td>An attachment does not create a new provider conversation.</td>
+</tr>
+<tr>
+<td>Desktop / CLI</td>
+<td>Local interaction and device-specific layout</td>
+<td>Desktop need not run for phone access; local clients can keep current Rust paths initially.</td>
+</tr>
+<tr>
+<td>Machine service — proposed</td>
+<td>Authentication, protocol connections and command admission</td>
+<td>Calls existing operations; no parallel Task or Graph engine. Durable receipts belong in Machine-owned storage.</td>
+</tr>
+<tr>
+<td>Existing Rust operations and store</td>
+<td>Local records and execution facts; provider synchronization</td>
+<td>Planning intent keeps its configured provider/journal authority.</td>
+</tr>
+<tr>
+<td>Session owners and Graph runners</td>
+<td>Their actual execution, provider identity, PTYs and retained output</td>
+<td>Separate supervision from the network frontend must be proved.</td>
+</tr>
+<tr>
+<td>Optional hub — future</td>
+<td>Verified event inbox, trigger configuration, dispatch receipts</td>
+<td>May request authorized work; does not become the Machine database or terminal relay.</td>
+</tr>
+</tbody>
+</table>
+<p>The hub can begin as an inbox, then gain an explicit execution grant. It dispatches an existing Loopflow operation to <strong>one named Machine</strong>; that Machine's Graph runner chooses the steps. Event refresh may fan out. Execution must not. Current Task claims deliberately tolerate disagreement and preserve local work; they are not a distributed lock. Offline status does not authorize another Machine to take over. <a href="research-authority-hub.md">Authority research</a>, <a href="../rust/loopflow/src/store/sqlite/task_ownership.rs">ownership implementation</a></p>
+<p>For a future deployment, the Machine initiates an outbound authenticated connection to the public hub. Webhook events and scoped requests travel back over that connection. Direct phone traffic still uses Tailscale. This avoids requiring the hub to join each tailnet. Paseo provides a useful precedent for separating enrollment from execution permission; Loopflow should retain its own Graph model. <a href="https://paseo.sh/docs/hub/security">Paseo security</a></p>
+<h2 id="2-define-survival-before-installation">2. Define survival before installation</h2>
+<table>
+<thead>
+<tr>
+<th>What happens</th>
+<th>Proposed behavior</th>
+<th>Qualification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Phone disconnects or backgrounds</td>
+<td>Work continues; phone later reattaches</td>
+<td>iOS background networking is not an always-on connection.</td>
+</tr>
+<tr>
+<td>Desktop quits</td>
+<td>Installed service and execution continue</td>
+<td>Desktop-provided tools may become unavailable.</td>
+</tr>
+<tr>
+<td>Machine service restarts</td>
+<td>Connections drop; execution continues</td>
+<td>Not yet proved under either installed supervisor.</td>
+</tr>
+<tr>
+<td>Service or app updates</td>
+<td>Negotiate compatible protocols; retain busy owners</td>
+<td>Executables, schema reader floors and owner versions all matter.</td>
+</tr>
+<tr>
+<td>Mac user logs out</td>
+<td>Personal LaunchAgent stops</td>
+<td>Unattended hosting is a separate install mode.</td>
+</tr>
+<tr>
+<td>Host sleeps</td>
+<td>Execution suspends; network requests can time out</td>
+<td>Tailscale does not make a sleeping host available.</td>
+</tr>
+<tr>
+<td>Host reboots</td>
+<td>Old processes are gone; reconcile saved history</td>
+<td>Resuming a conversation must not replay an interrupted submission.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The important discovery:</strong> today's owners call <code>setsid()</code>, but that does not escape a systemd service's cgroup. A naïve Linux service restart would kill its supposedly detached children. Independent execution units are one candidate solution. macOS requires a separate launchd/logout/update experiment. <a href="research-runtime-lifecycle.md">Lifecycle research</a>, <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html">systemd process termination</a></p>
+<p>Personal Mac hosting can use a user LaunchAgent managed through SMAppService. Standalone installation can use the same implementation without a Desktop UI. Linux user services with lingering are a practical always-on option. A Mac that must recover before login needs both a compatible Loopflow installation and an appropriate Tailscale variant; ordinary Mac Tailscale GUI variants do not run before login. <a href="https://developer.apple.com/documentation/servicemanagement/smappservice/register()">Apple registration</a>, <a href="https://tailscale.com/docs/concepts/macos-variants">Tailscale variants</a></p>
+<p>Credential access, PATH and browser/computer tools must be tested under the installed service account. A healthy listener does not prove an agent can authenticate or use a tool supplied by a closed application. Existing detached-session expiry and owner rollover policies remain relevant; this design does not promise immortal processes.</p>
+<h2 id="3-share-the-session-keep-presentation-local">3. Share the Session, keep presentation local</h2>
+<p><strong>Open to observe. Choose “Use here” to take control.</strong> Opening a phone, rotating it or showing its keyboard must not resize Desktop's TUI. Loopflow's existing wire already distinguishes input control from geometry/color ownership and supports passive observation. One PTY still has one canonical geometry. A passive phone pans or scales that screen; taking geometry causes the program to reflow for everyone. <a href="research-shared-sessions.md">Shared-session research</a></p>
+<p>Keep tabs, split ratios, font size, zoom, search and scroll position on each device. Reconnection must not steal control from a device that took over more recently. Input accepted before takeover may execute; takeover cannot retract bytes already delivered.</p>
+<p>There must also be <strong>one terminal-query responder</strong>. Current code uses the headless owner when no input controller exists and the controlling renderer otherwise, even though geometry can belong elsewhere. Prefer a stable host responder if its emulation coverage is sufficient; otherwise make responder election explicit. Two renderers must never both answer a device query or replay old responses. <a href="../rust/loopflow/src/transport/output.rs">Output processing</a></p>
+<p>Native Swift provides the existing open-Task list. Tapping a Task opens its Session terminal, with usable, editable input. No intermediate Task details, changes or checks screen is required. A separate native composer is outside the minimum scope. Input claims and geometry still require a protocol decision.</p>
+<h2 id="4-three-recovery-contracts-not-one">4. Three recovery contracts, not one</h2>
+<table>
+<thead>
+<tr>
+<th>Stream</th>
+<th>Current foundation</th>
+<th>Remote contract to establish</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Work state</td>
+<td>Watches emit complete changed readings</td>
+<td>Fresh authoritative snapshot plus ordered updates; label cached data. Current store revisions are not an event replay log.</td>
+</tr>
+<tr>
+<td>Terminal output</td>
+<td>Per-viewer byte resume: 60 seconds, 1 MiB spool</td>
+<td>Resume only within the same stream generation and bounds; otherwise install a fresh screen snapshot.</td>
+</tr>
+<tr>
+<td>Semantic commands</td>
+<td>Existing operation-specific behavior</td>
+<td>Durable request identity, acceptance/result lookup and explicit outcome-unknown state.</td>
+</tr>
+</tbody>
+</table>
+<p>Terminal snapshots currently omit images and bound retained history. A fresh screen is not a complete activity transcript. An interrupted socket says nothing definitive about whether a command ran. <a href="../rust/loopflow/src/transport/README.md">Transport contract</a></p>
+<p>For semantic actions such as starting work, persist request identity and reconcile it to the accepted Process/Session. Reusing a request ID with different content must fail. Acceptance deduplication still does not guarantee exactly-once arbitrary external side effects; crashes before or after dispatch need recoverable admission and outcome reconciliation.</p>
+<p><strong>Never automatically resend raw keys, paste or Enter after uncertainty.</strong> Terminal input has no general operation result to query. Preserve the last screen visibly as stale, reacquire attachment and control, then let the person decide what to type. Backpressure must disconnect a slow viewer without blocking execution or Desktop. <a href="research-recovery.md">Recovery research</a></p>
+<h2 id="5-choose-the-application-contract-before-the-carrier">5. Choose the application contract before the carrier</h2>
+<p>Use two logical surfaces: typed Work operations/subscriptions and Session attachment/control/output. Reuse existing Rust operations; do not publish arbitrary CLI argv as the permanent application contract. The typed write surface still needs an inventory of missing mobile operations. A generic argv adapter already existed in lfd's history.</p>
+<p><strong>Recommended first transport experiment: HTTPS/WSS through host Tailscale Serve.</strong> It fits native app networking and ordinary Mac Tailscale installations. Compare the same operations over SSH before making the transport commitment. SSH can carry an application protocol and connect to a persistent server; it does not imply a serverless design. <a href="https://wezterm.org/multiplexing.html">WezTerm multiplexing</a></p>
+<p>Handshake on Machine identity, API major/minor or equivalent compatibility range, and capabilities before attachment. Negotiate supported operations rather than relying on matching app build numbers. The phone, gateway and still-running owners can be three versions. Define that policy before the first independent mobile release. Exact compatibility duration remains open. <a href="research-protocol.md">Protocol research</a></p>
+<p>Rex's control/data separation, bootstrap and sequenced events, explicit ownership and scoped terminal connection tickets are the closest API reference. Borrow the contract patterns; retain Loopflow identities and behavior. Public documentation does not prove a complete reusable terminal wire implementation or hands-on iOS experience. <a href="https://www.superlogical.com/rex/docs/reference/api">Rex API</a></p>
+<h2 id="6-automatic-setup-with-explicit-trust">6. Automatic setup with explicit trust</h2>
+<p><strong>Enable phone access → scan once → reconnect automatically.</strong> The host detects its installed Tailscale variant, signed-in state, available private Serve endpoint and running Machine. The phone validates the actual connection; host readiness alone cannot prove phone reachability.</p>
+<p>Proposed QR: endpoint, expected Machine ID, protocol version and a short-lived single-use pairing ticket. Exchange it for a revocable per-phone credential stored in Keychain. No tailnet admin key, provider credential or permanent bearer credential in the QR. Revoking access closes active streams as well as rejecting future requests.</p>
+<p>Tailscale controls network reachability; application pairing controls access to a particular Machine. Serve's identity headers are useful context but do not isolate a loopback backend from other local OS users. Require application authentication there too. Prefer a dedicated private Serve port, preserve unrelated routes, and never enable Funnel for phone access. Serve/Funnel exposure applies to a whole port. <a href="research-trust-setup.md">Trust/setup research</a>, <a href="https://tailscale.com/docs/features/tailscale-serve">Serve</a>, <a href="https://tailscale.com/docs/features/tailscale-funnel">Funnel</a></p>
+<p>Automatic setup cannot silently complete SSO, grant VPN consent, change organizational policy or wake a host. Tailscale offers iOS Shortcuts device discovery, but that does not establish a direct in-process enumeration API for Loopflow. QR handoff keeps setup independent of that question. Ordinary SSH still needs server/key setup; Tailscale SSH server support excludes the usual Mac GUI variants. <a href="https://tailscale.com/docs/features/mac-ios-shortcuts">Shortcuts</a>, <a href="https://tailscale.com/docs/features/tailscale-ssh">Tailscale SSH</a></p>
+<h2 id="7-make-the-terminal-excellent-on-an-actual-phone">7. Make the terminal excellent on an actual phone</h2>
+<p>Keep terminal rendering independent of transport. The host owns the PTY; the Swift app receives bytes and sends input. Existing Loopflow GhosttyKit is macOS-only. Upstream libghostty-vt building for iOS does not itself supply UIKit input and Metal rendering, and its API remains in development. <a href="../swift/Package.swift">Swift manifest</a>, <a href="https://ghostty.org/docs/install/release-notes/1-4-0#libghostty">Ghostty library status</a></p>
+<p>Start a device spike with <strong>Lakr233/libghostty-spm</strong>: it offers host-managed I/O, native wrappers and UIKit input. Compare Termini's smaller custom-transport controller; study Rootshell and gterm for complete mobile interaction. Use SwiftTerm as an accessibility/input benchmark. These are candidates, not a measured ranking. <a href="research-native-mobile.md">Native-mobile research</a></p>
+<p>Prove IME marked text, dictation, multiline paste, hardware keys, selection, VoiceOver, keyboard resizing and hidden-surface power behavior. Rendering a demo is insufficient. A phone file path is not a remote file attachment; defer transfer or implement it explicitly. Preserve renderer reply suppression during replay.</p>
+<p>The MVP remains useful entirely in the foreground. Background completion alerts require a separate APNs delivery design, possibly deployed beside the future hub. No background socket promise is implied. The selected prototype opens existing Tasks directly into editable Session terminals. Wave navigation, shells and other pane types are outside the MVP. The HTML simulates behavior and does not establish native-device quality. <a href="mobile-prototypes.html">Selected MVP prototype</a></p>
+<h2 id="what-to-study-and-what-each-reference-resolves">What to study, and what each reference resolves</h2>
+<table>
+<thead>
+<tr>
+<th>Reference</th>
+<th>Study for</th>
+<th>Do not inherit automatically</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rex</td>
+<td>Control/data API, ownership, bootstrap, server modes</td>
+<td>Its full window/block model or embedded Tailscale.</td>
+</tr>
+<tr>
+<td>Paseo</td>
+<td>Detached workers, replay, geometry claims, hub permission boundary</td>
+<td>Relay, provider runtime or separate workflow engine.</td>
+</tr>
+<tr>
+<td>tmux / iTerm2</td>
+<td>Native presentation over persistent terminal state</td>
+<td>A second session hierarchy under Loopflow.</td>
+</tr>
+<tr>
+<td>WezTerm</td>
+<td>SSH to a persistent mux, domains and version compatibility</td>
+<td>Requirement to use SSH or its compatibility policy.</td>
+</tr>
+<tr>
+<td>Mosh / Eternal Terminal</td>
+<td>Screen convergence versus retained stream recovery</td>
+<td>New UDP protocol or predictive echo in the MVP.</td>
+</tr>
+<tr>
+<td>Apple / Tailscale / systemd</td>
+<td>Real lifecycle, identity and installation constraints</td>
+<td>“Background” as a guarantee of continuous availability.</td>
+</tr>
+<tr>
+<td>Ghostty wrappers / SwiftTerm</td>
+<td>Input, rendering, accessibility and packaging</td>
+<td>Claims of device quality without measurement.</td>
+</tr>
+</tbody>
+</table>
+<p>Detailed primary-source comparisons and proof limits live in the seven research notes below. None of this research ran a native build, configured a service, or demonstrated end-to-end mobile connectivity.</p>
+<h2 id="prove-these-boundaries-first">Prove these boundaries first</h2>
+<ol>
+<li><strong>Two clients, one Session.</strong> Phone observes, takes control, opens its keyboard and returns control. One provider, one geometry, one query responder.</li>
+<li><strong>Kill the frontend during work.</strong> Same provider and Graph continue under real launchd and systemd. Reconnect to the same identities.</li>
+<li><strong>Lose the reply after submission.</strong> Semantic command lookup finds its original acceptance. Raw input is never silently replayed. Reconnect beyond terminal retention gets a fresh screen.</li>
+<li><strong>Clean-host pairing.</strong> Ordinary Mac Tailscale variants and Linux; existing Serve routes remain intact. Test cellular access, logout, certificate renewal and revocation.</li>
+<li><strong>Update with a busy owner.</strong> Mobile/gateway/owner version skew and schema floors remain explicit. No forced duplicate conversation.</li>
+<li><strong>Paper-test the future hub.</strong> Duplicate event, offline Machine, changed owner and lost receipt. Fixed execution recipient and ordinary transfer preserve authority. Build no hub feature to run this exercise.</li>
+</ol>
+<h2 id="research-record">Research record</h2>
+<ul>
+<li><a href="research-authority-hub.md">Authority and future hub</a></li>
+<li><a href="research-runtime-lifecycle.md">Runtime lifecycle and installation</a></li>
+<li><a href="research-shared-sessions.md">Shared Sessions and terminal ownership</a></li>
+<li><a href="research-recovery.md">Reconnection and uncertain delivery</a></li>
+<li><a href="research-protocol.md">Application protocol and transport</a></li>
+<li><a href="research-trust-setup.md">Trust, pairing and automatic setup</a></li>
+<li><a href="research-native-mobile.md">Native mobile and terminal libraries</a></li>
+<li><a href="lfd-history.md">Prior lfd attempts</a></li>
+</ul>
+<p>Selected direction records Jack Heart's statements. Recommendations and experiments remain unapproved architecture choices. Research is source review, not evidence that the proposed system is implemented.</p>
+<h2 id="page-verification">Page verification</h2>
+<p>Chrome/Playwright checks covered all three architecture views, six scenario selections, component inspection, and narrow dark-mode layout. The three prototypes passed their simulated control, input, paste, disconnect/reconnect and pairing flows. All five pages have valid local file links and no external runtime dependencies. Screenshots were visually inspected. These checks validate the HTML studies, not native terminal behavior or network/process survival.</p>
+<h2 id="decisions-still-open">Decisions still open</h2>
+<ol>
+<li>First carrier to prototype: <strong>a. HTTPS/WSS + Serve</strong> (recommended); <strong>b. SSH carrying the same application operations</strong>. Host Tailscale is already selected.</li>
+<li>Initial hosting promise: <strong>a. personal Mac while logged in plus always-on Linux</strong>; <strong>b. also unattended Mac before login</strong>, requiring separate packaging and credential proof.</li>
+<li>Session input handoff and geometry when the phone opens a Task viewed on Desktop. <strong>Existing open Tasks → editable Session is selected.</strong></li>
+<li>First-release alerts: <strong>a. foreground only</strong>; <strong>b. background push</strong>, with a separately scoped provider service. The future webhook hub remains optional either way.</li>
+</ol>
+</main>
+<footer class="footer">Research and proposals, not an implemented service. Built from mobile-system.md and seven linked research notes.<a href="lfd-history.md">lfd history</a><a href="#map">Back to map ↑</a></footer>
+</div>
+<script>
+const nodes={
+phone:{title:'Swift terminal on iPhone / iPad',tag:'Proposed client · selected direction',type:'proposed',short:'Native navigation + UIKit / Ghostty surface',body:'The phone renders the remote terminal and owns its local zoom, selection, scroll position and layout. It initially observes the existing Session. Direct keystrokes are immediate input once control is granted; they are never automatically replayed after a disconnect.',src:'research-native-mobile.md',ref:'Terminal and native-platform research'},
+desktop:{title:'Desktop / CLI',tag:'Existing clients',short:'Local Rust calls · Session attachments',body:'Desktop already reads and writes through shared Rust and uses the CLI for other operations. Its private GUI automation socket lives with the application. It is not the mobile server. Local clients can keep these paths while a separate remote adapter is introduced.',src:'../swift/LoopflowMac/Services/RegistryQueryLocal.swift',ref:'Current local query adapter'},
+remote:{title:'Remote CLI',tag:'Existing client',short:'OpenSSH → destination’s lf',body:'Existing Machine routing runs commands on the selected OS account and data directory through SSH. It verifies the destination Machine identity. There is no native iOS SSH integration or general mobile API in this checkout.',src:'../docs/architecture/machines.md',ref:'Current Machine routing'},
+network:{title:'Host Tailscale + Serve',tag:'External component · proposed integration',type:'proposed',short:'Private HTTPS/WSS · no embedded Loopflow node',body:'Use the host’s existing Tailscale installation. Serve supplies private HTTPS forwarding to the local Machine service. Application credentials still select and authorize the specific Machine. Configure a dedicated private endpoint without altering unrelated Serve/Funnel routes. SSH remains an alternative carrier to compare.',src:'research-trust-setup.md',ref:'Trust, variants and setup research'},
+api:{title:'Private Machine service',tag:'Proposed · independent of Desktop',type:'proposed',short:'Authenticate · typed operations · attach / stream',body:'This is the server the phone connects to: one service for the owning OS account and Loopflow data directory, on a personal Mac or remote host. It reuses existing operations and Session owners. It must not become a second Graph engine. Network connections are disposable; durable admission receipts belong with Machine-owned state.',src:'research-protocol.md',ref:'Application protocol research'},
+core:{title:'Existing Rust operations',tag:'Existing application core',short:'Read · write · watch · launch / resume',body:'Reuse the operations shared by CLI and Desktop. Work watches currently emit complete changed readings, not a replayable event log. The remote surface needs a capability inventory and durable admission for the semantic mutations it exposes. Add adapters around this model rather than another Work database.',src:'research-recovery.md',ref:'Recovery and command-delivery research'},
+store:{title:'Machine records + credentials',tag:'Existing authority',short:'SQLite · local files · provider history references',body:'Execution facts, local locks and credentials belong to the Machine. Planning intent keeps its configured provider or journal authority. The phone caches views; the future hub stores its own inbox and dispatch receipts. Neither becomes a replica that can independently execute the Machine’s work.',src:'research-authority-hub.md',ref:'Authority research'},
+owners:{title:'Session owners / Graph runners',tag:'Existing execution · isolation to prove',short:'Provider identity · PTYs · retained screen state',body:'Existing detached Session owners keep execution across viewer loss; Graph runners own their step execution. Putting them under a new supervised service creates another boundary: setsid() does not escape Linux systemd cgroups. Service-restart survival needs explicit supervision isolation on each OS, plus protocol and store compatibility across updates.',src:'research-runtime-lifecycle.md',ref:'Lifecycle and supervision research'},
+programs:{title:'Agents, shells and tools',tag:'Existing processes',short:'Run on this host · use this account’s environment',body:'The host provides filesystem access, executables and provider authentication. A closed Desktop can remove client-contributed browser or computer tools even while the agent process survives. A service health check must distinguish networking readiness from the ability to perform real work.',src:'research-runtime-lifecycle.md',ref:'Credentials and tool lifetimes'},
+providers:{title:'GitHub / Linear',tag:'External providers',short:'Public signed webhooks',body:'Public providers require reachable webhook ingress and have different retry policies. The future hub verifies delivery signatures and stores a receipt before acknowledging. Refresh events and explicit action requests need different stale-event handling; a webhook is not itself authority to execute.',src:'research-authority-hub.md',ref:'Provider evidence and delivery behavior'},
+hub:{title:'Optional public hub',tag:'Future · not required for mobile',type:'future',short:'Durable inbox + authorized automation client',body:'Receive verified events, retain them while a Machine is offline, and optionally dispatch an existing operation under an explicit execution grant. Keep the existing Graph runner as the step engine. No terminal relay, checkout, or duplicate execution database is required at the hub.',src:'research-authority-hub.md',ref:'Future hub alternatives'},
+dispatch:{title:'One selected Machine',tag:'Future dispatch contract',type:'future',short:'Machine initiates outbound link to hub',body:'The Machine opens an authenticated outbound connection; queued events and scoped requests return over it to the same operation boundary. Event refresh can fan out; execution selects one recipient. A timeout or an offline owner never authorizes failover. Task ownership today is not a distributed lock.',src:'research-authority-hub.md',ref:'Single-recipient dispatch and offline behavior'}
+};
+let mode='mobile';
+function node(id){const n=nodes[id];return `<button class="node ${n.type||''}" data-node="${id}" aria-pressed="false"><span class="tag">${n.tag}</span><strong>${n.title}</strong><small>${n.short}</small></button>`}
+const captions={today:'Today, Desktop uses local Rust operations and remote CLI uses SSH. Detached execution owners already exist. There is no general network Machine API or native iOS app target.',mobile:'Proposed: the phone reaches a standalone Machine service through the host’s Tailscale. Local clients keep their existing Rust paths initially. Solid components exist; dashed components are work to add.',hub:'Future: direct phone access is unchanged. A separate public hub receives webhooks. Machines connect outbound to collect events or explicitly authorized commands; terminal traffic never passes through the hub.'};
+function renderMap(){
+ document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode)));
+ document.getElementById('map-caption').textContent=captions[mode];
+ const today=mode==='today';
+ document.getElementById('diagram').innerHTML=`<div class="row">${node(today?'desktop':'phone')}${node(today?'remote':'desktop')}</div><div class="row"><div class="connector">${today?'Rust FFI + CLI':'Phone → private tailnet endpoint'}</div><div class="connector">${today?'OpenSSH → destination lf':'Local Rust operations / owner sockets'}</div></div><div class="host"><div class="host-title"><strong>${today?"ONE LOOPFLOW MACHINE":"MAC OR LINUX HOST"}</strong><span>${today?"One OS account + data directory":"Tailscale is shared by the host; the service belongs to one account / data directory"}</span></div>${today?'':`<div class="entry">${node('network')}<div class="connector" aria-hidden="true"></div>${node('api')}</div><div class="connector">Inside this Loopflow Machine: service delegates to existing operations and owner attachments<br>Desktop / CLI can continue calling them locally</div>`}<div class="branch"><div>${node('core')}<div class="connector">read / commit local facts</div>${node('store')}</div><div>${node('owners')}<div class="connector">own execution and output</div>${node('programs')}</div></div><p class="footnote">Operations launch or resume owners; owner discovery and attachment preserve the same Session identity.${today?'':' Service restart survival is a target to prove, not a current guarantee.'}</p></div>${mode==='hub'?`<div class="future-lane"><h3>FUTURE PUBLIC INGRESS · separate from the private mobile endpoint</h3><div class="hub-grid">${node('providers')}<div class="connector">HTTPS</div>${node('hub')}<div class="connector">events / requests</div>${node('dispatch')}</div><p class="footnote">Connection initiation: Machine → hub. Delivery: hub → Machine over that connection. No hub dependency for direct phone access.</p></div>`:''}`;
+ document.querySelectorAll('[data-node]').forEach(b=>b.addEventListener('click',()=>selectNode(b.dataset.node)));
+ document.querySelector('#scenario option[value="webhook"]').disabled=mode!=='hub';
+ if(mode!=='hub'&&document.getElementById('scenario').value==='webhook')document.getElementById('scenario').value='attach';
+ selectNode(today?'owners':'api');renderScenario();
+}
+function selectNode(id){const n=nodes[id];document.querySelectorAll('[data-node]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.node===id)));document.querySelectorAll('.node').forEach(b=>b.classList.toggle('selected',b.dataset.node===id));document.getElementById('detail-title').textContent=n.title;document.getElementById('detail-body').textContent=n.body;document.getElementById('detail-source').innerHTML=`<a href="${n.src}">${n.ref} ↗</a>`}
+const scenarios={
+attach:{title:'Observe the same Session; create no new execution.',body:'The paired phone authenticates, checks Machine identity and capabilities, then attaches without input or geometry ownership. A fresh terminal snapshot establishes the screen; later output follows in order. Desktop stays in control.',path:'Phone → Tailscale → Machine service → existing owner → snapshot + live output',ids:['phone','network','api','owners']},
+takeover:{title:'Input control and terminal size are separate claims.',body:'“Use here” explicitly requests control. The host revokes the old input claim before accepting new input. Taking geometry separately changes the one canonical PTY size. Both viewers see the same running program; local tabs and scroll positions remain independent. Exactly one responder answers terminal queries.',path:'Observe → request control / geometry → host acknowledgement → input enabled',ids:['phone','desktop','owners']},
+disconnect:{title:'Execution continues; uncertain input is not replayed.',body:'The phone keeps a visibly stale screen and disables sending. Reconnect resumes retained terminal bytes only within the same owner/stream bounds (currently 60 seconds and 1 MiB); otherwise it requests a fresh screen. Control must be reacquired without stealing a newer takeover. Semantic command results are reconciled separately.',path:'Connection lost → preserve view → authenticate → resume or snapshot → confirm authority',ids:['phone','api','owners']},
+restart:{title:'Restart the frontend, preserve execution — this must be proved.',body:'The intended boundary leaves Session owners and Graph runners running while the network service restarts. Today’s setsid() alone does not isolate them from systemd cgroup cleanup. Install separate execution supervision and test the real Mac and Linux lifecycle before promising uninterrupted work.',path:'Frontend stops → execution stays owned elsewhere → frontend reconnects to existing owners',ids:['api','owners','programs']},
+reboot:{title:'History survives a reboot; processes do not.',body:'On a supported boot/login path, the service reconciles saved records and missing owners. Resuming a conversation is distinct from restoring a running process. Interrupted input is flagged and never blindly replayed. Personal Mac LaunchAgents and ordinary Mac Tailscale apps require login; unattended hosting needs a different installation mode.',path:'Processes gone → boot / login → reconcile records → explicit recovery',ids:['network','api','store','owners']},
+webhook:{title:'Duplicate receipt, one dispatch recipient, no automatic failover.',body:'The future hub verifies and durably records the delivery, deduplicates it, and evaluates the configured authorized action. It targets one Machine and retains the same action identity through retries. An offline Machine stays queued. A lost response triggers receipt lookup; it does not send the same work to another host.',path:'Provider → verified inbox → one action ID → selected Machine → acceptance / result',ids:['providers','hub','dispatch','core','store']}
+};
+function renderScenario(){let s=scenarios[document.getElementById('scenario').value];document.querySelectorAll('.node').forEach(b=>b.classList.toggle('affected',mode!=='today'&&s.ids.includes(b.dataset.node)));if(mode==='today'){document.getElementById('scenario-title').textContent='Today’s foundation, not a shipped mobile service.';document.getElementById('scenario-body').textContent='Local viewers can detach and reattach to retained owners; remote commands use SSH. The scenarios in the other views describe the proposed mobile contract. Existing output recovery is bounded, and a new installed service would require explicit lifecycle isolation.';document.getElementById('scenario-path').textContent='Existing: CLI / Desktop → Rust operations → detached Session owners';return}document.getElementById('scenario-title').textContent=s.title;document.getElementById('scenario-body').textContent=s.body;document.getElementById('scenario-path').textContent=s.path}
+document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;renderMap()}));document.getElementById('scenario').addEventListener('change',renderScenario);renderMap();
+document.querySelectorAll('.reading table').forEach(t=>{const wrap=document.createElement('div');wrap.className='table-wrap';t.before(wrap);wrap.append(t)});
+</script>
+</body></html>

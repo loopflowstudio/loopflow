@@ -1,0 +1,10 @@
+/* Prototype styles sourced from Desktop's bundled faces and Loopflow Light/Dark catalogue. */
+@font-face{font-family:Lato;src:url('../swift/Loopflow/Fonts/Lato-Regular.ttf');font-weight:400;font-display:swap}
+@font-face{font-family:Lato;src:url('../swift/Loopflow/Fonts/Lato-Bold.ttf');font-weight:700;font-display:swap}
+@font-face{font-family:Cormorant;src:url('../swift/Loopflow/Fonts/CormorantGaramond-Medium.otf');font-weight:500;font-display:swap}
+@font-face{font-family:JetBrains;src:url('../swift/Loopflow/Fonts/JetBrainsMono-Regular.ttf');font-weight:400;font-display:swap}
+:root{color-scheme:light;--background:#faf8f5;--surface:#fffdf9;--surface-muted:#f3eee7;--surface-element:#ece6dd;--border:#e6dfd6;--border-active:#c2b5a6;--border-strong:#d6ccc0;--ink:#2a2624;--secondary:#5f5752;--muted:#685f58;--accent:#722f37;--accent-text:#faf8f5;--action:#722f37;--selected:#e1d9ce;--working:#3269aa;--working-fill:#eaedf0;--available:#5d3539;--available-fill:#efeae8;--warning:#87601b;--warning-fill:#f4eee4;--success:#3b734c;--failure:#b0443b;--terminal-bg:#faf8f5;--terminal-ink:#2a2624}
+:root[data-theme="dark"]{color-scheme:dark;--background:#2b3036;--surface:#343b44;--surface-muted:#3c4550;--surface-element:#444e59;--border:#46505b;--border-active:#6b7683;--border-strong:#56606b;--ink:#f5f1ea;--secondary:#c8c1b8;--muted:#c7bfb7;--accent:#722f37;--accent-text:#faf8f5;--action:#cebfa9;--selected:#515a65;--working:#a5c0e1;--working-fill:#2c3541;--available:#c8b9c1;--available-fill:#33363c;--warning:#d3bb8e;--warning-fill:#353634;--success:#a7c5af;--failure:#e3b2ae;--terminal-bg:#2b3036;--terminal-ink:#f5f1ea}
+
+:root{--titlebar:#722f37;--keyboard-bg:#d1d3d9;--keyboard-key:#fff;--keyboard-special:#adb2bc;--keyboard-ink:#161616;--keyboard-shadow:#8e939c}
+:root[data-theme="dark"]{--titlebar:#443036;--keyboard-bg:#2c2c2e;--keyboard-key:#636366;--keyboard-special:#444447;--keyboard-ink:#fff;--keyboard-shadow:#151515}

@@ -543,9 +543,12 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(prepared.config.agent(), inspection.config.agent());
+            assert_eq!(
+                prepared.config.agent().unwrap(),
+                inspection.config.agent().unwrap()
+            );
             assert!(prepared.config.chrome);
-            inspection.config.agent().to_owned()
+            inspection.config.agent().unwrap().to_owned()
         };
         {
             let _profile = crate::lf::commands::graph::EnvVarGuard::set(

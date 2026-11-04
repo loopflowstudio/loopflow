@@ -110,7 +110,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         &personal,
         None,
     );
-    let (provider, _) = parse_agent(&agent);
+    let provider = agent.ok().map(|agent| parse_agent(&agent).0);
     let machine_id = store
         .task_checkout(&task.id)
         .await

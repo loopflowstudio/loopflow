@@ -197,7 +197,7 @@
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
-          "provider": "codex",
+          "provider": null,
           "owner": {
             "person": "Jack Heart",
             "person_key": "jack@loopflow.studio",

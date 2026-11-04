@@ -108,7 +108,7 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Agents Loopflow can drive, in the order it prefers them.
+/// Agents Loopflow can drive; listing order grants no preference.
 const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
 
 /// An explicit invocation-wide choice; definitions and defaults never set it.
@@ -142,18 +142,26 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
     }
 }
 
-/// Agent used when neither the caller, config, nor skill chooses one: the
-/// first known agent installed on this machine.
-pub fn default_agent() -> &'static str {
+/// Select automatically only when exactly one supported harness is installed.
+pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
     let is_installed = |agent: &str| agent == KNOWN_AGENTS[0];
     #[cfg(not(test))]
     let is_installed = check_cli_available;
-    installed_agent(is_installed).unwrap_or(KNOWN_AGENTS[0])
+    installed_agent(is_installed)
 }
 
 fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    KNOWN_AGENTS.into_iter().find(|agent| is_installed(agent))
+    let mut installed = KNOWN_AGENTS.into_iter().filter(|agent| is_installed(agent));
+    let only = installed.next()?;
+    installed.next().is_none().then_some(only)
+}
+
+pub(crate) fn select_agent(agent: Option<&str>) -> Result<&str, LoadError> {
+    match agent {
+        Some(agent) => Ok(agent),
+        None => default_agent().ok_or(LoadError::AgentSelection),
+    }
 }
 
 /// Authority is independent of the declaration's scope and target.
@@ -185,12 +193,8 @@ pub struct SummaryConfig {
     pub path: String,
     #[serde(default)]
     pub tokens: Option<usize>,
-    #[serde(default = "default_summary_agent")]
-    pub agent: String,
-}
-
-fn default_summary_agent() -> String {
-    default_agent().to_string()
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 /// Interactive session launch configuration.
@@ -485,12 +489,12 @@ pub struct LogConfig {
 }
 
 impl Config {
-    /// Return the configured agent or Loopflow's compiled default.
-    pub fn agent(&self) -> &str {
-        self.agent
-            .as_deref()
-            .or(self.default_agent.as_deref())
-            .unwrap_or_else(|| default_agent())
+    /// Resolve authored preferences, or the sole installed harness.
+    ///
+    /// # Errors
+    /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
+    pub fn agent(&self) -> Result<&str, LoadError> {
+        select_agent(self.agent.as_deref().or(self.default_agent.as_deref()))
     }
 }
 
@@ -824,7 +828,7 @@ mod tests {
     #[test]
     fn default_agent_is_the_one_installed() {
         assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
-        assert_eq!(installed_agent(|_| true), Some("codex"));
+        assert_eq!(installed_agent(|_| true), None);
         assert_eq!(installed_agent(|_| false), None);
     }
 
@@ -913,7 +917,7 @@ mod tests {
     fn default_config_values() {
         let config = Config::default();
         assert!(config.agent.is_none());
-        assert_eq!(config.agent(), "codex");
+        assert_eq!(config.agent().unwrap(), "codex");
         assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
         assert!(config.docs.is_empty());
@@ -946,7 +950,7 @@ chrome: true
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.agent.as_deref(), Some("codex:o3"));
-        assert_eq!(config.agent(), "codex:o3");
+        assert_eq!(config.agent().unwrap(), "codex:o3");
         assert!(config.yolo);
         assert!(config.chrome);
     }
@@ -1049,9 +1053,9 @@ summaries:
         assert_eq!(config.summaries.len(), 2);
         assert_eq!(config.summaries[0].path, "src/");
         assert_eq!(config.summaries[0].tokens, Some(5000));
-        assert_eq!(config.summaries[0].agent, "claude");
+        assert_eq!(config.summaries[0].agent.as_deref(), Some("claude"));
         assert_eq!(config.summaries[1].path, "tests/");
-        assert_eq!(config.summaries[1].agent, default_agent());
+        assert_eq!(config.summaries[1].agent, None);
     }
 
     #[test]
@@ -1141,14 +1145,16 @@ release:
             super::settings::resolve(&config, Some(&crate::graph::Skill::named("implement")))
                 .unwrap()
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "claude:opus"
         );
         assert_eq!(
             super::settings::resolve(&config, Some(&crate::graph::Skill::named("design")))
                 .unwrap()
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "claude"
         );
         std::fs::write(&wave, "workflow: code\n").unwrap();

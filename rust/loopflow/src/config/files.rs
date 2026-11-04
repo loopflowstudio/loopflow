@@ -741,7 +741,8 @@ mod tests {
             crate::config::load_config(Some(repo.path()))
                 .unwrap()
                 .unwrap()
-                .agent(),
+                .agent()
+                .unwrap(),
             "codex"
         );
         assert!(std::process::Command::new("git")
@@ -756,7 +757,8 @@ mod tests {
             crate::config::load_config(Some(repo.path()))
                 .unwrap()
                 .unwrap()
-                .agent(),
+                .agent()
+                .unwrap(),
             "claude"
         );
     }

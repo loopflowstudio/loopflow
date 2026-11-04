@@ -447,11 +447,9 @@ pub fn resolve_layers(
     // Each block shares provenance; specificity orders blocks within a source/scope.
     let mut candidates = Vec::new();
     let mut defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    insert(
-        &mut defaults,
-        &["default_agent"],
-        super::default_agent().into(),
-    );
+    if let Some(agent) = super::default_agent() {
+        insert(&mut defaults, &["default_agent"], agent.into());
+    }
     insert(
         &mut defaults,
         &["graph"],
@@ -602,6 +600,11 @@ pub fn resolve_layers(
             entry.candidates.push(SettingCandidate {
                 key: key.clone(),
                 value: value.clone(),
+                locator: if key == "default_agent" && candidate.source == ConfigSource::Builtin {
+                    "PATH (only installed harness)".into()
+                } else {
+                    candidate.locator.clone()
+                },
                 ..candidate.clone()
             });
             entry.value = if super::catalog::definition(&key).is_some_and(|definition| {
@@ -675,7 +678,13 @@ pub fn resolve_layers(
     }
     // Config keeps the two authored keys distinct. Inspection's effective agent
     // includes both classes, with every fallback below every explicit choice.
-    let mut agent = explanations["default_agent"].clone();
+    let mut agent = explanations
+        .get("default_agent")
+        .cloned()
+        .unwrap_or(EffectiveSetting {
+            value: Value::Null,
+            candidates: Vec::new(),
+        });
     if let Some(choices) = explanations.remove("agent") {
         agent.value = choices.value;
         agent.candidates.extend(choices.candidates);
@@ -878,7 +887,7 @@ mod tests {
                 &format!("skills: {{implement: {{{key}: codex}}}}"),
             );
             let resolved = resolve_layers(&[personal], Some(&skill)).unwrap();
-            assert_eq!(resolved.config.agent(), expected);
+            assert_eq!(resolved.config.agent().unwrap(), expected);
             assert_eq!(resolved.settings["agent"].value.as_str(), Some(expected));
             assert_eq!(
                 resolved.settings["agent"].candidates.last().unwrap().key,
@@ -900,7 +909,8 @@ mod tests {
             resolve_layers(&[personal.clone(), repo], Some(&skill))
                 .unwrap()
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "claude"
         );
         let repo = layer(
@@ -909,7 +919,7 @@ mod tests {
             "graphs: {release: {steps: {write-code: {default_agent: claude}}}}",
         );
         let resolved = resolve_layers(&[personal, repo], Some(&skill)).unwrap();
-        assert_eq!(resolved.config.agent(), "codex");
+        assert_eq!(resolved.config.agent().unwrap(), "codex");
         assert!(resolved.config.agent.is_none());
         assert_eq!(
             resolved.settings["agent"].candidates.last().unwrap().key,
@@ -938,7 +948,8 @@ mod tests {
                 resolve_layers(&layers[..count], Some(&occurrence()))
                     .unwrap()
                     .config
-                    .agent(),
+                    .agent()
+                    .unwrap(),
                 expected
             );
         }
@@ -950,7 +961,8 @@ mod tests {
             resolve_layers(&layers, Some(&occurrence()))
                 .unwrap()
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "claude:environment"
         );
         let _cli = select_invocation(serde_yaml_ng::from_str("default_agent: codex:cli").unwrap());
@@ -958,7 +970,8 @@ mod tests {
             resolve_layers(&layers, Some(&occurrence()))
                 .unwrap()
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "codex:cli"
         );
         let mut skill = occurrence();
@@ -967,7 +980,8 @@ mod tests {
             resolve_layers(&layers, Some(&skill))
                 .unwrap()
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "claude:choice"
         );
         let _force = select_invocation(serde_yaml_ng::from_str("agent: codex:forced").unwrap());
@@ -975,7 +989,8 @@ mod tests {
             resolve_layers(&layers, Some(&skill))
                 .unwrap()
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "codex:forced"
         );
     }
@@ -997,10 +1012,14 @@ mod tests {
             Some(&skill),
         )
         .unwrap();
-        assert_eq!(resolved.config.agent(), "claude");
+        assert_eq!(resolved.config.agent().unwrap(), "claude");
         assert_eq!(skill.docs, Some(vec![]));
         assert_eq!(
-            resolve_layers(&[], Some(&skill)).unwrap().config.agent(),
+            resolve_layers(&[], Some(&skill))
+                .unwrap()
+                .config
+                .agent()
+                .unwrap(),
             "codex"
         );
     }
@@ -1041,7 +1060,7 @@ mod tests {
         let mut skill = Skill::named("kickoff");
         skill.agent = Some("claude".into());
         let selected = super::resolve(&general.config, Some(&skill)).unwrap();
-        assert_eq!(selected.config.agent(), "claude");
+        assert_eq!(selected.config.agent().unwrap(), "claude");
         assert_eq!(
             selected.settings["agent"].candidates.last().unwrap().source,
             ConfigSource::Builtin
@@ -1093,14 +1112,14 @@ mod tests {
             layer(ConfigSource::Personal, SettingScope::Repository, "agent: codex\nyolo: false"),
         ];
         let resolved = resolve_layers(&layers, Some(&skill)).unwrap();
-        assert_eq!(resolved.config.agent(), "codex");
+        assert_eq!(resolved.config.agent().unwrap(), "codex");
         assert!(!resolved.config.yolo);
         assert!(!resolved.config.chrome);
         let source = resolved.settings["agent"].candidates.last().unwrap();
         assert_eq!(source.locator, "Personal/Repository");
         assert_eq!(source.target, super::SettingTarget::General);
         let revealed = resolve_layers(&layers[..2], Some(&skill)).unwrap();
-        assert_eq!(revealed.config.agent(), "claude:sonnet");
+        assert_eq!(revealed.config.agent().unwrap(), "claude:sonnet");
         assert!(revealed.config.yolo);
     }
     #[test]
@@ -1112,17 +1131,23 @@ mod tests {
         );
         let _cli = select_invocation(serde_yaml_ng::from_str("agent: codex\nyolo: false").unwrap());
         let resolved = resolve_layers(&[], Some(&occurrence())).unwrap();
-        assert_eq!(resolved.config.agent(), "codex");
+        assert_eq!(resolved.config.agent().unwrap(), "codex");
         let _nested = select_invocation(serde_yaml_ng::from_str("{}").unwrap());
-        assert_eq!(resolve_layers(&[], None).unwrap().config.agent(), "codex");
+        assert_eq!(
+            resolve_layers(&[], None).unwrap().config.agent().unwrap(),
+            "codex"
+        );
         {
             let _nested =
                 select_invocation(serde_yaml_ng::from_str("agent: claude:sonnet").unwrap());
             let selected = resolve_layers(&[], None).unwrap();
-            assert_eq!(selected.config.agent(), "claude:sonnet");
+            assert_eq!(selected.config.agent().unwrap(), "claude:sonnet");
             assert!(!selected.config.yolo);
         }
-        assert_eq!(resolve_layers(&[], None).unwrap().config.agent(), "codex");
+        assert_eq!(
+            resolve_layers(&[], None).unwrap().config.agent().unwrap(),
+            "codex"
+        );
         assert_eq!(
             resolved.settings["agent"]
                 .candidates
@@ -1236,7 +1261,7 @@ mod tests {
                 "codex"
             };
             let inspected = super::resolve(&config, Some(&step.skill)).unwrap();
-            assert_eq!(inspected.config.agent(), expected);
+            assert_eq!(inspected.config.agent().unwrap(), expected);
             let prepared = crate::prompt::process::prepare_process_prompt(
                 &config,
                 crate::prompt::process::ProcessPromptInput {
@@ -1246,7 +1271,7 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(prepared.config.agent(), expected);
+            assert_eq!(prepared.config.agent().unwrap(), expected);
             assert_eq!(prepared.config.chrome, index % 2 != 0);
             assert_eq!(prepared.config.isolate, Some(index % 2 == 0));
         }
@@ -1276,7 +1301,7 @@ mod tests {
                 panic!("agent step")
             };
             let resolved = super::resolve(&config, Some(&step.skill)).unwrap();
-            assert_eq!(resolved.config.agent(), "codex");
+            assert_eq!(resolved.config.agent().unwrap(), "codex");
             assert_eq!(
                 resolved.settings["agent"].candidates.last().unwrap().source,
                 ConfigSource::Repository

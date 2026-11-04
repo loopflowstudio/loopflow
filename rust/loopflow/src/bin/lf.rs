@@ -617,7 +617,10 @@ fn print_task_snapshot(
             }
         };
         let branch = snapshot.branch.as_deref().unwrap_or("unplaced");
-        let body = format!("provider {}", snapshot.provider);
+        let body = format!(
+            "provider {}",
+            snapshot.provider.as_deref().unwrap_or("not selected")
+        );
         println!(
             "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}",
             snapshot.issue_identifier,

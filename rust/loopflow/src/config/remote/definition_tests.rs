@@ -39,7 +39,10 @@ fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
         },
     )
     .unwrap();
-    assert_eq!(prepared.config.agent(), inspection.config.agent());
+    assert_eq!(
+        prepared.config.agent().unwrap(),
+        inspection.config.agent().unwrap()
+    );
     assert_eq!(prepared.config.skip_permissions, inspection.config.yolo);
     assert_eq!(prepared.config.chrome, inspection.config.chrome);
     for path in &inspection.config.docs {
@@ -53,7 +56,7 @@ fn probe(repo: &Path) -> settings::ResolvedSettings {
     let inspected = crate::config::api::inspect(repo, None, Some("probe"), None, None).unwrap();
     assert_eq!(
         inspected[0]["settings"]["agent"]["value"],
-        resolved.config.agent()
+        resolved.config.agent().unwrap()
     );
     assert_eq!(
         inspected[0]["settings"]["yolo"]["value"],
@@ -80,19 +83,22 @@ fn forwarded_general_choice_excludes_executor_definition_preferences() {
     let _home = home(executor.path());
     let body = "---\n# independent preferences\nagent: claude:executor\nyolo: true\nchrome: true\n---\nExecutor instructions.\n";
     write(executor.path(), "skills/probe.md", body);
-    assert_eq!(probe(repo.path()).config.agent(), "claude:executor");
+    assert_eq!(
+        probe(repo.path()).config.agent().unwrap(),
+        "claude:executor"
+    );
     {
         let _profile = EnvVarGuard::set(
             remote::PROFILE_ENV,
             &serde_json::to_string(&profile).unwrap(),
         );
         let resolved = probe(repo.path());
-        assert_eq!(resolved.config.agent(), "codex:origin");
+        assert_eq!(resolved.config.agent().unwrap(), "codex:origin");
         assert!(!resolved.config.yolo);
         assert!(resolved.config.chrome);
         assert!(!executor.path().join(".lf/profile-retention.json").exists());
         remote::receive(Some(repo.path())).unwrap();
-        assert_eq!(probe(repo.path()).config.agent(), "codex:origin");
+        assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:origin");
         assert_eq!(
             std::fs::read_to_string(executor.path().join(".lf/skills/probe.md")).unwrap(),
             body
@@ -104,9 +110,12 @@ fn forwarded_general_choice_excludes_executor_definition_preferences() {
             .iter()
             .any(|entry| entry["receipt"]["status"] == "conflict"));
     }
-    assert_eq!(probe(repo.path()).config.agent(), "claude:executor");
+    assert_eq!(
+        probe(repo.path()).config.agent().unwrap(),
+        "claude:executor"
+    );
     remote::inspect(true, false).unwrap();
-    assert_eq!(probe(repo.path()).config.agent(), "codex:origin");
+    assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:origin");
     let retained = std::fs::read_to_string(executor.path().join(".lf/skills/probe.md")).unwrap();
     assert!(retained.contains("Executor instructions."));
     assert!(retained.contains("chrome: true"));
@@ -140,7 +149,7 @@ fn origin_skill_fallback_survives_transport_and_explicit_adoption() {
             &serde_json::to_string(&profile).unwrap(),
         );
         let resolved = probe(repo.path());
-        assert_eq!(resolved.config.agent(), "codex:origin");
+        assert_eq!(resolved.config.agent().unwrap(), "codex:origin");
         assert!(resolved.config.yolo);
         assert_eq!(
             resolved.settings["agent"].selected().unwrap().key,
@@ -156,12 +165,18 @@ fn origin_skill_fallback_survives_transport_and_explicit_adoption() {
             ".lf/skills/probe.md",
             "---\nagent: claude:repository\n---\nRepository body.",
         );
-        assert_eq!(probe(repo.path()).config.agent(), "claude:repository");
+        assert_eq!(
+            probe(repo.path()).config.agent().unwrap(),
+            "claude:repository"
+        );
     }
     remote::inspect(true, false).unwrap();
-    assert_eq!(probe(repo.path()).config.agent(), "claude:repository");
+    assert_eq!(
+        probe(repo.path()).config.agent().unwrap(),
+        "claude:repository"
+    );
     std::fs::remove_file(repo.path().join(".lf/skills/probe.md")).unwrap();
-    assert_eq!(probe(repo.path()).config.agent(), "codex:origin");
+    assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:origin");
     let retained = std::fs::read_to_string(executor.path().join(".lf/skills/probe.md")).unwrap();
     assert!(retained.contains("default_agent: codex:origin"));
     assert!(retained.ends_with("Executor body."));
@@ -220,7 +235,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             .map(|skill| resolve(repo.path(), skill).config)
             .collect::<Vec<Config>>()
     };
-    assert_eq!(selected()[0].agent(), "claude:executor");
+    assert_eq!(selected()[0].agent().unwrap(), "claude:executor");
     {
         let _profile = EnvVarGuard::set(
             remote::PROFILE_ENV,
@@ -242,10 +257,10 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             assert_eq!(resolved.len(), 4);
             for index in [0, 2] {
                 let pair = &resolved[index..index + 2];
-                assert_eq!(pair[0].config.agent(), "codex:named");
+                assert_eq!(pair[0].config.agent().unwrap(), "codex:named");
                 assert!(pair[0].config.yolo);
                 assert!(pair[0].config.chrome);
-                assert_eq!(pair[1].config.agent(), "codex:anonymous");
+                assert_eq!(pair[1].config.agent().unwrap(), "codex:anonymous");
                 assert_eq!(
                     pair[0].settings["agent"].selected().unwrap().key,
                     "default_agent"
@@ -266,7 +281,8 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
         assert_eq!(
             resolve(repo.path(), steps(repo.path())[0].clone())
                 .config
-                .agent(),
+                .agent()
+                .unwrap(),
             "claude:repository"
         );
         std::fs::remove_file(repo.path().join(".lf/graphs/inner.yaml")).unwrap();
@@ -276,17 +292,17 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             topology
         );
         std::fs::remove_file(executor.path().join(".lf/graphs/inner.yaml")).unwrap();
-        assert_eq!(selected()[0].agent(), "codex:named");
+        assert_eq!(selected()[0].agent().unwrap(), "codex:named");
         write(executor.path(), "graphs/inner.yaml", topology);
     }
-    assert_eq!(selected()[0].agent(), "claude:executor");
+    assert_eq!(selected()[0].agent().unwrap(), "claude:executor");
     remote::inspect(true, false).unwrap();
     let configs: Vec<_> = steps(repo.path())
         .into_iter()
         .map(|skill| resolve(repo.path(), skill).config)
         .collect();
-    assert_eq!(configs[0].agent(), "codex:named");
-    assert_eq!(configs[1].agent(), "codex:anonymous");
+    assert_eq!(configs[0].agent().unwrap(), "codex:named");
+    assert_eq!(configs[1].agent().unwrap(), "codex:anonymous");
     let retained = std::fs::read_to_string(executor.path().join(".lf/graphs/inner.yaml")).unwrap();
     assert!(retained.contains("# executor topology"));
     assert!(retained.contains("chrome: true"));
@@ -301,7 +317,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
     );
     assert!(selected()
         .iter()
-        .all(|config| config.agent() == "codex:general"));
+        .all(|config| config.agent().unwrap() == "codex:general"));
 }
 
 #[test]
@@ -349,7 +365,7 @@ fn captured_origin_instructions_keep_executor_host_preferences() {
         Some("Captured origin instructions.")
     );
     let selected = resolve(repo.path(), captured[0].clone());
-    assert_eq!(selected.config.agent(), "codex:origin");
+    assert_eq!(selected.config.agent().unwrap(), "codex:origin");
     assert!(!selected.config.chrome);
     assert_eq!(
         selected.settings["chrome"].selected().unwrap().locator,
@@ -390,14 +406,14 @@ fn retained_definitions_refresh_and_remove_only_unchanged_preferences() {
         remote::receive(Some(repo.path())).unwrap();
     };
     receive(&profile);
-    assert_eq!(probe(repo.path()).config.agent(), "codex:first");
+    assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:first");
     let first = profile.clone();
     profile.revision += 1;
     profile.definitions[0].values =
         serde_yaml_ng::from_str("default_agent: codex:second\nexclude: []").unwrap();
     receive(&profile);
     receive(&first);
-    assert_eq!(probe(repo.path()).config.agent(), "codex:second");
+    assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:second");
     // Body edits do not transfer preference ownership. Preference deletion does.
     write(
         executor.path(),
@@ -415,7 +431,7 @@ fn retained_definitions_refresh_and_remove_only_unchanged_preferences() {
         .iter()
         .any(|entry| entry["receipt"]["status"] == "conflict"));
     remote::inspect(true, false).unwrap();
-    assert_eq!(probe(repo.path()).config.agent(), "codex:second");
+    assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:second");
     profile.revision += 1;
     profile.definitions.clear();
     receive(&profile);
@@ -456,7 +472,7 @@ fn unavailable_retention_keeps_forwarded_work_and_never_installs_definitions() {
         &serde_json::to_string(&profile).unwrap(),
     );
     remote::receive(Some(repo.path())).unwrap();
-    assert_eq!(probe(repo.path()).config.agent(), "codex:origin");
+    assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:origin");
     assert!(!executor.path().join(".lf/skills/probe.md").exists());
     assert_eq!(
         std::fs::read_to_string(executor.path().join(".lf/graphs/inner.yaml")).unwrap(),
@@ -473,5 +489,5 @@ fn unavailable_retention_keeps_forwarded_work_and_never_installs_definitions() {
         "---\nagent: invalid-provider\n---\nUnrelated.",
     );
     remote::receive(Some(repo.path())).unwrap();
-    assert_eq!(probe(repo.path()).config.agent(), "codex:origin");
+    assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:origin");
 }

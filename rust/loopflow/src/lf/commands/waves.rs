@@ -170,7 +170,7 @@ pub struct TaskRuntimeSnapshot {
     pub completion_pending: Option<String>,
     pub reason: String,
     pub updated_at: String,
-    pub provider: String,
+    pub provider: Option<String>,
     /// Who owns the Task on which Machine, as this Machine reads the ownership
     /// log; absent when the Task is unowned.
     pub owner: Option<crate::durable::TaskOwner>,
@@ -1667,7 +1667,7 @@ fn snapshot_task_runtime(
     status: TaskState,
     completion_pending: Option<String>,
     owner: Option<crate::durable::TaskOwner>,
-    provider: String,
+    provider: Option<String>,
 ) -> TaskRuntimeSnapshot {
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
@@ -1952,7 +1952,7 @@ async fn snapshot_task_detail(
         personal,
         None,
     );
-    let (provider, _) = crate::config::parse_agent(&agent);
+    let provider = agent.ok().map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let machine_id = shared
         .checkouts
@@ -3939,7 +3939,7 @@ mod tests {
                 status,
                 reason: "settled".to_string(),
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
-                provider: "codex".to_string(),
+                provider: Some("codex".to_string()),
                 owner: Some(owned()),
                 completion_pending: None,
             };
@@ -4022,7 +4022,7 @@ mod tests {
             status: TaskState::Moving,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
-            provider: "codex".to_string(),
+            provider: Some("codex".to_string()),
             owner: Some(owned()),
             completion_pending: None,
         };
@@ -4130,7 +4130,7 @@ mod tests {
                         status,
                         reason: "terminal".into(),
                         updated_at: "2026-07-21T00:00:00Z".into(),
-                        provider: "codex".into(),
+                        provider: Some("codex".into()),
                         owner: Some(owned()),
                         completion_pending: None,
                     };
@@ -4193,7 +4193,7 @@ mod tests {
                 status,
                 reason: "terminal".into(),
                 updated_at: "2026-07-21T00:00:00Z".into(),
-                provider: "codex".into(),
+                provider: Some("codex".into()),
                 owner: Some(owned()),
                 completion_pending: None,
             };

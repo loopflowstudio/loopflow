@@ -358,7 +358,7 @@ pub(crate) fn conversation(
         wave.as_deref(),
         &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
         Some(&skill),
-    );
+    )?;
     let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
         captured: None,

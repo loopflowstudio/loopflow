@@ -85,6 +85,7 @@ fn source(candidate: &Value) -> String {
         ("repository", _) => "Shared project",
         ("command_line", _) => "Command line",
         ("environment", _) => "Environment",
+        ("builtin", _) if candidate["key"] == "default_agent" => "Only installed harness",
         ("builtin", _) => "Built-in",
         (other, _) => other,
     };
@@ -179,7 +180,11 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
                     .unwrap_or(&[]);
                 (
                     key.as_str(),
-                    truncate(&display_value(&setting["value"]), 36),
+                    if key.as_str() == "agent" && setting["value"].is_null() {
+                        "Not selected".into()
+                    } else {
+                        truncate(&display_value(&setting["value"]), 36)
+                    },
                     effective_source(candidates),
                 )
             })
@@ -198,6 +203,15 @@ fn render(output: &[Value], repo: &Path, options: &ShowOptions, colors: &Colors)
         }
         let hidden =
             settings.len() - usize::from(settings.contains_key("default_agent")) - visible.len();
+        if settings
+            .get("agent")
+            .is_some_and(|agent| agent["value"].is_null())
+        {
+            out.push_str(&format!(
+                "\n  {}\n",
+                crate::error::LoadError::AgentSelection
+            ));
+        }
         if hidden > 0 {
             out.push_str(&format!(
                 "\n  {}{hidden} built-in settings hidden · --all to include them{}\n",

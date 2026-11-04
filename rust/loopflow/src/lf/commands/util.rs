@@ -91,10 +91,10 @@ pub(crate) fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
     anyhow::ensure!(
-        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()).0.as_str()),
+        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
-        config.agent(),
-        config.agent(),
+        config.agent()?,
+        config.agent()?,
     );
     if let Some(provider) = provider_session {
         if session.provider.as_deref() != Some("codex") {

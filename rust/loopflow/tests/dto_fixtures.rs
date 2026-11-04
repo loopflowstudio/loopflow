@@ -87,6 +87,7 @@ fn wave_detail_preserves_graph_and_machine() {
     };
     assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
+    assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
     assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
@@ -455,6 +456,7 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.worktree.as_deref(),
         Some("/src/loopflow.workspace")
     );
+    assert!(snapshot.provider.is_none());
     assert!(snapshot.pr.is_none());
     assert!(!snapshot.branch.as_ref().unwrap().is_empty());
     assert_eq!(

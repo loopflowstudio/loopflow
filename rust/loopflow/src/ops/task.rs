@@ -166,7 +166,7 @@ pub struct TaskSnapshot {
     pub workspace_slug: String,
     pub branch: Option<String>,
     pub base_commit: Option<String>,
-    pub provider: String,
+    pub provider: Option<String>,
     pub pr: Option<TaskPr>,
     pub latest_event: Option<crate::work::task::TaskEvent>,
     #[serde(with = "time::serde::rfc3339")]
@@ -1589,14 +1589,13 @@ pub(crate) fn resolve_task_agent(
     wave: Option<&str>,
     personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
-) -> String {
-    let config = crate::config::load_wave_config_with(Some(worktree), wave, personal)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    crate::config::settings::resolve(&config, skill)
-        .map(|resolved| resolved.config.agent().to_owned())
-        .unwrap_or_else(|_| crate::config::default_agent().to_owned())
+) -> OpsResult<String> {
+    let config =
+        crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
+    Ok(crate::config::settings::resolve(&config, skill)?
+        .config
+        .agent()?
+        .to_owned())
 }
 
 fn task_configuration_refusal(
@@ -1606,12 +1605,18 @@ fn task_configuration_refusal(
     skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
-    checkout_execution_boundary(
-        worktree,
-        &resolve_task_agent(worktree, wave, personal, skill),
-    )
-    .err()
-    .map(|error| error.to_string())
+    // A Graph's steps may choose different agents; no general preference is
+    // required to inspect or start the Graph. Each launch resolves its own choice.
+    let agent = match resolve_task_agent(worktree, wave, personal, skill) {
+        Ok(agent) => agent,
+        Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
+            return None
+        }
+        Err(error) => return Some(error.to_string()),
+    };
+    checkout_execution_boundary(worktree, &agent)
+        .err()
+        .map(|error| error.to_string())
 }
 
 /// Why the Task cannot start a process: its configuration, else a

@@ -916,6 +916,7 @@ mod tests {
                                 )?
                                 .unwrap()
                                 .agent()
+                                .unwrap()
                                 .to_owned())
                             }))
                             .join()

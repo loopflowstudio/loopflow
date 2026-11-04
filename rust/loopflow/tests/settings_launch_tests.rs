@@ -1089,7 +1089,7 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
             },
         )
         .unwrap();
-        assert_eq!(prepared.config.agent(), expected);
+        assert_eq!(prepared.config.agent().unwrap(), expected);
         assert_eq!(prepared.config.chrome, wave.is_some());
         assert_eq!(inspection[0]["settings"]["agent"]["value"], expected);
     };
@@ -1163,13 +1163,11 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     assert_eq!(json[0]["settings"]["default_agent"]["value"], "codex");
     assert_eq!(json[0]["settings"]["chrome"]["value"], false);
     assert!(json[0]["settings"]["context_budgets.memory_bytes"].is_object());
-    assert_eq!(
-        json[0]["settings"]["agent"]["candidates"]
-            .as_array()
-            .unwrap()
-            .len(),
-        3
-    );
+    assert!(json[0]["settings"]["agent"]["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|candidate| candidate["key"] == "default_agent" && candidate["source"] == "personal"));
 
     repo.create_file(".lf/config.yaml", "{}\n");
     let fallback = show(&["--explain"]);
@@ -1203,4 +1201,113 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     assert!(graph.contains("\nconfig-table-flow / config-table-proof\n"));
     assert!(graph.contains("\nconfig-table-flow / revision · config-table-proof\n"));
     assert!(!graph.contains("unnamed step"));
+}
+
+#[test]
+#[cfg(unix)]
+fn automatic_agent_selection_requires_exactly_one_installed_harness() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    symlink("/usr/bin/git", bin.path().join("git")).unwrap();
+    repo.create_file(".lf/skills/selection-proof.md", "Report the selection.\n");
+    let run = |args: &[&str]| {
+        command(repo.path(), home.path(), args)
+            .env("PATH", bin.path())
+            .output()
+            .unwrap()
+    };
+    let inspect = || {
+        let output = run(&["config", "show", "--skill", "selection-proof", "--json"]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()[0]["settings"]["agent"]
+            .clone()
+    };
+    let unresolved = || {
+        let agent = inspect();
+        assert!(agent["value"].is_null(), "{agent}");
+        assert!(agent["candidates"].as_array().unwrap().is_empty());
+        let output = run(&["-b", "skill", "selection-proof"]);
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("No agent selected"), "{error}");
+        assert!(error.contains("lf set --global default_agent"), "{error}");
+        assert!(!home.path().join("provider-started").exists());
+    };
+    let install = |name: &str| {
+        let path = bin.path().join(name);
+        fs::write(
+            &path,
+            "#!/bin/sh\nprintf started > \"$LF_HOME/provider-started\"\nexit 91\n",
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    };
+
+    unresolved();
+    for harness in ["claude", "codex", "opencode", "pi"] {
+        install(harness);
+        let agent = inspect();
+        assert_eq!(agent["value"], harness);
+        assert_eq!(
+            agent["candidates"][0]["locator"],
+            "PATH (only installed harness)"
+        );
+        fs::remove_file(bin.path().join(harness)).unwrap();
+    }
+    install("claude");
+    install("codex");
+    unresolved();
+    let output = run(&["config", "show", "--skill", "selection-proof", "--explain"]);
+    let table = String::from_utf8(output.stdout).unwrap();
+    assert!(output.status.success() && table.contains("Not selected"));
+    assert!(table.contains("lf set --global default_agent"));
+
+    let created = run(&[
+        "task",
+        "create",
+        "--title",
+        "Choose agents per step",
+        "--json",
+    ]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let task: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    let status = run(&["task", "status", task["id"].as_str().unwrap(), "--json"]);
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+
+    let output = run(&["set", "--global", "default_agent", "claude"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(inspect()["value"], "claude");
+    let output = run(&[
+        "-a",
+        "codex",
+        "config",
+        "show",
+        "--skill",
+        "selection-proof",
+        "--json",
+    ]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value[0]["settings"]["agent"]["value"], "codex");
+    assert_eq!(inspect()["value"], "claude");
+    assert!(!home.path().join("provider-started").exists());
 }

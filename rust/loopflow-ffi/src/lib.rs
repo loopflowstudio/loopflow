@@ -406,7 +406,7 @@ mod configuration_tests {
             },
         )
         .unwrap();
-        assert_eq!(prepared.config.agent(), expected);
+        assert_eq!(prepared.config.agent().unwrap(), expected);
         assert_eq!(
             explained["inspections"][0]["settings"]["agent"]["value"],
             expected
@@ -602,7 +602,8 @@ mod configuration_tests {
             loopflow::config::load_config(Some(clone.path()))
                 .unwrap()
                 .unwrap()
-                .agent(),
+                .agent()
+                .unwrap(),
             "codex:global"
         );
         match previous {

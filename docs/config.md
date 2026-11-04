@@ -644,7 +644,7 @@ Choose a harness, with an optional model. Use `default_agent` for a fallback.
 |---|---|
 | **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (uses applicable authored fallbacks, then the first installed harness: `codex`, `claude`, `opencode`, `pi`) |
+| **Default** | unset (uses applicable authored fallbacks, then the sole installed harness) |
 
 ```yaml
 agent: codex          # harness default
@@ -657,7 +657,13 @@ skills:
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
 
 Built-in skills recommend no harness. With no authored choice or fallback,
-Loopflow uses the first installed harness: Codex, Claude, OpenCode, then Pi.
+Loopflow selects automatically only when exactly one supported harness is installed.
+With multiple harnesses, save your choice with `lf set --global default_agent claude`
+or select one command with `-a claude`. Start setup with `lf -a claude init` to
+choose and save a personal default. Installation order and remaining usage do not
+choose a harness.
+Inspection still works without a choice; a new launch explains how to select one.
+Existing Sessions retain their recorded provider when resumed.
 A personal `skills.implement.agent: codex` beats a repository occurrence's
 `agent: claude`; changing that personal key to `default_agent` lets the repository
 choice win, even if it is general. `-a` explicitly selects the invocation's agent.

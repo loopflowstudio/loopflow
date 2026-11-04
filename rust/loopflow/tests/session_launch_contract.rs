@@ -430,6 +430,18 @@ fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
         ".lf/config.yaml",
         "diff: false\ndiff_files: false\npaste: false\n",
     );
+    let unresolved = fixture
+        .command()
+        .args(["config", "show", "--json"])
+        .output()
+        .unwrap();
+    success(&unresolved);
+    let settings: Value = serde_json::from_slice(&unresolved.stdout).unwrap();
+    assert!(settings[0]["settings"]["agent"]["value"].is_null());
+    let resumed = fixture.run(&["session", "resume", &session]);
+    pair(&resumed, "--resume", token);
+    pair(&resumed, "--model", "sonnet");
+    assert_eq!(fixture.session(), session);
     for (fallback, expected) in [("codex", "sonnet"), ("claude:haiku", "haiku")] {
         let resumed = fixture.run(&[
             "--setting",

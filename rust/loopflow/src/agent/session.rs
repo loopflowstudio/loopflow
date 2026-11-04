@@ -71,7 +71,7 @@ pub(crate) fn build_session_command(
     invocation: ProviderInvocation<'_>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
-    let (harness, model) = crate::config::parse_agent(config.agent());
+    let (harness, model) = crate::config::parse_agent(config.agent()?);
     let cwd = config
         .cwd
         .clone()
@@ -179,7 +179,7 @@ pub(crate) fn session_environment(
     context_file: Option<&Path>,
 ) -> Result<BTreeMap<String, String>> {
     let mut environment = config.env.clone();
-    if crate::config::parse_agent(config.agent()).0 == "opencode" {
+    if crate::config::parse_agent(config.agent()?).0 == "opencode" {
         let mut settings: serde_json::Value = environment
             .get("OPENCODE_CONFIG_CONTENT")
             .cloned()
@@ -269,18 +269,20 @@ pub(crate) fn resolve_session_config(
         .ok_or_else(|| anyhow::anyhow!("Session has no provider"))?;
     let resolved = crate::config::settings::resolve(&current, skill.as_ref())?;
     let current = &resolved.config;
-    let candidate = resolved.settings["agent"]
-        .candidates
-        .last()
-        .expect("agent has a builtin fallback");
-    let selected = (candidate.key == "agent"
-        && matches!(
-            candidate.source,
-            crate::config::ConfigSource::CommandLine | crate::config::ConfigSource::Environment
-        ))
-    .then(|| current.agent());
-    let configured_agent =
-        (candidate.source != crate::config::ConfigSource::Builtin).then(|| current.agent());
+    let candidate = resolved.settings["agent"].selected();
+    let selected = candidate
+        .filter(|candidate| {
+            candidate.key == "agent"
+                && matches!(
+                    candidate.source,
+                    crate::config::ConfigSource::CommandLine
+                        | crate::config::ConfigSource::Environment
+                )
+        })
+        .map(|candidate| candidate.value.as_str().expect("agent is a string"));
+    let configured_agent = candidate
+        .filter(|candidate| candidate.source != crate::config::ConfigSource::Builtin)
+        .map(|candidate| candidate.value.as_str().expect("agent is a string"));
     let model = if let Some(agent) = configured_agent {
         let (harness, model) = crate::config::parse_agent(agent);
         if harness == provider {
@@ -341,7 +343,7 @@ pub(crate) fn resolve_session_config(
     if needs_execution_boundary {
         config.execution_boundary = Some(super::checkout_execution_boundary(
             &session.cwd,
-            config.agent(),
+            config.agent()?,
         )?);
     }
     if !importing {

@@ -98,6 +98,7 @@ fn prepare_prompt(
     };
     let effective = crate::config::settings::resolve(config, resolved_skill.as_ref())?;
     let config = &effective.config;
+    let agent = config.agent()?.to_owned();
     let mut docs = config.docs.clone();
     docs.extend(config.context.iter().cloned());
     docs.extend(requested_docs);
@@ -165,8 +166,6 @@ fn prepare_prompt(
             content,
             source: DocumentSource::Summary,
         }));
-
-    let agent = config.agent().to_owned();
 
     let skill_invocation = components
         .skill
@@ -803,8 +802,8 @@ Test skill body.
             )
             .expect("prepare Process prompt");
             assert_eq!(
-                prepared.config.agent(),
-                crate::config::default_agent(),
+                prepared.config.agent().unwrap(),
+                crate::config::default_agent().unwrap(),
                 "{name}"
             );
         }

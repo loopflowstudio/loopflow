@@ -126,7 +126,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     turn.agent = resolved.agent.clone();
     let message = if session.captured.is_some()
         && session.provider.as_deref()
-            != Some(crate::config::parse_agent(resolved.agent()).0.as_str())
+            != Some(crate::config::parse_agent(resolved.agent()?).0.as_str())
     {
         let request = crate::ops::human_session::conversation_log::continuation(&store, &session)?;
         format!("{request}\n\n{message}")
@@ -487,7 +487,7 @@ fn build_prompt_at(
         "loaded config"
     );
     trace!(
-        agent = config.agent(),
+        agent = ?config.agent(),
         ?config.yolo,
         "loaded config"
     );
@@ -592,7 +592,7 @@ fn build_prompt_at(
         agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
         agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(
             &repo_root,
-            agent_config.agent(),
+            agent_config.agent()?,
         )?);
         agent_config.skip_permissions = true;
     }
@@ -860,7 +860,7 @@ fn begin_capture(
             session,
             spec,
             &built.context,
-            AgentProcessRequest::from_prepared(prepared_config),
+            AgentProcessRequest::from_prepared(prepared_config)?,
         )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(
@@ -868,10 +868,10 @@ fn begin_capture(
             &id,
             spec,
             &built.context,
-            Some(AgentProcessRequest::from_prepared(prepared_config)),
+            Some(AgentProcessRequest::from_prepared(prepared_config)?),
         )
     } else {
-        let launch = Some(AgentProcessRequest::from_prepared(prepared_config));
+        let launch = Some(AgentProcessRequest::from_prepared(prepared_config)?);
         CaptureHandle::begin_with_context(spec, &built.context, launch)
     }
     .map_err(|error| {

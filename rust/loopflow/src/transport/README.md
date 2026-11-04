@@ -22,9 +22,7 @@ waits for Move here, and an ended one waits for an explicit open.
 Preparing asks a running owner whether a viewer holds control, so an owner from an
 earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
-but never answers reads `detached` too. If it holds a turn, draft or pending request,
-reattachment failure leaves that provider intact. Resume again when its transport
-answers; saved history alone cannot restore the native editor.
+but never answers reads `detached` too.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
@@ -59,16 +57,17 @@ judgments retry at the next poll.
 Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
-`lf resume` also moves an idle owner from an earlier build onto the lf entry.
-If that owner holds work, resume attaches to the running provider;
-an owner with this lifetime policy moves when the turn ends. An older owner
-without the policy needs another resume after its turn. An unanswering protected
-owner reports attachment failure without ending its provider or replaying input.
+`lf resume` replaces an idle owner that is superseded or unanswering, continuing
+its saved provider thread without replaying input. A turn, draft or pending request
+keeps the existing provider: resume attaches if possible, otherwise reports
+attachment failure. Try again when its transport answers; saved history cannot
+restore the native editor. An owner with this lifetime policy moves when its work
+settles; an older owner without it needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
-ends idle owners directly; existing viewers
-may close and need `lf resume` again. Graph runners keep running and launch each
+ends idle owners directly; existing viewers may close and need `lf resume` again.
+Graph runners keep running and launch each
 next step through the entry. Owners and runners whose store has advanced beyond
 their reader floor cannot recover themselves through this policy.
 

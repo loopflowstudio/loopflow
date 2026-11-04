@@ -1157,9 +1157,10 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 }
 
 /// Attach to protected work even when its owner cannot answer: saved history
-/// cannot reconstruct its editor or pending requests. Only an idle superseded
-/// owner can move to the installed lf. Compare builds against the launch entry
-/// so a development viewer in the main Home still selects the installed lf.
+/// cannot reconstruct its editor or pending requests. An idle owner that is
+/// superseded or does not answer gives way to native continuation. Compare builds
+/// against the launch entry so a development viewer in the main Home still selects
+/// the installed lf.
 fn attaches(
     store: &SqliteStore,
     session: &LfSession,

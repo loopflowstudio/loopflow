@@ -1,44 +1,21 @@
 # LOO-724 assumptions — 2026-11-04
 
-The installation repair stays with LOO-723, as Jack Heart's directive assigns it.
-His November 4 expansion puts disconnected-Session investigation and recovery
-inside LOO-724 as well as retained hooks. Same-Session owner replacement through
-the supported recovery path is in scope; recreating conversations is not.
-The old planning callback is an alias of Stop, including its attachment
-fence and subagent exclusion; there is no separate legacy executor. Old unknown
-callbacks retain the existing retirement diagnostic, while recognized callback
-failures remain errors. This narrows the initial proposal to error on every
-unknown callback: older Sessions can also retain retired title hooks.
+Jack Heart's acceptance, coordination boundary, unresolved permanent-transport
+choice and evidence limits are kept once in [the plan](loo-724.md).
 
-The existing three-second group-death observation bound also applies to recovery
-in another process. A missing local lifeline is not evidence helpers will persist;
-natural group disappearance permits recovery, while survivors still refuse it.
-Jack Heart's later LOO-723 comment `769c9593-3021-4c4d-9bfc-e98da3a9d7b3` assigns
-the immediate Desktop install to the parent Session; LOO-723 retains permanent
-installation policy and mini rollout. Parent receipt
-`bf95e5de-bd4a-4856-a208-4462bf17158b` establishes the coherent local helper;
-installed Session recovery still needs its own receipt. Detached or unknown
-inventory state alone does not
-authorize restarting every old Session or replaying a finished Task.
+Reversible implementation choices:
 
-The 2026-11-04 composed regression uses two candidate executables with the same
-wire/schema and a native provider stand-in. It establishes completed continued
-input, not an earlier-release upgrade or installed-provider recovery. Read-only
-correlation found `Uncertain` native input on LOO-582/312/515/558; no inference
-that those drafts can be discarded is accepted. No live handoff was attempted.
+- Treat retained `__planning-check` as Stop, with the same fence and subagent
+  exclusion. Keep the retirement diagnostic for unknown hooks (older Sessions
+  can retain title callbacks); genuine recognized-hook failures remain errors.
+- Apply the existing three-second group-death observation window across processes.
+  No local lifeline writer does not prove persistent helpers; surviving helpers
+  still refuse replacement without signals.
+- Retry the existing owner queue every 100 ms after nonblocking retention fails.
+  This is scheduling, not new persistence or replay authority.
 
-The input-retention repair reuses the owner's existing queue and retries every
-100 ms without waiting for the store lock. This is a local scheduling choice,
-not new persistence or replay authority. Recorded input still precedes delivery.
-Jack Heart's LOO-718 report remains a separate live reproduction: no automatic
-paused-goal selection, handoff or input is justified by a responsive control probe.
-
-2026-11-04 implementation choice: preserve a live protected owner even when its
-control socket does not answer. `Uncertain` contains no recoverable editor text;
-provider history and a saved screen cannot rebuild queued keys or a pending
-request. Remove forced termination of protected work from resume and rollover.
-A failed attachment must leave the provider intact, and a later successful
-attachment must continue its actual editor/request. This repairs destructive
-recovery but cannot make a permanently broken old transport answer. Such a case
-requires transport repair or an explicit loss decision that Jack Heart has not
-made. Parent coordination steer: `598cfecc-ac66-4836-a65a-d5ad23875412`.
+Preserve a live protected owner even when its socket cannot answer. `Uncertain`
+contains no reconstructable editor text; history and screen snapshots cannot
+recover queued keys or pending requests. Temporary loss of attachment must leave
+those intact. Choosing irreversible loss for a permanently broken transport needs
+Jack Heart's decision; it is not a headless implementation assumption.

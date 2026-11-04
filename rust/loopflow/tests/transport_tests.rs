@@ -3314,8 +3314,8 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     assert_eq!(output.stdout, b"same conversation");
 }
 
-/// An owner from an earlier lf can stay alive after an upgrade yet never answer
-/// its socket. Opening its Session neither waits on it nor gives up: the stale
+/// An idle owner from an earlier lf can stay alive after an upgrade yet never
+/// answer its socket. Opening its Session neither waits on it nor gives up: the stale
 /// viewer record reads `detached`, and reconnecting stops its provider and
 /// continues the same provider thread in a new owner, without replaying input.
 #[test]

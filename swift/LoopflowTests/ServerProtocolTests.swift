@@ -101,6 +101,42 @@ struct ServerProtocolTests {
         #expect(try encoded(request) == value("task_from_session"))
     }
 
+    @Test func coreLoopWritesShareTheRustWriteContract() throws {
+        let writes: [(String, String, ServedWrite)] = [
+            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", from: "implement", agent: "claude", approve: false)),
+            ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
+            ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
+            ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
+            ("task_comment", "comment-1", .taskComment(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
+            ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
+        ]
+        for (name, id, write) in writes {
+            #expect(try encoded(.request(id: id, operation: .command(write))) == value(name), "\(name)")
+        }
+        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", from: nil, agent: nil, approve: true).argv
+            == ["--batch", "task", "run", "LOO-1", "--json"])
+        guard case .response(_, _, .object(let running)) = try message("task_running") else {
+            Issue.record("Missing task.run result"); return
+        }
+        #expect(running["state"] == .string("running"))
+        #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
+        guard case .response(_, _, .object(let shipping)) = try message("task_shipping") else {
+            Issue.record("Missing task.ship result"); return
+        }
+        #expect(shipping["state"] == .string("shipping"))
+        guard case .response(_, _, .object(let held)) = try message("task_held") else {
+            Issue.record("Missing task.hold result"); return
+        }
+        #expect(held["stopped"] == .bool(true))
+    }
+
+    @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
+        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"))
+        #expect(try encoded(wait) == value("task_wait"))
+        guard case .ended(let id) = try message("ended") else { Issue.record("Missing ended"); return }
+        #expect(id == "wait-1")
+    }
+
     @Test func connectionErrorsHaveNoRequestId() throws {
         guard case .error(let id, let code, let message, let data) = try message("error") else { Issue.record("Missing error"); return }
         #expect(id == nil)

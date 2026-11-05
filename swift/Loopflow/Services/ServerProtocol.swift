@@ -119,6 +119,9 @@ public enum ServerMessage: Decodable, Sendable {
     /// `session.owner`, null once a subscription or attachment is confirmed.
     case response(id: String, traceID: String, result: JSONValue)
     case reading(id: String, frame: JSONValue)
+    /// The subscription's last reading was its answer (`task.wait` reached
+    /// its state); nothing follows for `id`.
+    case ended(id: String)
     /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
     /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
@@ -136,6 +139,7 @@ public enum ServerMessage: Decodable, Sendable {
                              result: try box.decode(JSONValue.self, forKey: .result))
         case "reading":
             self = .reading(id: try box.decode(String.self, forKey: .id), frame: try box.decode(JSONValue.self, forKey: .frame))
+        case "ended": self = .ended(id: try box.decode(String.self, forKey: .id))
         case "error":
             self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
                           message: try box.decode(String.self, forKey: .message), data: try box.decode(JSONValue.self, forKey: .data))

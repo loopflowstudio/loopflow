@@ -67,6 +67,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case tokens(directory: String, days: Int?)
     case retention
     case doctor
+    /// The Task now and whether it reached `until` (`submitted` or
+    /// `terminal`); subscribed, it ends after the reading that reached it.
+    case taskWait(issue: String, until: String)
 
     /// Rows in one `sessionPage`.
     static let sessionPageLimit = 100
@@ -147,6 +150,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["history", "retention", "--json"]
         case .doctor:
             return ["doctor", "--json"]
+        case .taskWait(let issue, let until):
+            return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
         }
     }
 
@@ -218,6 +223,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("repository.tokens", ["directory": directory, "days": days])
         case .retention: TaggedFields("history.retention")
         case .doctor: TaggedFields("machine.doctor")
+        case .taskWait(let issue, let until): TaggedFields("task.wait", ["issue": issue, "until": until])
         }
     }
 
@@ -236,7 +242,14 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskAbandon(directory: String, issue: String)
     case taskNotes(directory: String, issue: String, notes: String)
     case taskOwnership(directory: String, issue: String, claimed: Bool)
-    case shipStop(directory: String, issue: String)
+    /// Start the Task's run detached; `approve` runs every step headless to
+    /// `end` and approves Auto-Ship, as `-b` does.
+    case taskRun(directory: String, issue: String, from: String?, agent: String?, approve: Bool)
+    case taskShip(directory: String, issue: String)
+    case taskHold(directory: String, issue: String)
+    case taskSteer(directory: String, issue: String, message: String)
+    case taskComment(directory: String, issue: String, message: String)
+    case taskInterrupt(directory: String, issue: String)
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     case sessionRename(directory: String, id: String, name: String)
@@ -268,7 +281,14 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskAbandon(_, let issue): ["task", "abandon", issue, "--json"]
         case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)", "--json"]
         case .taskOwnership(_, let issue, let claimed): ["task", claimed ? "claim" : "unassign", issue, "--json"]
-        case .shipStop(_, let issue): ["--task", issue, "ship", "--stop", "--json"]
+        case .taskRun(_, let issue, let from, let agent, let approve):
+            (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
+                + Self.option("--from", from) + ["--json"]
+        case .taskShip(_, let issue): ["--task", issue, "ship", "--json"]
+        case .taskHold(_, let issue): ["--task", issue, "ship", "--stop", "--json"]
+        case .taskSteer(_, let issue, let message): ["task", "comment", issue, "--steer", message, "--json"]
+        case .taskComment(_, let issue, let message): ["task", "comment", issue, message, "--json"]
+        case .taskInterrupt(_, let issue): ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave):
             ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
         case .taskSave(_, let issue, let path, let revision, _):
@@ -357,8 +377,19 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes])
         case .taskOwnership(let directory, let issue, let claimed):
             TaggedFields(claimed ? "task.claim" : "task.unassign", ["directory": directory, "issue": issue])
-        case .shipStop(let directory, let issue):
+        case .taskRun(let directory, let issue, let from, let agent, let approve):
+            TaggedFields("task.run", ["directory": directory, "issue": issue, "from": from, "agent": agent,
+                                      "approve": approve])
+        case .taskShip(let directory, let issue):
+            TaggedFields("task.ship", ["directory": directory, "issue": issue])
+        case .taskHold(let directory, let issue):
             TaggedFields("task.hold", ["directory": directory, "issue": issue])
+        case .taskSteer(let directory, let issue, let message):
+            TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
+        case .taskComment(let directory, let issue, let message):
+            TaggedFields("task.comment", ["directory": directory, "issue": issue, "message": message])
+        case .taskInterrupt(let directory, let issue):
+            TaggedFields("task.interrupt", ["directory": directory, "issue": issue])
         case .taskMove(let directory, let issue, let wave):
             TaggedFields("task.move", ["directory": directory, "issue": issue, "wave": wave])
         case .taskSave(let directory, let issue, let path, let revision, let content):
@@ -864,7 +895,7 @@ public struct RegistryQuery: Sendable {
     /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
     /// auto-merge Loopflow armed is disabled.
     public func stopShipping(issue: String, cwd: String?) async throws {
-        _ = try await write(.shipStop(directory: cwd ?? "/", issue: issue))
+        _ = try await write(.taskHold(directory: cwd ?? "/", issue: issue))
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {

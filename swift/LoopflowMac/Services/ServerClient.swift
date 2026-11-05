@@ -255,6 +255,8 @@ final class ServerLink: @unchecked Sendable {
             // a late answer to a forgotten request.
         case .reading(let id, let frame):
             state.withLock { subscriptions[id] }?.receive(frame)
+        case .ended(let id):
+            state.withLock { subscriptions.removeValue(forKey: id) }?.end()
         case .error(let id?, let code, let message, _):
             let refusal = RegistryQueryError("\(code): \(message)")
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: refusal); return }
@@ -445,6 +447,9 @@ private final class ServerSubscription: @unchecked Sendable {
 
     /// The server ended this subscription, or the connection failed.
     func finish(throwing error: any Error) { stop(error) }
+
+    /// The server sent this subscription's last reading.
+    func end() { stop(nil) }
 
     func cancel() async { stop(nil) }
 

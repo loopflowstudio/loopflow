@@ -533,6 +533,61 @@ pub(crate) struct PendingInput {
     pub(crate) latest: i64,
 }
 
+/// The caller reads and validates this Session inside the same transaction.
+pub(super) fn bind_session_in(
+    conn: &Connection,
+    session: &LfSession,
+    task: &TaskId,
+) -> StoreResult<()> {
+    let id = session.id.as_str();
+    if let Some(bound) = &session.task_id {
+        if bound != task {
+            let issue = super::children::short_task_id(conn, bound)?.ok_or(StoreError::NotFound)?;
+            return Err(StoreError::InvalidAuthority(format!(
+                "Session {id} already has Task {issue}; binding is permanent"
+            )));
+        }
+    } else {
+        let wave = super::durable::task_wave_in(conn, task)?;
+        if session
+            .wave_id
+            .as_ref()
+            .is_some_and(|existing| Some(existing) != wave.as_ref())
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Session {id} belongs to another Wave"
+            )));
+        }
+        conn.execute(
+                "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
+                params![id, task.as_str(), wave.as_ref().map(crate::id::WaveId::as_str), crate::store::rows::now_unix()],
+            )?;
+    }
+    repair_session_title_in(conn, id, None)
+}
+
+pub(super) fn choose_task_primary_in(
+    conn: &Connection,
+    task: &TaskId,
+    session: &str,
+) -> StoreResult<()> {
+    let chosen = conn.execute(
+        &format!(
+            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
+                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
+                    AND s.completed_at IS NULL AND s.id IN ({}))",
+            super::task_work::session_ids("?1")
+        ),
+        params![task.as_str(), session],
+    )?;
+    if chosen != 1 {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Session {session} is not an unfinished interactive conversation of this Task"
+        )));
+    }
+    Ok(())
+}
+
 impl SqliteStore {
     pub(crate) fn bind_session_transport(
         &self,
@@ -746,20 +801,7 @@ impl SqliteStore {
         session: &str,
     ) -> StoreResult<LfSession> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let chosen = conn.execute(
-            &format!(
-                "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
-                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
-                    AND s.completed_at IS NULL AND s.id IN ({}))",
-                super::task_work::session_ids("?1")
-            ),
-            params![task.as_str(), session],
-        )?;
-        if chosen != 1 {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Session {session} is not an unfinished interactive conversation of this Task"
-            )));
-        }
+        choose_task_primary_in(&conn, task, session)?;
         task_primary_in(&conn, task)?
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
@@ -1335,22 +1377,27 @@ impl SqliteStore {
     }
 
     /// Called under the Session launch lock after proving there is no live client.
-    pub(crate) fn move_primary_workspace(
+    pub(crate) fn admit_session_workspace(
         &self,
         session: &LfSession,
         cwd: &Path,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
+    ) -> StoreResult<LfSession> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Binding may have selected a directory while an opening prepared the
+        // old scope's workspace. Its explicit choice wins over that preparation.
+        let updated = tx.execute(
+            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
             return Err(StoreError::InvalidAuthority(
-                "primary Session changed before workspace admission".into(),
+                "Session changed before workspace admission".into(),
             ));
         }
-        Ok(())
+        let admitted = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(admitted)
     }
 
     /// The Task a Session is primary for, else the repository or Wave it is or
@@ -1503,42 +1550,13 @@ impl SqliteStore {
         let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if session.cwd != before.cwd {
-            return Err(StoreError::InvalidAuthority(
-                "Session workspace changed before binding".into(),
-            ));
-        }
-        if session.captured != expected_capture {
+        let current = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if current.cwd != before.cwd || current.captured != expected_capture {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),
             ));
         }
-        if let Some(bound) = &session.task_id {
-            if bound != task {
-                let issue =
-                    super::children::short_task_id(&tx, bound)?.ok_or(StoreError::NotFound)?;
-                return Err(StoreError::InvalidAuthority(format!(
-                    "Session {id} already has Task {issue}; binding is permanent"
-                )));
-            }
-        } else {
-            let wave = super::durable::task_wave_in(&tx, task)?;
-            if session
-                .wave_id
-                .as_ref()
-                .is_some_and(|existing| Some(existing) != wave.as_ref())
-            {
-                return Err(StoreError::InvalidAuthority(format!(
-                    "Session {id} belongs to another Wave"
-                )));
-            }
-            tx.execute(
-                "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
-                params![id, task.as_str(), wave.as_ref().map(crate::id::WaveId::as_str), crate::store::rows::now_unix()],
-            )?;
-        }
-        repair_session_title_in(&tx, id, None)?;
+        bind_session_in(&tx, &current, task)?;
         let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(bound)

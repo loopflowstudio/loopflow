@@ -471,20 +471,15 @@ mod tests {
         )
         .unwrap();
         let task = store
-            .create_task(
-                &crate::work::task::NewTask {
-                    repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
-                    due_date: None,
-                    id: TaskId::new(),
-                    project_id: Some(project.id),
-                    title: "Inspect before starting".into(),
-                    description: String::new(),
-                },
-                Some(std::sync::Arc::new(crate::store::PlanningLocks::new(
-                    tempfile::tempfile().unwrap(),
-                ))),
-            )
-            .await
+            .sqlite
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+                due_date: None,
+                id: TaskId::new(),
+                project_id: Some(project.id),
+                title: "Inspect before starting".into(),
+                description: String::new(),
+            })
             .unwrap();
         let report = explain_context(
             &store,

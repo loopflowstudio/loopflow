@@ -1030,6 +1030,31 @@ def test_ignored_data_is_not_walked_but_registered_nested_worktrees_are(
     assert (repo / "cache/0/data").exists()
 
 
+@pytest.mark.parametrize("nested_name", ["independent", "target"])
+def test_discovery_inherits_checkout_above_source_root_and_switches_at_nested_repo(
+    cleaner,
+    nested_name,
+) -> None:
+    repo = _build_fixture(cleaner, 300)
+    cleaner.src = repo / "packages"
+    outer = cleaner.src / "one/two/target/output"
+    nested = cleaner.src / nested_name
+    _write(outer, 3)
+    nested.mkdir()
+    _git(nested, "init", "-q")
+    (nested / ".gitignore").write_text("node_modules/\n")
+    inner = nested / "one/two/node_modules/output"
+    _write(inner, 3)
+    unignored = nested / "target/source"
+    _write(unignored, 3)
+
+    candidates = {candidate.path: candidate for candidate in cleaner._builds()}
+    assert candidates[outer.parent].checkout == repo
+    assert candidates[inner.parent].checkout == nested
+    assert cleaner._reason(candidates[unignored.parent], 0, _activity()) == "not ignored"
+    assert not cleaner.failures
+
+
 @pytest.mark.parametrize("owner_kind", ["chrome", "self", "foreign"])
 def test_protected_process_owner_prevents_reclamation(cleaner, monkeypatch, owner_kind) -> None:
     repo = _build_fixture(cleaner, 3000)
@@ -1222,7 +1247,7 @@ def test_native_uv_cap_reclaims_unused_downloads_and_preserves_reserved_cache(cl
 
 
 def test_docker_reclaims_only_old_reproducible_unused_images(cleaner, monkeypatch):
-    images = {"downloaded", "local", "used", "recent"}
+    images = {"age-unknown", "downloaded", "local", "used", "recent"}
     build_cache = ["old-cache"]
 
     def command(args, **kwargs):
@@ -1250,16 +1275,13 @@ def test_docker_reclaims_only_old_reproducible_unused_images(cleaner, monkeypatc
                 if identifier == "recent"
                 else "2020-01-01T00:00:00.123456789Z"
             )
-            return "\t".join(
-                map(
-                    json.dumps,
-                    [
-                        identifier,
-                        created,
-                        [] if identifier == "local" else ["registry@sha256:fixture"],
-                    ],
-                )
-            )
+            metadata = {
+                "Id": identifier,
+                "RepoDigests": [] if identifier == "local" else ["registry@sha256:fixture"],
+            }
+            if identifier != "age-unknown":
+                metadata["Created"] = created
+            return json.dumps(metadata)
         if action == ["image", "rm"]:
             assert "--force" not in args
             images.remove(args[-1])
@@ -1268,7 +1290,13 @@ def test_docker_reclaims_only_old_reproducible_unused_images(cleaner, monkeypatc
 
     monkeypatch.setattr(cleaner, "_command", command)
     cleaner._prune_docker()
-    assert images == {"local", "used", "recent"}
+    assert images == {"age-unknown", "local", "used", "recent"}
+    assert {
+        "step": "docker image",
+        "image": "age-unknown",
+        "status": "retained",
+        "reason": "unknown creation time",
+    } in cleaner.maintenance
     assert not build_cache
     assert not cleaner.failures
 

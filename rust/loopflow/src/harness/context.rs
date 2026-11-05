@@ -19,16 +19,14 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     Ok(vec!["--settings".into(), path.display().to_string()])
 }
 
-/// Codex runs thread-configured hooks only when that configuration also trusts
-/// them, and its review screen lists only launch layers. Trust exactly these
-/// declarations for this thread; host entries and persisted decisions stay as found.
-/// Hash protocol: codex-rs/hooks/src/engine/discovery.rs (0.164.0).
-pub(crate) fn codex_config(
+/// The app-server's session-flags `hooks`: a wrapper's declarations, then lf's,
+/// each of lf's trusted so Codex runs it without review. Wrapper declarations keep
+/// their indices so their trust IDs survive; host entries and persisted decisions
+/// stay as found. Hash protocol: codex-rs/hooks/src/engine/discovery.rs (0.164.0).
+pub(crate) fn codex_hooks(
     context: &ContextDelivery,
     session_hooks: Option<&Value>,
 ) -> Result<Value> {
-    // lf's hooks replace the app-server's session-flags hooks. Keep wrapper
-    // declarations at their original indices so their trust IDs survive.
     let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
     let additions = context.hook_settings()?;
     let mut states = hooks
@@ -80,7 +78,7 @@ pub(crate) fn codex_config(
         hooks[event] = json!(combined);
     }
     hooks["state"] = Value::Object(states);
-    Ok(json!({"hooks":hooks}))
+    Ok(hooks)
 }
 
 pub(crate) fn add_opencode_context(
@@ -183,8 +181,8 @@ mod tests {
                 references: vec![repo.path().join("task-reference.md")],
             })
             .collect();
-        let first = super::codex_config(&contexts[0], None).unwrap();
-        assert_eq!(first, super::codex_config(&contexts[1], None).unwrap());
+        let first = super::codex_hooks(&contexts[0], None).unwrap();
+        assert_eq!(first, super::codex_hooks(&contexts[1], None).unwrap());
         assert_eq!(
             super::claude_args(&contexts[0]).unwrap(),
             super::claude_args(&contexts[1]).unwrap()
@@ -234,7 +232,7 @@ mod tests {
                 "/<session-flags>/config.toml:session_start:0:0": {"trusted_hash": "host"},
             },
         });
-        let hooks = &super::codex_config(&context, Some(&host)).unwrap()["hooks"];
+        let hooks = &super::codex_hooks(&context, Some(&host)).unwrap();
         assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
         let state = hooks["state"].as_object().unwrap();
         assert_eq!(state["host-trust"]["trusted_hash"], "unchanged");

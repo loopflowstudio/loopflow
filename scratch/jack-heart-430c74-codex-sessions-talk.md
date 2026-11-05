@@ -2,7 +2,7 @@
 
 Status: implemented, compressed, synced onto main through #1826, thread following
 implemented and compressed (no cuts), realigned 2026-11-05; concept review 2 moved lf's
-configuration onto the app-server (implemented 2026-11-05; gate next).
+configuration onto the app-server (implemented and compressed 2026-11-05; gate next).
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -97,7 +97,7 @@ for per-thread config is deleted.
   with `async` (false) and `timeout` (600) defaults filled in (verified with
   `hooks/list`). lf trusted only handler 0, so its async `task-updates` handlers
   needed review; as server config the TUI showed a review dialog. Fixed in
-  `codex_config`.
+  `codex_hooks`.
 - The observer copies the Session's context binding to a `/new` or `/fork` thread
   before selecting it (`context_block::follow_codex_session`).
 - Headless Codex keeps its config on `thread/start` (out of scope; its fakes read it).
@@ -133,6 +133,7 @@ Implement 2026-11-05: `codex_terminal.py --new-thread` (real 0.166.0) plain+wrap
 `--lib harness::` 186 passed; `context_launch_tests::` 13 passed; `session_launch_contract`
 26 passed twice (two earlier runs each had two different load-flaky failures, Pi/Claude
 included, each passing alone); lifecycle `personal_task_launch_resume...` passed; clippy, fmt clean.
+Compress 2026-11-05 (`codex_hooks` returns hooks, `toml_string`): `--lib harness::` 186 passed, `context_launch_tests::codex` 2 passed, clippy clean.
 
 ## Demo
 

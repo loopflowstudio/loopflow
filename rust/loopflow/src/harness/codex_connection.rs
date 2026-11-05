@@ -1245,7 +1245,7 @@ mod tests {
             assert_eq!(receive(&mut socket).await["method"], "initialized");
             let start = receive(&mut socket).await;
             assert_eq!(start["method"], "thread/start");
-            assert_eq!(start["params"]["developerInstructions"], "prepared");
+            assert_eq!(start["params"]["cwd"], "/work");
             send(
                 &mut socket,
                 json!({"id":start["id"],"result":{"thread":{"id":"created"}}}),
@@ -1257,13 +1257,9 @@ mod tests {
             send(&mut socket, json!({"id":name["id"],"result":{}})).await;
             let _ = socket.next().await;
         });
-        let thread = super::open_thread(
-            &endpoint,
-            json!({"developerInstructions":"prepared"}),
-            "Fix login",
-        )
-        .await
-        .unwrap();
+        let thread = super::open_thread(&endpoint, json!({"cwd":"/work"}), "Fix login")
+            .await
+            .unwrap();
         assert_eq!(thread.as_str(), "created");
         provider.await.unwrap();
     }

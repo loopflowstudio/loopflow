@@ -109,12 +109,16 @@ fn config_overrides(config: &Value) -> Result<Vec<String>> {
     Ok(args)
 }
 
+/// JSON's escapes are TOML basic-string escapes; TOML also forbids raw DEL.
+fn toml_string(text: &str) -> Result<String> {
+    Ok(serde_json::to_string(text)?.replace('\u{7f}', "\\u007F"))
+}
+
 fn toml_inline(value: &Value) -> Result<String> {
     Ok(match value {
         Value::Null => anyhow::bail!("TOML has no null"),
         Value::Bool(_) | Value::Number(_) => value.to_string(),
-        // JSON's escapes are TOML basic-string escapes; TOML also forbids raw DEL.
-        Value::String(text) => serde_json::to_string(text)?.replace('\u{7f}', "\\u007F"),
+        Value::String(text) => toml_string(text)?,
         Value::Array(items) => format!(
             "[{}]",
             items
@@ -127,11 +131,7 @@ fn toml_inline(value: &Value) -> Result<String> {
             "{{{}}}",
             entries
                 .iter()
-                .map(|(key, value)| Ok(format!(
-                    "{}={}",
-                    serde_json::to_string(key)?.replace('\u{7f}', "\\u007F"),
-                    toml_inline(value)?
-                )))
+                .map(|(key, value)| Ok(format!("{}={}", toml_string(key)?, toml_inline(value)?)))
                 .collect::<Result<Vec<_>>>()?
                 .join(",")
         ),
@@ -722,8 +722,7 @@ impl CodexHarness {
                         .find(|layer| layer["name"]["type"] == "sessionFlags")
                 })
                 .and_then(|layer| layer["config"].get("hooks"));
-            config["hooks"] =
-                super::context::codex_config(context, session_hooks)?["hooks"].clone();
+            config["hooks"] = super::context::codex_hooks(context, session_hooks)?;
         }
         Ok(config)
     }

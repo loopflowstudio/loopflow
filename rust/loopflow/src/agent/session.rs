@@ -440,13 +440,14 @@ mod tests {
                         .any(|arg| arg.contains("failIfUnavailable")));
                 }
                 if provider == "codex" {
-                    let params = build_codex_thread_start_params(command.launch.as_ref().unwrap());
+                    let params =
+                        build_codex_thread_start_params(command.launch.as_ref().unwrap(), false);
                     assert_eq!(params["sandbox"], "workspace-write");
                     assert_eq!(params["approvalPolicy"], "never");
                 }
             }
             if provider == "codex" {
-                let params = build_codex_thread_start_params(&config);
+                let params = build_codex_thread_start_params(&config, true);
                 assert_eq!(params["sandbox"], "workspace-write");
                 assert_eq!(params["approvalPolicy"], "never");
             } else if provider == "claude" {
@@ -482,7 +483,7 @@ mod tests {
             isolate: None,
             agent: Some("claude:sonnet".into()),
             cwd: Some(cwd.path().into()),
-            chrome: true,
+            chrome: Some(true),
             max_turns: Some(7),
             output_schema: Some(serde_json::json!({"type":"object"})),
             ..Default::default()
@@ -504,6 +505,118 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--json-schema", r#"{"type":"object"}"#]));
             assert_eq!(command.args.contains(&"--resume".into()), token.is_some());
+        }
+    }
+
+    #[test]
+    fn unset_chrome_sends_no_flag_and_explicit_choices_send_theirs() {
+        let cwd = tempfile::tempdir().unwrap();
+        for (chrome, expected) in [
+            (None, None),
+            (Some(true), Some("--chrome")),
+            (Some(false), Some("--no-chrome")),
+        ] {
+            let config = AgentConfig {
+                agent: Some("claude".into()),
+                cwd: Some(cwd.path().into()),
+                chrome,
+                ..Default::default()
+            };
+            for invocation in [
+                ProviderInvocation::Terminal { session_id: None },
+                ProviderInvocation::ClaudeStream { session_id: None },
+            ] {
+                let command = build_session_command(&config, invocation, None).unwrap();
+                let sent: Vec<_> = command
+                    .args
+                    .iter()
+                    .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
+                    .map(String::as_str)
+                    .collect();
+                assert_eq!(sent, Vec::from_iter(expected));
+            }
+        }
+    }
+
+    /// Codex, OpenCode and Pi have no Chrome equivalent; the whole launch
+    /// (args, environment, Codex thread params) stays free of the setting.
+    #[test]
+    fn chrome_choice_reaches_no_harness_but_claude() {
+        let cwd = tempfile::tempdir().unwrap();
+        for harness in ["codex", "opencode", "pi"] {
+            let config = AgentConfig {
+                agent: Some(harness.into()),
+                cwd: Some(cwd.path().into()),
+                chrome: Some(true),
+                ..Default::default()
+            };
+            let command = build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap();
+            let launch = format!(
+                "{:?} {:?} {:?}",
+                command.args,
+                session_environment(&config, None).unwrap(),
+                build_codex_thread_start_params(&config, false)
+            );
+            assert!(
+                !launch.to_lowercase().contains("chrome"),
+                "{harness}: {launch}"
+            );
+        }
+    }
+
+    /// Pi has no permission bypass; `yolo` reaches it as nothing.
+    #[test]
+    fn yolo_sends_pi_nothing() {
+        let cwd = tempfile::tempdir().unwrap();
+        let launch = |skip_permissions| {
+            let config = AgentConfig {
+                agent: Some("pi".into()),
+                cwd: Some(cwd.path().into()),
+                skip_permissions,
+                ..Default::default()
+            };
+            build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap()
+            .args
+        };
+        assert_eq!(launch(true), launch(false));
+    }
+
+    #[test]
+    fn bare_harness_sends_no_model_and_a_pinned_one_sends_it() {
+        let cwd = tempfile::tempdir().unwrap();
+        for (agent, expected) in [
+            ("claude", None),
+            ("claude:opus", Some("opus")),
+            ("pi", None),
+            ("pi:openai/gpt-5", Some("openai/gpt-5")),
+        ] {
+            let config = AgentConfig {
+                agent: Some(agent.into()),
+                cwd: Some(cwd.path().into()),
+                ..Default::default()
+            };
+            let command = build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap();
+            let model = command
+                .args
+                .iter()
+                .position(|arg| arg == "--model")
+                .map(|index| command.args[index + 1].as_str());
+            assert_eq!(model, expected, "{agent}");
         }
     }
 

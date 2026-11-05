@@ -292,6 +292,38 @@ impl SqliteStore {
         )? != 0)
     }
 
+    /// A boundary lf could not record enters the Session's history as unknown at
+    /// the next one that succeeds (Jack Heart, 2026-11-05): one observation per
+    /// gap, written before the gap closes so a failed write keeps it open. Hooks
+    /// and the Codex relay share this writer.
+    pub(crate) fn close_recording_gap(
+        &self,
+        session: &str,
+        gap: &mut crate::store::RecordingGap,
+    ) -> StoreResult<()> {
+        if let Some(span) = gap.span() {
+            let session = self.session(session)?.ok_or(StoreError::NotFound)?;
+            let input = session
+                .input_key()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                .clone();
+            self.retain_session_observation(
+                &session,
+                &crate::session::SessionObservation {
+                    artifact_key: input,
+                    source: format!("store-gap:{}:{}", span.first_miss, span.last_miss),
+                    observed_at: span.first_miss,
+                    task_id: session.task_id.clone(),
+                    wave_id: session.wave_id.clone(),
+                    payload: serde_json::json!({"source":"store-gap",
+                        "first_miss":span.first_miss,"last_miss":span.last_miss}),
+                },
+            )?;
+        }
+        gap.recovered();
+        Ok(())
+    }
+
     pub(crate) fn retain_session_observation(
         &self,
         session: &crate::session::LfSession,
@@ -784,7 +816,58 @@ fn record_event_in(
 mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
+    use crate::store::RecordingGap;
     use serde_json::json;
+
+    #[test]
+    fn a_recovered_gap_enters_the_sessions_history_once() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let marker = home.path().join("thread.store-gap");
+        let gap = || RecordingGap::marked(marker.clone());
+        let observations = || -> i64 {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM session_events WHERE session_id='session'
+                     AND kind='observed' AND json_extract(payload,'$.source')='store-gap'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        // A boundary that records with no gap open writes nothing extra.
+        store.close_recording_gap("session", &mut gap()).unwrap();
+        assert_eq!(observations(), 0);
+        // Two hook processes miss the store; the next one that reaches it records
+        // the hole once, and later boundaries have nothing left to say.
+        gap().note("turn evidence", &"database is locked");
+        gap().note("steers", &"database is locked");
+        let mut open = gap();
+        let span = open.span().unwrap().clone();
+        store.close_recording_gap("session", &mut open).unwrap();
+        assert!(open.span().is_none());
+        assert_eq!(observations(), 1);
+        let payload: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM session_events WHERE kind='observed'
+                 AND json_extract(payload,'$.source')='store-gap'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["first_miss"], span.first_miss);
+        assert_eq!(payload["last_miss"], span.last_miss);
+        store.close_recording_gap("session", &mut gap()).unwrap();
+        assert_eq!(observations(), 1);
+    }
 
     fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> i64 {
         let attachment = store

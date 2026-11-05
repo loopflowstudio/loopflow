@@ -53,7 +53,7 @@ fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
 
 fn probe(repo: &Path) -> settings::ResolvedSettings {
     let resolved = resolve(repo, crate::graph::load_skill("probe", repo).unwrap());
-    let inspected = crate::config::api::inspect(repo, None, Some("probe"), None, None).unwrap();
+    let inspected = crate::engine::config::inspect(repo, None, Some("probe"), None, None).unwrap();
     assert_eq!(
         inspected[0]["settings"]["agent"]["value"],
         resolved.config.agent().unwrap()
@@ -242,7 +242,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             &serde_json::to_string(&profile).unwrap(),
         );
         let inspected =
-            crate::config::api::inspect(repo.path(), None, None, Some("outer"), None).unwrap();
+            crate::engine::config::inspect(repo.path(), None, None, Some("outer"), None).unwrap();
         assert_eq!(inspected.len(), 4);
         for index in [0, 2] {
             let pair = &inspected[index..index + 2];
@@ -272,7 +272,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             "- step: {name: probe, id: work, agent: claude:repository}\n",
         );
         let repository =
-            crate::config::api::inspect(repo.path(), None, None, Some("inner"), Some("work"))
+            crate::engine::config::inspect(repo.path(), None, None, Some("inner"), Some("work"))
                 .unwrap();
         assert_eq!(
             repository[0]["settings"]["agent"]["value"],

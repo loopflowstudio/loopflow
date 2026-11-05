@@ -18,8 +18,8 @@ enum ServerClient {
         String(decoding: try JSONEncoder().encode(await request(.command(change), location: location)), as: UTF8.self)
     }
 
-    static func configuration(_ value: JSONValue, location: ServerLocation = .shared) async throws -> Data {
-        try JSONEncoder().encode(await request(.configuration(value), location: location))
+    static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
+        try JSONEncoder().encode(await request(.config(operation), location: location))
     }
 
     private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> JSONValue {

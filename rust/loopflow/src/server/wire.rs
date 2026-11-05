@@ -53,7 +53,7 @@ pub struct ClientIdentity {
 }
 
 /// What a request asks for, named by its `kind`: a dotted resource and verb
-/// (`task.complete`, `plan.get`). `desktop.*` kinds are Desktop's own
+/// (`task.complete`, `planning.list`). `desktop.*` kinds are Desktop's own
 /// arrangement state, not part of what other clients are offered.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -70,13 +70,8 @@ pub enum ServerOperation {
     /// The owner Process of a Session's terminal, if one is recorded.
     #[serde(rename = "session.owner")]
     SessionOwner { session: crate::id::LfSessionId },
-    /// Settings files: catalogue, declaration, explanation and theme.
-    #[serde(rename = "config.file")]
-    Configuration {
-        request: crate::config::api::Request,
-    },
     /// Switch this connection to the existing owner protocol after `bridged`.
-    #[serde(rename = "terminal.attach")]
+    #[serde(rename = "process.attach")]
     Attach { owner: LfProcessId },
 }
 

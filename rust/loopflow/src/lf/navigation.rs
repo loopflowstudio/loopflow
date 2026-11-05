@@ -52,6 +52,8 @@ pub fn resolve_child(
             "comment" => Some("task"),
             // `lf release` stays the release command.
             "sync" | "release" => Some("ops"),
+            // `lf set` and `lf unset` stay the everyday spelling of `config set|unset`.
+            "set" | "unset" => Some("config"),
             _ => None,
         };
         if let Some(owner) = owner.and_then(|name| command.find_subcommand(name)) {
@@ -192,6 +194,8 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     let mut current = &tree;
     let mut path = Vec::new();
     let mut output = vec![args[0].clone()];
+    // Where each word of `path` sits in `output`.
+    let mut positions = Vec::new();
     let mut location = Vec::new();
     let mut index = 1;
     let mut boundary = false;
@@ -238,6 +242,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                         .find_subcommand(owner)
                         .expect("resolved child exists");
                 }
+                positions.extend(output.len()..output.len() + expansion.len());
                 output.extend(expansion.clone());
                 path.extend(expansion);
                 if current.get_subcommands().next().is_none()
@@ -248,6 +253,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             } else {
                 // Keep unknown owner children in help requests too: they must
                 // fail identically instead of becoming the owner's help page.
+                positions.push(output.len());
                 path.push(value.clone());
                 output.push(value.clone());
                 boundary = true;
@@ -256,6 +262,31 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             output.push(value.clone());
         }
         index += 1;
+    }
+    if let Some(start) = positions.first().copied() {
+        let rest: Vec<String> = (start..output.len())
+            .filter(|index| !positions.contains(index))
+            .map(|index| output[index].clone())
+            .collect();
+        if let Some(entry) = super::aliases::find(&path, &rest) {
+            let mut moved = output[..start].to_vec();
+            moved.extend(entry.canonical.iter().map(|word| word.to_string()));
+            let mut dropped = entry.words.to_vec();
+            for (index, word) in output.iter().enumerate().skip(start) {
+                if positions.contains(&index) {
+                    continue;
+                }
+                if let Some(at) = dropped.iter().position(|old| old == word) {
+                    dropped.remove(at);
+                    continue;
+                }
+                moved.push(word.clone());
+            }
+            if help {
+                moved.push("--help".into());
+            }
+            return normalize_args(moved);
+        }
     }
     if help {
         let mut request = vec![args[0].clone()];

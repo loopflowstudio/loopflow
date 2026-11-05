@@ -489,21 +489,19 @@ async fn operate(
                 .map_err(unavailable)?
                 .map_err(unavailable)
         }
-        Operation::Server(ServerOperation::Configuration { request }) => {
-            let mut target = serde_json::to_value(&request).map_err(unavailable)?;
-            target
-                .as_object_mut()
-                .expect("configuration request is an object")
-                .remove("value");
-            effect(target, id, instance, trace_id, move || {
-                crate::config::api::run(request)
-            })
-            .await
-        }
         Operation::Write(change) => {
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
-                for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
+                // Setting values and authored text stay out of request telemetry.
+                for field in [
+                    "content",
+                    "notes",
+                    "plan",
+                    "layout",
+                    "slots",
+                    "expression",
+                    "value",
+                ] {
                     fields.remove(field);
                 }
             }
@@ -661,8 +659,7 @@ mod tests {
     use crate::engine::ErrorCode;
     use crate::lf::commands::read::Read;
     use crate::server::wire::{
-        ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation,
-        MAX_MESSAGE, REVISION,
+        ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, MAX_MESSAGE, REVISION,
     };
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
@@ -727,9 +724,7 @@ mod tests {
     }
 
     fn catalog() -> Operation {
-        Operation::Server(ServerOperation::Configuration {
-            request: crate::config::api::Request::Catalog,
-        })
+        Operation::Read(crate::lf::commands::read::Read::ConfigCatalog)
     }
 
     /// Serialize the tests that read an empty Machine registry through env.

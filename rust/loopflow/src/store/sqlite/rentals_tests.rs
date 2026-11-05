@@ -41,12 +41,11 @@ fn file_edits_change_admission_without_rewriting_live_rentals() {
         crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
     store.add_ondemand(&code(1)).unwrap();
     let admitted = store.admit_rental("code", None, None, false).unwrap();
-    crate::config::api::run(crate::config::api::Request::Declaration {
-        destination: crate::config::files::Destination::PersonalGlobal {},
-        key: "ondemands.code.max_machines".into(),
-        value: Some("0".into()),
-        unset: false,
-    })
+    crate::engine::config::set(
+        &crate::config::files::Destination::PersonalGlobal {},
+        "ondemands.code.max_machines",
+        "0",
+    )
     .unwrap();
     assert_eq!(store.ondemand("code").unwrap().unwrap().max_machines, 0);
     assert!(store.admit_rental("code", None, None, false).is_err());

@@ -46,7 +46,7 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
-→ {"type":"request","id":"a","operation":{"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true}}
+→ {"type":"request","id":"a","operation":{"kind":"planning.list","directory":"/","wave":null,"task":null,"all":true}}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null}}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
@@ -117,35 +117,43 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | Resource | Reads | Writes |
 | --- | --- | --- |
 | `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs`, `task.wait` | `task.create`, `task.run`, `task.ship`, `task.hold`, `task.steer`, `task.comment`, `task.interrupt`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
-| `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new` |
-| `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
+| `session` | `session.list` (`limit` pages it), `session.owner`, `session.usage`, `session.history`, `session.retention` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new` |
+| `wave`, `planning` | `wave.list`, `wave.planning`, `wave.graph`, `planning.list` | `wave.create`, `wave.sync` |
 | `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repository.path` | |
 | `graph` | `graph.list`, `graph.run` | `graph.customize` |
-| `machine`, `process` | `machine.self`, `machine.list`, `machine.doctor`, `process.list` | |
-| `usage`, `history` | `usage.get`, `history.list`, `history.retention` | |
-| `work`, `view`, `config` | `work.resolve`, `view.list`, `view.get`, `config.settings` | `config.file` |
-| `terminal` | | `terminal.attach` |
-| `desktop` | `desktop.portfolio`, `desktop.layout` | `desktop.portfolio.set`, `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
+| `machine`, `process` | `machine.self`, `machine.list`, `machine.doctor`, `process.list` | `process.attach` |
+| `work` | `work.resolve` | |
+| `config` | `config.catalog`, `config.settings`, `config.get`, `config.explain` | `config.set`, `config.unset`, `config.theme` |
+| `desktop` | `desktop.portfolio`, `desktop.layout`, `desktop.view.list`, `desktop.view.get` | `desktop.portfolio.set`, `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
+
+The nouns are Loopflow's primitives (Wave, Task, Graph, Session, Process,
+Machine, Repository, Work, PR, Checkout, Skill, Account), plus `config` for
+settings, `desktop` for the app and `planning` for every Wave's plan at once;
+nothing gets a namespace of its own for a client.
 
 `desktop.*` is Desktop's own arrangement state: which repositories its windows
 show, saved pane layouts and Dashboards. It is served for Desktop and is not
 part of what a phone or bot client is offered.
 
-- `config.file {request}` uses `config::api::Request` for catalogue, declaration,
-  explanation and theme access. CLI and Desktop share the same Rust validation
-  and file writer. It returns the value `config::api::run` returns and never
-  replays a failed or uncertain save. Setting values are omitted from request telemetry.
+- `config.*` is `engine::config`, which `lf config` calls too: `config.catalog`
+  lists the typed settings, `config.settings {directory, wave, skill, graph,
+  step}` resolves them with their sources, and `config.get`, `config.set
+  {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
+  a destination names an owner (`personal_global`, `shared_repository {repository}`,
+  …), never a file plus a scope. `config.theme {path, value}` is Appearance's
+  theme file. A failed or uncertain save is never replayed; setting values are
+  omitted from request telemetry.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is
   supported. Repository IDs resolve on the destination with `repository.path`;
-  paths in local reads are destination paths. `view.get` returns the existing
+  paths in local reads are destination paths. `desktop.view.get` returns the existing
   WorkViewPlan, including the recorded primary Session; roadmap membership alone
   cannot select one. A missing primary stays absent. Resolve its owner with
   `session.owner` before attachment.
-- `subscribe {id, operation}` takes a read with a watch: `view.list`,
-  `session.list` without `limit`, `task.get`, `task.wait`, `history.list`,
-  `plan.get`, `repository.planning` and `process.list`. It answers
+- `subscribe {id, operation}` takes a read with a watch: `desktop.view.list`,
+  `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
+  `planning.list`, `repository.planning` and `process.list`. It answers
   `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
@@ -193,7 +201,7 @@ part of what a phone or bot client is offered.
 - `session.owner {session}` resolves a Session ID to `{owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.
-- `terminal.attach {owner}` takes the exact existing owner Process ID on a connection of
+- `process.attach {owner}` takes the exact existing owner Process ID on a connection of
   its own: hello, one attach request, its response, then the unchanged binary owner
   protocol in `transport/README.md` and `transport/wire.rs`. An owner whose
   endpoint refuses is `not_found {owner}`: it ended. Each terminal has

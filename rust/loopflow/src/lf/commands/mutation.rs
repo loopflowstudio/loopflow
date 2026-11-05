@@ -38,7 +38,6 @@ pub fn accepts(cli: &Cli) -> bool {
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
             WaveCommand::Add { .. }
-                | WaveCommand::NewChapter { .. }
                 | WaveCommand::Status {
                     sync: true,
                     watch: false,
@@ -141,8 +140,6 @@ fn local(
         Commands::Wave { cmd } => wave(
             &crate::repo::require_repo_root(directory, "this command")?,
             cmd,
-            selected_wave,
-            directory,
             io,
         ),
         Commands::Session { cmd } => super::session::mutate(cli, directory, cmd, io),
@@ -295,57 +292,8 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     }
 }
 
-fn wave(
-    repo: &Path,
-    command: &WaveCommand,
-    selected_wave: Option<&str>,
-    directory: &Path,
-    io: &mut CommandIo<'_>,
-) -> Result<()> {
+fn wave(repo: &Path, command: &WaveCommand, io: &mut CommandIo<'_>) -> Result<()> {
     match command {
-        WaveCommand::NewChapter {
-            wave,
-            name,
-            plan,
-            dry_run,
-            json,
-            ..
-        } => {
-            let rotation = crate::ops::chapter::new_chapter(
-                repo,
-                name,
-                &read_plan(&directory.join(plan), io.input)?,
-                wave.as_deref().or(selected_wave),
-                *dry_run,
-            )?;
-            if let Some(provider) = crate::config::load_config_or_default(Some(repo))
-                .planning_transport()
-                .remote_name()
-                .filter(|_| !dry_run)
-            {
-                writeln!(io.error, "Saved locally; pending {provider} sync.")?;
-            }
-            if *json {
-                writeln!(io.output, "{}", serde_json::to_string_pretty(&rotation)?)?;
-            } else {
-                writeln!(io.output, "Chapter {}", rotation.name)?;
-                for wave in rotation.waves {
-                    writeln!(
-                        io.output,
-                        "  {} → {} ({})",
-                        wave.wave, rotation.name, wave.successor_id
-                    )?;
-                    for task in wave.tasks {
-                        writeln!(
-                            io.output,
-                            "    {}  {:?}  {}",
-                            task.task.identifier, task.disposition, task.reason
-                        )?;
-                    }
-                }
-            }
-            Ok(())
-        }
         WaveCommand::Add {
             wave,
             objective,
@@ -425,14 +373,4 @@ pub fn read_task_draft(input: &mut dyn Read) -> Result<String> {
     input.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(bytes.len() <= limit, "Draft exceeds 1 MB");
     Ok(String::from_utf8(bytes)?)
-}
-
-fn read_plan(path: &Path, input: &mut dyn Read) -> Result<Vec<u8>> {
-    if path == Path::new("/dev/stdin") {
-        let mut bytes = Vec::new();
-        input.read_to_end(&mut bytes)?;
-        Ok(bytes)
-    } else {
-        Ok(std::fs::read(path)?)
-    }
 }

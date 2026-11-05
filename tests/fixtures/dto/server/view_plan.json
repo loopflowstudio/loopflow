@@ -1,1 +1,1 @@
-{"type":"request","id":"view-1","operation":{"kind":"view.get","directory":"/repo","expression":"task:INF-123"}}
+{"type":"request","id":"view-1","operation":{"kind":"desktop.view.get","directory":"/repo","expression":"task:INF-123"}}

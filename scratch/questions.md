@@ -230,3 +230,30 @@ Step 1 (task.* and the core loop). Decisions made headless; each is reversible.
 - **Desktop callers.** `WorkModel.shipTask` and `runTask` still spawn `lf`;
   moving them to `task.ship` / `task.run` needs `task.run` to take a `graph`
   and the headless test that taps the ship argv to change.
+
+Step 2 (session.asks and session.answer) was reverted on Jack Heart's direction:
+the phone gets the real terminal on the real Claude Code session, so there is
+no asks reading and no answer write.
+
+Step 3 (namespace alignment). Decisions made headless; each is reversible.
+
+- **Config is one path.** `config::api` moved to `engine::config`; its
+  `Request` enum and the server's `config.file` operation are gone. The kinds
+  are `config.catalog`, `config.settings`, `config.get`, `config.explain`
+  (reads) and `config.set`, `config.unset`, `config.theme` (writes), each
+  spelled by `lf config catalog|settings|get|set|unset|explain`. `lf set` and
+  `lf unset` stay the everyday shorthand (reserved owner). `config.theme {path,
+  value}` has no CLI: Appearance owns an arbitrary theme file and its
+  Apply/Cancel transaction; reading is `value: null`. If Jack wants theme to be
+  an ordinary `config.set` on the personal global destination, Appearance's
+  file choice has to go.
+- **Wave's plan.** `wave.get` (Desktop's one-Wave read) is renamed
+  `wave.planning`; `plan.get` (every Wave's plan) is `planning.list`.
+- **Chapter rotation's engine stays.** `lf wave new-chapter`, the
+  `chapter.start` write and Desktop's "Realign Projects…" sheet are deleted;
+  `ops::chapter::{new_chapter, rotate}` and the store's project rotation keep
+  their tests but no command reaches them. Delete them when Jack decides KRs
+  are not returning, or rewire when they do. The `start-chapter`,
+  `wave_start-chapter`, `review-chapter`, `split-wave` and `init` skills still
+  describe `lf wave new-chapter`; they need Jack's call on what chapter
+  planning becomes before they are rewritten.

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+pub mod aliases;
 pub mod commands;
 pub mod navigation;
 pub mod output;
@@ -557,31 +558,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: OpsCommand,
     },
-    /// Set your own value of a setting for this repository, a Wave or every
-    /// repository; it never edits committed config
-    #[command(after_help = SETTING_KEYS)]
-    Set {
-        key: String,
-        value: String,
-        /// Every repository
-        #[arg(long)]
-        global: bool,
-        /// Edit the committed repository or Wave configuration explicitly
-        #[arg(long, id = "set_shared", conflicts_with = "global")]
-        shared: bool,
-    },
-    /// Clear your own value of a setting, so the committed config chooses
-    #[command(after_help = SETTING_KEYS)]
-    Unset {
-        key: String,
-        /// Every repository
-        #[arg(long)]
-        global: bool,
-        /// Edit the committed repository or Wave configuration explicitly
-        #[arg(long, id = "unset_shared", conflicts_with = "global")]
-        shared: bool,
-    },
-    /// Read Loopflow configuration
+    /// Read and declare Loopflow settings
     Config {
         #[command(subcommand)]
         cmd: ConfigCommand,
@@ -1132,8 +1109,6 @@ impl Commands {
             Self::Ship { .. }
             | Self::Open(_)
             | Self::Inline { .. }
-            | Self::Set { .. }
-            | Self::Unset { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
             | Self::ContextBlock { .. }
@@ -1179,7 +1154,6 @@ impl WaveCommand {
         match self {
             Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
             Self::Status { sync, .. } => *sync,
-            Self::NewChapter { dry_run, .. } => !dry_run,
             Self::Remove { preview, .. } => !preview,
             Self::EditPlan { .. }
             | Self::Add { .. }
@@ -1403,7 +1377,12 @@ impl MachineCommand {
 impl ConfigCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::User { .. } | Self::Show { .. } | Self::Catalog { .. } => false,
+            Self::User { .. }
+            | Self::Settings { .. }
+            | Self::Catalog { .. }
+            | Self::Get { .. }
+            | Self::Explain { .. } => false,
+            Self::Set { .. } | Self::Unset { .. } => true,
             Self::Import { .. } => true,
             Self::Migrate { accept } => *accept,
             Self::Retained { replace, keep } => *replace || *keep,
@@ -1502,8 +1481,8 @@ const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where
 Values use YAML; false disables and [] clears an additive list.
 The default destination is root lf.config.local.yaml, shared across Task worktrees.
 --global edits ~/.lf/config.yaml; --shared explicitly edits committed configuration.
-`lf --wave <name> set` selects a Wave; unset removes only that declaration.
-`lf config show --skill <name> --json` explains effective values and sources.";
+`lf --wave <name> config set` selects a Wave; unset removes only that declaration.
+`lf config settings --skill <name> --json` explains effective values and sources.";
 
 #[derive(Subcommand, Debug)]
 pub enum WaveGraphCommand {
@@ -1831,22 +1810,6 @@ pub enum WaveCommand {
         description: Option<String>,
     },
 
-    /// Rotate this Wave, or every Wave with --all, to the named Project plan
-    #[command(allow_missing_positional = true)]
-    NewChapter {
-        #[arg(required_unless_present = "all", conflicts_with = "all")]
-        wave: Option<String>,
-        name: String,
-        /// Advance every Wave in this repository
-        #[arg(long)]
-        all: bool,
-        #[arg(long)]
-        plan: PathBuf,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Add a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
     /// and start its first chapter. Adding an existing Wave changes nothing.
     Add {
@@ -2664,8 +2627,8 @@ pub enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show effective preferences without launching
-    Show {
+    /// Show effective settings and their sources without launching
+    Settings {
         #[arg(long)]
         skill: Option<String>,
         #[arg(long)]
@@ -2674,6 +2637,47 @@ pub enum ConfigCommand {
         step: Option<String>,
         #[command(flatten)]
         output: commands::config::ShowOptions,
+    },
+    /// Read one file's declaration of a setting: yours for this repository,
+    /// a Wave's or every repository's, or the committed one
+    #[command(after_help = SETTING_KEYS)]
+    Get {
+        key: String,
+        #[command(flatten)]
+        destination: commands::setting::DestinationArgs,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set your own value of a setting for this repository, a Wave or every
+    /// repository; it never edits committed config
+    #[command(after_help = SETTING_KEYS)]
+    Set {
+        key: String,
+        value: String,
+        #[command(flatten)]
+        destination: commands::setting::DestinationArgs,
+        /// Print the saved declaration
+        #[arg(long)]
+        json: bool,
+    },
+    /// Clear your own value of a setting, so the committed config chooses
+    #[command(after_help = SETTING_KEYS)]
+    Unset {
+        key: String,
+        #[command(flatten)]
+        destination: commands::setting::DestinationArgs,
+        /// Print the removed declaration's file
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain how a setting resolves where it would be declared: every
+    /// source's candidate and the value a launch there uses
+    Explain {
+        key: String,
+        #[command(flatten)]
+        destination: commands::setting::DestinationArgs,
+        #[arg(long)]
+        json: bool,
     },
     /// Print the configured participant display name.
     User {
@@ -3267,8 +3271,8 @@ mod tests {
             vec!["lf", "session", "steer", "session_1", "keep attribution"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
             vec!["lf", "task", "move", "LOO-1", "--machine", "mini"],
-            vec!["lf", "--wave", "product", "set", "machine", "mini"],
-            vec!["lf", "unset", "account.claude", "--global"],
+            vec!["lf", "--wave", "product", "config", "set", "machine", "mini"],
+            vec!["lf", "config", "unset", "account.claude", "--global"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
@@ -3404,25 +3408,7 @@ mod tests {
     }
 
     #[test]
-    fn chapter_commands_require_retained_plan_and_task_creation_needs_no_project_selector() {
-        let preview = Cli::try_parse_from([
-            "lf",
-            "wave",
-            "new-chapter",
-            "two",
-            "--all",
-            "--plan",
-            "chapter.json",
-            "--dry-run",
-            "--json",
-        ])
-        .unwrap();
-        assert!(matches!(
-            preview.command,
-            Some(Commands::Wave {
-                cmd: WaveCommand::NewChapter { dry_run: true, .. }
-            })
-        ));
+    fn task_creation_needs_no_project_selector() {
         let task = Cli::try_parse_from([
             "lf",
             "task",

@@ -95,14 +95,14 @@ struct RegistryQueryTests {
             try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
         }
         #expect(try object(ServedRead.history(since: "7d", limit: 50, wave: nil, project: "p", task: nil))
-            == object(#"{"kind":"history.list","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
+            == object(#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
         let sessions = ServedRead.desktopSessions(directory: "/r", headless: true)
         #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null}"#))
         #expect(sessions.argv == ["desktop", "sessions", "--interactive", "all", "--json"])
         #expect(try object(ServedRead.taskDiff(issue: "FIX-1", path: nil, base: "parent", draft: nil))
             == object(#"{"kind":"task.diff","issue":"FIX-1","path":null,"base":"parent","draft":null}"#))
         let view = ServedRead.viewPlan(directory: "/r", expression: "state:backlog")
-        #expect(try object(view) == object(#"{"kind":"view.get","directory":"/r","expression":"state:backlog"}"#))
+        #expect(try object(view) == object(#"{"kind":"desktop.view.get","directory":"/r","expression":"state:backlog"}"#))
         #expect(view.cwd == "/r")
         #expect(ServedRead.waves.cwd == nil)
     }
@@ -139,10 +139,6 @@ struct RegistryQueryTests {
         #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
         #expect(portfolio.argv == ["portfolio", "remove", "/r", "--json"])
         #expect(portfolio.cwd == "/")
-        let chapter = ServedWrite.newChapter(directory: "/r", name: "October", plan: "{}", preview: true)
-        #expect(try object(chapter) == object(
-            #"{"kind":"chapter.start","directory":"/r","name":"October","plan":"{}","preview":true}"#))
-        #expect(chapter.input == "{}")
         let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil)
         #expect(try object(primary) == object(
             #"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#))

@@ -273,26 +273,19 @@ fn run_ssh_io(
     use std::io::Write;
     let args = ssh_argv(dest, forward_agent, preamble, false)?;
     let mut input = Vec::new();
-    let reads_input = match &cli.command {
+    let reads_input = matches!(
+        &cli.command,
         Some(crate::lf::Commands::Task {
-            cmd: crate::lf::TaskCommand::Save { .. },
-        })
-        | Some(crate::lf::Commands::Desktop {
-            cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
-        }) => true,
-        Some(crate::lf::Commands::Task {
-            cmd:
-                crate::lf::TaskCommand::Create {
+            cmd: crate::lf::TaskCommand::Save { .. }
+                | crate::lf::TaskCommand::Create {
                     request: None,
                     notes: None,
                     ..
                 },
-        }) => true,
-        Some(crate::lf::Commands::Wave {
-            cmd: crate::lf::WaveCommand::NewChapter { plan, .. },
-        }) => plan == std::path::Path::new("/dev/stdin"),
-        _ => false,
-    };
+        }) | Some(crate::lf::Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
+        })
+    );
     if reads_input {
         io.input.read_to_end(&mut input)?;
     }

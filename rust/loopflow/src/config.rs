@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use crate::agent::check_cli_available;
 use crate::error::LoadError;
 
-pub mod api;
 pub mod catalog;
 mod definitions;
 pub mod files;

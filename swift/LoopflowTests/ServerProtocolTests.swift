@@ -88,10 +88,8 @@ struct ServerProtocolTests {
     }
 
     @Test func configurationUsesTheSharedDestinationContract() throws {
-        let raw = try value("configuration")
-        guard case .object(let root) = raw, case .object(let operation) = root["operation"],
-              let request = operation["request"] else { Issue.record("Missing configuration request"); return }
-        #expect(try encoded(.request(id: "config-1", operation: .configuration(request))) == raw)
+        let set = ConfigOperation.set(destination: .object(["kind": .string("personal_global")]), key: "theme", value: "Hearth")
+        #expect(try encoded(.request(id: "config-1", operation: .config(set))) == value("configuration"))
     }
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {

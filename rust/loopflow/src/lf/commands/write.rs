@@ -143,15 +143,6 @@ pub enum Write {
     /// `lf wave status <wave> --sync --json`: the planning refresh.
     #[serde(rename = "wave.sync")]
     PlanningRefresh { directory: PathBuf, wave: String },
-    /// `lf wave new-chapter --all <name> --plan /dev/stdin --json`, with
-    /// `plan` (JSON) on stdin; `--dry-run` when `preview`, which records nothing.
-    #[serde(rename = "chapter.start")]
-    NewChapter {
-        directory: PathBuf,
-        name: String,
-        plan: String,
-        preview: bool,
-    },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
     /// recording nothing.
     #[serde(rename = "graph.customize")]
@@ -230,6 +221,28 @@ pub enum Write {
         directory: PathBuf,
         work: String,
         layout: String,
+    },
+    /// `lf config set <key> <value> <destination flags> --json`: declare a
+    /// setting in the destination's file; `value` is YAML.
+    #[serde(rename = "config.set")]
+    ConfigSet {
+        destination: crate::config::files::Destination,
+        key: String,
+        value: String,
+    },
+    /// `lf config unset <key> <destination flags> --json`: remove that
+    /// declaration so other sources choose.
+    #[serde(rename = "config.unset")]
+    ConfigUnset {
+        destination: crate::config::files::Destination,
+        key: String,
+    },
+    /// Appearance's theme file at `path`: set to `value`, or read when null.
+    /// Desktop owns its Apply/Cancel transaction; no CLI spells it.
+    #[serde(rename = "config.theme")]
+    ConfigTheme {
+        path: PathBuf,
+        value: Option<String>,
     },
 }
 
@@ -346,21 +359,6 @@ impl Write {
                     super::waves::Shape::Tasks,
                 )?)?)
             }
-            Self::NewChapter {
-                name,
-                plan,
-                preview,
-                ..
-            } => {
-                let repo = crate::repo::require_repo_root(directory, "this command")?;
-                value(&crate::ops::chapter::new_chapter(
-                    &repo,
-                    name,
-                    plan.as_bytes(),
-                    None,
-                    *preview,
-                )?)
-            }
             Self::GraphCustomize { name, .. } => value(&super::graph::Customized {
                 path: crate::graph::customize(
                     name,
@@ -368,6 +366,17 @@ impl Write {
                 )?,
             }),
             Self::Portfolio { change } => value(&crate::portfolio::change(change, directory)?),
+            Self::ConfigSet {
+                destination,
+                key,
+                value: declared,
+            } => value(&crate::engine::config::set(destination, key, declared)?),
+            Self::ConfigUnset { destination, key } => {
+                value(&crate::engine::config::unset(destination, key)?)
+            }
+            Self::ConfigTheme { path, value: theme } => {
+                value(&crate::engine::config::theme(path, theme.as_deref())?)
+            }
             Self::DashboardQuery { .. }
             | Self::DashboardPin { .. }
             | Self::DashboardUnpin { .. }
@@ -539,7 +548,6 @@ impl Write {
     pub fn input(&self) -> Option<&str> {
         match self {
             Self::TaskSave { content, .. } => Some(content),
-            Self::NewChapter { plan, .. } => Some(plan),
             Self::DashboardSlots { slots, .. } => Some(slots),
             Self::PaneLayout { layout, .. } => Some(layout),
             _ => None,
@@ -569,7 +577,6 @@ impl Write {
             | Self::SessionNew { directory, .. }
             | Self::WaveAdd { directory, .. }
             | Self::PlanningRefresh { directory, .. }
-            | Self::NewChapter { directory, .. }
             | Self::GraphCustomize { directory, .. }
             | Self::DashboardQuery { directory, .. }
             | Self::DashboardPin { directory, .. }
@@ -580,7 +587,10 @@ impl Write {
             | Self::DashboardSlots { directory, .. }
             | Self::TileMove { directory, .. }
             | Self::PaneLayout { directory, .. } => directory,
-            Self::Portfolio { .. } => Path::new("/"),
+            Self::Portfolio { .. }
+            | Self::ConfigSet { .. }
+            | Self::ConfigUnset { .. }
+            | Self::ConfigTheme { .. } => Path::new("/"),
         }
     }
 }
@@ -602,7 +612,6 @@ mod tests {
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
             r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
-            r#"{"kind":"chapter.start","directory":"/r","name":"October","plan":"{}","preview":true}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
@@ -618,11 +627,6 @@ mod tests {
                 serde_json::from_str::<serde_json::Value>(json).unwrap()
             );
         }
-        let chapter: Write = serde_json::from_str(
-            r#"{"kind":"chapter.start","directory":"/r","name":"October","plan":"{}","preview":true}"#,
-        )
-        .unwrap();
-        assert_eq!(chapter.input(), Some("{}"));
     }
 
     #[test]

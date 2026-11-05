@@ -45,9 +45,10 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
 
 #[test]
 fn configuration_edits_use_the_server_without_work_processes() {
-    use loopflow::config::api::Request;
     use loopflow::config::files::Destination;
-    use loopflow::server::wire::{Operation, ServerOperation};
+    use loopflow::lf::commands::read::Read;
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::Operation;
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
@@ -65,15 +66,13 @@ fn configuration_edits_use_the_server_without_work_processes() {
         connection.welcome().machine.is_none(),
         "an unreadable registry leaves the Machine unknown, not the connection refused"
     );
-    let mut request = |request| {
+    let mut request = |operation| {
         connection
-            .request(Operation::Server(ServerOperation::Configuration {
-                request,
-            }))
+            .request(operation)
             .map(|response| response.result)
             .map_err(|error| error.downcast::<loopflow::engine::Error>().unwrap())
     };
-    let catalog = request(Request::Catalog).unwrap();
+    let catalog = request(Operation::Read(Read::ConfigCatalog)).unwrap();
     assert!(catalog
         .as_array()
         .unwrap()
@@ -84,31 +83,31 @@ fn configuration_edits_use_the_server_without_work_processes() {
         "# retained\ntheme: Linen\n",
     )
     .unwrap();
-    let declaration = |value: &str| Request::Declaration {
-        destination: Destination::PersonalGlobal {},
-        key: "theme".into(),
-        value: Some(value.into()),
-        unset: false,
+    let declaration = |value: &str| {
+        Operation::Write(Write::ConfigSet {
+            destination: Destination::PersonalGlobal {},
+            key: "theme".into(),
+            value: value.into(),
+        })
     };
     assert_eq!(request(declaration("Hearth")).unwrap()["value"], "Hearth");
     let saved = fs::read_to_string(home.path().join("config.yaml")).unwrap();
     assert!(saved.contains("# retained"));
     assert!(saved.contains("Hearth"));
-    let refused = request(Request::Declaration {
+    let refused = request(Operation::Write(Write::ConfigSet {
         destination: Destination::SharedRepository {
             repository: repo.path().to_owned(),
         },
         key: "user.name".into(),
-        value: Some("Wrong scope".into()),
-        unset: false,
-    })
+        value: "Wrong scope".into(),
+    }))
     .unwrap_err();
     assert!(refused.message.contains("does not apply"), "{refused:?}");
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    let theme = request(Request::Theme {
+    let theme = request(Operation::Write(Write::ConfigTheme {
         path: home.path().join("config.yaml"),
         value: None,
-    })
+    }))
     .unwrap();
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
@@ -415,6 +414,9 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineId
         | Read::Portfolio
         | Read::Settings { .. }
+        | Read::ConfigCatalog
+        | Read::ConfigGet { .. }
+        | Read::ConfigExplain { .. }
         | Read::PaneLayout { .. }
         | Read::People { .. }
         | Read::Graphs { .. }
@@ -461,6 +463,19 @@ fn server_operations_match_their_lf_commands() {
                     skill: Some("implement".into()),
                     graph: None,
                     step: None,
+                },
+                Read::ConfigCatalog,
+                Read::ConfigGet {
+                    destination: loopflow::config::files::Destination::SharedRepository {
+                        repository: repo.path().to_owned(),
+                    },
+                    key: "agent".into(),
+                },
+                Read::ConfigExplain {
+                    destination: loopflow::config::files::Destination::PersonalRepository {
+                        repository: repo.path().to_owned(),
+                    },
+                    key: "agent".into(),
                 },
                 Read::PaneLayout {
                     directory: repo.path().to_owned(),
@@ -701,7 +716,6 @@ fn server_operations_match_their_lf_commands() {
         | Write::SessionNew { .. }
         | Write::WaveAdd { .. }
         | Write::PlanningRefresh { .. }
-        | Write::NewChapter { .. }
         | Write::GraphCustomize { .. }
         | Write::Portfolio { .. }
         | Write::DashboardQuery { .. }
@@ -712,6 +726,10 @@ fn server_operations_match_their_lf_commands() {
         | Write::DashboardShow { .. }
         | Write::DashboardSlots { .. }
         | Write::TileMove { .. }
+        // configuration_edits_use_the_server_without_work_processes covers settings.
+        | Write::ConfigSet { .. }
+        | Write::ConfigUnset { .. }
+        | Write::ConfigTheme { .. }
         | Write::PaneLayout { .. } => (
             [
                 Write::TaskNotes {
@@ -1006,37 +1024,6 @@ fn server_operations_match_their_lf_commands() {
         customize.clone()
     };
     assert_eq!(compare(customize.clone(), &recustomize, &customized), 0);
-    // A chapter preview reads the rotation it would make and records nothing.
-    let waves = Read::Waves.read().unwrap();
-    let wave_id = waves
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|wave| wave.to_string().contains("\"task-pr-tests\""))
-        .and_then(|wave| wave["id"].as_str())
-        .unwrap_or_else(|| panic!("no task-pr-tests Wave in {waves}"))
-        .to_owned();
-    let preview = Write::NewChapter {
-        directory: directory.clone(),
-        name: "October".into(),
-        plan: serde_json::json!({
-            "name": "October",
-            "waves": [{
-                "wave_id": wave_id,
-                "successor_id": "proj_4f6c2b8e-3d5a-4c1e-9b7a-2e8d6f0a1c3b",
-                "create": true,
-                "project_name": "October",
-                "krs": [{"text": "Desktop writes through the server", "holds": false}],
-                "metric_targets": []
-            }]
-        })
-        .to_string(),
-        preview: true,
-    };
-    assert_eq!(
-        compare(preview.clone(), &|| preview.clone(), &|| effect("INF-123")),
-        0
-    );
     // A bind preview names the Task a bind would assign and assigns nothing.
     let bind_preview = Write::SessionBind {
         directory: directory.clone(),
@@ -1598,26 +1585,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["wave", "status", wave, "--sync", "--json"]),
         ),
-        Write::NewChapter {
-            directory,
-            name,
-            preview,
-            ..
-        } => {
-            let mut spelled = words(&[
-                "wave",
-                "new-chapter",
-                "--all",
-                name,
-                "--plan",
-                "/dev/stdin",
-                "--json",
-            ]);
-            if *preview {
-                spelled.push("--dry-run".into());
-            }
-            (path(directory), spelled)
-        }
         Write::GraphCustomize { directory, name } => (
             path(directory),
             words(&["graph", "customize", name, "--json"]),
@@ -1754,6 +1721,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["desktop", "layout", work, "--save"]),
         ),
+        Write::ConfigSet { .. } | Write::ConfigUnset { .. } | Write::ConfigTheme { .. } => {
+            unreachable!("settings writes are compared on their own")
+        }
     };
     let mut argv = vec!["--cwd".to_owned(), directory];
     argv.extend(words);

@@ -876,9 +876,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             })
         }
 
-        WaveCommand::NewChapter { .. } => {
-            unreachable!("shared mutation dispatch precedes this command")
-        }
         WaveCommand::Connect {
             wave,
             all,
@@ -1473,35 +1470,66 @@ fn run() -> anyhow::Result<()> {
                         println!("Imported declarations into {}", saved.display());
                         return Ok(());
                     }
-                    Some(Commands::Set {
-                        key,
-                        value,
-                        global,
-                        shared,
+                    Some(Commands::Config {
+                        cmd:
+                            loopflow::lf::ConfigCommand::Set {
+                                key,
+                                value,
+                                destination,
+                                json,
+                            },
                     }) => {
                         let repo = configuration_directory(&cli)?;
-                        return loopflow::lf::commands::setting::run(
-                            &repo,
-                            cli.wave.as_deref(),
+                        return loopflow::lf::commands::setting::declare(
+                            &destination.destination(&repo, cli.wave.as_deref())?,
                             key,
                             Some(value),
-                            *global,
-                            *shared,
+                            *json,
                         );
                     }
-                    Some(Commands::Unset {
-                        key,
-                        global,
-                        shared,
+                    Some(Commands::Config {
+                        cmd:
+                            loopflow::lf::ConfigCommand::Unset {
+                                key,
+                                destination,
+                                json,
+                            },
                     }) => {
                         let repo = configuration_directory(&cli)?;
-                        return loopflow::lf::commands::setting::run(
-                            &repo,
-                            cli.wave.as_deref(),
+                        return loopflow::lf::commands::setting::declare(
+                            &destination.destination(&repo, cli.wave.as_deref())?,
                             key,
                             None,
-                            *global,
-                            *shared,
+                            *json,
+                        );
+                    }
+                    Some(Commands::Config {
+                        cmd:
+                            loopflow::lf::ConfigCommand::Get {
+                                key,
+                                destination,
+                                json,
+                            },
+                    }) => {
+                        journal::mark_effect_free_read();
+                        let repo = configuration_directory(&cli)?;
+                        return loopflow::lf::commands::setting::get(
+                            &destination.destination(&repo, cli.wave.as_deref())?,
+                            key,
+                            *json,
+                        );
+                    }
+                    Some(Commands::Config {
+                        cmd:
+                            loopflow::lf::ConfigCommand::Explain {
+                                key, destination, ..
+                            },
+                    }) => {
+                        journal::mark_effect_free_read();
+                        let repo = configuration_directory(&cli)?;
+                        return loopflow::lf::commands::setting::explain(
+                            &destination.destination(&repo, cli.wave.as_deref())?,
+                            key,
                         );
                     }
                     Some(Commands::Config {
@@ -1521,7 +1549,7 @@ fn run() -> anyhow::Result<()> {
                     }
                     Some(Commands::Config {
                         cmd:
-                            loopflow::lf::ConfigCommand::Show {
+                            loopflow::lf::ConfigCommand::Settings {
                                 skill,
                                 graph,
                                 step,
@@ -1645,7 +1673,7 @@ fn run() -> anyhow::Result<()> {
         && !matches!(
             cli.command,
             Some(Commands::Config {
-                cmd: loopflow::lf::ConfigCommand::Show { .. }
+                cmd: loopflow::lf::ConfigCommand::Settings { .. }
             })
         )
     {
@@ -2533,30 +2561,45 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     }
     // Your own settings scope by the `--wave` typed, never by the worktree's
     // Work, so they dispatch before Work binding.
-    let setting = match &cli.command {
-        Some(Commands::Set {
-            key,
-            value,
-            global,
-            shared,
-        }) => Some((key, Some(value.as_str()), *global, *shared)),
-        Some(Commands::Unset {
-            key,
-            global,
-            shared,
-        }) => Some((key, None, *global, *shared)),
-        _ => None,
-    };
-    if let Some((key, value, global, here)) = setting {
+    if let Some(Commands::Config {
+        cmd:
+            cmd @ (loopflow::lf::ConfigCommand::Get { .. }
+            | loopflow::lf::ConfigCommand::Set { .. }
+            | loopflow::lf::ConfigCommand::Unset { .. }
+            | loopflow::lf::ConfigCommand::Explain { .. }),
+    }) = &cli.command
+    {
+        use loopflow::lf::commands::setting;
+        use loopflow::lf::ConfigCommand;
         return in_directory_runtime(args, |repo| {
-            loopflow::lf::commands::setting::run(
-                repo,
-                cli.wave.as_deref(),
-                key,
-                value,
-                global,
-                here,
-            )
+            let wave = cli.wave.as_deref();
+            match cmd {
+                ConfigCommand::Get {
+                    key,
+                    destination,
+                    json,
+                } => setting::get(&destination.destination(repo, wave)?, key, *json),
+                ConfigCommand::Set {
+                    key,
+                    value,
+                    destination,
+                    json,
+                } => setting::declare(
+                    &destination.destination(repo, wave)?,
+                    key,
+                    Some(value),
+                    *json,
+                ),
+                ConfigCommand::Unset {
+                    key,
+                    destination,
+                    json,
+                } => setting::declare(&destination.destination(repo, wave)?, key, None, *json),
+                ConfigCommand::Explain {
+                    key, destination, ..
+                } => setting::explain(&destination.destination(repo, wave)?, key),
+                _ => unreachable!("matched above"),
+            }
         });
     }
     // Task run/checkout own preparation above; ordinary invocations bind existing
@@ -2689,7 +2732,7 @@ fn execute_command(
             loopflow::lf::ConfigCommand::Catalog { json } => {
                 loopflow::lf::commands::config::catalog(*json)
             }
-            loopflow::lf::ConfigCommand::Show {
+            loopflow::lf::ConfigCommand::Settings {
                 skill,
                 graph,
                 step,
@@ -2706,6 +2749,12 @@ fn execute_command(
             }),
             loopflow::lf::ConfigCommand::User { json } => {
                 loopflow::lf::commands::config::print_user(*json)
+            }
+            loopflow::lf::ConfigCommand::Get { .. }
+            | loopflow::lf::ConfigCommand::Set { .. }
+            | loopflow::lf::ConfigCommand::Unset { .. }
+            | loopflow::lf::ConfigCommand::Explain { .. } => {
+                unreachable!("settings dispatch precedes Work binding")
             }
             loopflow::lf::ConfigCommand::Repository {
                 bind,
@@ -2745,9 +2794,6 @@ fn execute_command(
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
-        Some(Commands::Set { .. } | Commands::Unset { .. }) => {
-            unreachable!("settings dispatch precedes Work binding")
-        }
         Some(Commands::Ops { cmd }) => dispatch_ops(cmd, cli, args),
         Some(Commands::Self_ {
             cmd:

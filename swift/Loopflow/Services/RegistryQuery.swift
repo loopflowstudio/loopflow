@@ -173,7 +173,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     private var tagged: TaggedFields {
         switch self {
         case .monitorPs: TaggedFields("process.list")
-        case .desktopPlans(let directory): TaggedFields("view.list", ["directory": directory])
+        case .desktopPlans(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .desktopSessions(let directory, let headless):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": nil, "limit": nil])
         case .desktopTask(let directory, let issue):
@@ -194,22 +194,22 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .people(let directory): TaggedFields("repository.people", ["directory": directory])
         case .graphs(let directory): TaggedFields("graph.list", ["directory": directory])
         case .viewPlan(let directory, let expression):
-            TaggedFields("view.get", ["directory": directory, "expression": expression])
+            TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
         case .graphProcesses(let directory, let task, let after):
             TaggedFields("task.runs", ["directory": directory, "task": task, "after": after])
         case .graphProcess(let id): TaggedFields("graph.run", ["id": id])
         case .usage(let days, let wave, let project, let task):
-            TaggedFields("usage.get", ["days": days, "wave": wave, "project": project, "task": task])
+            TaggedFields("session.usage", ["days": days, "wave": wave, "project": project, "task": task])
         case .taskContext(let task): TaggedFields("task.context", ["task": task])
         case .waveDetail(let directory, let wave):
-            TaggedFields("wave.get", ["directory": directory, "wave": wave])
+            TaggedFields("wave.planning", ["directory": directory, "wave": wave])
         case .closedTasks(let directory, let wave, let after):
             TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
         case .machines: TaggedFields("machine.list")
         case .history(let since, let limit, let wave, let project, let task):
-            TaggedFields("history.list", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
+            TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
         case .roadmap(let directory, let wave, let task, let all):
-            TaggedFields("plan.get", ["directory": directory, "wave": wave, "task": task, "all": all])
+            TaggedFields("planning.list", ["directory": directory, "wave": wave, "task": task, "all": all])
         case .planningStatus(let directory): TaggedFields("repository.planning", ["directory": directory])
         case .workLink(let directory, let url):
             TaggedFields("work.resolve", ["directory": directory, "url": url])
@@ -221,7 +221,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                                           "limit": Self.sessionPageLimit])
         case .tokens(let directory, let days):
             TaggedFields("repository.tokens", ["directory": directory, "days": days])
-        case .retention: TaggedFields("history.retention")
+        case .retention: TaggedFields("session.retention")
         case .doctor: TaggedFields("machine.doctor")
         case .taskWait(let issue, let until): TaggedFields("task.wait", ["issue": issue, "until": until])
         }
@@ -260,7 +260,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionNew(directory: String, id: String, agent: String?)
     case waveAdd(directory: String, wave: String, objective: String?)
     case planningRefresh(directory: String, wave: String)
-    case newChapter(directory: String, name: String, plan: String, preview: Bool)
     case graphCustomize(directory: String, name: String)
     /// Run from `/`, as the app's `lf` ran it.
     case portfolio(change: [String])
@@ -304,8 +303,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             Self.prepared(agent, ["session", "new", id], repo: nil)
         case .waveAdd(_, let wave, let objective): ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
         case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
-        case .newChapter(_, let name, _, let preview):
-            ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"] + (preview ? ["--dry-run"] : [])
         case .graphCustomize(_, let name): ["graph", "customize", name, "--json"]
         case .portfolio(let change): ["portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
@@ -356,7 +353,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var input: String? {
         switch self {
         case .taskSave(_, _, _, _, let content): content
-        case .newChapter(_, _, let plan, _): plan
         case .dashboardSlots(_, _, _, let slots): slots
         case .paneLayout(_, _, let layout): layout
         default: nil
@@ -408,8 +404,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .planningRefresh(let directory, let wave):
             TaggedFields("wave.sync", ["directory": directory, "wave": wave])
-        case .newChapter(let directory, let name, let plan, let preview):
-            TaggedFields("chapter.start", ["directory": directory, "name": name, "plan": plan, "preview": preview])
         case .graphCustomize(let directory, let name):
             TaggedFields("graph.customize", ["directory": directory, "name": name])
         case .portfolio(let change):
@@ -753,11 +747,6 @@ public struct RegistryQuery: Sendable {
         var args = ["wave", "remove", name, "--json"]
         if preview { args.append("--preview") }
         return try Self.decode(WaveRemoval.self, from: await run(args, cwd))
-    }
-
-    public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
-        try Self.decode(ProjectRotationPreview.self, from: await write(
-            .newChapter(directory: cwd, name: name, plan: plan, preview: preview)))
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
@@ -1689,37 +1678,6 @@ public struct CodeSlice: Decodable, Sendable, Identifiable {
     public let ext: String
     public let lines: Int
     public let tokens: Int
-}
-
-/// Display projection of the rotation report; provider bodies stay owned by Rust.
-public struct ProjectRotationPreview: Decodable, Sendable {
-    public let name: String
-    public let waves: [WaveRotation]
-
-    public struct WaveRotation: Decodable, Sendable {
-        public let wave: String
-        public let successor_id: String
-        public let predecessor: Project?
-        public let successor: Project?
-        public let tasks: [Task]
-    }
-
-    public struct Project: Decodable, Sendable {
-        public let id: String
-        public let name: String
-    }
-
-    public struct Task: Decodable, Sendable {
-        public let task: Issue
-        public let disposition: String
-        public let reason: String
-    }
-
-    public struct Issue: Decodable, Sendable {
-        public let id: String
-        public let identifier: String
-        public let title: String
-    }
 }
 
 public struct ProjectReadiness: Decodable, Sendable, Hashable {

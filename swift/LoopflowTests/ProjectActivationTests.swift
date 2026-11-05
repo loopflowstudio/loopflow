@@ -107,16 +107,6 @@ struct ProjectActivationTests {
         #expect((try? view.inspect().find(text: "Preparing Project…")) == nil)
     }
 
-    @Test("rotation report retains destinations and unresolved Task reasons")
-    func rotationPreview() async throws {
-        let query = RegistryQuery(runWithInput: { _, _, _ in
-            #"{"name":"October","waves":[{"wave":"a","successor_id":"next","predecessor":{"id":"before","name":"Summer work"},"successor":null,"tasks":[{"task":{"id":"issue","identifier":"A-1","title":"Keep work"},"disposition":"unresolved","reason":"Provider unavailable"}]}]}"#
-        }, run: { _, _ in throw RegistryQueryError("unexpected read") })
-        let result = try await query.realignProjects(name: "October", plan: "{}", preview: true, cwd: "/repo")
-        #expect(result.waves.first?.predecessor?.name == "Summer work")
-        #expect(result.waves.first?.successor_id == "next")
-        #expect(result.waves.first?.tasks.first?.reason == "Provider unavailable")
-    }
 }
 
 private actor DelayedPreparation {

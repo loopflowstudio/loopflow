@@ -1,87 +1,99 @@
-//! The destination-based editor used by CLI and Desktop.
+//! The `config` namespace: the typed settings catalogue, what a scope's
+//! settings resolve to, and the files that declare them. The CLI (`lf config
+//! catalog|settings|get|set|unset|explain`) and the server's `config.*` kinds
+//! call these functions; Desktop's Settings and Appearance panes use them
+//! through the server.
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_yaml_ng::Value;
 use std::path::{Path, PathBuf};
 
-use super::files::Destination;
+use crate::config::files::Destination;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Request {
-    Catalog,
-    Declaration {
-        destination: Destination,
-        key: String,
-        value: Option<String>,
-        unset: bool,
-    },
-    Explain {
-        destination: Destination,
-        key: String,
-    },
-    /// Appearance owns its configured theme file and its Apply/Cancel transaction.
-    Theme {
-        path: PathBuf,
-        value: Option<String>,
-    },
+/// `config.catalog`: every typed setting, its schema and its policies.
+pub fn catalog() -> Vec<&'static crate::config::catalog::Definition> {
+    crate::config::catalog::definitions()
 }
 
-pub fn run(request: Request) -> Result<serde_json::Value> {
-    match request {
-        Request::Catalog => Ok(serde_json::to_value(super::catalog::definitions())?),
-        Request::Declaration {
-            destination,
-            key,
-            value,
-            unset,
-        } => Ok(serde_json::to_value(declaration(
-            &destination,
-            &key,
-            value.as_deref(),
-            unset,
-        )?)?),
-        Request::Explain { destination, key } => {
-            let destination = destination.resolve()?;
-            super::settings::validate_scope(&key, destination.source, destination.scope)?;
-            let parts: Vec<_> = key.split('.').collect();
-            let preference = super::settings::preference_parts(&parts)?;
-            let (skill, graph, step) = match &parts[..parts.len() - preference.len()] {
-                ["skills", skill] => (Some(*skill), None, None),
-                ["graphs", graph, "steps", step] => (None, Some(*graph), Some(*step)),
-                _ => (None, None, None),
-            };
-            let config = super::load_wave_config(
-                destination.repository.as_deref(),
-                destination.wave.as_deref(),
-            )?
-            .unwrap_or_default();
-            let home = crate::store::lf_home_dir();
-            let rows = inspect_selection(
-                &config,
-                destination.repository.as_deref().unwrap_or(&home),
-                skill,
-                graph,
-                step,
-            )?;
-            // Choices and fallbacks are explained together under their effective key.
-            let effective_key = if preference == ["default_agent"] {
-                "agent".into()
-            } else {
-                preference.join(".")
-            };
-            Ok(
-                serde_json::json!({"path":destination.path, "key":effective_key, "inspections":rows}),
-            )
-        }
-        Request::Theme { path, value } => Ok(serde_json::to_value(file_value(
-            &path,
-            &["theme"],
-            "theme",
-            value.as_deref(),
-            false,
-        )?)?),
-    }
+/// `config.get`: the declaration of `key` at `destination`, null when none.
+pub fn get(destination: &Destination, key: &str) -> Result<Declaration> {
+    declaration(destination, key, None, false)
+}
+
+/// `config.set`: declare `key` at `destination`; `value` is YAML.
+pub fn set(destination: &Destination, key: &str, value: &str) -> Result<Declaration> {
+    declaration(destination, key, Some(value), false)
+}
+
+/// `config.unset`: remove `key`'s declaration at `destination`, so other
+/// sources choose.
+pub fn unset(destination: &Destination, key: &str) -> Result<Declaration> {
+    declaration(destination, key, None, true)
+}
+
+/// What `config.explain` returns: every source's candidate for `key` and the
+/// effective value, as a launch at the destination's scope resolves it.
+#[derive(Debug, Serialize)]
+pub struct Explanation {
+    pub path: PathBuf,
+    pub key: String,
+    pub inspections: Vec<serde_json::Value>,
+}
+
+/// `config.explain`: how `key` resolves at the scope `destination` names.
+pub fn explain(destination: &Destination, key: &str) -> Result<Explanation> {
+    let destination = destination.resolve()?;
+    crate::config::settings::validate_scope(key, destination.source, destination.scope)?;
+    let parts: Vec<_> = key.split('.').collect();
+    let preference = crate::config::settings::preference_parts(&parts)?;
+    let (skill, graph, step) = match &parts[..parts.len() - preference.len()] {
+        ["skills", skill] => (Some(*skill), None, None),
+        ["graphs", graph, "steps", step] => (None, Some(*graph), Some(*step)),
+        _ => (None, None, None),
+    };
+    let config = crate::config::load_wave_config(
+        destination.repository.as_deref(),
+        destination.wave.as_deref(),
+    )?
+    .unwrap_or_default();
+    let home = crate::store::lf_home_dir();
+    let inspections = inspect_selection(
+        &config,
+        destination.repository.as_deref().unwrap_or(&home),
+        skill,
+        graph,
+        step,
+    )?;
+    // Choices and fallbacks are explained together under their effective key.
+    let key = if preference == ["default_agent"] {
+        "agent".into()
+    } else {
+        preference.join(".")
+    };
+    Ok(Explanation {
+        path: destination.path,
+        key,
+        inspections,
+    })
+}
+
+/// `config.theme`: the theme file Appearance owns at `path`, set to `value`
+/// when one is given, read otherwise.
+pub fn theme(path: &Path, value: Option<&str>) -> Result<Declaration> {
+    file_value(path, &["theme"], "theme", value, false)
+}
+
+/// `config.settings`: the effective settings at `directory` for a Wave, a
+/// skill or one Graph step, with each value's sources.
+pub fn settings(
+    directory: &Path,
+    wave: Option<&str>,
+    skill: Option<&str>,
+    graph: Option<&str>,
+    step: Option<&str>,
+) -> Result<Vec<serde_json::Value>> {
+    let repo = crate::repo::working_directory_in(directory)?;
+    inspect(&repo, wave, skill, graph, step)
 }
 
 #[derive(Debug, Serialize)]
@@ -89,11 +101,11 @@ pub struct Declaration {
     pub path: PathBuf,
     pub key: String,
     pub value: Value,
-    pub lifecycle: super::catalog::Lifecycle,
+    pub lifecycle: crate::config::catalog::Lifecycle,
 }
 
 /// Read, set or unset a declaration at the same destination used by inspection.
-pub fn declaration(
+fn declaration(
     destination: &Destination,
     key: &str,
     value: Option<&str>,
@@ -101,11 +113,11 @@ pub fn declaration(
 ) -> Result<Declaration> {
     anyhow::ensure!(!(value.is_some() && unset), "choose a value or unset");
     let destination = destination.resolve()?;
-    super::settings::validate_scope(key, destination.source, destination.scope)?;
+    crate::config::settings::validate_scope(key, destination.source, destination.scope)?;
     if let ("graph", Some(value), Some(repository)) =
         (key, value, destination.repository.as_deref())
     {
-        let parsed = super::settings::parse_value(key, value)?;
+        let parsed = crate::config::settings::parse_value(key, value)?;
         if let Some(name) = parsed.as_str() {
             let graph = crate::graph::load_authored_graph(name, repository)?;
             crate::graph::compile_graph(&graph, repository)?;
@@ -124,12 +136,12 @@ fn file_value(
     unset: bool,
 ) -> Result<Declaration> {
     let parsed = value
-        .map(|value| super::settings::parse_value(key, value))
+        .map(|value| crate::config::settings::parse_value(key, value))
         .transpose()?;
     if parsed.is_some() || unset {
-        super::files::edit(path, parts, parsed)?;
+        crate::config::files::edit(path, parts, parsed)?;
     }
-    let document = super::files::read(path)?;
+    let document = crate::config::files::read(path)?;
     let value = parts
         .iter()
         .try_fold(&document, |value, part| value.get(*part))
@@ -139,13 +151,15 @@ fn file_value(
         path: path.to_owned(),
         key: parts.join("."),
         value,
-        lifecycle: super::catalog::definition(&super::settings::preference_path(key)?.join("."))
-            .expect("validated key")
-            .lifecycle,
+        lifecycle: crate::config::catalog::definition(
+            &crate::config::settings::preference_path(key)?.join("."),
+        )
+        .expect("validated key")
+        .lifecycle,
     })
 }
 
-/// The CLI and served Desktop read share this inspection.
+/// The effective settings in `repo`, as `config.settings` reads them.
 pub fn inspect(
     repo: &std::path::Path,
     wave: Option<&str>,
@@ -223,7 +237,7 @@ fn inspect_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{run, Request};
+    use super::{explain, get, set, unset as unset_key};
     use crate::config::files::Destination;
     use crate::lf::commands::graph::EnvVarGuard;
     use loopflow_test_support::TestRepo;
@@ -249,11 +263,14 @@ mod tests {
         let destinations: Vec<Destination> = serde_json::from_value(fixture.clone()).unwrap();
         assert_eq!(serde_json::to_value(destinations).unwrap(), fixture);
         for destination in fixture.as_array().unwrap() {
-            let mut request = serde_json::json!({"action":"declaration", "destination":destination,
-                "key":"agent", "value":"codex", "unset":false});
-            assert!(serde_json::from_value::<Request>(request.clone()).is_ok());
+            let mut request = serde_json::json!({"kind":"config.set", "destination":destination,
+                "key":"agent", "value":"codex"});
+            assert!(
+                serde_json::from_value::<crate::lf::commands::write::Write>(request.clone())
+                    .is_ok()
+            );
             request["scope"] = "global".into();
-            assert!(serde_json::from_value::<Request>(request).is_err());
+            assert!(serde_json::from_value::<crate::lf::commands::write::Write>(request).is_err());
             let mut invalid = destination.clone();
             invalid["path"] = "/another/config.yaml".into();
             assert!(serde_json::from_value::<Destination>(invalid).is_err());
@@ -266,12 +283,12 @@ mod tests {
         value: Option<&str>,
         unset: bool,
     ) -> anyhow::Result<Value> {
-        run(Request::Declaration {
-            destination: destination.clone(),
-            key: key.into(),
-            value: value.map(str::to_owned),
-            unset,
-        })
+        let saved = match (value, unset) {
+            (Some(value), _) => set(destination, key, value),
+            (None, true) => unset_key(destination, key),
+            (None, false) => get(destination, key),
+        }?;
+        Ok(serde_json::to_value(saved)?)
     }
 
     fn check(
@@ -281,11 +298,7 @@ mod tests {
         key: &str,
         expected: &str,
     ) {
-        let explained = run(Request::Explain {
-            destination: destination.clone(),
-            key: key.into(),
-        })
-        .unwrap();
+        let explained = serde_json::to_value(explain(destination, key).unwrap()).unwrap();
         let config = crate::config::load_wave_config(Some(repo), wave)
             .unwrap()
             .unwrap();

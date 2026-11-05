@@ -44,7 +44,7 @@ pub fn show(
     step: Option<&str>,
     options: &ShowOptions,
 ) -> anyhow::Result<()> {
-    let output = crate::config::api::inspect(repo, wave, skill, graph, step)?;
+    let output = crate::engine::config::inspect(repo, wave, skill, graph, step)?;
     if options.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {

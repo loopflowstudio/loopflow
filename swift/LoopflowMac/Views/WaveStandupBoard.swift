@@ -156,7 +156,6 @@ struct WaveStandupBoard: View {
     let view: WorkNavigation.Board
     @AppStorage(WaveStandupDefaults.doneDaysKey) private var doneDays = TaskHistoryFilter().days
     @Environment(\.palette) private var palette
-    @State private var showRealignment = false
 
     private var roadmap: WaveRoadmap? {
         if case .wave(let id) = view { model.wave(id: id) } else { nil }
@@ -199,9 +198,6 @@ struct WaveStandupBoard: View {
         .background(palette.background, ignoresSafeAreaEdges: [])
         .accessibilityIdentifier("wave-standup-board")
         .task(id: model.repoPath) { await model.loadGitHubPeople() }
-        .sheet(isPresented: $showRealignment) {
-            if let roadmap { ProjectRealignmentView(repo: roadmap.wave.repo) }
-        }
     }
 
     private func header(_ roadmap: WaveRoadmap) -> some View {
@@ -221,8 +217,6 @@ struct WaveStandupBoard: View {
                     model.historyReference = nil
                     model.historyWave = roadmap.wave
                 }.accessibilityIdentifier("wave-project-history")
-                Button("Realign Projects…") { showRealignment = true }
-                    .accessibilityIdentifier("wave-realign-projects")
                 if let workflow = roadmap.graph {
                     Button("Workflow · \(workflow)") {
                         Task {

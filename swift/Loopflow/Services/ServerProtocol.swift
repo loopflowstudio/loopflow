@@ -87,10 +87,10 @@ public enum ServerOperation: Encodable, Sendable {
     case sessionOwner(session: String)
     case read(ServedRead)
     case command(ServedWrite)
-    case configuration(JSONValue)
+    case config(ConfigOperation)
     case attach(owner: String)
 
-    private enum Keys: String, CodingKey { case kind, owner, session, request }
+    private enum Keys: String, CodingKey { case kind, owner, session }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
@@ -99,14 +99,51 @@ public enum ServerOperation: Encodable, Sendable {
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.owner", forKey: .kind)
             try box.encode(session, forKey: .session)
-        case .configuration(let request):
-            var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("config.file", forKey: .kind)
-            try box.encode(request, forKey: .request)
+        case .config(let operation): try operation.encode(to: encoder)
         case .attach(let owner):
             var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("terminal.attach", forKey: .kind)
+            try box.encode("process.attach", forKey: .kind)
             try box.encode(owner, forKey: .owner)
+        }
+    }
+}
+
+/// The `config.*` operations Desktop's Settings and Appearance panes use.
+/// A destination is the Rust `config::files::Destination` as JSON: an owner,
+/// never a file plus a scope. Mirrors `Read::Config*` and `Write::Config*`.
+public enum ConfigOperation: Encodable, Sendable {
+    case catalog
+    case get(destination: JSONValue, key: String)
+    case explain(destination: JSONValue, key: String)
+    /// `value` is YAML.
+    case set(destination: JSONValue, key: String, value: String)
+    case unset(destination: JSONValue, key: String)
+    /// Appearance's theme file: set to `value`, or read when nil.
+    case theme(path: String, value: String?)
+
+    private enum Keys: String, CodingKey { case kind, destination, key, value, path }
+    public func encode(to encoder: Encoder) throws {
+        var box = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .catalog: try box.encode("config.catalog", forKey: .kind)
+        case .get(let destination, let key), .explain(let destination, let key), .unset(let destination, let key):
+            let kind = switch self {
+            case .get: "config.get"
+            case .explain: "config.explain"
+            default: "config.unset"
+            }
+            try box.encode(kind, forKey: .kind)
+            try box.encode(destination, forKey: .destination)
+            try box.encode(key, forKey: .key)
+        case .set(let destination, let key, let value):
+            try box.encode("config.set", forKey: .kind)
+            try box.encode(destination, forKey: .destination)
+            try box.encode(key, forKey: .key)
+            try box.encode(value, forKey: .value)
+        case .theme(let path, let value):
+            try box.encode("config.theme", forKey: .kind)
+            try box.encode(path, forKey: .path)
+            try box.encode(value, forKey: .value)
         }
     }
 }

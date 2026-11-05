@@ -38,6 +38,33 @@ fn optional(flag: &str, value: Option<impl ToString>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// `command` as `lf` spells it for `destination`: the flags
+/// `Destination::from_cli` reads back.
+pub(crate) fn destination_argv(
+    destination: &crate::config::files::Destination,
+    command: &[&str],
+) -> Vec<String> {
+    use crate::config::files::Destination;
+    let (repository, wave, flag) = match destination {
+        Destination::PersonalGlobal {} => (None, None, Some("--global")),
+        Destination::PersonalRepository { repository } => (Some(repository), None, None),
+        Destination::SharedRepository { repository } => (Some(repository), None, Some("--shared")),
+        Destination::PersonalWave { repository, wave } => (Some(repository), Some(wave), None),
+        Destination::SharedWave { repository, wave } => {
+            (Some(repository), Some(wave), Some("--shared"))
+        }
+    };
+    let mut argv = match repository {
+        Some(repository) => at(repository, command),
+        None => words(command),
+    };
+    if let Some(wave) = wave {
+        argv.splice(0..0, ["--wave".to_owned(), wave.clone()]);
+    }
+    argv.extend(flag.map(str::to_owned));
+    argv
+}
+
 /// `command` as `lf --cwd <directory> …` runs it.
 fn at(directory: &Path, command: &[&str]) -> Vec<String> {
     let mut argv = vec!["--cwd".to_owned(), directory.display().to_string()];
@@ -56,7 +83,7 @@ pub enum Read {
     #[serde(rename = "process.list")]
     MonitorPs,
     /// `lf --cwd <directory> desktop plans`: the plans a repository window shows.
-    #[serde(rename = "view.list")]
+    #[serde(rename = "desktop.view.list")]
     DesktopPlans { directory: PathBuf },
     /// `lf --cwd <directory> desktop sessions`, with `--interactive all`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
@@ -96,6 +123,11 @@ pub enum Read {
     /// `lf portfolio`: the repositories this Machine's windows show.
     #[serde(rename = "desktop.portfolio")]
     Portfolio,
+    /// `lf config catalog --json`: every typed setting and its policies.
+    #[serde(rename = "config.catalog")]
+    ConfigCatalog,
+    /// `lf --cwd <directory> [--wave <wave>] config settings [--skill|--graph
+    /// [--step]] --json`: effective settings and their sources.
     #[serde(rename = "config.settings")]
     Settings {
         directory: PathBuf,
@@ -103,6 +135,19 @@ pub enum Read {
         skill: Option<String>,
         graph: Option<String>,
         step: Option<String>,
+    },
+    /// `lf config get <key> <destination flags> --json`: one file's declaration.
+    #[serde(rename = "config.get")]
+    ConfigGet {
+        destination: crate::config::files::Destination,
+        key: String,
+    },
+    /// `lf config explain <key> <destination flags> --json`: every source's
+    /// candidate and the value a launch there resolves.
+    #[serde(rename = "config.explain")]
+    ConfigExplain {
+        destination: crate::config::files::Destination,
+        key: String,
     },
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
     #[serde(rename = "desktop.layout")]
@@ -115,7 +160,7 @@ pub enum Read {
     Graphs { directory: PathBuf },
     /// `lf --cwd <directory> desktop view [expression] --plan`: what a view
     /// shows; no expression is the repository's own.
-    #[serde(rename = "view.get")]
+    #[serde(rename = "desktop.view.get")]
     ViewPlan {
         directory: PathBuf,
         expression: Option<String>,
@@ -133,7 +178,7 @@ pub enum Read {
     GraphProcess { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
-    #[serde(rename = "usage.get")]
+    #[serde(rename = "session.usage")]
     Usage {
         days: u32,
         wave: Option<String>,
@@ -146,11 +191,11 @@ pub enum Read {
     TaskContext { task: String },
     /// `lf --cwd <directory> desktop wave <wave>`: one Wave's Projects and
     /// Tasks, after syncing its repository with the tracker.
-    #[serde(rename = "wave.get")]
+    #[serde(rename = "wave.planning")]
     WaveDetail { directory: PathBuf, wave: String },
     /// `lf --cwd <directory> desktop done --wave <wave> [--after <after>]`:
     /// one page of a Wave's closed Tasks. Only `closed` lists exist; open
-    /// Tasks are `plan.get`'s.
+    /// Tasks are `planning.list`'s.
     #[serde(rename = "task.list")]
     ClosedTasks {
         directory: PathBuf,
@@ -162,12 +207,12 @@ pub enum Read {
     #[serde(rename = "machine.list")]
     Machines,
     /// `lf history`: what Sessions did, by Work.
-    #[serde(rename = "history.list")]
+    #[serde(rename = "session.history")]
     History(HistoryWindow),
     /// `lf --cwd <directory> desktop plan [wave] [--task <task>] [--all]`:
     /// Waves and Tasks. Read once, it first asks the tracker about each
     /// repository read; its watch reads the store.
-    #[serde(rename = "plan.get")]
+    #[serde(rename = "planning.list")]
     Roadmap {
         directory: PathBuf,
         wave: Option<String>,
@@ -199,7 +244,7 @@ pub enum Read {
         days: Option<u32>,
     },
     /// `lf history retention`: how much Session history providers keep.
-    #[serde(rename = "history.retention")]
+    #[serde(rename = "session.retention")]
     Retention,
     /// `lf doctor`: the ledger's self-audit.
     #[serde(rename = "machine.doctor")]
@@ -260,6 +305,13 @@ impl Read {
             Self::Waves => words(&["wave", "list", "--all", "--json"]),
             Self::MachineId => words(&["machine", "id", "--json"]),
             Self::Portfolio => words(&["portfolio", "--json"]),
+            Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
+            Self::ConfigGet { destination, key } => {
+                destination_argv(destination, &["config", "get", key, "--json"])
+            }
+            Self::ConfigExplain { destination, key } => {
+                destination_argv(destination, &["config", "explain", key, "--json"])
+            }
             Self::Settings {
                 directory,
                 wave,
@@ -453,13 +505,20 @@ impl Read {
                 skill,
                 graph,
                 step,
-            } => value(&crate::config::api::inspect(
-                &crate::repo::working_directory_in(directory)?,
+            } => value(&crate::engine::config::settings(
+                directory,
                 wave.as_deref(),
                 skill.as_deref(),
                 graph.as_deref(),
                 step.as_deref(),
             )?),
+            Self::ConfigCatalog => value(&crate::engine::config::catalog()),
+            Self::ConfigGet { destination, key } => {
+                value(&crate::engine::config::get(destination, key)?)
+            }
+            Self::ConfigExplain { destination, key } => {
+                value(&crate::engine::config::explain(destination, key)?)
+            }
             Self::PaneLayout { directory, work } => {
                 super::desktop::saved_layout(None, directory, work)
             }
@@ -521,9 +580,10 @@ impl Read {
             Self::WaveDetail { directory, wave } => {
                 value(&super::waves::desktop_status(directory, wave)?)
             }
-            Self::ClosedTasks { closed: false, .. } => {
-                Err(invalid("only closed Tasks are listed; read plan.get for open ones").into())
-            }
+            Self::ClosedTasks { closed: false, .. } => Err(invalid(
+                "only closed Tasks are listed; read planning.list for open ones",
+            )
+            .into()),
             Self::ClosedTasks {
                 directory,
                 wave,
@@ -689,7 +749,7 @@ mod tests {
         let read = |json: &str| serde_json::from_str::<Read>(json).unwrap().argv();
         assert_eq!(
             read(
-                r#"{"kind":"history.list","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#
+                r#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#
             ),
             [
                 "history",
@@ -723,7 +783,7 @@ mod tests {
             ["task", "diff", "FIX-1", "--base", "parent", "--json"]
         );
         assert_eq!(
-            read(r#"{"kind":"view.get","directory":"/r","expression":"state:backlog"}"#),
+            read(r#"{"kind":"desktop.view.get","directory":"/r","expression":"state:backlog"}"#),
             [
                 "--cwd",
                 "/r",

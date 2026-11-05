@@ -938,19 +938,17 @@ mod tests {
         };
         agent("claude");
 
-        crate::config::api::declaration(
+        crate::engine::config::set(
             &crate::config::files::Destination::from_cli(&checkout, None, true, false).unwrap(),
             "agent",
-            Some("codex"),
-            false,
+            "codex",
         )
         .unwrap();
         agent("codex");
-        crate::config::api::declaration(
+        crate::engine::config::set(
             &crate::config::files::Destination::from_cli(&checkout, None, false, false).unwrap(),
             "agent",
-            Some("pi"),
-            false,
+            "pi",
         )
         .unwrap();
         agent("pi");

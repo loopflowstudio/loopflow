@@ -30,7 +30,7 @@ pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
 }
 
 /// A user edit selects an owner, never a file plus an independently asserted scope.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Destination {
@@ -623,7 +623,11 @@ mod tests {
         value: Option<&str>,
     ) -> anyhow::Result<std::path::PathBuf> {
         let destination = super::Destination::from_cli(repo, wave, global, shared)?;
-        Ok(crate::config::api::declaration(&destination, key, value, value.is_none())?.path)
+        Ok(match value {
+            Some(value) => crate::engine::config::set(&destination, key, value)?,
+            None => crate::engine::config::unset(&destination, key)?,
+        }
+        .path)
     }
 
     #[test]
@@ -934,25 +938,12 @@ mod tests {
         )
         .unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
-        let request = crate::config::api::Request::Declaration {
-            destination: super::Destination::PersonalRepository {
-                repository: repo.path().to_owned(),
-            },
-            key: "planning.provider".into(),
-            value: Some("linear".into()),
-            unset: false,
+        let destination = super::Destination::PersonalRepository {
+            repository: repo.path().to_owned(),
         };
-        assert!(crate::config::api::run(request).is_err());
+        assert!(crate::engine::config::set(&destination, "planning.provider", "linear").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-        crate::config::api::run(crate::config::api::Request::Declaration {
-            destination: super::Destination::PersonalRepository {
-                repository: repo.path().to_owned(),
-            },
-            key: "chrome".into(),
-            value: Some("false".into()),
-            unset: false,
-        })
-        .unwrap();
+        crate::engine::config::set(&destination, "chrome", "false").unwrap();
         assert!(
             !crate::config::load_config(Some(repo.path()))
                 .unwrap()

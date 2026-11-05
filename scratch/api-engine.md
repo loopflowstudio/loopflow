@@ -83,7 +83,15 @@ Rules:
 4. **Reads are pure.** Anything that talks to the tracker is a verb
    (`wave.sync`), never a side effect of a read.
 5. **One dry-run pattern.** A `preview` field on the write, never a separate read.
-6. **Desktop arrangement is its own namespace.** `desktop.*` is app-owned state
+6. **Nouns are the primitives.** Jack Heart (November 5): "for core API nouns we
+   should stick to the primitives that I designed before mobile and not add new
+   ones for mobile." The API nouns are Wave, Project, Chapter, Task, Graph,
+   Session, Process, Machine, Repository and Work, plus `config` for settings
+   and `desktop` for app-owned arrangement. Nothing else gets a namespace: a
+   Session's usage and history are `session.*`, a Project's plan is `project.*`,
+   attaching a terminal is attaching to an owner Process, Desktop views are
+   `desktop.*`.
+7. **Desktop arrangement is its own namespace.** `desktop.*` is app-owned state
    lf stores for the Mac app. Documented as such; not offered to a phone or a bot.
 
 ## The core loop operations
@@ -120,7 +128,13 @@ Observed on November 5 (`lf help`, `.lf/config.yaml`, `config/catalog.rs`):
 - Config keys: `exclude skills planning linear release` at the top of
   `.lf/config.yaml`; the typed catalogue uses one prefix, `context.`.
 - API kinds after the follow-up pass: `task. session. wave. chapter. plan.
-  repository. graph. machine. process. usage. history. work. config. view. desktop.`
+  repository. graph. machine. process. usage. history. work. config. view.
+  desktop. terminal.`; rule 6 folds the non-primitives: `plan.get` → `project.get`
+  (a Wave's current Project with its Tasks), `usage.get` → `session.usage`,
+  `history.list` → `session.history`, `history.retention` → `session.retention`,
+  `view.list`/`view.get` → `desktop.view.list`/`desktop.view.get`,
+  `terminal.attach` → `process.attach`, `config.file` → `config.set`/`config.get`
+  as the catalogue dictates. `work.resolve` stays: Work is a primitive.
 
 Mismatches to resolve, each by moving the CLI or config to the API name:
 

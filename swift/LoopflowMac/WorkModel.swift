@@ -218,13 +218,15 @@ final class WorkModel {
         presentWaveTiles()
     }
 
-    /// Working Tasks initialize their conversation; navigation never takes input
-    /// from another terminal or launches the Task graph.
+    /// Working Tasks and the repository and Wave primaries initialize their
+    /// conversation; navigation never takes input from another terminal, launches
+    /// a Graph or runs an operator.
     func openWarmConversations() {
         guard let registry = workspaceRegistry, let repository = workspaceRepository,
               let repoPath, !showsSavedWork, roadmap.errorMessage == nil,
-              registry.localMachineId != nil, sessions.errorMessage == nil, let records = sessions.value else { return }
-        prefetchTaskConversations(in: registry, repository: repository)
+              let machine = registry.localMachineId, sessions.errorMessage == nil, let records = sessions.value else { return }
+        prefetchConversations(in: registry, repository: repository,
+                              primaries: WorkspaceIdentity(machineId: machine, worktree: repoPath))
         let store = registry.sessionStore(repository: repository, repoPath: repoPath, query: query)
         store.reconcile(records)
         for key in registry.warmWork {
@@ -257,15 +259,16 @@ final class WorkModel {
         registry.openWarmConversations(store: store)
     }
 
-    /// Includes a working Task queued behind the preparation slots or before its
-    /// Sessions read lands. Close, a failure or a missing location leaves a person
-    /// something to do instead.
+    /// Includes a working Task or a primary queued behind the preparation slots or
+    /// before its Sessions read lands. Close, a failure or a missing location leaves
+    /// a person something to do instead.
     func conversationIsOpening(_ workspace: SessionsWorkspace) -> Bool {
         if workspace.openingConversation { return true }
-        guard workspace.key.kind == .task, !workspace.conversationClosed, !showsSavedWork,
+        guard !workspace.conversationClosed, !showsSavedWork,
               workspace.conversationError == nil, workspace.conversationStart == nil,
-              roadmap.errorMessage == nil, sessions.errorMessage == nil,
-              let task = task(id: workspace.key.id)?.task else { return false }
+              roadmap.errorMessage == nil, sessions.errorMessage == nil else { return false }
+        guard workspace.key.kind == .task else { return workspaceRegistry?.localMachineId != nil && repoPath != nil }
+        guard let task = task(id: workspace.key.id)?.task else { return false }
         return task.conversationIntent == .start && taskWorkspaceIdentity(task) != nil
     }
 
@@ -273,9 +276,16 @@ final class WorkModel {
         navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
     }
 
-    /// Fresh working Tasks lead; saved unfinished Tasks fill the remaining capacity.
-    private func prefetchTaskConversations(in registry: SessionsWorkspaceRegistry, repository: String) {
+    /// The repository and every Wave open beside the Task bound; fresh working
+    /// Tasks lead that bound and saved unfinished Tasks fill its remaining capacity.
+    private func prefetchConversations(in registry: SessionsWorkspaceRegistry, repository: String, primaries location: WorkspaceIdentity) {
         registry.loadWarmIntent(repository: repository)
+        let repositoryKey = workspaceKey(for: nil, repository: repository)
+        registry.prefetchPrimary(repositoryKey, title: workspaceTitle(repositoryKey), location: location)
+        for roadmap in visibleRoadmaps {
+            let key = workspaceKey(for: .wave(id: roadmap.wave.id), repository: repository)
+            registry.prefetchPrimary(key, title: roadmap.wave.name, wave: roadmap.wave.name, location: location)
+        }
         let savedOrder = Dictionary(registry.restoreCandidates.enumerated().map { ($0.element, $0.offset) },
                                     uniquingKeysWith: min)
         let working = visibleTasks.filter { $0.conversationIntent == .start }.map { task in
@@ -2030,9 +2040,9 @@ final class WorkModel {
         return (sessions.value ?? []).filter { $0.names(task: runtimeID) }
     }
 
-    func openPrimaryConversation(in workspace: SessionsWorkspace, wave: String?, store: SessionsStore) async {
+    func openPrimaryConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
         guard let workspaceRegistry else { return }
-        await workspace.openPrimaryConversation(wave: wave, store: store, registry: workspaceRegistry)
+        await workspace.openPrimaryConversation(store: store, registry: workspaceRegistry)
     }
 
     /// ⌘N: the Nth Task row on screen.

@@ -11,9 +11,14 @@ Wave's goal and memory arrive with this conversation; read them before acting.
 You are this Wave's operator. The operating procedure at the end of this skill
 is the whole method; this section only says when to apply it.
 
-- Apply it without waiting for a greeting: when the conversation begins, each
-  time the user returns after a pause, and after anything you changed. Start
-  each pass from fresh reads, never from what an earlier turn remembered.
+- Opening this conversation asks for nothing. A first turn without the user's
+  request is a reading pass: read fresh state, report where the Wave stands and
+  end the turn, with no Work changed: launch, claim or start nothing. Steers
+  delivered with that turn are recorded direction: report them and act when the
+  user asks here. Operation begins with their first request.
+- Apply it each time the user returns after a pause, and after anything you
+  changed. Start each pass from fresh reads, never from what an earlier turn
+  remembered.
 - Answer the user first. A question, a change of direction or a new idea
   interrupts operation; it does not end it. Resume the pass afterwards and
   finish it before the turn ends.

@@ -139,16 +139,16 @@ struct WorkCacheTests {
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
         let deadline = ContinuousClock.now + .seconds(3)
         let expected = closed ? 1 : 2
-        while store.sessions.filter({ $0.state == .prepared }).count < expected, ContinuousClock.now < deadline { await Task.yield() }
+        while store.preparedTaskConversations.count < expected, ContinuousClock.now < deadline { await Task.yield() }
         #expect(registry.selectedWork == selected)
-        #expect(store.sessions.filter { $0.state == .prepared }.count == expected)
+        #expect(store.preparedTaskConversations.count == expected)
         // boundedSelectedFirstPreparation proves admission order; these two reads then race.
         #expect(Set(await source.preparedTasks) == (closed ? [other.id] : [selected.id, other.id]))
         #expect(registry.retained(selected)?.conversationClosed == closed)
         #expect(registry.retained(selected)?.hostUse == (closed ? "away" : "retained"))
         #expect(registry.retained(other)?.hostUse == "retained")
         // Saved unstarted and shipping Tasks are not working: they reveal history only.
-        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments.contains("--reveal-existing") })
+        #expect(store.preparedTaskConversations.allSatisfy { $0.launchArguments.contains("--reveal-existing") })
         registry.prepareForQuit()
     }
 
@@ -186,8 +186,8 @@ struct WorkCacheTests {
         #expect(Set(await source.preparedTasks) == Set(expected.prefix(2)))
         await source.releasePreparations()
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
-        while store.sessions.filter({ $0.state == .prepared }).count < 8, ContinuousClock.now < deadline { await Task.yield() }
-        #expect(store.sessions.filter { $0.state == .prepared }.count == 8)
+        while store.preparedTaskConversations.count < 8, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.preparedTaskConversations.count == 8)
         #expect(Set(await source.preparedTasks) == Set(expected))
         #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments.contains("--start-if-free") })
         model.openWarmConversations()
@@ -423,6 +423,76 @@ struct WorkCacheTests {
         while workspace.openingConversation, ContinuousClock.now < deadline { await Task.yield() }
         #expect(store.sessions.first { $0.id == "conversation-" + id }?.state == .prepared)
         #expect(workspace.multiplexer.focusedPaneId == focus)
+        registry.prepareForQuit()
+    }
+
+    @Test("Repository and Wave primaries open on load beside the Task bound, before any selection")
+    func loadOpensRepositoryAndWavePrimaries() async throws {
+        let source = try Source()
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+        let repositoryKey = WorkWorkspaceKey(repository: repository, kind: .repository, id: repository)
+        // The fixture's second Wave belongs to another repository; this window never loads it.
+        let wave = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-1")
+        #expect(registry.warmPrimaries == [repositoryKey, wave])
+        #expect(registry.recentTasks.count == 8)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while await source.preparedPrimaries.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(await source.preparedPrimaries == ["repository", "wave:product"]) // The selected repository leads.
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        let primaries = ["primary-repository", "primary-wave:product"]
+        while store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments.contains("--start-if-free") })
+        for key in [repositoryKey, wave] {
+            let workspace = try #require(registry.retained(key))
+            #expect(workspace.conversationIntent == .start)
+            #expect(workspace.conversationError == nil)
+            #expect(workspace.multiplexer.sessionPane?.sessionId?.hasPrefix("primary-") == true)
+        }
+        #expect(registry.retained(wave)?.wave == "product")
+        #expect(model.selection == nil)
+        registry.prepareForQuit()
+    }
+
+    @Test("A queued or failed primary shows opening or its failure with Retry, never an Open gate")
+    func primaryPaneNeverOffersAnOpenGate() async throws {
+        let source = try Source()
+        try await source.populateWorkingTasks()
+        await source.setLocationFailure(nil)
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
+        registry.canPrepare = { false } // Both slots are busy in another window.
+        let model = WorkModel(query: source.query, repoPath: Self.repo)
+        model.confirmMachine("home-a")
+        model.bindWorkspaces(registry, repository: repository)
+        await model.refresh()
+        let repositoryKey = WorkWorkspaceKey(repository: repository, kind: .repository, id: repository)
+        let waveKey = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-1")
+        let queued = try #require(registry.retained(waveKey))
+        #expect(registry.preparationCount == 0)
+        #expect(!queued.openingConversation)
+        #expect(model.conversationIsOpening(queued))
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        let view = WorkspacePanesView(workspace: queued, isFocused: true, sessions: store, model: model,
+            onFocus: { id, _ in queued.multiplexer.setFocusedPane(id) })
+        _ = try view.inspect().find(text: "Opening conversation…")
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "primary-open-conversation") }
+
+        await source.setPreparationFailure("Claude account unavailable")
+        registry.canPrepare = nil
+        registry.continueOpenings()
+        let deadline = ContinuousClock.now + .seconds(3)
+        let failed = try #require(registry.retained(repositoryKey))
+        while failed.conversationError == nil, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(failed.conversationError == "Claude account unavailable")
+        #expect(!model.conversationIsOpening(failed))
+        let failedView = WorkspacePanesView(workspace: failed, isFocused: true, sessions: store, model: model,
+            onFocus: { id, _ in failed.multiplexer.setFocusedPane(id) })
+        _ = try failedView.inspect().find(text: "Claude account unavailable")
+        let button = try failedView.inspect().find(viewWithAccessibilityIdentifier: "primary-open-conversation").button()
+        #expect(try button.labelView().text().string() == "Retry")
         registry.prepareForQuit()
     }
 
@@ -705,6 +775,11 @@ struct WorkCacheTests {
     }
 }
 
+private extension SessionsStore {
+    /// Task conversations lf prepared, apart from the repository and Wave primaries a load also opens.
+    var preparedTaskConversations: [SessionItem] { sessions.filter { $0.state == .prepared && $0.record.taskPrimary } }
+}
+
 private actor Source {
     private var roadmap: String
     private let sessions: String
@@ -713,6 +788,8 @@ private actor Source {
     private var preparationFailure: String?
     private var failsOnce = false
     private(set) var preparedTasks: [String] = []
+    /// Repository and Wave primaries prepared on load: "repository" or "wave:<name>".
+    private(set) var preparedPrimaries: [String] = []
     private var holding: [String]?
     private(set) var reads = 0
     private var held: CheckedContinuation<Void, Never>?
@@ -823,7 +900,8 @@ private actor Source {
     private func read(_ args: [String]) async throws -> String {
         reads += 1
         if failed { throw RegistryQueryError("offline") }
-        let command = args.first == "--machine" ? Array(args.dropFirst(4)) : args
+        var command = args.first == "--machine" ? Array(args.dropFirst(4)) : args
+        if command.first == "--repo" { command = Array(command.dropFirst(2)) }
         if let holding, command.starts(with: holding) {
             await withCheckedContinuation { continuation in
                 held = continuation
@@ -847,6 +925,26 @@ private actor Source {
             throw RegistryQueryError(preparationFailure)
         }
         let openFlag = ["--start-if-free", "--reveal-existing"].first(where: command.contains)
+        if command.starts(with: ["session", "resume"]), let openFlag, !command.contains("--task") {
+            // A repository or Wave primary: Rust places it in the scope's own checkout.
+            let wave = command.firstIndex(of: "--wave").map { command[$0 + 1] }
+            let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
+            let waveId = try wave.map { name in try #require(snapshot.waves.first { $0.wave.name == name }).wave.id }
+            let scope = wave.map { "wave:" + $0 } ?? "repository"
+            let page = try JSONSerialization.jsonObject(with: Data(sessions.utf8)) as! [String: Any]
+            var record = (page["entries"] as! [[String: Any]])[0]
+            record["id"] = "primary-" + scope
+            record["primary_scope"] = wave == nil ? "repository" : "wave"
+            record["wave_id"] = waveId ?? NSNull()
+            record["task_ids"] = []
+            record["task_primary"] = false
+            record["workspace"] = ["machine_id": "home-a", "worktree": "/src/loopflow." + (wave ?? "repo"), "task_id": NSNull()]
+            record["state"] = "closed"
+            record["actions"] = sessionActionFixture(state: "closed")
+            record["open_argv"] = ["lf", "session", "resume", "primary-" + scope, openFlag]
+            preparedPrimaries.append(scope)
+            return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
+        }
         if command.starts(with: ["session", "resume"]), let openFlag {
             let id = command[try #require(command.firstIndex(of: "--task")) + 1]
             let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)

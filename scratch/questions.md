@@ -97,3 +97,23 @@ looks good”; repository and Wave conversations must also open on selection and
 prefetch. “auto open everything *AND* prefetch everything”. No normal selected
 No session/Open session gate. Supersedes the Task-only and started-only discovery
 restrictions. Accepted scope and constraints: `loo-672-load-prefetch.md`.
+
+Implementation assumptions, November 5 (primaries):
+
+- Repository and Wave conversations are warm outside the eight-Task bound, not
+  inside it: a repository has one plus a few Waves, and counting them against the
+  Task bound would evict working Tasks to keep Waves warm. Close still releases
+  them; a deliberate visit readmits. To bound them too, move them into `recentTasks`.
+- Load order is selected Work, visible tiles, repository and Waves, then recent
+  working Tasks. Primaries are a handful of fast prepare calls, so they delay the
+  first Task by well under a second; put them after `recentTasks` in `warmWork` to
+  let Tasks lead instead.
+- `lf resume` and `lf resume --wave` with no message now open with the same
+  reading pass as Task primaries, so the operator waits for the person's first
+  message there too. The same trade-off recorded for Tasks on November 4 applies: the
+  launch cannot tell Desktop's automatic opening from an explicit CLI opening.
+- Repository and Wave conversations are prefetched only in the loaded repository's
+  window; Desktop never loads other repositories on the Machine.
+- The queue verifies a primary's Machine but not its checkout, because Rust places
+  primaries in the scope's persistent agent worktree, which Desktop's navigation
+  location (the repository root) never names.

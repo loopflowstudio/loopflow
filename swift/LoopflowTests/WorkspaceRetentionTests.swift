@@ -117,6 +117,35 @@ struct WorkspaceRetentionTests {
         #expect(tile.hostUse == "retained")
     }
 
+    @Test("Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit")
+    func primariesStayWarmBesideTheTaskBound() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/repo")
+        let repository = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let wave = WorkWorkspaceKey(repository: "repo", kind: .wave, id: "wave-1")
+        registry.prefetchPrimary(repository, title: "repo", location: location)
+        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        #expect(registry.warmPrimaries == [repository, wave])
+        #expect(registry.retained(wave)?.wave == "product")
+        let keys = (0..<9).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
+        for key in keys { registry.prefetch(key, title: key.id, location: location, completed: false) }
+        #expect(registry.recentTasks.count == 8)
+        #expect(registry.warmWork == [repository, wave] + keys.prefix(8))
+        // Primaries report no checkout presence: `hostUse` belongs to Task checkouts.
+        let primary = registry.retained(wave)!
+        #expect(primary.conversationIntent == .start)
+        primary.multiplexer.load(sessionId: "wave-conversation")
+        primary.closePane(primary.multiplexer.sessionPane!.id)
+        #expect(primary.conversationClosed)
+        #expect(registry.warmPrimaries == [repository])
+        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        #expect(registry.warmPrimaries == [repository], "refresh never undoes Close")
+        registry.open(wave, title: "product", location: location)
+        #expect(!primary.conversationClosed)
+        #expect(registry.warmPrimaries == [repository, wave])
+    }
+
     @Test("Saved unfinished Tasks fill spare warmth without evicting working Tasks", arguments: [7, 8])
     func restoredTasksFillSpareWarmth(workingCount: Int) {
         let repository = "repo_" + UUID().uuidString

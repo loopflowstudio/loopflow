@@ -1000,30 +1000,25 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
 }
 
 #[test]
-fn opening_a_task_primary_without_a_request_only_reads() {
-    use crate::session::PrimaryScope;
-    let task = PrimaryScope::Task(TaskId::new());
-    let opening = super::first_turn(None, Some(&task));
+fn opening_any_primary_without_a_request_only_reads() {
+    let opening = super::first_turn(None);
     assert!(opening.contains("change no Work"));
     assert!(opening.contains("launch no Graph"));
+    assert!(opening.contains("claim or start no Task"));
     assert!(opening.contains("Steers delivered with this turn are recorded direction"));
     assert_eq!(
-        super::first_turn(Some("land it"), Some(&task)),
+        super::first_turn(Some("land it")),
         "land it",
         "a person's stored request is the first turn"
     );
-    let skill = include_str!("../../builtins/task/skill/task_session.md");
-    assert!(skill.contains("A first turn without the user's\n  request is a reading pass"));
-    assert!(skill.contains("Steers delivered with that turn are recorded\n  direction"));
-    assert!(!skill.contains("without waiting for a greeting"));
-}
-
-#[test]
-fn repository_and_wave_primaries_keep_their_opening() {
-    use crate::session::PrimaryScope;
-    assert_eq!(
-        super::first_turn(None, Some(&PrimaryScope::Wave(crate::id::WaveId::new()))),
-        super::PRIMARY_MESSAGE
-    );
-    assert_eq!(super::first_turn(None, None), super::PRIMARY_MESSAGE);
+    for skill in [
+        include_str!("../../builtins/task/skill/task_session.md"),
+        include_str!("../../builtins/ops/skill/repo_session.md"),
+        include_str!("../../builtins/wave/skill/wave_session.md"),
+    ] {
+        let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(skill.contains("request is a reading pass"));
+        assert!(skill.contains("Steers delivered with that turn are recorded direction"));
+        assert!(!skill.contains("without waiting for a greeting"));
+    }
 }

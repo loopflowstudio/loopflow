@@ -792,23 +792,15 @@ async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> R
         Some(skill) => args.extend(["skill".to_string(), "--".to_string(), skill.clone()]),
         None => args.push(":".to_string()),
     }
-    let scope = store.sqlite.primary_scope(&session.id)?;
-    args.push(first_turn(session.request.as_deref(), scope.as_ref()).to_string());
+    args.push(first_turn(session.request.as_deref()).to_string());
     Ok(args)
 }
 
 /// A stored request, the person's own or a continuation `new_thread` seeded, is
-/// the first turn; without one, opening a Task primary asks for nothing, so its
-/// first turn only reads.
-fn first_turn<'a>(
-    request: Option<&'a str>,
-    scope: Option<&crate::session::PrimaryScope>,
-) -> &'a str {
-    match (request, scope) {
-        (Some(request), _) => request,
-        (None, Some(crate::session::PrimaryScope::Task(_))) => TASK_PRIMARY_MESSAGE,
-        (None, _) => PRIMARY_MESSAGE,
-    }
+/// the first turn; without one, opening a primary asks for nothing, so its
+/// first turn only reads. Desktop opens every primary on load this way.
+fn first_turn(request: Option<&str>) -> &str {
+    request.unwrap_or(PRIMARY_MESSAGE)
 }
 
 pub(crate) fn capture_subjects(
@@ -1741,8 +1733,7 @@ pub(crate) fn human_session_argv(id: &str) -> Result<Vec<String>> {
     ])
 }
 
-const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
-const TASK_PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of this Task, and nobody has asked for anything yet. Read the Task's current state, report where it stands and change no Work: launch no Graph and replay no earlier input, even for a stopped run. Steers delivered with this turn are recorded direction: report them and act when the user asks here. Operate once the user asks.\n</lf:primary-session>";
+const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task, and nobody has asked for anything yet. Read its current state, report where it stands and change no Work: launch no Graph, claim or start no Task and replay no earlier input, even for a stopped run. Steers delivered with this turn are recorded direction: report them and act when the user asks here. Operate once the user asks.\n</lf:primary-session>";
 
 pub(crate) fn lock_session_process(id: &str) -> Result<File> {
     let directory = crate::store::lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);

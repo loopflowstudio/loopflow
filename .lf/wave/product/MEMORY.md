@@ -958,19 +958,20 @@ Retired Ask/Ready/Complete and LOO-491 evidence:
 `a32c385044:.lf/wave/product/MEMORY.md`, this heading.
 
 Jack Heart's November 4 LOO-672 approval selects warm unfinished Tasks,
-bottom-on-return, existing-history reveal and explicit **Take back** over the last
-screen. No Fork button/shared input; CLI fork remains. Jack added fresh
-idle/active/moving load-prefetch without saved visits. Selected-first admission
-honors Close; saved display grants no retention. Eight conversations/two
-preparations remain provisional. Visible/protected work survives; completed
-departure releases through 717.
+bottom-on-return and explicit **Take back** over the last screen; no Fork
+button/shared input, CLI fork remains. Selected-first admission honors Close;
+saved display grants no retention. Eight conversations/two preparations remain
+provisional. Visible/protected work survives; completed departure releases
+through 717.
 
 Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
-of this task”) and on November 5 ruled out any normal “unopened” state: owned
-idle/active/moving Tasks create their primary Session and start or resume the
-provider during load, before selection. Unassigned Tasks stay backlog. The first
-turn without a request reads and reports; each start spends one provider turn.
-Start keeps non-replacing intent through argv, execution and claim; only Take back
+of this task”), ruled out any normal “unopened” state on November 5, then extended
+it: “auto open everything *AND* prefetch everything”. Owned idle/active/moving
+Tasks and the repository and Wave primaries create their Session and start or
+resume the provider during load, before selection; primaries stay warm beside the
+Task bound. Unassigned Tasks stay backlog. Any primary's first turn without a
+request reads and reports, launching no Graph or operator; each start spends one
+provider turn. Start keeps non-replacing intent through argv, execution and claim; only Take back
 replaces input; Close fences late results. A consumed first launch with no history
 costs one Try again. Launch runs from the model: `.hidden()` panes never mount, so
 prepared Sessions start their terminal from the store and the pane adopts it.
@@ -979,8 +980,8 @@ recovery restarts it; fixtures end in `interactive: default`.
 
 Local retention uses the local query; remote presence uses observed remote
 identity (peer lookup of the local Machine failed “is not added”). The November 5
-disposable candidate proved four providers live on load with no Graph; drafts,
-cold return, Rex takeover, reboot and twenty-Task footprint remain with demo.
+disposable candidate proved four providers live on load with no Graph; primaries,
+drafts, cold return, Rex takeover, reboot and twenty-Task footprint remain with demo.
 
 ### Task observation and retired Watch
 

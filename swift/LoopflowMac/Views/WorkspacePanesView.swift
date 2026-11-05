@@ -784,12 +784,18 @@ struct SessionPaneView: View {
                 TaskConversationButton(workspace: workspace, model: model)
             }
         } else {
-            PaneEmptyState(title: "No session open", systemImage: "terminal",
-                           description: "Open the retained conversation when you’re ready.") {
-                Button("Open conversation") {
-                    let wave = workspace.key.kind == .wave ? model.wave(id: workspace.key.id)?.wave.name : nil
-                    Task { await model.openPrimaryConversation(in: workspace, wave: wave, store: sessions) }
-                }.buttonStyle(.bordered)
+            // A primary opens on its own; this pane only shows why it has not and
+            // offers the retry. Close is the one deliberate way to stay here.
+            PaneEmptyState(title: workspace.conversationError == nil ? "Conversation not open" : "Conversation failed to open",
+                           systemImage: workspace.conversationError == nil ? "terminal" : "exclamationmark.triangle",
+                           description: workspace.conversationError
+                               ?? (workspace.conversationClosed ? "Closed here. Select it again to reopen the conversation."
+                                   : "Loopflow has not reported this repository yet.")) {
+                Button(workspace.conversationError == nil ? "Open conversation" : "Retry") {
+                    Task { await model.openPrimaryConversation(in: workspace, store: sessions) }
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("primary-open-conversation")
             }
         }
     }

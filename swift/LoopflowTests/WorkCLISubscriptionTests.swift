@@ -10,7 +10,7 @@ import ViewInspector
 @Suite("CLI to retained Work sidebar", .serialized)
 @MainActor
 struct WorkCLISubscriptionTests {
-    @Test("Load initializes working Task conversations without a Start click", arguments: [false, true])
+    @Test("Load initializes working Task and repository conversations without a Start click", arguments: [false, true])
     func workingTaskConversationOpensAutomatically(prepared: Bool) async throws {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -41,25 +41,31 @@ struct WorkCLISubscriptionTests {
         let otherStore = otherRegistry.sessionStore(repository: repository.id, repoPath: fixture.repo.path, query: query)
         let workspace = try #require(registry.retained(model.workspaceKey(for: .task(id: id), repository: repository.id)))
         let store = registry.sessionStore(repository: repository.id, repoPath: fixture.repo.path, query: query)
-        try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil && store.sessions.first?.state == .prepared }
+        try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil && store.sessions.first { $0.record.taskPrimary }?.state == .prepared }
         #expect(model.selection == nil)
+        // The repository's own conversation opens on the same load, in its scope checkout.
+        let repositoryWorkspace = try #require(registry.retained(model.workspaceKey(for: nil, repository: repository.id)))
+        try await eventually { store.sessions.first { $0.record.primaryScope == "repository" }?.state == .prepared }
+        #expect(repositoryWorkspace.conversationError == nil)
+        #expect(repositoryWorkspace.multiplexer.sessionPane?.sessionId == store.sessions.first { $0.record.primaryScope == "repository" }?.id)
         // Selecting and refreshing reuse the Session admitted by fresh-load prefetch.
         model.select(.task(id: id))
         await model.refreshSessions()
         model.openWarmConversations()
-        let session = try #require(store.sessions.first)
+        let session = try #require(store.sessions.first { $0.record.taskPrimary })
         #expect(session.state == .prepared)
         #expect(session.record.workspace?.identity == location)
         #expect(session.launchArguments.contains("--start-if-free"))
         #expect(workspace.conversationStart == nil)
         #expect(try await query.taskConversationStart(issue: id, cwd: fixture.repo.path) == nil)
         let recorded = try await query.sessionPage(cwd: fixture.repo.path).entries
-        #expect(recorded.count == 1)
-        #expect(recorded.first?.id == session.id)
+        #expect(recorded.filter(\.taskPrimary).map(\.id) == [session.id])
+        #expect(recorded.filter { $0.primaryScope == "repository" }.count == 1)
+        #expect(recorded.count == 2)
         if let initial { #expect(initial.id == session.id) }
-        #expect(recorded.first?.agentProcessId == nil)
-        try await eventually { otherStore.sessions.first?.state == .prepared }
-        #expect(otherStore.sessions.first?.id == session.id)
+        #expect(recorded.allSatisfy { $0.agentProcessId == nil }) // Prepared, not launched: no Graph or operator ran.
+        try await eventually { otherStore.sessions.first { $0.record.taskPrimary }?.state == .prepared }
+        #expect(otherStore.sessions.first { $0.record.taskPrimary }?.id == session.id)
         otherRegistry.prepareForQuit()
         await otherRegistry.releaseForQuit()
         registry.prepareForQuit()
@@ -124,7 +130,7 @@ struct WorkCLISubscriptionTests {
         model.select(.wave(id: wave.wave.id))
         let original = try #require(registry.selectedWork.flatMap(registry.retained))
         original.multiplexer.newShell(command: ["/bin/cat"], location: original.location)
-        let originalLayout = original.multiplexer.layout
+        let originalPanes = original.multiplexer.layout.allPanes.map(\.id)
         let originalFiles = original.files(issue: seedID, cwd: fixture.repo.path, query: query)
         let originalDraft = originalFiles.document("notes.txt")
         originalDraft.editor.string = "retain original draft"
@@ -148,7 +154,8 @@ struct WorkCLISubscriptionTests {
         }
         #expect(model.selection == .wave(id: wave.wave.id))
         #expect(registry.retained(original.key) === original)
-        #expect(original.multiplexer.layout == originalLayout)
+        // The Wave's own conversation fills its session pane on load; the panes survive.
+        #expect(original.multiplexer.layout.allPanes.map(\.id) == originalPanes)
         #expect(originalFiles.document("notes.txt") === originalDraft)
         #expect(originalDraft.editor.string == "retain original draft")
 

@@ -113,7 +113,10 @@ final class SessionsWorkspace {
     var conversationError: String?
     var conversationStart: SessionAction?
     /// What automatic opening and Retry may do; only Take back replaces input.
-    var conversationIntent: SessionOpenIntent = .reveal
+    /// Repository and Wave primaries always start; a Task's intent follows its state.
+    var conversationIntent: SessionOpenIntent
+    /// The Wave's name as `--wave` takes it; nil outside Wave Work.
+    var wave: String?
     private var didPrepareTaskPanes = false
     var lastVisit = Date.distantPast
     var conversationClosed = false
@@ -131,9 +134,11 @@ final class SessionsWorkspace {
     }
 
     /// Populate this retained Work even if navigation changes while lf prepares it.
+    /// Automatic opening runs through the registry's warm queue; this is Retry.
     func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
+        if let wave { self.wave = wave }
         await openConversation {
-            let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
+            let record = try await store.query.ensurePrimarySession(wave: self.wave, cwd: store.repoPath)
             store.reconcile([record])
             store.adoptPreparation(record)
             registry.presentSession(record, in: self)
@@ -512,6 +517,7 @@ final class SessionsWorkspace {
         self.location = location
         self.localMachineId = localMachineId
         self.surfaces = surfaces
+        conversationIntent = key.kind == .task ? .reveal : .start
         multiplexer = MultiplexerStore(taskId: key.kind == .task ? key.id : nil)
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
@@ -543,6 +549,8 @@ final class SessionsWorkspaceRegistry {
     private(set) var machineError: String?
 
     private(set) var recentTasks: [WorkWorkspaceKey] = []
+    /// Repository and Wave primaries: always warm outside the Task bound until Close.
+    private(set) var warmPrimaries: [WorkWorkspaceKey] = []
     private(set) var restoreCandidates: [WorkWorkspaceKey] = []
     private var completedTasks: Set<WorkWorkspaceKey> = []
     private struct WarmIntent: Codable {
@@ -605,6 +613,17 @@ final class SessionsWorkspaceRegistry {
         reconcileWarmth()
     }
 
+    /// A repository or Wave primary opens on load like any working Task and stays
+    /// warm beside the Task bound; only Close leaves it unopened. Each load
+    /// refreshes its location and the Wave's `--wave` name.
+    func prefetchPrimary(_ key: WorkWorkspaceKey, title: String, wave: String? = nil, location: WorkspaceIdentity) {
+        guard !presentationClosed, !quitting, !closedConversations.contains(key) else { return }
+        workspace(for: key, title: title, location: location).wave = wave
+        guard !warmPrimaries.contains(key) else { return }
+        warmPrimaries.append(key)
+        reconcileWarmth()
+    }
+
     func confirmLocation(in workspace: SessionsWorkspace) {
         workspace.requiresLocationValidation = false
         reconcileWarmth()
@@ -631,6 +650,7 @@ final class SessionsWorkspaceRegistry {
         }
         for workspace in workspaces.values {
             let retained = visible.contains(workspace.key) || recentTasks.contains(workspace.key)
+                || warmPrimaries.contains(workspace.key)
             if (!retained || workspace.conversationClosed) && (workspace.hostUse == "retained" || openings[workspace.key] != nil) {
                 openings.removeValue(forKey: workspace.key)?.cancel()
                 for pane in workspace.multiplexer.layout.allPanes {
@@ -646,15 +666,19 @@ final class SessionsWorkspaceRegistry {
     private func closeConversation(in key: WorkWorkspaceKey) {
         closedConversations.insert(key)
         recentTasks.removeAll { $0 == key }
+        warmPrimaries.removeAll { $0 == key }
         restoreCandidates.removeAll { $0 == key }
         reconcileWarmth()
     }
 
     /// Selected first, then visible Tasks, which the warm limit excepts, then
-    /// bounded restored, visited and prefetched Work.
+    /// repository and Wave primaries, then bounded restored, visited and
+    /// prefetched Tasks.
     var warmWork: [WorkWorkspaceKey] {
         var keys = [selectedWork].compactMap { $0 }
-        for key in visibleWork.filter({ $0.kind == .task }) + recentTasks where !keys.contains(key) { keys.append(key) }
+        for key in visibleWork.filter({ $0.kind == .task }) + warmPrimaries + recentTasks where !keys.contains(key) {
+            keys.append(key)
+        }
         return keys
     }
 
@@ -671,7 +695,9 @@ final class SessionsWorkspaceRegistry {
                 guard existing.opensAutomatically(intent: workspace.conversationIntent)
                         || (workspace.requiresLocationValidation && existing.record.launchRetry != nil) else { continue }
             } else {
-                guard key.kind == .task || id != nil, workspace.location != nil else { continue }
+                guard workspace.location != nil else { continue }
+                // A Wave's `--wave` name arrives with the roadmap; the next pass opens it.
+                guard key.kind != .wave || id != nil || workspace.wave != nil else { continue }
                 // A tile with nothing to reveal keeps its own offer; visiting it may still refuse.
                 guard id != nil || workspace.conversationIntent == .start || key == selectedWork
                         || recentTasks.contains(key) else { continue }
@@ -725,6 +751,8 @@ final class SessionsWorkspaceRegistry {
         if let existing { record = existing.record }
         else if let id = workspace.multiplexer.sessionPane?.sessionId {
             record = try await query.prepareSession(id: id, cwd: store.repoPath, intent: intent)
+        } else if key.kind != .task {
+            record = try await query.ensurePrimarySession(wave: workspace.wave, cwd: store.repoPath)
         } else {
             do {
                 record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath, intent: intent)
@@ -739,7 +767,11 @@ final class SessionsWorkspaceRegistry {
         }
         try Task.checkCancellation()
         guard !workspace.conversationClosed, workspace.location == location else { return }
-        guard record.workspace?.identity == location else {
+        // A primary runs in the persistent checkout Rust chose for its scope, so
+        // only its Machine must agree; a Task conversation must match its checkout.
+        let placed = key.kind == .task ? record.workspace?.identity == location
+            : record.workspace?.machineId == location.machineId
+        guard placed else {
             throw RegistryQueryError("The conversation belongs to a different Machine or checkout; nothing was opened.")
         }
         workspace.conversationStart = nil
@@ -856,6 +888,8 @@ final class SessionsWorkspaceRegistry {
         if key.kind == .task, !completedTasks.contains(key), !closedConversations.contains(key) {
             recentTasks.removeAll { $0 == key }
             recentTasks.insert(key, at: 0)
+        } else if key.kind != .task, deliberate, !warmPrimaries.contains(key) {
+            warmPrimaries.append(key)
         }
         reconcileWarmth()
         if let sessions { openWarmConversations(store: sessions) }
@@ -997,6 +1031,7 @@ final class SessionsWorkspaceRegistry {
         workspaces[key] = workspace
         openWork = openWork.map { $0 == previous ? key : $0 }
         recentTasks = recentTasks.map { $0 == previous ? key : $0 }
+        warmPrimaries = warmPrimaries.map { $0 == previous ? key : $0 }
         restoreCandidates = restoreCandidates.map { $0 == previous ? key : $0 }
         if closedConversations.remove(previous) != nil { closedConversations.insert(key) }
         if completedTasks.remove(previous) != nil { completedTasks.insert(key) }

@@ -11,7 +11,9 @@ Jack: “otherwise looks good” for the repaired Task demo. The selected reposi
 in Jack’s screenshot still showed No session open / Open conversation. Jack
 requested the same behavior for Waves and repositories, then clarified “auto
 open everything *AND* prefetch everything”. Implement the expanded scope in
-`loo-672-load-prefetch.md`; return for demo. No shipping approval.
+`loo-672-load-prefetch.md`; return for demo. No shipping approval. The expanded
+scope is implemented at the tree (`loo-672-ready-conversations.md`, Primaries) and
+unproven natively; the November 5 candidates predate it.
 
 ## Current open candidate — November 5
 
@@ -95,6 +97,10 @@ With real Claude and Codex Sessions, from a fresh repository load with no saved
 visits, verify working Tasks prefetch automatically without changing selection
 (proven above), then:
 
+- Repository and Wave primaries: with no saved history, load opens the repository
+  and each Wave conversation unselected; selecting one reveals the already started
+  Session and no operator pass or Graph launched; returning to an existing Task
+  conversation keeps it. The fixture needs a Wave in the loaded repository.
 - A → B → A: type an unsubmitted draft; verify exact draft and provider identity.
 - Exceed the warm set, return cold: saved history precedes input readiness and no
   new turn starts. Measure first paint separately from usable input.

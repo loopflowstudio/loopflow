@@ -21,6 +21,36 @@ initialize absent primary Sessions/history, with loading or actionable failures
 shown honestly. Automatic startup is a reading pass for every primary scope,
 not permission to run its operator.
 
+**Primaries (implemented November 5).** The registry keeps a `warmPrimaries` set
+beside `recentTasks`: the repository and every Wave the window's roadmap shows are
+prefetched on every `openWarmConversations` pass through `prefetchPrimary`, retained
+outside the eight-Task bound, and dropped only by Close (a deliberate visit
+readmits). `warmWork` orders selected, visible tiles, primaries, then recent Tasks,
+under the same two preparation slots. A primary workspace's intent is always Start;
+a Task's still follows its state. With no Session the queue calls
+`ensurePrimarySession(wave:)` with the Wave name `prefetchPrimary` records on the
+workspace from the roadmap, through the same `--start-if-free --prepare` write the
+Open button used; Rust `select_connection` admits the primary, `admit_workspace`
+places it in the scope's persistent checkout, and `open_without_replacing` keeps the
+first-thread, controlled-elsewhere and consumed-launch refusals. The queue therefore
+checks a primary's Machine only, not its checkout, against the workspace location.
+The selected-state pane shows opening, the conversation, or a failure with
+**Retry**; `openPrimaryConversation` remains as that Retry. After Close, or before
+Loopflow reports the Machine, the pane reads **Conversation not open** with the same
+button labelled **Open conversation**; a deliberate reselection reopens without it.
+Rust `first_turn` has one
+`PRIMARY_MESSAGE` for every scope: read, report, change no Work, launch no Graph,
+claim or start no Task, treat steers as recorded direction. `repo_session.md` and
+`wave_session.md` carry the same reading-pass bullet as `task_session.md`; their
+operating pass begins with the person's first request.
+
+**Remaining for primaries.** Native proof: a fresh repository load with no saved
+history opens the repository and each Wave conversation unselected, selection
+reveals the already started Session, returning to an existing Task conversation
+keeps it, and no operator pass or Graph launched (`loo-672-demo.md`, required
+demonstration). `prepare-redemo.py` needs a Wave in the loaded repository for that
+case. `demo.html` and PR #1816's body still describe the Task-only scope.
+
 ## Accepted outcome and constraints
 
 Task conversations open without a Start or Open click after launch, selection and
@@ -97,12 +127,12 @@ after leaving the Dashboard. The live relay writes the `loopflow:input-ready` ti
 marker only after acknowledged control; `GhosttyManager` turns it into
 `ghosttySessionReady`, which marks the pane live.
 
-**First turn.** A Task primary's first turn without a request is a reading pass:
-`TASK_PRIMARY_MESSAGE`, selected by primary scope in `first_turn`, and
-`task_session.md` say to read, report, leave a stopped run stopped and treat steers
-as recorded direction. Repository and Wave primaries keep their prior text. Each
-automatic start spends one provider turn, so a load can spend up to eight; the
-“no new agent turn” acceptance holds only for existing history.
+**First turn.** Any primary's first turn without a request is a reading pass:
+`PRIMARY_MESSAGE` in `first_turn` and the three session skills say to read, report,
+leave a stopped run stopped, claim or start nothing and treat steers as recorded
+direction. Each automatic start spends one provider turn, so a load can spend up to
+eight Task turns plus one per primary; the “no new agent turn” acceptance holds
+only for existing history.
 
 **Folder trust.** `restore_task_checkout` now calls `mark_lf_created`, so Task
 checkouts carry the created marker again (none did since #1648). Adopted checkouts
@@ -116,8 +146,11 @@ reconciliation and conversation lookup agree.
 ### Delete — do not maintain
 
 - History-only reveal as the automatic policy for working Task load, linked
-  selection, prefetch and Retry. Reveal stays for other Work and the CLI's explicit
-  `--reveal-existing` contract.
+  selection, prefetch and Retry. Reveal stays for backlog Tasks and the CLI's
+  explicit `--reveal-existing` contract.
+- The selected-state **No session open / Open conversation** gate for repository
+  and Wave Work, the `key.kind == .task || id != nil` admission in the warm queue,
+  and `TASK_PRIMARY_MESSAGE` as a Task-only first turn: deleted November 5.
 - `missingTaskConversationStartsExplicitly` and the sidebar refusal assertion;
   automatic preparation of both absence cases replaced them.
 - The hidden warm host and any launch that depends on a pane mounting.
@@ -133,14 +166,14 @@ Warm slots are not filtered by person: a teammate's owned Task on an unreachable
 Machine fails quietly and occupies one. Desktop has no local person identity to
 compare. Acceptable while Jack is the only owner; revisit before shared repositories.
 
-Sync, November 5: the stack parent's tip is already contained and origin/main is
-not merged; the parent (#1811) integrates first. A trial merge of origin/main
-conflicts in three parent files (`transport.rs`, `transport/lifetime.rs`,
+Sync, November 5 (re-checked at realign against `384505b120`): the stack parent's
+tip is already contained and origin/main is not merged; the parent (#1811)
+integrates first. A trial merge of origin/main conflicts in three parent files (`transport.rs`, `transport/lifetime.rs`,
 `tests/README.md`) and two of this branch's: a comment line in `bin/lf.rs` and the
 Sessions `onChange` block, where main's `reconcileMembership` now returns a
 selection to apply before `openWarmConversations`. At the main sync,
 `open_without_replacing` still decides owner liveness with `answering` alone
-(`human_session.rs:1043`) while main's `attaches` consults `owner_retention`
+(`human_session.rs:1035`) while main's `attaches` consults `owner_retention`
 (`ae3c91abee`, `86fea8578f`); confirm a retained unresponsive owner with no native
 history refuses rather than counting as a first thread. `answering` turns private
 on main; only this module calls it after the merge. `c59cfcc631` (#1807) adopted
@@ -170,6 +203,13 @@ in `.ready` or `.failed`.
 
 ## Verification
 
+November 5 primaries: `cargo test -p loopflow --lib ops::human_session::` and
+`scripts/test_desktop.sh --filter 'WorkCacheTests|WorkspaceRetentionTests|WorkspacePanesTests|WorkNavigationTests|WorkCLISubscriptionTests'`
+New cases: primaries open on load beside the
+Task bound before selection; a queued primary shows opening and a failed one Retry,
+never an Open gate; primaries stay warm and Close releases until a deliberate
+visit; the real-CLI load prepares the repository primary with no agent process.
+
 Focused checks cover automatic working Task preparation for absent and prepared
 Sessions, identity across refresh and selection, bounded fresh-load prefetch
 excluding unassigned Tasks, unavailable-to-Start transition, visible tiles past the
@@ -188,4 +228,14 @@ clippy and the 714-test Desktop suite passed before publication. November 5
 203 passed in 8 suites; Rust unchanged, no rerun. Realign, November 5: plan claims
 checked against the tree by inspection (intent, warm queue, store launch, first
 turn, trust marker, shared matching, named tests all present); no code change, no
-rerun. The rendered proof's candidate predates `83b3d64a93`'s shared Task matching.
+rerun. Compress, November 5 (primaries): `cargo test -p loopflow --lib ops::human_session::`
+36 passed; `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkspaceRetentionTests|WorkspacePanesTests|WorkNavigationTests|WorkCLISubscriptionTests|WarmPaneMountTests'`
+passed after correcting three inherited expectations: the fixture's second Wave
+belongs to another repository and is never loaded, `hostUse` is Task-checkout
+presence that primaries never report, and a Wave workspace's session pane fills on
+load while its panes survive CLI mutations. Realign, November 5 (primaries): plan
+claims checked against the tree by inspection (`warmPrimaries`, `prefetchPrimary`,
+`warmWork` order, primary Start intent, Machine-only placement check, one
+`PRIMARY_MESSAGE`, the three skills' reading-pass bullet, the four new tests);
+scratch and Wave memory edits only, no rerun. The rendered proof's candidate
+predates `83b3d64a93`'s shared Task matching and the primaries change.

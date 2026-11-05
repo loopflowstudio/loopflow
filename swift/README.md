@@ -87,33 +87,35 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Working Tasks open their conversations on load, before any selection. Recent
-unfinished Tasks stay warm for immediate return: Desktop retains eight, plus any
-additional visible panes; a Task shown as a Dashboard tile stays warm after the
-Dashboard leaves. Return lands at the bottom. Older conversations reconnect or resume
-the same provider history automatically.
-A small **Connecting…** indicator remains until the live relay accepts input.
-Errors remain visible with **Retry**.
+Every conversation a window can select opens on load, before any selection and
+with no saved recent visits: the repository's, each Wave's and every claimed
+working Task's (idle, active or moving). Selecting any of them shows opening, the
+live conversation, a passive view of a conversation another client controls, or a
+failure with **Retry**; never a **No session** or **Open** gate. Load opens the
+selected Work first, then visible tiles, then the repository and Waves, then
+recent working Tasks, two preparations at a time; initial rendering does not wait.
+A prepared conversation starts its provider at once, before any pane shows it;
+selecting the Work shows the running terminal. A small **Connecting…** indicator
+remains until the live relay accepts input.
 
-After relaunch, the saved selected Task opens first, then the bounded warm set
-reconnects with at most two preparations at once. Fresh completion and recorded
-Machine/checkout evidence must arrive before background retention. Close removes warm intent; refresh does not reopen it.
-Deliberately selecting that Task again permits reconnection. Completed Tasks
-release on departure through the shared two-minute/fifteen-minute lifecycle.
+Recent unfinished Tasks stay warm for immediate return: Desktop retains eight, plus
+any additional visible panes; a Task shown as a Dashboard tile stays warm after the
+Dashboard leaves. Repository and Wave conversations stay warm beside that bound.
+Return lands at the bottom. Older conversations reconnect or resume the same
+provider history automatically. After relaunch, the saved selected Work opens
+first, then the bounded warm set reconnects with at most two preparations at once.
+Fresh completion and recorded Machine/checkout evidence must arrive before
+background retention. Close removes warm intent; refresh does not reopen it, and a
+deliberate selection does. Completed Tasks release on departure through the
+shared two-minute/fifteen-minute lifecycle.
 
-Repository load prepares and opens conversations for claimed working Tasks (idle,
-active or moving), even with no saved recent visits. The selected Task comes first,
-then visible tiles, then recent working Tasks, two preparations at a time. Visible
-tiles sit outside the eight-conversation limit. A prepared conversation starts its
-provider at once, before any pane shows it; selecting the Task shows the running terminal.
-Saved Close remains closed; initial rendering does not wait for preparation.
-
-Working Tasks automatically create their primary Session if absent and start its
-native conversation if it has no history. Existing history resumes on the same
-Session. No Start or Open click is needed, including after relaunch. Unstarted and
+Automatic opening creates the primary Session if absent and starts its native
+conversation if it has no history. Existing history resumes on the same Session.
+No Start or Open click is needed, including after relaunch. Unstarted and
 unassigned Tasks are backlog: they are not prefetched and never start a conversation
-on their own. Opening never launches a Task Graph or replays consumed input: with
-no request, the first turn reads the Task and reports where it stands. A failed
+on their own. Opening never launches a Graph, claims or starts a Task, runs the
+repository or Wave operator, or replays consumed input: with no request, the first
+turn of any primary reads its scope and reports where it stands. A failed
 automatic Start shows its error with **Retry**. A launch that ended with no saved
 history stays closed until **Try again** repeats it; Retry and refresh never do.
 If another client holds input, the pane offers **Take back** and leaves that client

@@ -43,18 +43,17 @@ the screen or showing an idle prompt cannot discard that protection. Pending
 approvals and questions stay with their original provider until answered or canceled.
 
 The store records a conversation; it never carries it. Input waits in the owner
-only while its retention record is busy, and for at most one second, the same
-budget hooks give a locked store: the owner retries every 100 ms without
-polling the writable PTY between attempts, while output, control queries and
-viewer return remain responsive. A store that fails the record, or stays locked
-past that second (an install's migration transaction), delivers the bytes
-anyway, holds the Session in memory until the native client ends, and logs the
-gap once; later input delivers at once until a record succeeds, which closes
-the gap. Returning to the Session
-does not resubmit queued input. This cannot recover an editor from a dead
-provider. A quit returns the provider's own exit within a second; exit records
-still waiting on a locked or refused store finish in the background or are lost,
-logged.
+only while its retention record is busy, and at most for the one second hooks
+give a locked store: the owner retries every 100 ms without polling the
+writable PTY between attempts, while output, control queries and viewer return
+remain responsive. A store that fails the record or stays locked past that
+second (an install's migration transaction) delivers the bytes anyway, holds
+the Session in memory until the native client ends, and logs the gap once;
+later input delivers at once until a record succeeds and closes the gap.
+Returning to the Session does not resubmit queued input. This cannot recover an
+editor from a dead provider. A quit returns the provider's own exit within a
+second; exit records still waiting on a locked or refused store finish in the
+background or are lost, logged.
 
 Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings

@@ -49,48 +49,29 @@ fn run_fixture(store: &str) {
     );
 }
 
-/// How the fixture breaks the store under the owner, and how long delivery
-/// may take while it stays broken.
-struct Broken {
-    sql: rusqlite::Connection,
-    delivery: Duration,
+/// Delivery may take the one-second hook budget while the store stays locked.
+const DELIVERY: Duration = Duration::from_secs(2);
+
+/// Break the store under the owner the way `kind` names, until restored.
+fn break_store(kind: &str, db: &Path) -> rusqlite::Connection {
+    let sql = rusqlite::Connection::open(db).unwrap();
+    let sql_text = match kind {
+        "failed" => {
+            "CREATE TRIGGER reject_input BEFORE UPDATE OF native_input ON processes
+             BEGIN SELECT RAISE(FAIL, 'fixture store unavailable'); END;"
+        }
+        // An install's migration: one exclusive transaction for as long as it runs.
+        "locked" => "BEGIN EXCLUSIVE",
+        other => panic!("unknown fixture store {other}"),
+    };
+    sql.execute_batch(sql_text).unwrap();
+    sql
 }
 
-impl Broken {
-    fn open(kind: &str, db: &Path) -> Self {
-        let sql = rusqlite::Connection::open(db).unwrap();
-        match kind {
-            "failed" => {
-                sql.execute_batch(
-                    "CREATE TRIGGER reject_input BEFORE UPDATE OF native_input ON processes
-                     BEGIN SELECT RAISE(FAIL, 'fixture store unavailable'); END;",
-                )
-                .unwrap();
-                Self {
-                    sql,
-                    delivery: Duration::from_secs(5),
-                }
-            }
-            // An install's migration: one exclusive transaction for as long as it runs.
-            "locked" => {
-                sql.execute_batch("BEGIN EXCLUSIVE").unwrap();
-                Self {
-                    sql,
-                    delivery: Duration::from_secs(2),
-                }
-            }
-            other => panic!("unknown fixture store {other}"),
-        }
-    }
-
-    fn restore(self) {
-        if !self.sql.is_autocommit() {
-            self.sql.execute_batch("COMMIT").unwrap();
-        }
-        let _ = self
-            .sql
-            .execute_batch("DROP TRIGGER IF EXISTS reject_input");
-    }
+fn restore_store(sql: rusqlite::Connection) {
+    let _ = sql.execute_batch("ROLLBACK");
+    sql.execute_batch("DROP TRIGGER IF EXISTS reject_input")
+        .unwrap();
 }
 
 #[test]
@@ -101,7 +82,7 @@ fn input_store_fixture() {
     let guard = crate::journal::TestLedgerGuard::new();
     crate::journal::with_runtime(guard.home(), &["lf".into(), "fixture".into()], || {
         let owner = crate::journal::current_lf_process_id().unwrap();
-        let broken = Broken::open(&kind, &guard.home().join("loopflow.db"));
+        let broken = break_store(&kind, &guard.home().join("loopflow.db"));
         let endpoint = super::endpoint(&owner)?;
         let marker = guard.home().join("delivered");
         let receipt = marker.clone();
@@ -135,16 +116,15 @@ fn input_store_fixture() {
             socket
                 .write_all(&frame(Tag::Input, b"retained draft\n"))
                 .unwrap();
-            let deadline = Instant::now() + broken.delivery;
+            let deadline = Instant::now() + DELIVERY;
             while !receipt.exists() {
                 assert!(
                     Instant::now() < deadline,
-                    "a {kind} store held the person's input past {:?}",
-                    broken.delivery
+                    "a {kind} store held the person's input past {DELIVERY:?}"
                 );
                 std::thread::sleep(Duration::from_millis(20));
             }
-            broken.restore();
+            restore_store(broken);
             let mut output = Vec::new();
             socket.read_to_end(&mut output).unwrap();
         });

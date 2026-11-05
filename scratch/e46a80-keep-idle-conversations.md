@@ -41,18 +41,15 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
 - Owner input: a store *error* delivers the bytes unrecorded and holds the
   owner in memory until the native client ends; a *busy* store (`Ok(false)`)
   waits 100 ms and tries again, for at most the hook's one-second budget
-  (`HOOK_BUSY_TIMEOUT`). A store still locked after that is the same recording
-  gap as a failed one: the bytes go to the provider, the owner holds the Session
-  in memory, and the gap is noted once with the lock as its reason. The budget
-  runs from the first busy answer since the last successful record, so once it
-  has lapsed every later busy answer delivers at once instead of waiting another
-  second per keystroke; a successful record resets it and closes the gap.
+  (`HOOK_BUSY_TIMEOUT`), measured from the first busy answer since the last
+  successful record. Past it a locked store is the same recording gap as a
+  failed one: the bytes go to the provider, the owner holds the Session in
+  memory, the gap is noted once with the lock as its reason, and every later
+  busy answer delivers at once until a record succeeds and closes the gap.
   LOO-709's "record before deliver" keeps its purpose (no idle ending while a
-  draft exists) through the in-memory hold. (Second concept review, 2026-11-05:
-  the first implement left the busy wait unbounded, so an install's exclusive
-  migration transaction held every keystroke for as long as it ran; closed by
-  the third implement pass, pinned by
-  `locked_input_store_delivers_the_queued_bytes_within_the_hook_budget`.)
+  draft exists) through the in-memory hold. The second concept review found the
+  first implement had left this wait unbounded under an install's exclusive
+  migration transaction; the third implement pass bounded it.
 - Exit: `settle` and the launcher's return record best-effort. The exit code is
   the provider's own; the resume hint is already printed by the owner.
   `SessionCapture::finish` writes `terminal.json` and treats its store
@@ -165,6 +162,7 @@ and `successor_handoff_*` integration tests. Surviving behavior is pinned by
 `idle_relay_survives_store_failure_and_accepts_a_reconnect`,
 `settlement_without_a_store_keeps_the_providers_own_exit`,
 `failed_input_store_delivers_the_queued_bytes_unrecorded`,
+`locked_input_store_delivers_the_queued_bytes_within_the_hook_budget`,
 `a_recovered_gap_enters_the_sessions_history_once` and
 `a_marked_gap_survives_processes_and_closes_with_its_file`.
 
@@ -199,3 +197,5 @@ Compress pass (one `GapSpan` in `RecordingGap`, one `Settling` slot in the owner
 Realign (2026-11-05, after compress): code, AGENTS.md, both READMEs and `docs/` agree with Decisions and Delete (every deleted name absent, every pinning test present, `close_gap` writes the `store-gap` observation before `recovered()`); only Wave memory lagged, now folded in. `lf context`: memory 15986/16000 tokens, scratch 3168/12000; no code change, no rerun.
 
 Implement pass (busy-store input bound): `cargo test -p loopflow --lib transport::input_retry_tests::` 3 passed (the locked fixture delivers in about one second); `cargo fmt` and `cargo clippy --all-targets -D warnings` clean.
+
+Compress pass (busy-store input bound): the fixture keeps one `DELIVERY` bound and two functions in place of a `Broken` struct; `cargo test -p loopflow --lib transport::input_retry_tests::` 3 passed, `cargo fmt` and `cargo clippy --all-targets -D warnings` clean.

@@ -122,7 +122,8 @@ other results. Explicit Task reuse keeps its existing container across membershi
 changes. Test peers share JSON reply setup; uncertain replies stay raw failures.
 
 Remote arrival, caller discovery and their evidence limits are described below.
-These components do not deliver the outstanding Rex retention hold.
+The adapter now reports each Task's Rex hold (see the concept review below); the
+shared lifetime owner does not yet consume it.
 
 Live observers now acknowledge preparation before offering Ctrl+R to request input
 on the same connection. The existing execution owner records destination placement
@@ -136,7 +137,7 @@ Review found and repaired both disappearing preparation errors and stale routing
 after transfer. Configured provider proof remains owed.
 
 **Readiness (November 5).** Each `OpenReceipt` carries `conversations`: per-Session
-`connected · history · failed · uncertain`, separate from native `status`. The
+`connected · history · ended · failed · uncertain`, separate from native `status`. The
 viewer alone reports it (`session view --observer <key>`), writing a record under
 `LF_HOME/open/observers/<destination>/` and holding its OS lock, as the follower
 does, so a record cannot outlive a host restart. No schema change. Opening waits
@@ -389,6 +390,25 @@ Observer records stay readiness-only; a stopped observer now reads `ended`,
 `failed` only for a reported attachment error. Remaining: LOO-717's shared owner
 consumes `hold::task_hold` (or `task status` evidence surfaces it) once its API lands.
 
+**Second pass (November 5, headless) — next implement direction.** The hold
+landed on the wrong reader. `lf open` prints `Rex views: held (a retained view keeps
+this Task)` on each receipt. That answer is nearly always `held`, because opening
+just created or reused the view. It also claims an effect nothing enforces yet: the
+docs say retention integration is not delivered, and no cleanup reads `rex_hold`.
+The receipt is per destination while the hold is Task-wide across copies and
+servers, and each opened Task costs another session/window inventory. Fix, settled
+by "Rex adapter reports; LOO-717 decides" and "docs claim only what exists":
+
+- `lf open` text says what the inventory saw: `present`, `confirmed closed`,
+  `unreadable`. It makes no keep/cleanup claim. The JSON field keeps its
+  `held · released · unknown` values for the shared owner and the demo, and its
+  doc comment says it is Task-wide.
+- `hold::task_hold` stays the single adapter read. No `task status` field, timer
+  or new command until LOO-717's API names its consumer: inventing that read here
+  would choose LOO-717's surface for it.
+- No other change. Readiness, splits and routing match the accepted contract.
+- Implemented (November 5). Check: lib `open::` 17/17, `work_open_tests::` 31/31 (3 ignored), fmt + clippy clean.
+
 Counterexample kept open: a restored but forgotten Rex tab holds a completed Task's
 checkout until the person closes it. That follows Jack's "retaining a view is the
 reason to keep" direction; if demo shows it is unwelcome, that is a new product
@@ -449,6 +469,4 @@ Earlier complete plans/results: `cc607dc3e1:scratch/rex-workspace.md` and
 `7b886d04cc:scratch/rex-workspace.md`; dated demo evidence is in
 [workspace-demo.md](workspace-demo.md).
 
-Check (November 5 split pass, compress): shared `IsolatedRex::pwd`; clippy passed; native `rex_manual_resume_elsewhere…` 1 passed (isolated Rex, `LOOPFLOW_TEST_REX`); gate owns the combined run.
-
-Check (November 5 implement, compress, realign): lib `transport::`/`open::` 70, `work_open_tests::` 31, `documented_commands::`/`dto_fixtures::` 52 and `prepared_destination` 1 passed; clippy passed; `transport_tests` hermetic to `REX_*` 67 passed, 1 intermittent (`contended_input_retention_keeps_control_and_delivers_once_after_unlock`, 3/3 alone); native Rex restart, handoff and identity proofs passed one at a time, identity once missed its 15s arrival deadline beside restart. Realign reconciled plan and memory only, no rerun; gate owns the combined run and those intermittent cases, authored demo owns the app's Split.
+Check (November 5 implement → compress → realign): lib `transport::`/`open::` 70, `work_open_tests::` 31, `documented_commands::`/`dto_fixtures::` 52, `prepared_destination` 1 and native `rex_manual_resume_elsewhere…` 1 passed; clippy passed; `transport_tests` hermetic to `REX_*` 67 passed, 1 intermittent (`contended_input_retention_keeps_control_and_delivers_once_after_unlock`, 3/3 alone); native Rex restart, handoff and identity proofs passed one at a time, identity once missed its 15s arrival deadline beside restart. This realign reran nothing: origin/main has no commits past the `384505b120` base and LOO-717's PR #1811 is unchanged at `b81df60579`. Gate owns the combined run and the intermittent cases; the authored demo owns the app's Split.

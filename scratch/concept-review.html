@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-498 concept review — what holds a Task in Rex</title>
+<title>LOO-498 concept review — who reads the Rex hold</title>
 <style>
   :root { color-scheme: light dark; --fg:#1d1d1f; --muted:#6b6b70; --bg:#fbfbf8; --rule:#ddd9cf; --new:#2f6f4f; --old:#9a3b2e; --code:#f1efe8; }
   @media (prefers-color-scheme: dark) { :root { --fg:#e9e7e1; --muted:#9a988f; --bg:#17171a; --rule:#34332f; --new:#7fc8a0; --old:#e58a7c; --code:#222226; } }
@@ -23,98 +23,67 @@
   .tag.ex { color:var(--muted); }
   ol li { margin:.5rem 0; }
   .wrap { overflow-x:auto; }
+  pre { overflow-x:auto; background:var(--code); padding:.6rem .8rem; border-radius:4px; }
+  pre code { background:none; padding:0; }
 </style>
 </head>
 <body>
 <main>
 <header>
-  LOO-498 · concept-review step (headless) · November 5, 2026<br>
+  LOO-498 · concept-review step (headless, second pass) · November 5, 2026<br>
   Built from <code>scratch/rex-workspace.md</code>, <code>docs/workspaces.md</code>,
-  <code>scratch/questions.md</code>, <code>open/workspace/observer.rs</code>,
-  <code>store/sqlite/host_workspaces.rs</code>
+  <code>open.rs</code> (<code>OpenReceipt</code>), <code>open/workspace.rs</code>,
+  <code>open/workspace/hold.rs</code>
 </header>
 
-<h1>A kept tab holds the Task. A live observer only says it's ready.</h1>
+<h1>The hold is right. The place it's shown is wrong.</h1>
 
-<p>No decision is needed from you to continue. This page records one
-consequence of your November 4 contract, which the branch had blurred, so
-implementation can follow it. The questions at the end are for the demo, not
-for this step.</p>
+<p>You don't need to decide anything for work to continue. The first pass settled
+the evidence for a hold, a Task occurrence present in a Rex inventory, and the branch
+implemented it. This pass checks <em>who reads it</em>.</p>
 
 <h2>What you do</h2>
 <p class="existing"><span class="tag ex">existing</span><br>
-<code>lf open</code> → Rex Task tabs appear → you work, switch tabs, press
-Ctrl+] to leave a conversation, quit Rex, come back days later, close a tab
-when you're done with it.</p>
+<code>lf open</code> → Rex Task tabs appear → you work, leave, return, close a tab
+when you're finished with it. Cleanup of a Task happens later, while you're away.</p>
 
-<h2>Two questions, one piece of evidence</h2>
-<p>Each Rex Conversation pane now carries an observer record with an OS lock.
-It answers <em>is this conversation live right now</em>, and <code>lf open</code>
-reports it. The plan then said retention still needed “a reliable
-terminal-to-Session association” and that native IDs “cannot stand in for live
-holds, including after restart.” Read together, that pushes toward using
-observer liveness, or something new, as the cleanup hold.</p>
+<h2>The mismatch</h2>
+<p class="existing"><span class="tag ex">existing</span><br>
+Every receipt from <code>lf open</code> prints:</p>
+<pre><code>  Rex views: held (a retained view keeps this Task)</code></pre>
+<ul>
+  <li>It almost always reads <code>held</code>, because opening just made or reused the view.</li>
+  <li>It claims a protection nothing enforces yet. No cleanup reads it, and
+      <code>docs/workspaces.md</code> says retention integration is not delivered.</li>
+  <li>A receipt covers one destination, but the hold covers the whole Task, across
+      copies and servers. Each opened Task also adds a Rex inventory read.</li>
+</ul>
+<p>The reader that matters is the shared lifetime owner (LOO-717), when the person
+is away. Accepted contract: the Rex adapter reports and LOO-717 decides.</p>
 
-<p>Your contract says something different. A retained terminal holds the Task
-<em>regardless of focus</em>. Only <em>confirmed removal</em> releases it.
-Unknown inventory never does. A tab Rex keeps after its observer exits is still
-a view you kept.</p>
-
-<div class="wrap">
-<table>
-  <tr><th>Question</th><th>Evidence</th><th>Who reads it</th></tr>
-  <tr><td>Does this Task have a kept view?</td>
-      <td><span class="tag">proposed</span> its <code>HostOccurrence</code> destination appears in a successful Rex inventory</td>
-      <td>Rex adapter reports <code>held · released · unknown</code>; LOO-717 decides cleanup</td></tr>
-  <tr><td>Is this Conversation live?</td>
-      <td><span class="tag ex">existing</span> observer record + OS lock</td>
-      <td><code>lf open</code> receipt only</td></tr>
-  <tr><td>May LF replay or repair a pane?</td>
-      <td>nothing, ever</td><td>—</td></tr>
-</table>
-</div>
-
-<h2>Walk it through</h2>
-<div class="wrap">
-<table>
-  <tr><th>Moment</th><th>Readiness</th><th>Hold</th></tr>
-  <tr><td>Open, conversation attaches</td><td><code>connected</code></td><td>held</td></tr>
-  <tr><td>Ctrl+] in that pane</td><td><span class="was">failed</span> <code>ended</code></td><td>held (tab still there)</td></tr>
-  <tr><td>Rex restarts, restores tabs with fresh shells</td><td><code>ended</code>, retry offered</td><td>held</td></tr>
-  <tr><td>Rex server unreachable</td><td>unknown</td><td>unknown, so not released</td></tr>
-  <tr><td>You close the last Task tab and copy</td><td>—</td><td>released; normal cleanup conditions apply</td></tr>
-  <tr><td>You ran <code>lf resume</code> by hand in a pane, then quit it</td><td>—</td><td>held while attached (existing lifetime), nothing after</td></tr>
-</table>
-</div>
-
-<h2>What changes in the next implement pass</h2>
+<h2>Next implement pass</h2>
 <ol class="proposed">
-  <li>One Rex inventory read per Task produces <code>held · released · unknown</code>
-      from its occurrences, including named copies and Wave conversation
-      containers. It goes to the shared lifetime owner. No adapter timer,
-      closure or settlement.</li>
-  <li>Observer records stay readiness-only.</li>
-  <li><code>failed</code> for an observer that simply stopped becomes
-      <code>ended</code>. Only the lock's absence is known.
-      <code>failed</code> keeps meaning an attachment error was reported.</li>
+  <li><span class="tag">proposed</span> Text output reports the inventory:
+      <code>present</code> · <code>confirmed closed</code> · <code>unreadable</code>.
+      It makes no keep or cleanup claim.</li>
+  <li>JSON <code>rex_hold</code> keeps <code>held · released · unknown</code> for the
+      shared owner and the demo. Its doc comment says it is Task-wide.</li>
+  <li><code>hold::task_hold</code> stays the one adapter read. No <code>task status</code>
+      field or new command yet: that would pick LOO-717's API for it.</li>
 </ol>
-<p>Nothing new is needed for terminal-to-Session association:
-<code>HostOccurrence</code> already records Task → destination. Native IDs still never
-authorize replay or prove the original programs survived. Those are separate
-questions.</p>
 
-<h2>Counterexample kept open</h2>
-<p>You restore a Rex session, forget a completed Task's tab, and its checkout
-stays until you close that tab. That follows from “retaining a view is the reason
-to keep.” If the demo shows you don't want it, it's a new product choice. It
-should not be handled by reintroducing away detection.</p>
+<h2>Counterexample still open</h2>
+<p>A restored, forgotten tab keeps a completed Task's checkout until you close it.
+That follows from &ldquo;retaining a view is the reason to keep.&rdquo; If the demo
+shows you don't want it, that is a product choice for you, not something to solve
+with away detection.</p>
 
 <h2>For the demo</h2>
 <ol>
   <li>Should a restored, unfocused Rex tab keep a completed Task's checkout?
-      (a) yes, until you close it, which is the current reading; (b) no, a host restart
-      releases it.</li>
-  <li>When an observer stops, which label should it get? (a) <code>ended</code>; (b) keep <code>failed</code>.</li>
+      (a) yes, until you close it, which is the current reading; (b) no, a host restart releases it.</li>
+  <li>Where should you read why a Task wasn't cleaned up? (a) <code>lf task status</code>;
+      (b) wherever LOO-717 reports cleanup decisions; (c) <code>lf open --json</code> is enough.</li>
 </ol>
 </main>
 </body>

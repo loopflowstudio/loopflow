@@ -410,9 +410,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
 
 fn hold_text(hold: ViewHold) -> &'static str {
     match hold {
-        ViewHold::Held => "held (a retained view keeps this Task)",
-        ViewHold::Released => "released (every view is confirmed closed)",
-        ViewHold::Unknown => "unknown (inventory unread; the hold stays)",
+        ViewHold::Held => "present",
+        ViewHold::Released => "confirmed closed",
+        ViewHold::Unknown => "unreadable",
     }
 }
 

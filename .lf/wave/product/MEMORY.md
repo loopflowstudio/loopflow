@@ -584,12 +584,13 @@ absence, so repairs need a fresh authorized read. These records changed no Task.
 Jack Heart selected Rex first, bounded Herdr second. November 4: one-way LF
 templates; Rex owns edits, shells and restoration.
 Reopen preserves native work; confirmed absence permits template launch.
-IDs/receipts support reuse and uncertain creation, not retention or replay.
+A Task occurrence present in a successful Rex inventory is the cleanup hold
+(held beats unknown beats released); IDs never authorize replay.
 Named copies and prepared handoff remain required. Transport separates passive
 attachment from explicit input transfer. Receipts report native creation and,
-separately, each conversation observer's readiness (connected/history/failed/
-uncertain); `--retry-observers` adds a pane beside the retained one. Composed
-retry and restart pass on isolated Rex; a real provider's handoff is unproved.
+separately, each observer's readiness (connected/history/ended/failed/uncertain);
+`--retry-observers` adds a pane beside the retained one. Retry and restart pass
+on isolated Rex; a real provider's handoff is unproved.
 Started Tasks arrive passively; backlog is explicit. Native splits must use their
 Task's worktree/Machine.
 Jack (November 5): a cwd-less raw split landing in HOME is no verdict; the app
@@ -598,17 +599,15 @@ its directory to viewers; controllers withdraw it on leaving; shells never repor
 App Split unproved.
 
 Jack superseded Rex away/native-settlement: retained Task Session terminals prevent
-cleanup regardless of focus; confirmed final removal releases the hold, unknown
-does not. LF cleans Desktop-owned shells only. LOO-717 owns shared lifetime;
-its settlement API needs revision. Requested work finishes first;
-unfinished checkouts survive Close. Deleted-checkout reconstruction excluded.
+cleanup regardless of focus; confirmed final removal releases, unknown does not.
+LF cleans Desktop-owned shells only. LOO-717 owns shared lifetime; its settlement
+API still needs revision to consume the adapter's hold. Requested work finishes
+first; unfinished checkouts survive Close. Deleted-checkout reconstruction excluded.
 Desktop: two-minute eligible-idle and fifteen-minute completed-and-away cleanup;
 return cancels. Dirty files do not veto; changed committed refs stay protected.
 
-#1818 protects active input on failed attachment. #1807 binding keeps the provider's
-cwd; later attachments report the selected directory instead.
-Contract: docs/workspaces.md.
-
+#1818 protects active input on failed attachment; #1807 binding keeps the provider's
+cwd, and later attachments report the selected directory. Contract: docs/workspaces.md.
 
 ## Workspace redesign decisions
 

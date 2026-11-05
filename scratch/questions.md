@@ -70,8 +70,9 @@ Implementation choices, November 5, all reversible:
 - **Exit status:** `lf open` exits by native results only. A failed observer is
   reported in the receipt without failing the command. Readiness-gating scripts
   read `conversations`.
-- **Leaving looks like failure:** Ctrl+], a finished conversation and a host restart
-  all read `failed` ("no longer running"), because only the lock's absence is known.
+- **Leaving reads `ended`:** Ctrl+], a finished conversation and a host restart all
+  read `ended`, because only the lock's absence is known; `failed` is reserved for a
+  reported attachment error.
 
 [workspace-demo.md](workspace-demo.md) preserves the failed configured opening,
 later disposable real-data demonstration and native Split review still owed.
@@ -85,3 +86,9 @@ readiness-only. Settled from Jack Heart's confirmed-removal/unknown-is-not-relea
 contract, not a new decision. Reversible if the demo shows restored, forgotten tabs
 holding completed Tasks is unwelcome. Readiness `failed` for a stopped observer
 becomes `ended` (naming only).
+
+**Concept review second pass, November 5:** `lf open` text output stops claiming
+"a retained view keeps this Task" while no cleanup consumes the hold; it reports
+the inventory (`present · confirmed closed · unreadable`). JSON `rex_hold` stays.
+Exposing the hold in `task status` is left to LOO-717's API rather than chosen here.
+Reversible wording.

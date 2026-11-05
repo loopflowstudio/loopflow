@@ -161,8 +161,8 @@ pub struct OpenReceipt {
     pub fallback_argv: Vec<String>,
     /// Observers at this destination, separate from native create/reuse `status`.
     pub conversations: Vec<ConversationReadiness>,
-    /// Whether the Task's Rex views retain it, across every occurrence. Reported
-    /// for the shared lifetime owner; opening decides no cleanup from it.
+    /// Whether the Task's Rex views retain it: one Task-wide answer across every
+    /// copy and Rex server, not this destination's. Opening decides no cleanup from it.
     pub rex_hold: Option<ViewHold>,
 }
 

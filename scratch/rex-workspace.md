@@ -407,7 +407,13 @@ by "Rex adapter reports; LOO-717 decides" and "docs claim only what exists":
   or new command until LOO-717's API names its consumer: inventing that read here
   would choose LOO-717's surface for it.
 - No other change. Readiness, splits and routing match the accepted contract.
-- Implemented (November 5). Check: lib `open::` 17/17, `work_open_tests::` 31/31 (3 ignored), fmt + clippy clean.
+- Implemented (November 5, checkpoint 40cb6dca36); realign reconfirmed the text, doc comment and single reader. Check: `cargo test -p loopflow --lib open::` 17/17, `--test integration work_open_tests::` 31/31 (3 ignored), fmt + clippy clean.
+
+**Third pass (November 5, headless): no change.** Code matches the second pass
+(`hold_text`: present · confirmed closed · unreadable; one `hold::task_hold` reader;
+docs mark retention integration undelivered). origin/main has nothing past the
+`384505b120` base and LOO-717's PR #1811 is still at `b81df60579`, so no new
+consumer exists to design against. No open product choice beyond the counterexample below.
 
 Counterexample kept open: a restored but forgotten Rex tab holds a completed Task's
 checkout until the person closes it. That follows Jack's "retaining a view is the

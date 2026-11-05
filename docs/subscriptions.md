@@ -231,13 +231,17 @@ lf unset account.codex
 lf account route --json
 ```
 
-A launch uses the nearest of Wave, repository and global routes. Show lists
-eligible launch candidates in order without selecting one; its explicit
-`--repo` and `--default` work outside Git. A repository route requires a
-repository origin.
+Account order uses the personal global, repository or Wave scope. Repository and
+Wave declarations live in the clone's `lf.config.local.yaml`; linked Task worktrees
+share that file, while independent clones can choose different orders. Global
+orders live in `~/.lf/config.yaml`. `set`, `unset` and hand edits reach the same
+configuration; no DB override sits above the file.
 
-It is account-selection metadata, not an SSH or network route, and it contains
-no credential. Repository routes live in the local Loopflow database.
+The list contains account references, not credentials or network routes. Account
+registration, observed eligibility, usage and conversation attribution retain their
+runtime owners. No per-skill account policy exists. For remote work, the initiating
+profile supplies account preferences and the executor supplies its own credentials.
+See [Configuration](config.md#remote-work) for forwarding and retained preferences.
 
 A managed launch tries the repository route, then the default provider route.
 Without either route, every automatically eligible managed identity is a

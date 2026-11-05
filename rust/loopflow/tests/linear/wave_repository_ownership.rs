@@ -108,7 +108,6 @@ fn task(
         branch: "jack/repository-owned-waves".to_string(),
         base_commit: "deadbeef".to_string(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

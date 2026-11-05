@@ -334,7 +334,7 @@
         "merge_commit": null,
         "abandoned_at": null
       },
-      "graph_source": "task",
+      "graph_source": null,
       "section": "later",
       "ship_control": {
         "unavailable": null

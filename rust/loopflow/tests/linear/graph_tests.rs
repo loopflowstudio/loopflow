@@ -7,7 +7,7 @@ use std::process::Command;
 
 use loopflow::graph::compile_graph;
 use loopflow::graph::load_graph;
-use loopflow::graph::{ConcreteStep, Skill, Step};
+use loopflow::graph::{ConcreteStep, Step};
 use loopflow::store::sqlite::SqliteStore;
 use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
@@ -800,23 +800,14 @@ fn graph_parsing_parity() {
     assert!(
         matches!(&graph.items[0].target, loopflow::definition::Target::Skill(skill) if skill.name == "implement")
     );
-    assert_eq!(
-        graph.items[1],
-        Step {
-            target: loopflow::definition::Target::Skill(Skill {
-                source: None,
-                name: "review".to_string(),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-                docs: Vec::new(),
-                content: None,
-            }),
-            id: None,
-            interactive: false,
-            returns: None,
-        }
-    );
+    let loopflow::definition::Target::Skill(skill) = &graph.items[1].target else {
+        panic!("expected review skill");
+    };
+    assert_eq!(skill.name, "review");
+    assert_eq!(skill.occurrence.as_ref().unwrap().graph, "sample");
+    assert_eq!(graph.items[1].id, None);
+    assert!(!graph.items[1].interactive);
+    assert_eq!(graph.items[1].returns, None);
 }
 
 #[test]

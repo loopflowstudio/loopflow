@@ -448,7 +448,7 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/task-updates',checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1", [task.as_str()]).unwrap();
+        store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/task-updates',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [task.as_str()]).unwrap();
         store
             .conn
             .lock()

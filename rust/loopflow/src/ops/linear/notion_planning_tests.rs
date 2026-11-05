@@ -429,7 +429,6 @@ fn notion_task_create_mirrors_task_as_a_database_page() {
             None,
             Some("Ship the Notion provider".into()),
             Some("Mirror **Tasks** into Notion\n\n- pages\n- comments".into()),
-            None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
@@ -488,7 +487,6 @@ fn notion_team_page_without_databases_gains_tasks_and_projects() {
             None,
             Some("First Task".into()),
             None,
-            None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
@@ -512,7 +510,6 @@ fn notion_status_title_body_and_comments_write_back_to_the_page() {
             repo,
             None,
             Some("Write back".into()),
-            None,
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
@@ -591,7 +588,6 @@ fn notion_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             None,
             Some("Saved offline".into()),
             None,
-            None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
@@ -618,7 +614,6 @@ fn notion_comments_and_edits_by_people_become_task_direction() {
             repo,
             None,
             Some("Take direction".into()),
-            None,
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
@@ -688,7 +683,6 @@ fn notion_renames_and_completion_reach_the_task() {
             repo,
             None,
             Some("Original".into()),
-            None,
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
@@ -812,7 +806,6 @@ fn notion_pages_coworkers_archive_leave_the_plan() {
             None,
             Some("Archived in Notion".into()),
             None,
-            None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
@@ -845,7 +838,6 @@ fn notion_pages_move_to_in_progress_when_work_starts() {
             None,
             Some("Start here".into()),
             None,
-            None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
@@ -871,7 +863,6 @@ fn notion_pages_show_the_pr() {
             repo,
             None,
             Some("Ship it".into()),
-            None,
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
@@ -945,7 +936,6 @@ fn notion_wave_projects_become_project_pages_related_to_their_tasks() {
             repo,
             Some("product"),
             Some("Planned work".into()),
-            None,
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )

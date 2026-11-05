@@ -31,6 +31,18 @@ use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccountId, StoreError};
 
+type Upstream = WebSocketStream<UnixStream>;
+
+const REPLY_LIMIT: Duration = Duration::from_secs(15);
+/// Starting a thread loads MCP servers and plugins.
+const STARTUP_LIMIT: Duration = Duration::from_secs(60);
+/// How often a broken store is tried again.
+const STORE_RETRY: Duration = Duration::from_secs(5);
+/// How often Task updates and the attachment are read.
+const WATCH_INTERVAL: Duration = Duration::from_secs(1);
+const CLIENT_STOP_GRACE: Duration = Duration::from_secs(2);
+const REJOIN_INTERVAL: Duration = Duration::from_millis(250);
+
 // Codex sends single frames larger than tungstenite's defaults: plugin/list
 // carries the whole curated marketplace (7,000+ plugins, over 16 MiB).
 fn connection_config() -> Option<WebSocketConfig> {
@@ -41,9 +53,7 @@ fn connection_config() -> Option<WebSocketConfig> {
     )
 }
 
-pub(super) async fn connect_upstream(
-    socket: UnixStream,
-) -> Result<WebSocketStream<UnixStream>, Error> {
+pub(super) async fn connect_upstream(socket: UnixStream) -> Result<Upstream, Error> {
     Ok(
         client_async_with_config("ws://localhost", socket, connection_config())
             .await?
@@ -149,7 +159,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: Option<&AgentSessionId>) 
     Ok(())
 }
 
-async fn initialized(endpoint: &Path, name: &str) -> Result<WebSocketStream<UnixStream>> {
+async fn initialized(endpoint: &Path, name: &str) -> Result<Upstream> {
     let mut upstream = connect_upstream(UnixStream::connect(endpoint).await?).await?;
     rpc_request(
         &mut upstream,
@@ -326,8 +336,6 @@ pub fn run_observer() -> Result<()> {
     result
 }
 
-type Upstream = WebSocketStream<UnixStream>;
-
 /// Runs as long as its client does. A server can go before the store records why,
 /// so losing it says nothing about the client: a mover may still end it.
 async fn observe(observer: CodexObserver, ready: impl FnOnce()) -> Result<()> {
@@ -361,13 +369,6 @@ async fn observe(observer: CodexObserver, ready: impl FnOnce()) -> Result<()> {
         tokio::time::sleep(REJOIN_INTERVAL).await;
     }
 }
-
-/// How often a broken store is tried again, and how often Task updates and the
-/// attachment are read.
-const STORE_RETRY: Duration = Duration::from_secs(5);
-const WATCH_INTERVAL: Duration = Duration::from_secs(1);
-const CLIENT_STOP_GRACE: Duration = Duration::from_secs(2);
-const REJOIN_INTERVAL: Duration = Duration::from_millis(250);
 
 struct Recorder {
     observer: CodexObserver,
@@ -680,20 +681,12 @@ impl Recorder {
     }
 }
 
-const REPLY_LIMIT: Duration = Duration::from_secs(15);
-/// Starting a thread loads MCP servers and plugins.
-const STARTUP_LIMIT: Duration = Duration::from_secs(60);
-
-pub(crate) async fn rpc_request(
-    upstream: &mut WebSocketStream<UnixStream>,
-    method: &str,
-    params: Value,
-) -> Result<Value> {
+async fn rpc_request(upstream: &mut Upstream, method: &str, params: Value) -> Result<Value> {
     rpc_within(upstream, method, params, REPLY_LIMIT).await
 }
 
 async fn rpc_within(
-    upstream: &mut WebSocketStream<UnixStream>,
+    upstream: &mut Upstream,
     method: &str,
     params: Value,
     limit: Duration,

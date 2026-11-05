@@ -15,3 +15,9 @@
   They manage other tasks on the same app-server, and a Session's server is private
   to it. Assumed acceptable; the alternative is a client-started thread with lf's
   configuration supplied another way, which Codex 0.166.0 does not offer per thread.
+- Two real-Codex fixtures were already broken on main and stay broken; neither is
+  caused by this Task and neither runs in CI. `codex_connect.py --planning-peers`
+  writes the renamed `task_workflows` table; past that it reaches the same `lf resume`
+  of a Run that is refused (read from the code, not run). `actual_agent_process_children...` (ignored) passes its Codex half on
+  0.166.0, then asserts on Process rows for `lf session list`, a read that records
+  none since `changes_work`. Left unrepaired; each needs a re-author or retirement.

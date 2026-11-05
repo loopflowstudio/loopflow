@@ -93,7 +93,6 @@ class Handler(BaseHTTPRequestHandler):
         held = (
             "held conversation",
             "held fixture",
-            "held sibling",
             "held before driver death",
             "held after driver death",
         )
@@ -113,9 +112,7 @@ class Handler(BaseHTTPRequestHandler):
                 "name": "exec_command",
                 "arguments": json.dumps(
                     {
-                        "cmd": "printf sibling-only"
-                        if "held sibling" in json.dumps(request["input"][last_user])
-                        else self.server.commands.get(
+                        "cmd": self.server.commands.get(
                             len(self.server.requests), self.server.command
                         ),
                         "max_output_tokens": 100,
@@ -233,7 +230,6 @@ def main() -> None:
     parser.add_argument("--lf-home", type=Path)
     parser.add_argument("--control", type=Path)
     parser.add_argument("--launch", action="store_true")
-    parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--planning-peers", action="store_true")
     parser.add_argument("--graph-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--shared-provider-home", action="store_true")
@@ -324,16 +320,7 @@ enabled = false
                             work,
                             env,
                             server,
-                            shared_agent_process=False,
                             planning_peers=True,
-                        )
-                        return
-                    if args.public_connect:
-                        results["public_connect"] = _live_attachment_contract(
-                            binary, work, env, server, shared_agent_process=True
-                        )
-                        results["owner_exit"] = _live_attachment_contract(
-                            binary, work, env, server, shared_agent_process=False
                         )
                         return
                     if args.graph_decision_retry:
@@ -521,7 +508,6 @@ def _public_connection_contract(
     server: Responses,
     results: dict,
     headless: subprocess.Popen,
-    shared_agent_process: bool,
     planning_exchange: Callable[[str, str], None] | None = None,
 ) -> None:
     session = results["session_id"]
@@ -592,12 +578,6 @@ def _public_connection_contract(
         provider = Client(Path(endpoint))
         inspectors.append(provider)
         provider.call("thread/resume", {"threadId": thread})
-        sibling = None
-        if shared_agent_process:
-            sibling = provider.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})[
-                "thread"
-            ]["id"]
-            provider.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
             _connect(label)
@@ -629,13 +609,8 @@ def _public_connection_contract(
             provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
             == "active"
         )
-        if sibling:
-            assert (
-                provider.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-                == "active"
-            )
         # Explicit client replacement must use the same live-provider path as
-        # ordinary connect, with the current turn and shared sibling untouched.
+        # ordinary connect, with the current turn untouched.
         with sqlite3.connect(_database(env)) as database:
             before_prepare = _agent_process(
                 database,
@@ -666,11 +641,6 @@ def _public_connection_contract(
             provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
             == "active"
         )
-        if sibling:
-            assert (
-                provider.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-                == "active"
-            )
         with sqlite3.connect(_database(env)) as database:
             retained_connection = _agent_process(
                 database, session, "p.endpoint,s.provider_thread,p.id"
@@ -739,65 +709,60 @@ def _public_connection_contract(
             )
             assert set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) == launches
             results["completed_task_control_turn"] = followup
-        if not shared_agent_process:
-            # Closing the current native UI releases the engine; obsolete UIs
-            # and the original headless driver's exit could not release it.
-            call(2, "exit", {})
-            _, error = processes[2].communicate(timeout=15)
-            assert processes[2].returncode == 0, error.decode()
+        # Closing the current native UI releases the engine; obsolete UIs
+        # and the original headless driver's exit could not release it.
+        call(2, "exit", {})
+        _, error = processes[2].communicate(timeout=15)
+        assert processes[2].returncode == 0, error.decode()
+        with sqlite3.connect(_database(env)) as database:
+            closed = _agent_process(
+                database,
+                session,
+                "s.provider_thread,p.attached_lf_process_id,p.completed_at IS NOT NULL",
+            )
+        assert closed == (thread, None, 1), closed
+        assert not Path(endpoint).exists() or not provider.reader.is_alive()
+        results["owner_exit_closed_agent_process"] = True
+        if planning_exchange:
+            # Abruptly kill only this fixture's resumed driver. The next
+            # explicit resume must use the same native thread on a new engine;
+            # peer exchange itself must never retry the interrupted turn.
+            resumed = _resume("held before driver death")
+            planning_exchange("resumed", session)
+            resumed.kill()
+            resumed.communicate(timeout=10)
+            replaced.append(resumed)
+            server.release.set()
             with sqlite3.connect(_database(env)) as database:
-                closed = _agent_process(
-                    database,
-                    session,
-                    "s.provider_thread,p.attached_lf_process_id,p.completed_at IS NOT NULL",
-                )
-            assert closed == (thread, None, 1), closed
-            assert not Path(endpoint).exists() or not provider.reader.is_alive()
-            results["owner_exit_closed_agent_process"] = True
-            if planning_exchange:
-                # Abruptly kill only this fixture's resumed driver. The next
-                # explicit resume must use the same native thread on a new engine;
-                # peer exchange itself must never retry the interrupted turn.
-                resumed = _resume("held before driver death")
-                planning_exchange("resumed", session)
-                resumed.kill()
-                resumed.communicate(timeout=10)
-                replaced.append(resumed)
-                server.release.set()
-                with sqlite3.connect(_database(env)) as database:
-                    retained_events = database.execute(
-                        "SELECT seq,kind,payload FROM session_events "
-                        "WHERE session_id=? ORDER BY seq",
-                        (session,),
-                    ).fetchall()
-                launches = set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json"))
-                recovered = _resume("held after driver death")
-                with sqlite3.connect(_database(env)) as database:
-                    selected = database.execute(
-                        "SELECT provider_thread FROM agent_sessions WHERE id=?",
-                        (session,),
-                    ).fetchone()[0]
-                    recovered_events = database.execute(
-                        "SELECT seq,kind,payload FROM session_events "
-                        "WHERE session_id=? ORDER BY seq",
-                        (session,),
-                    ).fetchall()
-                assert selected == thread
-                assert recovered_events[: len(retained_events)] == retained_events
-                assert (
-                    len(set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) - launches) == 1
-                )
-                planning_exchange("dead-driver-resume", session)
-                server.release.set()
-                _, error = recovered.communicate(timeout=20)
-                assert recovered.returncode == 0, error.decode()
-                results["planning_preserved_native_thread"] = thread
+                retained_events = database.execute(
+                    "SELECT seq,kind,payload FROM session_events WHERE session_id=? ORDER BY seq",
+                    (session,),
+                ).fetchall()
+            launches = set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json"))
+            recovered = _resume("held after driver death")
+            with sqlite3.connect(_database(env)) as database:
+                selected = database.execute(
+                    "SELECT provider_thread FROM agent_sessions WHERE id=?",
+                    (session,),
+                ).fetchone()[0]
+                recovered_events = database.execute(
+                    "SELECT seq,kind,payload FROM session_events WHERE session_id=? ORDER BY seq",
+                    (session,),
+                ).fetchall()
+            assert selected == thread
+            assert recovered_events[: len(retained_events)] == retained_events
+            assert len(set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) - launches) == 1
+            planning_exchange("dead-driver-resume", session)
+            server.release.set()
+            _, error = recovered.communicate(timeout=20)
+            assert recovered.returncode == 0, error.decode()
+            results["planning_preserved_native_thread"] = thread
 
         results["history"] = history
-        results["public_connect"] = dict(
+        results["live_connect"] = dict(
             agent_process=agent_process,
             attached=attached,
-            active_turn_and_sibling_survived=True,
+            active_turn_survived=True,
             replaced_clients_exited=True,
             nested_child_id=child_id,
             nested_child_parent=child_parent,
@@ -823,7 +788,6 @@ def _live_attachment_contract(
     work: Path,
     env: dict[str, str],
     server: Responses,
-    shared_agent_process: bool,
     planning_peers: bool = False,
 ) -> dict:
     _init_repo(work, env)
@@ -918,7 +882,6 @@ def _live_attachment_contract(
             server,
             result,
             headless=child,
-            shared_agent_process=shared_agent_process,
             planning_exchange=exchange,
         )
         return result

@@ -48,18 +48,22 @@ ends the PTY, as for Claude.
 ## Delete — do not maintain
 
 Every relay target is gone: `CodexConnection`, relay diagnostics, `client.sock`,
-`ClientWatch`, `NativeConnection.relay`, their tests. No deletion target remains
-beyond the `--public-connect` decision below.
+`ClientWatch`, `NativeConnection.relay`, their tests, and `codex_connect.py
+--public-connect` with its shared-sibling branches. No deletion target remains.
 
 ## Remaining
 
-- Gate: affected suites once. `tests/e2e/codex_connect.py --public-connect` stops at
-  `lf resume`'s Run refusal, which this change does not touch; re-author it or retire
-  it with its `actual_agent_process_children...` caller, which pins Codex 0.157.1.
+- Gate: affected suites once.
 
-Checks: real Codex 0.166.0 `codex_terminal.py` plain and `--transport-failure`, and the
-demo below, passed before compress; compress re-ran observer lib tests,
-`context_launch_tests::codex`, `session_launch_contract` and clippy. Gate owns the rest.
+Decided 2026-11-05: retired `--public-connect`. Its headless-to-terminal handoff is
+refused by `lf resume` since #1767, and `a_moved_attachment_ends_only_its_own_client`
+covers the observer's half.
+
+Checks: real Codex 0.166.0 `codex_terminal.py` plain and `--transport-failure` and the
+demo below passed before compress; after merging main, `codex_connect.py --launch
+--graph-decision-retry replace` passed. Two real-Codex fixtures fail for reasons that
+predate this Task; see scratch/questions.md.
+Compress after merge: `cargo test -p loopflow --lib harness::codex_connection` 5 passed, clippy clean; gate owns the rest.
 
 ## Demo
 

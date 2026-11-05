@@ -359,37 +359,6 @@ impl SqliteStore {
         )
     }
 
-    /// Keep initiating failures without unbounded growth during reconnect storms.
-    pub(crate) fn retain_codex_relay_failure(
-        &self,
-        input: &str,
-        attachment: Option<&crate::process::SessionAttachment>,
-        payload: &Value,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let captured = super::sessions::capture_seq_in(&tx, input)?;
-        let count: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM session_events WHERE captured_event=?1 AND kind='observed'
-             AND json_extract(payload,'$.source')='codex_relay'",
-            [captured],
-            |row| row.get(0),
-        )?;
-        if count < 16 {
-            tx.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,agent_process_id,lf_process_id,
-                 task_id,wave_id,observed_at,payload,captured_event)
-                 SELECT session_id,'observed',?2,?3,?4,task_id,wave_id,?5,?6,seq
-                 FROM session_events WHERE seq=?1",
-                params![captured,format!("{input}:codex_relay:{count}"),
-                    attachment.map(|a| &a.agent_process_id),attachment.and_then(|a| a.lf_process_id.as_ref()),
-                    time::OffsetDateTime::now_utc().unix_timestamp(),serde_json::to_string(payload)?],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
     /// Replace the Session's reading with its current attachment's.
     pub(crate) fn record_session_activity(
         &self,

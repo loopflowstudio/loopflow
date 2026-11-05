@@ -1,5 +1,5 @@
 //! A native client's exit text names its own resume commands, which bypass lf
-//! and, for a remote Codex client, a relay that no longer exists. While a client
+//! and, for a remote Codex client, a server that no longer exists. While a client
 //! runs, the owner withholds what it prints after restoring the terminal and
 //! shows lf's return line instead. A client that ends without restoring its
 //! terminal (Codex on SIGTERM) gets it restored here, before that line.

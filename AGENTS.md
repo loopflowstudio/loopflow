@@ -173,9 +173,8 @@ When editing harness, transport or hook code (`rust/loopflow/src/harness/**`, `t
   `logs/lf.log` instead of failing the turn, the tool or the quit. A recording gap is
   one type, `store::RecordingGap` (`note` once per changed failure, `recovered` once);
   hooks keep theirs in a marker file and write the gap into the Session history as a
-  `store-gap` observation when the store answers again. The Codex relay is
-  the one remaining in-path piece; it tolerates store loss, and its removal is a
-  separate Task.
+  `store-gap` observation when the store answers again. Codex clients reach their
+  private app-server directly; lf only observes beside them.
 
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it

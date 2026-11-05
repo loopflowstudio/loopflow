@@ -19,7 +19,7 @@ a one-second busy timeout; on any store error it emits the context block without
 steers, exits 0 and records the gap once per native conversation in
 `logs/lf.log`. The turn or tool completes without it. A recording gap is one
 concept, `store::RecordingGap`: one log line per changed failure and one when the
-store answers again, whether the gap lives in an owner's or relay's memory or,
+store answers again, whether the gap lives in an owner's or observer's memory or,
 for hooks that are a fresh process at every boundary, in a `.store-gap` marker
 beside the delivery file. When a hook reaches the store again it writes the gap
 into the Session's history as one `store-gap` observation (first and last miss)
@@ -33,8 +33,7 @@ records finish in the background or are lost. Nothing about lf's own state ends 
 conversation either: a removed, rebuilt or superseded lf executable leaves its
 owner serving until the person quits, resumes elsewhere or an operator rolls over.
 
-The Codex relay (`codex_connection.rs`) is the one remaining in-path piece: the
-Codex TUI reaches its app-server through lf. It accepts clients before touching
-the store, continues through every store failure except a lost attachment, and
-dispatches a person's turn unfenced when the fence cannot be read. Only the saved
-initial input still waits for its receipt. Removing the relay is a separate Task.
+Codex (`codex_connection.rs`) has no relay: the Codex TUI connects straight to
+its private app-server, and lf's observer subscribes beside it to record turns
+and deliver Task updates. A store the observer cannot open is a recording gap it
+retries; history fills it on the next launch.

@@ -20,3 +20,8 @@
 - Why quitting on 11-04 left the terminal ignoring Ctrl-C/Ctrl-D is untraced;
   the candidate is a launcher blocked on the Session fence and SQLite busy
   timeout after the client exited. Settlement now returns within 800 ms either way.
+- Replay cadence for unrecorded typed bytes (third concept review): the serve
+  loop's retry at the lifetime policy's 2 s cadence, not the 100 ms busy retry.
+  A store that stays broken for the life of a Session (an old build after a
+  column change) would otherwise be asked ten times a second until the person
+  quits. If a faster catch-up matters, it is one constant.

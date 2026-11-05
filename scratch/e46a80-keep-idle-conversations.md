@@ -49,6 +49,8 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   LOO-709's "record before deliver" keeps its purpose (no idle ending while a
   draft exists) through the in-memory hold. Unbounded, the busy wait would hold
   every keystroke for the whole of an install's exclusive migration transaction.
+  Revised below: the hold lasts until the store records the bytes, not until
+  the native client ends.
 - Exit: `settle` and the launcher's return record best-effort. The exit code is
   the provider's own; the resume hint is already printed by the owner.
   `SessionCapture::finish` writes `terminal.json` and treats its store
@@ -128,10 +130,67 @@ sending it blind); `InvalidAuthority` still ends a relay (authority loss is not
 store loss); exit records open the store with the full 15 s budget because the
 terminal no longer waits on them.
 
-No open product choice. Nothing here changes what the product is; each item
-follows from Jack's steers and the written principle. The `store-gap`
+No open product choice. Nothing here changes what the product is; each item,
+including the catch-up direction below, follows from Jack's steers and the
+written principle. The `store-gap`
 observation is stored and not yet rendered by `lf session` or Desktop
 (questions.md); showing it is a later Task, not a question for this one.
+
+## Next: a gap closes when the record catches up (concept review, 2026-11-05)
+
+Third pass, against the implemented change. The contract holds in the moment:
+no store state ends, stalls or fails a conversation. It fails afterwards, in
+recovery: two of the three gaps never catch the store up once it answers, and
+`lf resume` (`human_session::attaches`), `lf monitor rollover`
+(`owner_disposition`) and the idle ending judge from the store, not from the
+owner's memory.
+
+- Typed draft (`transport/input.rs`). Past the budget the bytes go to the
+  provider and `recorded` advances past them, so the store's `native_input`
+  state machine never sees them; later keystrokes replay only themselves.
+  Counterexample, and it is this Task's own scenario: a person types during an
+  install's migration and stops with a draft in the editor; the install
+  finishes, so the owner is now superseded; `lf resume` reads no retention,
+  ends the owner, prints "Moved … off …", and the draft is gone. Rollover does
+  the same. The in-memory hold protects only the owner's own idle ending.
+  Jack's steer says the draft record "follows best-effort"; a record that never
+  follows is abandoned, not best-effort.
+- Codex turn evidence (`harness/fact_writer.rs`). `SessionActivityTracker::
+  reading` marks a reading saved before `record_session_activity` runs, and
+  readings are produced only on signals. A yielded reading lost to the gap
+  leaves the previous busy row in place until the next turn: the Session shows
+  busy, `owner_retention` answers `LiveTurn`, the idle ending never comes, and
+  resume and rollover treat the owner as holding work. The inverse failure,
+  same cause. For Claude, Pi and OpenCode the hook writes the `store-gap`
+  observation so the missed Stop reads as unknown; the relay's gap closes with
+  a log line only.
+
+Direction, implied by the accepted decisions (no product choice):
+
+1. `PendingInput` keeps the unrecorded bytes, not a flag: `unrecorded: Vec<u8>`
+   under the same 4 MiB `LIMIT`, replayed ahead of the next bytes in `retain`
+   and retried on the serve loop's existing `retry_at` at the lifetime policy's
+   2 s cadence while the queue is empty, so a quiet draft becomes known without
+   another keystroke and a store that stays broken is not asked ten times a
+   second. A successful replay closes the gap; `native_ended` drops the bytes.
+   `transport/README.md`: "until the store records it", not "until the native
+   client ends".
+2. The tracker marks a reading saved only when the write succeeds, and the
+   relay's one-second idle tick re-offers the last unsaved reading, so the
+   activity row catches up at the store's first answer. The relay's
+   `RecordingGap` then closes the way the hook's does: one `store-gap`
+   observation (first and last miss) for the Session before `recovered()`.
+   Move `close_gap` out of `lf/commands/context.rs` into the concept (a
+   `SqliteStore` method taking the Session and the gap) so hook and relay
+   share one writer.
+3. Fixtures: `failed_input_store_delivers_the_queued_bytes_unrecorded` grows a
+   recovery leg (restore the store, type nothing more, `owner_retention` reads
+   `NativeInput` within one poll); a fact-writer test where a yielded save
+   fails and the next tick records it; the relay test closes its gap into the
+   Session's history.
+
+Kept: the bounded wait, the unfenced turn, the receipt gate on saved input and
+the provider's own exit. Nothing here reopens them.
 
 ## Delete — do not maintain
 

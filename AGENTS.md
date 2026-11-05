@@ -216,6 +216,7 @@ When editing Rust tests:
   launch bundle-owned update code through LaunchServices. An external test runner
   writing a registered app can fail App Management; it does not model an app update.
   Cleanup unregisters the unique service job and LaunchServices entry.
+- Lifetime tests start a terminal owner with `Fixture::serve(true, …)`: a `--json` viewer on a pipe gets a pipe owner that dies with its stdin, so a retirement bug passes unseen. With `RUST_LOG` set, diagnostics go to stderr (`logs/transport.log` there), not `logs/lf.log`.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 
 # Goals

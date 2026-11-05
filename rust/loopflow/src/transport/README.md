@@ -65,9 +65,11 @@ the screen or showing an idle prompt cannot discard that protection. Pending
 approvals and questions stay with their original provider until answered or canceled.
 
 Input waits in the owner until its retention record commits. A busy store pauses
-delivery to the provider while output, control queries and viewer return remain
-responsive. Delivery continues automatically when the store becomes writable;
-returning to the Session does not resubmit queued input.
+delivery while output, control queries and viewer return remain responsive.
+The owner retries every 100 ms without polling the writable PTY between attempts.
+Changed failures log once; delivery resumes automatically when the store recovers.
+Returning to the Session does not resubmit queued input. This cannot restore a
+deleted store or recover an editor from a dead provider.
 
 Removing, replacing or superseding the owner's lf executable ends it after two
 seconds of command silence, once no input, turn, pending request, running Graph
@@ -76,23 +78,29 @@ path to `logs/lf.log`; attached viewers receive the reason and run the resume
 command through the lf entry. The viewer restores its terminal before running
 that command and preserves its exit status or launch error. Failed store
 judgments retry at the next poll.
+An owner held past its detached limit or its replaced executable logs why: native
+input, a live turn, running Graph, headless Run, no open Session or, for the
+executable, command output. Repeated unchanged policy errors and retention reasons
+produce one warning until the condition changes. Activity cannot accelerate
+the two-second policy poll; it launches no helper process.
 Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
 `lf resume` replaces an idle owner that is superseded or unanswering, continuing
-its saved provider thread without replaying input. A turn, draft or pending request
-keeps the existing provider: resume attaches if possible, otherwise reports
-attachment failure and leaves that work intact.
-Saved conversation history supports continuation after safe replacement; it cannot
-restore an editor or a pending request. An owner with this lifetime policy moves when
-its work settles; an older owner without it needs another resume.
+its saved provider thread without replaying input. Drafts, pending requests, running
+turns, Graphs and Runs keep their owner even when its socket does not answer. Resume
+attempts attachment; a failed attachment leaves that work intact. Saved history cannot
+restore a native editor or pending request. No open Session is unknown, not work: the
+owner stays on its own and an answering one is attached, but `lf resume` ends a
+superseded one that does not answer. Once protected work settles, an owner with this
+lifetime policy moves; an older owner without the policy needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
 ends idle owners directly; existing viewers may close and need `lf resume` again.
-Rollover and lifetime diagnostics name what retains an owner: native input, a
-running Graph, missing Session evidence, a headless Run or a live turn. Resume,
-rollover and lifetime policy use the same judgment, independent of reachability.
+Rollover names the same retention reasons. Resume, rollover and lifetime policy
+share this judgment; work holds independent of reachability. Only resume asks
+whether the owner answers, and only for no open Session.
 Graph runners keep running and launch each next step through the entry.
 Owners and runners whose store has advanced beyond their reader floor cannot
 recover themselves through this policy.

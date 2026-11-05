@@ -3,6 +3,8 @@
 
 mod connection;
 mod input;
+#[cfg(test)]
+mod input_retry_tests;
 mod lifetime;
 #[cfg(test)]
 mod lifetime_tests;
@@ -786,6 +788,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut execution_directory_reported = false;
     let mut planning = None;
     loop {
+        #[cfg(test)]
+        input_retry_tests::poll();
         #[cfg(test)]
         lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
         let mut replaced = Vec::new();

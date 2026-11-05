@@ -254,27 +254,26 @@ fn watch(
             Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
             None => grace.expired(now),
         };
-        let mut retained = |reason: &dyn std::fmt::Display| match change {
-            Some((change, path)) => warn_changed(
-                &mut decision,
-                owner,
-                format!(
-                    "retaining Session whose lf at {} was {change}: {reason}",
-                    path.display()
-                ),
+        let retained = |reason: &dyn std::fmt::Display| match change {
+            Some((change, path)) => format!(
+                "retaining Session whose lf at {} was {change}: {reason}",
+                path.display()
             ),
-            None => decision = None,
+            None => format!("retaining detached Session past its limit: {reason}"),
         };
         if !quiet {
-            retained(&"command output");
+            // Inside the limit nothing is being retained, so a reason held
+            // past it stays one line however often the grace restarts.
+            if change.is_some() {
+                warn_changed(&mut decision, owner, retained(&"command output"));
+            }
             continue;
         }
         match store.owner_retention(owner) {
             Ok(None) => decision = None,
-            // A turn or a running Graph holds it: activity, and the grace
-            // runs again from here.
+            // Retained work counts as activity: the grace runs again from here.
             Ok(Some(reason)) => {
-                retained(&reason);
+                warn_changed(&mut decision, owner, retained(&reason));
                 grace.quiet_since = now;
                 continue;
             }

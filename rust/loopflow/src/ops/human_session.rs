@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 use crate::durable::WorkRef;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
+use crate::store::sqlite::sessions::OwnerRetention;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
@@ -1165,9 +1166,11 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 
 /// Attach to protected work even when its owner cannot answer: saved history
 /// cannot reconstruct its editor or pending requests. An idle owner that is
-/// superseded or does not answer gives way to native continuation. Compare builds
-/// against the launch entry so a development viewer in the main Home still selects
-/// the installed lf.
+/// superseded or does not answer gives way to native continuation. So does an
+/// unanswering superseded owner with no open Session: no work is known there, while
+/// an answering one may hold a turn or draft nothing records, so a viewer attaches.
+/// Compare builds against the launch entry so a development viewer in the main Home
+/// still selects the installed lf.
 fn attaches(
     store: &SqliteStore,
     session: &LfSession,
@@ -1176,15 +1179,20 @@ fn attaches(
     if !owner_running(store, owner)? {
         return Ok(false);
     }
-    if store.owner_retention(owner)?.is_some() {
-        return Ok(true);
-    }
+    let unknown = match store.owner_retention(owner)? {
+        Some(OwnerRetention::NoOpenSession) => true,
+        Some(_) => return Ok(true),
+        None => false,
+    };
     let superseded = crate::journal::live_process_pid(store, owner)
         .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
         .filter(|(_, executable)| crate::installation::superseded(executable));
     let Some((pid, executable)) = superseded else {
         return Ok(answering(owner));
     };
+    if unknown && answering(owner) {
+        return Ok(true);
+    }
     end_owner(store, owner, pid).with_context(|| {
         format!(
             "end the owner on {} so the conversation can move here",

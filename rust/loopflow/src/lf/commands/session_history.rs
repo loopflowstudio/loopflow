@@ -75,11 +75,6 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
     let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
     let dir = crate::session_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
-    let diagnostics: Vec<_> = store
-        .summary_for_input(&snapshot.session_id, &input)?
-        .into_iter()
-        .filter(|event| event.payload["source"] == "codex_relay")
-        .collect();
     if view == SessionView::Final {
         let answer = store
             .input_final_answer(&input)
@@ -144,13 +139,6 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
         "Working directory: {}",
         snapshot.worktree.as_deref().unwrap_or("unknown")
     );
-    for event in &diagnostics {
-        println!(
-            "Codex relay diagnostic (AgentProcess {}): {}",
-            event.agent_process_id.as_deref().unwrap_or("unknown"),
-            event.payload["error"].as_str().unwrap_or("unavailable")
-        );
-    }
     let manifest = crate::session_record::read_manifest(&dir).ok();
     println!(
         "Replay: {}",

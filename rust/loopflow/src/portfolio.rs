@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::git::worktree_root;
 use crate::git::worktrees::main_repo_root;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PortfolioMode {
     Folder,
@@ -31,8 +31,9 @@ pub struct Portfolio {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Selection {
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Selection {
     mode: PortfolioMode,
     paths: BTreeSet<PathBuf>,
 }
@@ -171,7 +172,7 @@ fn reading(config: &serde_yaml_ng::Value) -> Result<Portfolio> {
 }
 
 pub fn read() -> Result<Portfolio> {
-    reading(&crate::config::read_global_config_at(
+    reading(&crate::config::files::read(
         &crate::store::lf_home_dir().join("config.yaml"),
     )?)
 }
@@ -210,7 +211,7 @@ fn register_authored_waves(portfolio: &Portfolio, command: &PortfolioCommand) ->
 }
 
 fn change_at(home: &Path, command: &PortfolioCommand) -> Result<Portfolio> {
-    let config = crate::config::update_global_config_at(home, |config| {
+    let config = crate::config::files::update(&home.join("config.yaml"), |config| {
         change_config(config, command)?;
         Ok(config.clone())
     })?;
@@ -391,8 +392,7 @@ mod tests {
         );
         fs::remove_dir_all(&outside).unwrap();
         let unavailable =
-            reading(&crate::config::read_global_config_at(&home.join("config.yaml")).unwrap())
-                .unwrap();
+            reading(&crate::config::files::read(&home.join("config.yaml")).unwrap()).unwrap();
         assert!(unavailable
             .repos
             .iter()
@@ -409,7 +409,7 @@ mod tests {
         );
         assert!(first.exists());
         assert_eq!(
-            crate::config::read_global_config_at(&home.join("config.yaml")).unwrap()["agent"],
+            crate::config::files::read(&home.join("config.yaml")).unwrap()["agent"],
             "codex"
         );
         assert!(!home.join("state.db").exists());
@@ -421,8 +421,7 @@ mod tests {
         let home = fixture.path().join("home");
         let missing = fixture.path().join("missing");
         let empty =
-            reading(&crate::config::read_global_config_at(&home.join("config.yaml")).unwrap())
-                .unwrap();
+            reading(&crate::config::files::read(&home.join("config.yaml")).unwrap()).unwrap();
         assert!(!empty.configured);
         assert_eq!(empty.mode, PortfolioMode::Folder);
         assert!(!home.exists());

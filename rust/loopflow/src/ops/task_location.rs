@@ -126,11 +126,12 @@ pub fn explain(
     };
     let source = match &route.source {
         TaskExecutionSource::Owner => "owner".to_string(),
-        TaskExecutionSource::OwningMachine(OwningMachineSource::Wave(wave)) => {
-            format!("owning_machine:wave:{wave}")
-        }
-        TaskExecutionSource::OwningMachine(OwningMachineSource::Repository) => {
-            "owning_machine:repository".into()
+        TaskExecutionSource::OwningMachine(OwningMachineSource::Preference(selected)) => {
+            format!(
+                "owning_machine:{}:{}",
+                selected.source.as_str(),
+                selected.locator
+            )
         }
         TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine) => {
             "owning_machine:this_machine".into()

@@ -637,11 +637,41 @@ async fn open_agent_session(
     let model =
         opencode_model(config).map(|(provider, model)| json!({"providerID":provider,"id":model}));
     if let Some(session_id) = stored {
-        client
+        let saved: Value = client
             .get(format!("{base_url}/api/session/{session_id}"))
             .send()
             .await?
-            .error_for_status()?;
+            .error_for_status()?
+            .json()
+            .await?;
+        if let Some(cwd) = &config.cwd {
+            if saved["data"]["location"]["directory"].as_str() != cwd.to_str() {
+                client
+                    .post(format!("{base_url}/api/session/{session_id}/move"))
+                    .timeout(Duration::from_secs(5))
+                    .json(&json!({"directory":cwd,"delivery":"queue"}))
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+                loop {
+                    let moved: Value = client
+                        .get(format!("{base_url}/api/session/{session_id}"))
+                        .timeout(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .json()
+                        .await?;
+                    if moved["data"]["location"]["directory"].as_str() == cwd.to_str() {
+                        break;
+                    }
+                    anyhow::ensure!(tokio::time::Instant::now() < deadline,
+                        "OpenCode has not moved conversation {session_id} to {}; reconnect to retry", cwd.display());
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        }
         if let Some(model) = model {
             client
                 .post(format!("{base_url}/api/session/{session_id}/model"))
@@ -935,6 +965,19 @@ mod tests {
         SendCurrentOutcome, SseParser,
     };
 
+    #[test]
+    fn bare_opencode_sends_no_model_and_a_pinned_variant_names_provider_and_model() {
+        let launch = |agent: &str| AgentConfig {
+            agent: Some(agent.into()),
+            ..AgentConfig::default()
+        };
+        assert_eq!(super::opencode_model(&launch("opencode")), None);
+        assert_eq!(
+            super::opencode_model(&launch("opencode:anthropic/claude-sonnet")),
+            Some(("anthropic".into(), "claude-sonnet".into()))
+        );
+    }
+
     #[tokio::test]
     async fn task_update_receipt_survives_reconnect() {
         use std::io::{Read, Write};
@@ -1211,7 +1254,8 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
-            chrome: false,
+            isolate: None,
+            chrome: None,
             session_attachment: None,
             system_prompt: String::new(),
             conversation_context: None,

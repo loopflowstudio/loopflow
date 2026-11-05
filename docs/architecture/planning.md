@@ -668,7 +668,8 @@ terminal surface on LfSession identity.
 Task status is `Ready`, `Done` or `Abandoned`. Current activity, command outcome,
 conversation state and Graph progress remain separate. A ready Task can have no
 live process; an absent terminal result cannot prove liveness. Binding to a done
-Task assigns work history without reopening it.
+Task selects its primary conversation without reopening the Task; earlier usage
+attribution remains unchanged.
 
 ```bash
 lf comment INF-124 "keep the public name"

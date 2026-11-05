@@ -15,8 +15,7 @@ private func enrichProcessPathForGUILaunch() {
 struct LoopflowApp: App {
     @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
-    @NSApplicationDelegateAdaptor(DesktopAppDelegate.self) private var appDelegate
-    private var workspaces: RepositoryWorkspaces { appDelegate.workspaces }
+    @State private var workspaces: RepositoryWorkspaces
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
@@ -40,6 +39,8 @@ struct LoopflowApp: App {
             AppUpdates.adoptIfUpdated()
         }
         bootstrapLoopflowApp()
+        _workspaces = State(initialValue: RepositoryWorkspaces(
+            localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId))
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
@@ -170,6 +171,7 @@ struct LoopflowApp: App {
                 ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
                 Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
                     .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
+                ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
             }.modifier(AppAppearance(appearance: appearance))
         }

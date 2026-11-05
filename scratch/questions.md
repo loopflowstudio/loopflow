@@ -139,3 +139,14 @@ a view plan is presented" means any presented board, including the repository pa
 Wave view, whose Task tiles `presentWaveTiles` opens like a Dashboard's. `inTile` keys on
 `selectedViewPlan` or `navigation.waveView` plus visibility, so those tiles' Retry attaches
 in place and the board stays. Wave-view tiles navigating instead was the rejected reading.
+
+## Sync onto LOO-717 viewer retention — November 5
+
+LOO-717 replaced host occurrence/presence reports with Task Session viewer
+holds (its `loo-717-shell-lifetimes.md` is authoritative). Resolution: warm
+conversations keep their viewers attached (`SessionsWorkspace.presented`), so
+visible and bounded recent unfinished Tasks hold their checkouts; leaving the
+warm set, Close and window close detach with Ctrl+]. Presence reporting, quit
+release and the retention tests built on them were deleted. Assumption: a
+minimal `DesktopAppDelegate` stays only to fence window teardown on quit, so
+quitting does not erase saved warm intent; it reports nothing.

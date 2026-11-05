@@ -20,20 +20,10 @@ CREATE TRIGGER store_revision_task_shells_delete AFTER DELETE ON task_shells BEG
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
 END;
 
--- Native hosts retain Work without storing their layouts here. A stale lease
--- is unknown observation, never evidence that a window was closed.
-CREATE TABLE task_host_occurrences (
-    task_id TEXT NOT NULL REFERENCES tasks(id),
-    occurrence TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN ('retained','away','closed','unknown')),
-    -- Host presentation/native jobs are separate from destination-owned execution.
-    native_settled INTEGER NOT NULL CHECK(native_settled IN (0,1)),
-    lease_until INTEGER NOT NULL,
-    revision INTEGER NOT NULL,
-    owner TEXT,
-    owner_exited INTEGER NOT NULL DEFAULT 0 CHECK(owner_exited IN (0,1)),
-    PRIMARY KEY(task_id,occurrence)
-);
+-- The serving owner's own viewers retain its Task checkout. `viewed`: an
+-- attached viewer has not left; `unknown`: an SSH viewer dropped without leaving.
+-- Host identities are never stored.
+ALTER TABLE processes ADD COLUMN viewer_hold TEXT CHECK(viewer_hold IN ('viewed','unknown'));
 CREATE TABLE task_retirements (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id),
     completion TEXT NOT NULL,
@@ -43,15 +33,6 @@ CREATE TABLE task_retirements (
     phase TEXT NOT NULL CHECK(phase IN ('waiting','closing','retired')),
     reason TEXT
 );
-CREATE TRIGGER store_revision_task_host_occurrences_insert AFTER INSERT ON task_host_occurrences BEGIN
-    UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
-END;
-CREATE TRIGGER store_revision_task_host_occurrences_update AFTER UPDATE ON task_host_occurrences BEGIN
-    UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
-END;
-CREATE TRIGGER store_revision_task_host_occurrences_delete AFTER DELETE ON task_host_occurrences BEGIN
-    UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
-END;
 CREATE TRIGGER store_revision_task_retirements_insert AFTER INSERT ON task_retirements BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
 END;

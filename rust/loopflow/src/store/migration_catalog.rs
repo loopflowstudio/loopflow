@@ -78,10 +78,6 @@ pub fn is_slug(version: &str) -> bool {
 pub struct Migration {
     pub version: &'static str,
     pub sql: &'static str,
-    /// The newest migration at or before this one that older readers cannot
-    /// read past: a reader must know it to open a store that applied this one.
-    /// A breaking or released migration names itself.
-    pub reader_floor: &'static str,
     /// Whether `origin/main` added these bytes. Only merged migrations reach the
     /// Machine's shared store.
     pub merged: bool,
@@ -91,74 +87,4 @@ impl Migration {
     pub fn version(&self) -> String {
         self.version.to_string()
     }
-
-    pub fn breaks_readers(&self) -> bool {
-        self.reader_floor == self.version
-    }
-}
-
-/// SQLite splices `ADD COLUMN` definitions in before table constraints, so the
-/// old definitions must all survive verbatim and only column definitions are new.
-pub fn table_within(old: &str, new: &str) -> bool {
-    let (Some((old_head, old_parts, old_tail)), Some((new_head, new_parts, new_tail))) =
-        (table_parts(old), table_parts(new))
-    else {
-        return false;
-    };
-    const CONSTRAINTS: [&str; 5] = ["CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN"];
-    old_head == new_head
-        && old_tail == new_tail
-        && old_parts.iter().all(|part| new_parts.contains(part))
-        && new_parts
-            .iter()
-            .filter(|part| !old_parts.contains(part))
-            .all(|part| {
-                let keyword = part.split_whitespace().next().unwrap_or("");
-                !CONSTRAINTS
-                    .iter()
-                    .any(|constraint| keyword.eq_ignore_ascii_case(constraint))
-            })
-}
-
-/// A `CREATE TABLE` statement as its head, top-level definitions and suffix.
-fn table_parts(sql: &str) -> Option<(&str, Vec<&str>, &str)> {
-    let open = sql.find('(')?;
-    let mut parts = Vec::new();
-    let mut start = open + 1;
-    let mut depth = 0;
-    let mut quote = None;
-    let mut characters = sql[open..]
-        .char_indices()
-        .map(|(index, c)| (open + index, c))
-        .peekable();
-    while let Some((index, character)) = characters.next() {
-        if let Some(end) = quote {
-            if character == end {
-                if end != ']' && characters.peek().is_some_and(|(_, next)| *next == end) {
-                    characters.next();
-                } else {
-                    quote = None;
-                }
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' | '`' => quote = Some(character),
-            '[' => quote = Some(']'),
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    parts.push(sql[start..index].trim());
-                    return Some((sql[..open].trim(), parts, sql[index + 1..].trim()));
-                }
-            }
-            ',' if depth == 1 => {
-                parts.push(sql[start..index].trim());
-                start = index + 1;
-            }
-            _ => {}
-        }
-    }
-    None
 }

@@ -9,27 +9,24 @@ import ViewInspector
 @Suite("Application workspace retention")
 @MainActor
 struct WorkspaceRetentionTests {
-    @Test("Recent unfinished Tasks stay warm; Close preserves history and releases retention")
-    func hostRetentionFollowsTheNativeWorkspace() {
+    @Test("Recent unfinished Tasks stay warm; window Close ends viewers but keeps history")
+    func warmTasksKeepViewersUntilClose() {
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         let first = WorkWorkspaceKey(repository: "repo", kind: .task, id: "first")
         let second = WorkWorkspaceKey(repository: "repo", kind: .task, id: "second")
         let a = registry.open(first, title: "First", location: nil)
         a.multiplexer.load(sessionId: "history")
-        #expect(a.hostUse == "retained")
-        #expect(!a.nativeSettled)
+        #expect(a.presented)
         let b = registry.open(second, title: "Second", location: nil)
-        #expect(a.hostUse == "retained")
-        #expect(!a.nativeSettled)
-        #expect(b.hostUse == "retained")
+        #expect(a.presented)
+        #expect(b.presented)
         registry.closePresentation()
-        #expect(a.hostUse == "closed")
-        #expect(b.hostUse == "closed")
+        #expect(!a.presented)
+        #expect(!b.presented)
         #expect(a.multiplexer.sessionPane?.sessionId == "history")
         #expect(registry.retained(first) === a)
         _ = registry.open(first, title: "First", location: nil)
-        #expect(a.hostUse == "retained")
-        #expect(!a.nativeSettled)
+        #expect(a.presented)
     }
 
     @Test("Warm visits are bounded; completed departure and Close release without refresh reopening")
@@ -39,21 +36,21 @@ struct WorkspaceRetentionTests {
         let keys = (0..<limit + 2).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
         for key in keys { registry.open(key, title: key.id, location: nil) }
         #expect(registry.recentTasks.count == limit)
-        #expect(registry.retained(keys[0])?.hostUse == "away")
+        #expect(registry.retained(keys[0])?.presented == false)
         let latest = registry.retained(keys[limit + 1])!
         registry.updateCompletion(keys[limit + 1], completed: true)
-        #expect(latest.hostUse == "retained")
+        #expect(latest.presented)
         registry.open(keys[0], title: "First", location: nil)
-        #expect(latest.hostUse == "away")
+        #expect(!latest.presented)
         let first = registry.retained(keys[0])!
         first.multiplexer.load(sessionId: "conversation")
         first.closePane(first.multiplexer.sessionPane!.id)
         #expect(first.conversationClosed)
         #expect(!registry.recentTasks.contains(keys[0]))
-        #expect(first.hostUse == "away")
+        #expect(!first.presented)
         registry.open(keys[0], title: "First", location: nil)
         #expect(!first.conversationClosed)
-        #expect(first.hostUse == "retained")
+        #expect(first.presented)
     }
 
     @Test("The warm-conversation bound spans repository windows without sharing surfaces")
@@ -93,13 +90,13 @@ struct WorkspaceRetentionTests {
         #expect(restored.recentTasks.isEmpty) // Saved intent alone acquires no hold.
         let closed = restored.open(keys[limit + 1], title: "Closed", location: nil, deliberate: false)
         #expect(closed.conversationClosed)
-        #expect(closed.hostUse == "away")
+        #expect(!closed.presented)
         let interruptedRestore = SessionsWorkspaceRegistry(localMachineId: "local")
         interruptedRestore.loadWarmIntent(repository: repository)
         #expect(interruptedRestore.restoreCandidates.count == limit - 1) // No fresh read has settled these yet.
         restored.open(keys[limit + 1], title: "Closed", location: nil)
         #expect(!closed.conversationClosed)
-        #expect(closed.hostUse == "retained")
+        #expect(closed.presented)
         UserDefaults.standard.removeObject(forKey: "warm-conversations-local-\(repository.lowercased())")
     }
 
@@ -112,12 +109,12 @@ struct WorkspaceRetentionTests {
         _ = registry.workspace(for: repository, title: "repo", location: nil)
         let tile = registry.workspace(for: tiled, title: "Tiled", location: location)
         registry.present(open: [repository, tiled])
-        #expect(tile.hostUse == "retained")
+        #expect(tile.presented)
         registry.prefetch(tiled, title: "Tiled", location: location, completed: false)
         #expect(registry.recentTasks == [tiled])
         #expect(!tile.requiresLocationValidation)
         registry.open(WorkWorkspaceKey(repository: "repo", kind: .task, id: "visited"), title: "Visited", location: location)
-        #expect(tile.hostUse == "retained")
+        #expect(tile.presented)
     }
 
     @Test("Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit")
@@ -136,7 +133,7 @@ struct WorkspaceRetentionTests {
         for key in keys { registry.prefetch(key, title: key.id, location: location, completed: false) }
         #expect(registry.recentTasks.count == limit)
         #expect(registry.warmWork == [repository, wave] + keys.prefix(limit))
-        // Primaries report no checkout presence: `hostUse` belongs to Task checkouts.
+        // Primaries hold no checkout: `presented` belongs to Task viewers.
         let primary = registry.retained(wave)!
         #expect(primary.conversationIntent == .start)
         primary.multiplexer.load(sessionId: "wave-conversation")
@@ -172,77 +169,6 @@ struct WorkspaceRetentionTests {
         #expect(registry.recentTasks == working + (full ? [] : [saved]))
         #expect(registry.restoreCandidates.isEmpty)
         #expect(registry.retained(saved)?.requiresLocationValidation == (full ? nil : true))
-    }
-
-    @Test("Quit acknowledges settled presentation as away and preserves an existing deadline")
-    func quitReleasesWithoutClose() async throws {
-        let application = RepositoryWorkspaces(localMachineId: "local")
-        let registry = application.registry(for: "repo")
-        let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: UUID().uuidString)
-        let workspace = registry.open(key, title: "Task", location: WorkspaceIdentity(machineId: "local", worktree: "/checkout"))
-        workspace.multiplexer.load(sessionId: "history")
-        workspace.startPersistence(query: RegistryQuery { args, _ in
-            guard args.contains("presence") else { return "null" }
-            func value(_ flag: String) -> String? {
-                args.firstIndex(of: flag).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
-            }
-            let ownerJSON = try #require(value("--owner"))
-            let owner = try JSONDecoder().decode(TaskHostOwner.self, from: Data(ownerJSON.utf8))
-            #expect(owner.machineID == "local")
-            #expect(owner.pid == UInt32(ProcessInfo.processInfo.processIdentifier))
-            #expect(owner.startedAt == Int64(try #require(Perf.processStartedAt)))
-            #expect(owner.settlesOnExit)
-            let deadline = value("--state") == "closed" ? 0 : 900
-            let reason = value("--native-settled") == "true" ? "null" : "\"Native resources remain\""
-            return """
-                {"task_id":"task","completion":"completed","checkout":"/checkout","branch":"task",
-                 "due_at":\(deadline),"phase":"waiting","reason":\(reason)}
-                """
-        }, repoPath: "/repo")
-        application.prepareForQuit()
-        // AppKit may close windows during termination. That is still departure.
-        registry.closePresentation()
-        workspace.retain(true)
-        await application.releaseForQuit()
-        #expect(workspace.hostUse == "away")
-        #expect(workspace.nativeSettled)
-        #expect(workspace.retirement?.dueAt == 900)
-        #expect(workspace.retirement?.reason == nil)
-        #expect(workspace.retentionError == nil)
-        #expect(workspace.multiplexer.sessionPane?.sessionId == "history")
-    }
-
-    @Test("Failed or timed-out quit reporting never invents acknowledgement", arguments: [false, true])
-    func quitReleaseFailure(stalled: Bool) async {
-        let application = RepositoryWorkspaces(localMachineId: "local")
-        let registry = application.registry(for: "repo")
-        let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: UUID().uuidString)
-        let workspace = registry.open(key, title: "Task", location: WorkspaceIdentity(machineId: "local", worktree: "/checkout"))
-        workspace.startPersistence(query: RegistryQuery { args, _ in
-            guard args.contains("presence") else { return "null" }
-            if stalled { try await Task.sleep(for: .seconds(60)) }
-            throw RegistryQueryError("Destination unavailable; release unknown")
-        }, repoPath: "/repo")
-        application.prepareForQuit()
-        let started = ContinuousClock.now
-        await application.releaseForQuit(timeout: .milliseconds(20))
-        #expect(started.duration(to: .now) < .seconds(2))
-        #expect(workspace.hostUse == "away")
-        #expect(workspace.retirement == nil)
-        #expect(workspace.retentionError != nil)
-    }
-
-    @Test("Quitting preserves a prior explicit Close")
-    func quitKeepsExplicitClose() async {
-        let application = RepositoryWorkspaces(localMachineId: "local")
-        let registry = application.registry(for: "repo")
-        let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: "closed")
-        let workspace = registry.open(key, title: "Task", location: nil)
-        workspace.closeWorkspace()
-        application.prepareForQuit()
-        await application.releaseForQuit()
-        #expect(workspace.hostUse == "closed")
-        #expect(workspace.nativeSettled)
     }
 
     @Test("Known repository entry presents its scene before admitting a new link",

@@ -39,6 +39,11 @@ Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
 when adding a table: give displayed rows revision triggers and classify operation-only
 receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
 its shared repository publishes authored files that lifecycle operations may already commit.
+When settings leave SQLite, search fixture SQL in `src/`, `tests/`, and
+`tests/e2e/` for removed columns and tables. Seed preferences through `lf set`;
+keep runtime observations in SQLite. Run account, Machine, Wave lifecycle, and
+context-budget regressions as well as migration tests: moving storage must
+preserve their existing behavior.
 
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
@@ -76,12 +81,49 @@ Twenty cycles exercise the public Machine route, abrupt transport loss,
 reattachment to the same shell, Close and process/PTY/socket settlement;
 a separate case covers failed authentication, stale checkout and shell exit.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
-Desktop demonstration. `ops::task::retirement::tests` covers native-host
-acknowledgement, cancellation, unconfirmed job cleanup and retry after partial
-Git deletion with disposable worktrees and a bare remote.
-`ssh_shells::retirement_observes_remote_host_exit_after_disconnect_without_a_new_presence_report`
-keeps the existing retirement executor alive through loss of its retaining host's
-Machine connection, then confirms exit after reconnect without another presence report.
+Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
+holds, unknown viewers, cancellation, unconfirmed job cleanup and retry after
+partial Git deletion with disposable worktrees and a bare remote.
+`session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unknown`
+records a real owner's hold through leave, reconnect grace and SSH loss.
+
+`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
+holds a SQLite writer while typing and returning to the viewer. Control stays
+responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery
+without replay. `transport::input_retry_tests` bounds polling through a failed
+store and verifies recovery through the real descriptor loop.
+
+`transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
+owners while resuming their Sessions. Drafts, pending requests, turns, Graph
+ancestry/steps and Runs retain the same provider, attachment and capture; no new
+provider launches. A completed Session is unknown, not work: its unanswering owner
+ends and resume continues on one new provider, while an answering one is attached.
+The matching rollover unit test preserves the named retention reasons and permits
+movement after protected work settles.
+
+Upgrade recovery also needs `transport_tests`: retained hooks must settle through
+ContextBlock, exclude subagents and report real delivery errors. Public resume
+must retain drafts, requests, history and Session/Task/capture identity through
+build replacement and viewer return; only provider replacement changes its fence.
+An unanswering protected owner survives failed attachment and completes continued
+turns after transport returns.
+`session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
+natural helper exit permits continuation, persistent helpers refuse it without
+signals or settlement, and both retain Task/history/steers. These stand-ins use
+candidate wire/schema; released-version, permanently broken transport and
+installed-provider recovery still need separate proof.
+Use published 0.15.1 for the released boundary: its owner speaks newline JSON
+and predates native-input tracking. Prove attachment and retention of an unsent
+draft before allowing its provider to be replaced; an absent input record does
+not establish that an older provider's editor is empty.
+Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
+a shallow checkout orders all slugs as drafts and can reject the released store
+before reaching the interaction under test.
+
+Hook command spelling or Clap declaration changes also run
+`cargo test -p loopflow --test integration cli_discovery::`. Its alias contract
+keeps the exact callback retained by running providers while rejecting other
+command aliases; run it alongside the retained-hook upgrade test.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
@@ -136,7 +178,7 @@ public live steering. It uses a local model and disposable homes; configured-acc
 and rendered acceptance remain separate.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
-`explicit_launch_policy_survives_task_workflow_nested_graphs_and_provider_children` when
+`explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own_agent` when
 integrating Claude transport changes; bound the test so missing acknowledgements
 fail locally instead of exhausting the merge queue's deadline.
 Cross-provider replay fixtures must install stand-ins for both the recorded and
@@ -387,6 +429,25 @@ skills and Graph recipes into the checkout; default sync exports globally.
 cargo test -p loopflow --lib skills::tests
 ```
 
+Settings and recipe changes also run the provider-boundary matrix:
+
+```bash
+cargo test -p loopflow --test integration settings_launch_tests::
+```
+
+It executes exported commands and runtime Graphs, comparing inspected settings
+with provider arguments and delivered documents. Preserve defining Graph IDs
+through composition, live repository skill overrides in global recipes, personal/shared
+file precedence, explicit CLI/environment selection and empty/false/unset values.
+Session/resume fixtures create local Tasks through the CLI and wait for each
+worker before reading its selection. Stand-ins establish launch behavior, not
+configured-provider recovery. Claude's headless permission floor is independent
+of the resolved `yolo` preference; terminal bypass checks own its negation.
+Launch and preview fixtures select a harness explicitly or save a fixture-local
+`default_agent`; they must not depend on the developer's installed providers.
+Keep composed launch matrices split into bounded behavioral cases so each stays
+within the ordinary CI test deadline without dropping assertions.
+
 After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch
 reflects the intended prompt change, regenerate the snapshots, review their
@@ -434,6 +495,11 @@ unmerged migration fails its checksum: use a fresh one. Preserve populated
 historical fixtures for merged migration coverage. A Task's migration is edited
 in place, so test the merged frontier against the finished migration and write
 no test for a schema that existed only between two edits.
+
+Installer preview regressions assert validation and preserved files independently
+of promotion eligibility, which depends on the build's Git history. Exercise them
+with `LOOPFLOW_MIGRATION_ORDER=/dev/null` as well as the normal catalog to cover
+builds that classify slug migrations as unmerged.
 
 A source copy without Git metadata must set `LOOPFLOW_BUILD_PROVENANCE=development`
 when exercising source behavior, and `LOOPFLOW_MIGRATION_ORDER` when it carries

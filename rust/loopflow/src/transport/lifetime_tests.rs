@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use anyhow::{bail, Result};
 
-use super::lifetime::{Activity, Change, Ending};
+use super::lifetime::{Activity, Ending};
 use super::output::Output;
 use super::wire::{Incoming, Request, Tag};
 use crate::id::LfProcessId;
@@ -22,7 +22,6 @@ thread_local! {
 
 struct Case {
     name: String,
-    idle: bool,
     end: mpsc::Sender<Ending>,
     ending: Option<mpsc::Receiver<Ending>>,
     activity: mpsc::Sender<Activity>,
@@ -34,7 +33,6 @@ impl Case {
     fn queue(&self) {
         self.end
             .send(Ending {
-                change: (!self.idle).then(|| (Change::Replaced, "replaced".into())),
                 activity: Activity::default(),
             })
             .unwrap();
@@ -73,6 +71,7 @@ pub(super) fn before_read(
                     cols: 80,
                     name: None,
                     moved: None,
+                    ssh: None,
                 },
             };
             viewer.write_all(&super::wire::frame(
@@ -122,15 +121,7 @@ pub(super) fn after_judgment(output: &Output, observed: Activity) -> Result<()> 
 
 #[test]
 fn queued_endings_drain_output_and_accept_viewers() {
-    for (name, idle) in [
-        ("ready", true),
-        ("ready", false),
-        ("unreported", true),
-        ("unreported", false),
-        ("throttled", true),
-        ("throttled", false),
-        ("attach", true),
-    ] {
+    for name in ["ready", "unreported", "throttled", "attach"] {
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -138,12 +129,11 @@ fn queued_endings_drain_output_and_accept_viewers() {
                 "--nocapture",
             ])
             .env("LOOPFLOW_ENDING_FIXTURE", name)
-            .env("LOOPFLOW_ENDING_IDLE", idle.to_string())
             .output()
             .unwrap();
         assert!(
             output.status.success(),
-            "{name}/{idle}: {}\n{}",
+            "{name}: {}\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -160,7 +150,6 @@ fn ending_order_fixture() {
     let (activity, changes) = mpsc::channel();
     CASE.set(Some(Case {
         name,
-        idle: std::env::var("LOOPFLOW_ENDING_IDLE").unwrap() == "true",
         end,
         ending: Some(ending),
         activity,
@@ -175,7 +164,7 @@ fn ending_order_fixture() {
             "UPDATE agent_sessions SET interactive=1, transport_lf_process_id=?1 WHERE id='session'",
             [owner.as_str()],
         )?;
-        assert!(store.owner_waits_for_person(&owner)?);
+        assert_eq!(store.owner_retention(&owner)?, None);
         let result = super::serve(&["/bin/sleep".into(), "30".into()], true);
         assert_eq!(result.unwrap_err().to_string(), "ending candidate vetoed");
         let _ = std::fs::remove_file(super::endpoint(&owner)?);

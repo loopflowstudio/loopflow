@@ -10,10 +10,11 @@ use std::time::Duration;
 
 use super::{block_on_task, task_error, task_store};
 use crate::durable::{TaskId, WorkStatus};
+use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
-    sqlite::{HostUse, TaskHostOwner, TaskRetirement},
+    sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
 };
 use crate::work::task::Task;
@@ -23,8 +24,8 @@ fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
-// Host updates and each cleanup pass serialize against the same Task. Returning
-// revokes queued work before a subsequent pass can perform another effect.
+// Completion, landing and each cleanup pass serialize against the same Task.
+// A returning viewer revokes queued work before the next pass performs an effect.
 pub(super) fn lock(task: &TaskId, executor: bool) -> OpsResult<File> {
     let directory = crate::store::lf_home_dir().join("workspace-locks");
     std::fs::create_dir_all(&directory)?;
@@ -46,36 +47,58 @@ pub(super) fn lock(task: &TaskId, executor: bool) -> OpsResult<File> {
     Ok(file)
 }
 
+const VIEWED: &str = "Retained by an open Task Session viewer";
+const UNKNOWN: &str = "Session viewer liveness unknown; cleanup pending";
+
+/// Why an LF viewer still retains this checkout. Only owners' own viewer
+/// records count; an ordinary shell in the checkout never does. An owner that
+/// died without recording its viewers leaves their fate unknown.
+fn viewer_hold(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<&'static str>> {
+    let mut unknown = false;
+    for owner in store.task_viewer_holds(task).map_err(task_error)? {
+        let live = !owner.ended
+            && crate::journal::process_evidence(store, &owner.owner)
+                != ProcessIdentityEvidence::Dead;
+        if live && owner.hold == ViewerHold::Viewed {
+            return Ok(Some(VIEWED));
+        }
+        unknown = true;
+    }
+    Ok(unknown.then_some(UNKNOWN))
+}
+
+fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirement>> {
+    let hold = viewer_hold(store, task)?;
+    store
+        .reconcile_task_retirement(task, now(), hold)
+        .map_err(task_error)
+}
+
 pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> {
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
     let _guard = lock(&task.id, false)?;
-    let intent = store
-        .sqlite
-        .reconcile_task_retirement(&task.id, now())
-        .map_err(task_error)?;
-    if !needs_executor(store, &task.id, intent.as_ref())? {
+    let intent = reconcile(&store.sqlite, &task.id)?;
+    if !needs_executor(intent.as_ref()) {
         return Ok(());
     }
     drop(_guard);
     start(&task.id)
 }
 
-fn needs_executor(
-    store: &SharedStore,
-    task: &TaskId,
-    intent: Option<&TaskRetirement>,
-) -> OpsResult<bool> {
-    let Some(intent) = intent.filter(|intent| intent.phase != "retired") else {
-        return Ok(false);
-    };
-    Ok(intent.due_at.is_some()
-        || !store
-            .sqlite
-            .retaining_hosts(task)
-            .map_err(task_error)?
-            .is_empty())
+/// The executor runs only toward a deadline. While a viewer holds the
+/// checkout it exits; that owner wakes it again when its viewers release.
+fn needs_executor(intent: Option<&TaskRetirement>) -> bool {
+    intent.is_some_and(|intent| intent.phase != "retired" && intent.due_at.is_some())
+}
+
+/// An owner whose viewers released restarts cleanup for its waiting Tasks.
+pub(crate) fn wake_released(store: &SqliteStore, owner: &LfProcessId) -> OpsResult<()> {
+    for task in store.owner_waiting_retirements(owner).map_err(task_error)? {
+        start(&task)?;
+    }
+    Ok(())
 }
 
 fn start(task: &TaskId) -> OpsResult<()> {
@@ -86,8 +109,8 @@ fn start(task: &TaskId) -> OpsResult<()> {
     }
     #[cfg(not(test))]
     {
-        // A running executor already watches the durable intent. Heartbeats
-        // must not launch a process every time they renew the same observation.
+        // A running executor already watches the durable intent; repeated
+        // releases must not launch another process for the same Task.
         let reservation = match lock(task, true) {
             Ok(lock) => lock,
             Err(OpsError::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -133,53 +156,6 @@ fn start(task: &TaskId) -> OpsResult<()> {
     }
 }
 
-/// Host state is semantic: each native host decides which occurrences to retain.
-/// Lease loss is unknown; only a positive read of the retaining owner's exit releases it.
-pub fn observe(
-    issue: &str,
-    occurrence: Option<&str>,
-    state: Option<HostUse>,
-    revision: Option<i64>,
-    native_settled: Option<bool>,
-    owner: Option<&TaskHostOwner>,
-) -> OpsResult<Option<TaskRetirement>> {
-    block_on_task(async {
-        let store = task_store().await?;
-        let id = store
-            .sqlite
-            .resolve_task_id(issue, None)
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("Task is unknown"))?;
-        if state.is_none() {
-            return store.sqlite.task_retirement(&id).map_err(task_error);
-        }
-        let _guard = lock(&id, false)?;
-        if let (Some(occurrence), Some(state)) = (occurrence, state) {
-            store
-                .sqlite
-                .observe_task_host(
-                    &id,
-                    occurrence,
-                    state,
-                    now(),
-                    revision.ok_or_else(|| task_error("Host revision is required"))?,
-                    native_settled.ok_or_else(|| task_error("Native settlement is required"))?,
-                    owner,
-                )
-                .map_err(task_error)?;
-        }
-        let result = store
-            .sqlite
-            .reconcile_task_retirement(&id, now())
-            .map_err(task_error)?;
-        drop(_guard);
-        if needs_executor(&store, &id, result.as_ref())? {
-            start(&id)?;
-        }
-        Ok(result)
-    })
-}
-
 pub fn run(issue: &str) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
@@ -205,7 +181,6 @@ pub fn run(issue: &str) -> OpsResult<()> {
             if super::task_work_status(&store, &task).await? != WorkStatus::Done {
                 return Ok(());
             }
-            reconcile_hosts(&store, &id).await?;
             let result = {
                 let _guard = lock(&id, false)?;
                 advance(&store, &task).await
@@ -230,17 +205,12 @@ pub fn run(issue: &str) -> OpsResult<()> {
 }
 
 async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
-    let Some(intent) = store
-        .sqlite
-        .reconcile_task_retirement(&task.id, now())
-        .map_err(task_error)?
-    else {
+    let Some(intent) = reconcile(&store.sqlite, &task.id)? else {
         return Ok(true);
     };
-    if !needs_executor(store, &task.id, Some(&intent))? {
+    if !needs_executor(Some(&intent)) {
         return Ok(true);
     }
-    // Retention can clear the deadline while an exact owner still needs watching.
     if intent.due_at.is_none_or(|due| due > now()) {
         return Ok(false);
     }
@@ -293,15 +263,6 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
         .map_err(task_error)?;
     // The existing owner policy sees the closing intent and rechecks active
     // work and queued input in the serving loop before ending the provider.
-    if !store
-        .sqlite
-        .retirement_hosts_settled(&task.id)
-        .map_err(task_error)?
-    {
-        return Err(task_error(
-            "Waiting for native hosts to settle this Task's occurrences",
-        ));
-    }
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         store
@@ -326,54 +287,16 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
     if current.completion != intent.completion || current.due_at.is_none() {
         return Ok(false);
     }
+    // A viewer that attached during closing keeps the checkout.
+    if reconcile(&store.sqlite, &task.id)?.is_none_or(|current| current.due_at.is_none()) {
+        return Ok(false);
+    }
     crate::ops::wt::apply_delete(deletion, &NullProgress)?;
     store
         .sqlite
         .retirement_progress(&intent, "retired", None)
         .map_err(task_error)?;
     Ok(true)
-}
-
-async fn reconcile_hosts(store: &SharedStore, task: &TaskId) -> OpsResult<()> {
-    for host in store.sqlite.retaining_hosts(task).map_err(task_error)? {
-        if owner_evidence(store, &host.owner).await == ProcessIdentityEvidence::Dead {
-            let _guard = lock(task, false)?;
-            store
-                .sqlite
-                .release_exited_host(task, &host)
-                .map_err(task_error)?;
-        }
-    }
-    Ok(())
-}
-
-async fn owner_evidence(store: &SharedStore, owner: &TaskHostOwner) -> ProcessIdentityEvidence {
-    let Ok(local) = store.sqlite.local_machine() else {
-        return ProcessIdentityEvidence::Unknown;
-    };
-    if owner.machine_id == local.id {
-        return crate::journal::process_identity_evidence(owner.pid, owner.started_at);
-    }
-    let read = async {
-        let machine = store
-            .sqlite
-            .machine_by_id(&owner.machine_id)?
-            .ok_or_else(|| anyhow::anyhow!("Retaining Machine is unavailable"))?;
-        let bytes = crate::lf::commands::ssh::request(
-            &machine,
-            &[
-                "machine".into(),
-                "process".into(),
-                owner.pid.to_string(),
-                owner.started_at.to_string(),
-            ],
-            None,
-        )
-        .await?;
-        anyhow::Ok(serde_json::from_slice::<ProcessIdentityEvidence>(&bytes)?)
-    };
-    // The ordinary SSH request is bounded and runs outside the Task lock.
-    read.await.unwrap_or(ProcessIdentityEvidence::Unknown)
 }
 
 fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -401,10 +324,11 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
             {
                 continue;
             }
-            if !store
+            if store
                 .sqlite
-                .owner_waits_for_person(&owner)
+                .owner_retention(&owner)
                 .map_err(task_error)?
+                .is_some()
             {
                 return Err(task_error(
                     "Requested work, a draft or a pending request still holds this Task",

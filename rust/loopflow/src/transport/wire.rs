@@ -137,6 +137,9 @@ pub(super) enum Request {
         name: Option<String>,
         /// What a controlling viewer this attachment replaces prints as it leaves.
         moved: Option<String>,
+        /// The viewer runs under SSH: losing its connection without `leave`
+        /// does not show that its LF viewer exited. Absent reads as local.
+        ssh: Option<bool>,
     },
     /// Continue a dropped viewer's stream, no snapshot.
     Resume(Resume),
@@ -163,6 +166,10 @@ pub(super) enum Request {
         program: String,
         state: crate::program_status::State,
         progress: Option<u8>,
+    },
+    Directory {
+        key: String,
+        cwd: std::path::PathBuf,
     },
     /// The direct child's native client began. `exit` replaces the client's own
     /// exit text; a detaching viewer prints `detach`.
@@ -259,12 +266,11 @@ pub(super) enum Event {
         held: bool,
     },
     /// Input control changed hands. A recipient with `held: false` restores
-    /// its terminal, prints `notice`, then runs the full successor command
-    /// when the owner is retiring, or leaves when another viewer took control.
+    /// its terminal, prints `notice` and leaves: another viewer took control,
+    /// or the owner is ending.
     Control {
         held: bool,
         notice: Option<String>,
-        successor: Option<Vec<String>>,
     },
     ChildExited {
         code: u8,

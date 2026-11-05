@@ -94,7 +94,7 @@ pub struct AgentProcessRequest {
     pub write_scope: crate::agent::AgentWriteScope,
     pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
     pub skip_permissions: bool,
-    pub chrome: bool,
+    pub chrome: Option<bool>,
 }
 
 impl AgentProcessRequest {
@@ -105,21 +105,23 @@ impl AgentProcessRequest {
         }
     }
 
-    pub(crate) fn from_prepared(config: &crate::agent::AgentConfig) -> Self {
-        Self {
+    pub(crate) fn from_prepared(
+        config: &crate::agent::AgentConfig,
+    ) -> Result<Self, crate::error::LoadError> {
+        Ok(Self {
             system_prompt: crate::agent::system_prompt_with_structured_replies(config),
             conversation_context: config.conversation_context.clone(),
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
             output_schema: config.output_schema.clone(),
-            agent: config.agent().to_string(),
+            agent: config.agent()?.to_string(),
             account_id: config.provider_account_id.clone(),
             max_turns: config.max_turns,
             write_scope: config.write_scope,
             execution_boundary: config.execution_boundary.clone(),
             skip_permissions: config.skip_permissions,
             chrome: config.chrome,
-        }
+        })
     }
 
     pub(crate) fn replay_unavailable_reason(&self) -> Option<&'static str> {
@@ -2000,8 +2002,16 @@ impl CaptureHandle {
     /// its launcher left. Settling it writes the same terminal receipt and
     /// attempt facts the launcher would have.
     pub(crate) fn adopt(handoff: CaptureHandoff) -> StoreResult<Self> {
-        let (dir, manifest) =
-            resolve_manifest(&crate::store::lf_home_dir(), &handoff.key).map_err(record_error)?;
+        // The handoff names the exact capture, so its directory needs no store:
+        // the terminal receipt is written even when the store is unavailable.
+        let dir = record_dir(&crate::store::lf_home_dir(), &handoff.key).ok_or_else(|| {
+            record_error(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid capture key",
+            ))
+        })?;
+        let manifest = read_manifest(&dir).map_err(record_error)?;
+        validate_manifest_path(&dir, &manifest).map_err(record_error)?;
         let mut capture = SessionCapture::from_manifest(manifest, dir);
         capture.attempt = handoff.attempt;
         capture.attempt_started = handoff.attempt_started;
@@ -2275,30 +2285,32 @@ impl SessionCapture {
             result_ref: None,
         };
         let terminal = write_terminal(&self.dir, terminal)?;
+        // The receipt file is the settlement; its store observation and the
+        // attachment's end are records that must never fail the exit.
         if self.manifest.harness != "loopflow" {
-            let store = row_store(&self.dir).map_err(std::io::Error::other)?;
             let input = &self.manifest.artifact_key;
-            if let Some(session) = store
-                .session_for_artifact(input)
-                .map_err(std::io::Error::other)?
-            {
-                store
-                    .retain_session_observation(
-                        &session,
-                        &crate::session::SessionObservation {
-                            artifact_key: input.clone(),
-                            source: "terminal.json".into(),
-                            observed_at: terminal.ended_at.unix_timestamp(),
-                            task_id: session.task_id.clone(),
-                            wave_id: session.wave_id.clone(),
-                            payload: serde_json::json!({
-                                "input_id": input,
-                                "source": "terminal.json",
-                                "evidence": terminal,
-                            }),
-                        },
-                    )
-                    .map_err(std::io::Error::other)?;
+            let observed = row_store(&self.dir).and_then(|store| {
+                let Some(session) = store.session_for_artifact(input)? else {
+                    return Ok(());
+                };
+                store.retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        artifact_key: input.clone(),
+                        source: "terminal.json".into(),
+                        observed_at: terminal.ended_at.unix_timestamp(),
+                        task_id: session.task_id.clone(),
+                        wave_id: session.wave_id.clone(),
+                        payload: serde_json::json!({
+                            "input_id": input,
+                            "source": "terminal.json",
+                            "evidence": terminal,
+                        }),
+                    },
+                )
+            });
+            if let Err(error) = observed {
+                tracing::warn!(%error, artifact_key = %input, "terminal receipt written; its Session observation was not recorded");
             }
         }
         self.settled_outcome = Some(outcome.to_string());
@@ -2319,7 +2331,9 @@ impl SessionCapture {
                 .and_then(|store| finish_session_attachment(&store, &session, &attachment, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
-                Err(error) => return Err(std::io::Error::other(error)),
+                Err(error) => {
+                    tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+                }
             }
         }
         Ok(())
@@ -3034,7 +3048,8 @@ mod tests {
         let process = AgentProcessRequest::from_prepared(&AgentConfig {
             task_prompt: "repair the failed operation".into(),
             ..Default::default()
-        });
+        })
+        .unwrap();
         let capture =
             CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), process).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
@@ -3303,7 +3318,8 @@ mod tests {
     fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
-            chrome: true,
+            isolate: None,
+            chrome: Some(true),
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
             task_prompt: "authored task\n\nwith trailing space ".to_string(),
             agent: Some("codex:gpt-5.6".to_string()),
@@ -3317,7 +3333,7 @@ mod tests {
             env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
             ..AgentConfig::default()
         };
-        let expected = AgentProcessRequest::from_prepared(&config);
+        let expected = AgentProcessRequest::from_prepared(&config).unwrap();
         let capture =
             CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), expected.clone())
                 .unwrap();
@@ -3545,7 +3561,8 @@ mod tests {
         let request = AgentProcessRequest::from_prepared(&AgentConfig {
             task_prompt: "the next instruction".into(),
             ..AgentConfig::default()
-        });
+        })
+        .unwrap();
         let context = crate::trace::PreparedTurnContext::from_prompts("", "the next instruction");
         crate::journal::with_runtime(ledger.home(), &command, || {
             let next = CaptureHandle::continue_with_context(
@@ -3628,7 +3645,7 @@ mod tests {
                 &session.id,
                 spec(ledger.home()),
                 &crate::trace::PreparedTurnContext::from_prompts("", "next"),
-                AgentProcessRequest::from_prepared(&AgentConfig::default()),
+                AgentProcessRequest::from_prepared(&AgentConfig::default()).unwrap(),
             )
             .is_err());
             let next = store.session(&session.id)?.unwrap();

@@ -60,6 +60,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case waves
     case machineId
     case portfolio
+    case settings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
     case paneLayout(directory: String, work: String)
     case people(directory: String)
     case graphs(directory: String)
@@ -110,6 +111,10 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["machine", "id", "--json"]
         case .portfolio:
             return ["portfolio", "--json"]
+        case .settings(_, let wave, let skill, let graph, let step):
+            return ["config", "show", "--json"] + (wave.map { ["--wave", $0] } ?? [])
+                + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
+                + (step.map { ["--step", $0] } ?? [])
         case .paneLayout(_, let work):
             return ["desktop", "layout", work]
         case .people:
@@ -192,6 +197,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .waves: TaggedFields("waves")
         case .machineId: TaggedFields("machine_id")
         case .portfolio: TaggedFields("portfolio")
+        case .settings(let directory, let wave, let skill, let graph, let step):
+            TaggedFields("settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .paneLayout(let directory, let work):
             TaggedFields("pane_layout", ["directory": directory, "work": work])
         case .people(let directory): TaggedFields("people", ["directory": directory])
@@ -784,15 +791,6 @@ public struct RegistryQuery: Sendable {
         try await run(["history", "show", id], nil)
     }
 
-    public func taskPresence(task: String, occurrence: String, state: String, revision: Int64, nativeSettled: Bool, owner: TaskHostOwner?) async throws -> TaskRetirement? {
-        var args = ["task", "presence", task, "--occurrence", occurrence,
-                                    "--state", state, "--revision", String(revision),
-                                    "--native-settled", String(nativeSettled)]
-        if let owner { args += ["--owner", String(decoding: try JSONEncoder().encode(owner), as: UTF8.self)] }
-        let output = try await run(args, nil)
-        return try Self.decode(TaskRetirement?.self, from: output)
-    }
-
     /// One store-driven reading keeps position, readiness and run history together.
     public func watchTask(task: String) async throws -> LineWatch {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
@@ -1002,6 +1000,12 @@ public struct RegistryQuery: Sendable {
             .sessionNew(directory: cwd ?? "/", id: session.id, agent: agent)))
     }
 
+    /// Create a Task around the selected conversation without launching work.
+    public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
+        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await run(
+            ["task", "create", "--session", id, "--title", title, "--json"], cwd))
+    }
+
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {
         try Self.decode(SessionBindingPreview.self, from: await serve(.bindPreview(session: id, task: task)))
     }
@@ -1098,7 +1102,7 @@ public struct TaskCreateRunFailed: LocalizedError, Sendable {
 public struct WaveGraph: Decodable, Sendable, Hashable {
     public struct Default: Decodable, Sendable, Hashable {
         public let name: String
-        /// `personal`, `wave`, `repo`, `global` or `default`
+        /// `builtin`, `repository`, `personal`, `environment` or `command_line`
         public let source: String
     }
     public let waveId: String?

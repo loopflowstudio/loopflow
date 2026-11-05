@@ -7,27 +7,11 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
-    @Test func taskHostOwnerIdentifiesTheRetainingProcessAndNativeSettlementContract() throws {
-        let data = try loadFixtureData("task_host_owner.json")
-        let value = try JSONDecoder().decode(TaskHostOwner.self, from: data)
-        #expect(value.pid == 1234)
-        #expect(value.startedAt == 1793746800)
-        #expect(value.settlesOnExit)
-        #expect(try JSONDecoder().decode(TaskHostOwner.self, from: JSONEncoder().encode(value)) == value)
-    }
     @Test func sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() throws {
         let data = try loadFixtureData("session_open_intents.json")
         let intents = try JSONDecoder().decode([SessionOpenIntent].self, from: data)
         #expect(intents == [.resume, .start, .reveal])
         #expect(try JSONDecoder().decode([SessionOpenIntent].self, from: JSONEncoder().encode(intents)) == intents)
-    }
-
-    @Test func taskRetirementKeepsCompletionDeadlineAndPendingReason() throws {
-        let data = try loadFixtureData("task_retirement.json")
-        let value = try JSONDecoder().decode(TaskRetirement.self, from: data)
-        #expect(value.dueAt == 1793747700)
-        #expect(value.phase == "waiting")
-        #expect(try JSONDecoder().decode(TaskRetirement.self, from: JSONEncoder().encode(value)) == value)
     }
 
     @Test func waveRemovalPreviewDecodesEveryField() throws {
@@ -650,6 +634,7 @@ struct DTOFixtureTests {
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
+        #expect(detail.tasks.items[0].runtime?.provider == nil)
         #expect(detail.tasks.items[0].task.sync.changes[0].field == "creation")
         #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
         #expect(detail.tasks.items[0].task.linearId == "issue-1")

@@ -14,13 +14,57 @@ lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
 
-Each Task gets its own worktree beside your repository, its own branch and at
+A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
 most one pull request. A stacked Task forks from its parent's PR; `lf sync`
 carries the child through the parent's updates and squash merge.
 
 Every agent that works on a Task starts from the same place: the Task's notes
 and comments, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
+
+## Keep work already in progress
+
+```bash
+lf task create --worktree . --title "Finish the prototype"
+lf session list --json                         # find the Loopflow Session ID
+lf task create --session SESSION --title "Finish the prototype"
+lf session bind SESSION --task LOO-12           # select this Task’s conversation
+```
+
+Promotion preserves the branch, dirty and untracked files, and the Session's
+provider history and live attachment. The selected Session becomes the Task's
+primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
+Pass `--session` explicitly to keep a conversation. An agent uses its own
+`LF_AGENT_CALLER.session_id` or looks it up with `lf session list --json`.
+Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
+no conversation. `--run` then uses ordinary Task conversation admission.
+Opening a conversation more recently never selects it. Explicit-source retries
+keep the same Task; conflicting Task ownership fails without moving either
+person's work.
+
+Plain `lf task create` files new work, including from an owned checkout or
+Session. `--run` starts the created Task; it does not opt into adoption.
+Explicit sources work with or without `--run`. Creation alone starts no Graph
+and approves no Auto-Ship. Binding also requires an explicit Session ID.
+
+Main and Wave checkouts remain shared. A selected Session there can become a
+Task conversation without moving its cwd; an explicit later `lf task checkout`
+gives the Task a separate home. Selecting a repository or Wave primary Session
+transfers that conversation to the Task; its former scope can open a new one.
+A remote command uses the selected Machine's existing paths and Sessions; it does not transfer local live work.
+
+Desktop offers **Create Task from this conversation** in the Session’s binding
+action. **Bind to Task** makes it the selected Task’s primary conversation.
+Already-assigned Sessions offer **Make primary Task conversation** in the palette
+and Task menu. The current terminal and composer stay in place.
+
+When an existing Task already has a worktree, `lf session bind <id> --task <task>`
+keeps that worktree and immediately sets the Session's working directory there.
+Already-running clients may keep their original directory; subsequent connections
+use the selected one. Files remain in their original checkout. If an open Task has no checkout, binding adopts the Session’s unowned
+linked checkout. Done Tasks can still select an unfinished conversation without
+reopening work. With no Task checkout, the conversation stays in place and no
+checkout is adopted. Closed Sessions and headless Runs cannot become primary.
 
 ## Steer it while it runs
 
@@ -237,10 +281,12 @@ Keychain.
 # .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
 graph: code
 agent: claude
-skill_agents:
-  implement: claude:opus
-context_budgets:
-  memory_tokens: 20000
+skills:
+  implement:
+    agent: claude:opus
+context:
+  budgets:
+    memory_tokens: 20000
 ```
 
 ```bash
@@ -252,20 +298,23 @@ lf wave status billing                                    # each setting and its
 ```
 
 `config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
-changes; launches in the Wave layer it over the repository's and your
-`~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
+changes; Wave values override repository values, and personal config overrides
+both. Repository settings (`planning`, `release`,
 `merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
 `id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
 settings.
 
-`lf set` never edits committed config. It stores your own value on this
-Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
-(`--global`); without `--wave` it sets the repository, even in a Wave's Task
-worktree. Your `graph`, `agent` or `skill_agents.<skill>` wins over the
-committed value for you only, and `lf wave status` reports it as `personal`.
-Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
-(`account.<provider>`) exist only this way; a launch uses the nearest of Wave,
-repository and global. `lf unset <key>` hands the choice back.
+`lf set` edits your private `lf.config.local.yaml`, shared across this clone's
+Task worktrees. `--wave` selects a Wave within that file; `--global` edits
+`~/.lf/config.yaml`. Independent clones have independent private preferences.
+The same values can be edited by hand or through Desktop. `lf unset <key>` removes
+your declaration and reveals the next applicable value.
+
+Machine choices and ordered accounts are personal file settings too. Credentials,
+observed availability and existing work placement remain runtime state. Agent choices
+beat all `default_agent` fallbacks; within each class, personal settings beat shared
+settings. [Configuration](config.md) owns the complete source/scope/target rules and
+remote preference behavior. `lf wave status` explains each value's source.
 
 A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
 released lf still reads (LOO-640 removes that).

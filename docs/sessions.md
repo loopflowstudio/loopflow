@@ -15,13 +15,18 @@ lf resume <session>                # an exact conversation
 lf session list --available        # conversations available for your next turn, across this repository
 ```
 
-`lf resume` always gets you back, with no flags to choose:
+`lf resume` reconnects to the conversation's running provider or continues its
+saved thread after safe replacement.
+
+A live turn, draft or pending request keeps its provider. If attachment fails,
+resume reports the failure and leaves that work intact. Returning does not
+resend input.
 
 | The conversation is… | `lf resume` |
 |---|---|
 | running with no terminal showing it (`detached`) | reattaches; nothing restarts |
 | shown in another lf terminal | takes it over; that terminal says where it went |
-| running in a provider client lf started elsewhere | stops that client and continues here |
+| running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
 | ended or crashed | continues the same provider thread from its history |
 | missing for this scope | starts one and says so |
 
@@ -34,7 +39,7 @@ Returning paints its saved screen while the provider reopens its history, withou
 replaying input. Active turns, watches, running Graphs, drafts and pending requests
 keep their owner. Drafts remain editable and requests remain answerable there.
 Edited, pasted or unacknowledged native input can retain the owner until the
-provider exits; the saved screen alone cannot restore an editor or request.
+provider exits; saved history and screens cannot restore an editor or request.
 
 ```bash
 lf resume <session> --fork         # leave the other client running; continue in a new conversation from it
@@ -123,7 +128,7 @@ the command returns when the turn ends.
 
 ```bash
 lf session rename <session> "Release notes"
-lf session bind <session> --task LOO-12      # file a loose conversation under its Task
+lf session bind <session> --task LOO-12      # select the Task’s primary conversation
 ```
 
 New Sessions are named from the request or the skill; Task conversations take
@@ -134,8 +139,17 @@ Task identifier first. In cmux, a Task's workspace is named
 workspace you renamed in cmux keeps your name.
 
 Launching in a Task's checkout binds the Session to that Task automatically.
-`bind` is for the rest: it assigns a Task to a Session that has none,
-permanently, including a done or landed Task, without reopening it.
+`bind` permanently associates an unfinished interactive Session and selects it
+as the Task's primary conversation. Repeating it selects that same Session again;
+other conversations stay associated. A Task with a worktree keeps it, and binding
+immediately sets the Session's working directory there. Already-running clients
+may keep their original directory; subsequent connections use the selected one.
+Files stay in their old checkout.
+An open Task without a worktree adopts the Session's unowned linked checkout;
+main and Wave checkouts stay shared. Done Tasks can still select an unfinished
+conversation. If the Task has no checkout, the conversation stays in place and
+no checkout is adopted. Binding starts no Graph, and leaves done or landed Tasks
+closed. Closed Sessions and headless Runs cannot become primary.
 `--dry-run` shows the exact target first.
 
 ## Which login it runs on

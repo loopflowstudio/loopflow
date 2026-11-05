@@ -10,7 +10,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -70,7 +69,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "completed": {
     "task": {
@@ -83,7 +82,6 @@
       "state": "completed",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -356,7 +354,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "stale": {
     "task": {
@@ -369,7 +367,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -616,7 +613,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "unavailable": {
     "task": {
@@ -629,7 +626,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -712,7 +708,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "user_wait": {
     "task": {
@@ -725,7 +721,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -973,7 +968,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "dirty": {
     "task": {
@@ -986,7 +981,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -1069,7 +1063,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "authored_commits": {
     "task": {
@@ -1082,7 +1076,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -1355,6 +1348,6 @@
       "merge_commit": null,
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   }
 }

@@ -281,14 +281,13 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             (profile / ".credentials.json").write_text(credential)
             now = int(time.time())
             db.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
-                "credential_state,routing_state,created_at,updated_at,observed_email,"
+                "INSERT INTO provider_accounts(provider,account_id,home,"
+                "credential_state,created_at,updated_at,observed_email,"
                 "observed_subject,observed_credential_digest) "
-                "VALUES('claude',?,?,?,'connected','automatic',?,?,?,?,?)",
+                "VALUES('claude',?,?,'connected',?,?,?,?,?)",
                 (
                     "reconnect",
                     str(profile),
-                    "reconnect@example.com",
                     now,
                     now,
                     "reconnect@example.com",
@@ -297,6 +296,12 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 ),
             )
             db.commit()
+            run(
+                "set",
+                "--global",
+                "accounts.claude.reconnect",
+                "{login_email: reconnect@example.com, routing_state: automatic}",
+            )
             (repo / ".lf/graphs").mkdir(exist_ok=True)
             (repo / ".lf/skills").mkdir(exist_ok=True)
             (repo / ".lf/graphs/reconnect.yaml").write_text("- reconnect-proof\n- cmd: context\n")

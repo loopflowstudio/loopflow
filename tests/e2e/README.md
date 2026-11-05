@@ -33,6 +33,9 @@ Include this fixture when changing Work storage or receipt field names: its SQL
 must read canonical Task fields, not retired provider JSON. To prove pending saves
 across a closed connection, make the peer unavailable during the save; short CLI
 commands attempt delivery even with Desktop closed.
+Account storage and settings migrations also reach this proof: seed runtime
+observations in SQLite and declare account preferences through `lf set`. Run both
+Linux proofs when changing that boundary; a macOS-only gate does not exercise it.
 `task_abandonment` and `local_planning` cover
 portable local decisions and deletion, retry identity and retained execution in
 both connection modes without provider access. No installation or live provider is used.

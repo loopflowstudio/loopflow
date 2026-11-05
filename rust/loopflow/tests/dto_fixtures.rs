@@ -72,7 +72,7 @@ fn wave_detail_preserves_graph_and_machine() {
     assert_eq!(snapshot.setup.graph.value.as_deref(), Some("code"));
     assert_eq!(
         snapshot.setup.skill_agents["implement"].source,
-        loopflow::work::wave::setup::SetupSource::Wave
+        loopflow::config::ConfigSource::Repository
     );
     assert_eq!(snapshot.setup.accounts["claude"].accounts, ["work"]);
     let Evidence::Ok {
@@ -87,6 +87,7 @@ fn wave_detail_preserves_graph_and_machine() {
     };
     assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
+    assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
     assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
@@ -455,6 +456,7 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.worktree.as_deref(),
         Some("/src/loopflow.workspace")
     );
+    assert!(snapshot.provider.is_none());
     assert!(snapshot.pr.is_none());
     assert!(!snapshot.branch.as_ref().unwrap().is_empty());
     assert_eq!(
@@ -1292,35 +1294,10 @@ fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run
 fn wave_graph_reports_its_default_with_or_without_a_wave() {
     let json = include_str!("../../../tests/fixtures/dto/wave_graph.json");
     let graphs: Vec<loopflow::ops::project::WaveGraph> = serde_json::from_str(json).unwrap();
-    assert_eq!(graphs[0].default.source.as_str(), "repo");
+    assert_eq!(graphs[0].default.source.as_str(), "repository");
     assert!(graphs[1].wave.is_none());
     assert_eq!(
         serde_json::to_value(&graphs).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-}
-
-#[test]
-fn task_retirement_keeps_completion_deadline_and_pending_reason() {
-    let json = include_str!("../../../tests/fixtures/dto/task_retirement.json");
-    let value: loopflow::store::sqlite::TaskRetirement = serde_json::from_str(json).unwrap();
-    assert_eq!(value.due_at, Some(1793747700));
-    assert_eq!(value.phase, "waiting");
-    assert_eq!(
-        serde_json::to_value(value).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-}
-
-#[test]
-fn task_host_owner_identifies_the_retaining_process_and_native_settlement_contract() {
-    let json = include_str!("../../../tests/fixtures/dto/task_host_owner.json");
-    let value: loopflow::store::sqlite::TaskHostOwner = serde_json::from_str(json).unwrap();
-    assert_eq!(value.pid, 1234);
-    assert_eq!(value.started_at, 1793746800);
-    assert!(value.settles_on_exit);
-    assert_eq!(
-        serde_json::to_value(value).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }

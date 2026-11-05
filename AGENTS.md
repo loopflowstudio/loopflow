@@ -155,6 +155,7 @@ When editing docs in `scratch/`:
 When changing the SQLite schema:
 - Keep one migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the one the branch already has
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix it forward
+- Destructive change is staged (Jack Heart, 2026-10-27): a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses
 - Test the merged frontier against the finished migration, not the steps between
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>`
   triggers to advance their domain in `store_revisions` inside the write.
@@ -162,6 +163,19 @@ When changing the SQLite schema:
   retain external lock guards through commit or rollback. Upgrade fixtures start
   before the whole release batch, not before a draft within it.
 - Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns
+
+When editing harness, transport or hook code (`rust/loopflow/src/harness/**`, `transport*`):
+- lf is a session manager, context adder and hook interjector on top of a harness,
+  never a middleman that can break the conversation (Jack Heart, 2026-11-05). It is
+  never in the byte path between a person and their provider except as a pass-through
+  that keeps passing when lf's own state (the store, a hook, a lock) is unavailable.
+  Every lf invocation at a turn or tool boundary is best-effort: it records a gap in
+  `logs/lf.log` instead of failing the turn, the tool or the quit. A recording gap is
+  one type, `store::RecordingGap` (`note` once per changed failure, `recovered` once);
+  hooks keep theirs in a marker file and write the gap into the Session history as a
+  `store-gap` observation when the store answers again. The Codex relay is
+  the one remaining in-path piece; it tolerates store loss, and its removal is a
+  separate Task.
 
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it
@@ -206,6 +220,7 @@ When editing Rust tests:
   replay a migration with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` (standalone binaries included) for the old name.
 - Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
+- Lifetime tests start a terminal owner with `Fixture::serve(true, …)`: a `--json` viewer on a pipe gets a pipe owner that dies with its stdin, so a retirement bug passes unseen. With `RUST_LOG` set, diagnostics go to stderr (`logs/transport.log` there), not `logs/lf.log`.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 - Prepared-command proofs execute `open_argv[0]` with its remaining arguments, including any environment wrapper. A nonzero exit alone does not prove ownership refusal; check the holder or refusal reason so a parsing error cannot pass the test.
 
@@ -298,8 +313,10 @@ history; mechanical results are step Process exits. A Session reaches its Graph
 through the step Process that captured its input. Do not replace Run with another
 generic attempt object.
 
-Main records have one SQLite owner. Every Task has a repository and optional Project membership; its Wave is derived through that Project. Constructors reject mismatched ancestry. Bind assigns an unassigned conversation once,
-including to done/landed Tasks. Prospective attribution preserves earlier usage owners; the history reader
+Main records have one SQLite owner. Every Task has a repository and optional Project membership; its Wave is derived through that Project. Constructors reject mismatched ancestry. Explicit Session bind permanently assigns an unfinished interactive conversation,
+selects it as primary and immediately sets its cwd to the Task checkout, including
+for done/landed Tasks without reopening them. Repeating bind reselects the same
+conversation; closed Sessions and headless Runs cannot become primary. Prospective attribution preserves earlier usage owners; the history reader
 owns that single choice. Actual work
 reservation claims an unowned Task in the ownership log; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither

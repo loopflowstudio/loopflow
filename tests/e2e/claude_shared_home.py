@@ -200,14 +200,13 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
             profile.mkdir(parents=True)
             (profile / ".credentials.json").write_text(_login(name))
             database.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
-                "credential_state,routing_state,created_at,updated_at,observed_email,"
+                "INSERT INTO provider_accounts(provider,account_id,home,"
+                "credential_state,created_at,updated_at,observed_email,"
                 "observed_subject,observed_credential_digest) "
-                "VALUES('claude',?,?,?,'connected','automatic',?,?,?,?,?)",
+                "VALUES('claude',?,?,'connected',?,?,?,?,?)",
                 (
                     name,
                     str(profile),
-                    f"{name}@example.com",
                     now,
                     now,
                     f"{name}@example.com",
@@ -215,6 +214,13 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
                     hashlib.sha256(_login(name).encode()).hexdigest(),
                 ),
             )
+    for name in ("first", "second"):
+        lf(
+            "set",
+            "--global",
+            f"accounts.claude.{name}",
+            f"{{login_email: {name}@example.com, routing_state: automatic}}",
+        )
 
     # A Claude started after a switch runs on the login Loopflow installed.
     use("first")

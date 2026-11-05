@@ -95,7 +95,7 @@ pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<()> {
 pub(crate) fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<String>> {
     anyhow::ensure!(config.write_scope != crate::agent::AgentWriteScope::Worktree || config.execution_boundary.is_some(), "Pi has no provider-only worktree sandbox; use a managed Task in an OS environment with the required boundary");
     let mut args = Vec::new();
-    if let Some(model) = crate::config::parse_agent(config.agent()).1 {
+    if let Some(model) = crate::config::parse_agent(config.agent()?).1 {
         args.extend(["--model".into(), model]);
     }
     if let Some(path) = context_file {
@@ -508,7 +508,8 @@ pub fn native_event() -> anyhow::Result<()> {
     let value: Value = serde_json::from_slice(&bytes)?;
     let adapter: crate::steer::SteerAdapter =
         serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store =
+        crate::store::sqlite::SqliteStore::open_for_hook(&crate::store::database_path_from_env()?)?;
     observe_native(&store, &adapter, &value)
 }
 

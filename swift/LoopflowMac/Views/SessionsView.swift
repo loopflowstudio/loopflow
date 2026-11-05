@@ -300,50 +300,18 @@ final class SessionsWorkspace {
     var disconnectedShells: Set<String> = []
     var shellScreens: [String: String] = [:]
 
-    private(set) var hostUse = "away"
-    private(set) var nativeSettled = false
-    @ObservationIgnored private var quitting = false
-    private(set) var retirement: TaskRetirement?
-    var retentionError: String?
-    @ObservationIgnored private var presenceTask: Task<Void, Never>?
-    @ObservationIgnored private var presenceRevision: Int64 = 0
-    private static let hostInstance = UUID().uuidString
+    /// Whether this Task's terminals are shown. An open LF viewer retains its
+    /// Task checkout, so departure ends this Work's viewers rather than keeping
+    /// them resident; shell and agent execution continue on their Machine.
+    private(set) var presented = false
 
-    func retain(_ retained: Bool) {
-        guard key.kind == .task, !quitting else { return }
-        let next = retained ? "retained" : "away"
-        if hostUse == next { return }
-        setHostUse(next)
-        Task { [weak self] in await self?.reportPresence() }
-    }
-
-    func closeWorkspace() {
-        guard !quitting else { return }
-        setHostUse("closed")
-        Task { [weak self] in await self?.reportPresence() }
-    }
-
-    func prepareForQuit() {
-        quitting = true
-        presenceTask?.cancel()
-        presenceTask = nil
-        // Preserve a prior explicit Close; quitting itself only releases retention.
-        setHostUse(hostUse == "closed" ? "closed" : "away")
-    }
-
-    func releaseForQuit() async {
-        await reportPresence(quitting: true)
-    }
-
-    private func setHostUse(_ state: String) {
-        hostUse = state
-        // Desktop owns presentation; the destination owns shell execution.
-        // Every release settles that presentation before reporting the fact.
-        if state != "retained" {
+    func present(_ shown: Bool) {
+        guard key.kind == .task, presented != shown else { return }
+        presented = shown
+        if !shown {
             conversationRequest = nil
             detachTerminals()
         }
-        nativeSettled = state != "retained"
     }
 
     private func detachTerminals() {
@@ -351,57 +319,6 @@ final class SessionsWorkspace {
             if case .shell(let tabs, _) = pane.content {
                 for tab in tabs { if let terminal = tab.terminal { surfaces.release(terminal) } }
             } else if let terminal = pane.terminal { surfaces.release(terminal) }
-        }
-    }
-
-    private func reportPresence(quitting: Bool = false) async {
-        guard self.quitting == quitting, !Task.isCancelled else { return }
-        guard key.kind == .task, let query = persistenceQuery, let location else { return }
-        guard let localMachineId else {
-            retentionError = "Machine identity is unavailable; retention has not been reported."
-            return
-        }
-        // Restored, unselected Work may never have passed through departure.
-        if hostUse == "away", !nativeSettled {
-            setHostUse("away")
-        }
-        let occurrence = "desktop:\(localMachineId):\(Self.hostInstance):\(key.id)"
-        let owner = Perf.processStartedAt.map {
-            TaskHostOwner(machineID: localMachineId, pid: UInt32(ProcessInfo.processInfo.processIdentifier),
-                          startedAt: Int64($0), settlesOnExit: true)
-        }
-        // The occurrence is unique to this app process; its revision needs no
-        // persistence or wall clock. Retained workspaces keep it across reopen.
-        presenceRevision += 1
-        let revision = presenceRevision
-        let observedUse = hostUse
-        let observedSettlement = nativeSettled
-        do {
-            let destination: RegistryQuery
-            let task: String
-            if location.machineId == localMachineId {
-                destination = query
-                task = key.id
-            } else {
-                guard let observed = multiplexer.layout.allPanes.first(where: { $0.content.location == location })?.executionLocation,
-                      case .recorded(let recorded, let checkout) = observed.location, checkout == location.worktree else {
-                    throw RegistryQueryError("Task retention is unknown until its remote location is observed.")
-                }
-                destination = query.onMachine(location.machineId, repository: key.repository)
-                task = recorded
-            }
-            let result = try await destination.taskPresence(task: task, occurrence: occurrence, state: observedUse, revision: revision, nativeSettled: observedSettlement, owner: owner)
-            guard !Task.isCancelled, presenceRevision == revision, hostUse == observedUse,
-                  nativeSettled == observedSettlement else { return }
-            retirement = result
-            retentionError = nil
-            if result?.phase == "closing", hostUse == "away" {
-                if case .shell(let tabs, _)? = multiplexer.shellPane?.content {
-                    disconnectedShells.formUnion(tabs.map(\.id))
-                }
-            }
-        } catch {
-            if presenceRevision == revision { retentionError = error.localizedDescription }
         }
     }
 
@@ -638,13 +555,13 @@ final class SessionsWorkspaceRegistry {
         for workspace in workspaces.values {
             let retained = visible.contains(workspace.key) || recentTasks.contains(workspace.key)
                 || warmPrimaries.contains(workspace.key)
-            if (!retained || workspace.conversationClosed) && (workspace.hostUse == "retained" || openings[workspace.key] != nil) {
+            if (!retained || workspace.conversationClosed) && (workspace.presented || openings[workspace.key] != nil) {
                 openings.removeValue(forKey: workspace.key)?.cancel()
                 for pane in workspace.multiplexer.layout.allPanes {
                     if let id = pane.sessionId { sessions?.release(id) }
                 }
             }
-            workspace.retain(retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
+            workspace.present(retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
         }
         saveWarmIntent()
         onWarmthChanged?()
@@ -836,18 +753,10 @@ final class SessionsWorkspaceRegistry {
         quitting = true
         for task in openings.values { task.cancel() }
         openings.removeAll()
-        for workspace in workspaces.values { workspace.prepareForQuit() }
         surfaces.clearFocus()
     }
 
-    func releaseForQuit() async {
-        await withTaskGroup(of: Void.self) { group in
-            for workspace in workspaces.values {
-                group.addTask { await workspace.releaseForQuit() }
-            }
-        }
-    }
-
+    /// Closing the window ends its terminal viewers; Work and history remain.
     func closePresentation() {
         guard !quitting else { return }
         presentationClosed = true
@@ -856,7 +765,7 @@ final class SessionsWorkspaceRegistry {
         saveWarmIntent()
         for task in openings.values { task.cancel() }
         openings.removeAll()
-        for workspace in workspaces.values { workspace.closeWorkspace() }
+        for workspace in workspaces.values { workspace.present(false) }
         surfaces.clearFocus()
         onPreparationFinished?()
     }
@@ -997,7 +906,25 @@ final class SessionsWorkspaceRegistry {
     }
 
     /// A partial inventory can update content location, never remove a Work tab.
-    func reconcileMembership(_ records: [SessionRecord]) {
+    @discardableResult
+    func reconcileMembership(_ records: [SessionRecord]) -> WorkReference? {
+        var selection: WorkReference?
+        for record in records {
+            guard let localMachineId, record.workspace?.machineId == localMachineId,
+                  record.work?.kind == .task, let task = record.work?.id,
+                  let sourceKey = key(containingSession: record.id),
+                  let source = retained(sourceKey) else { continue }
+            let destination = WorkWorkspaceKey(repository: sourceKey.repository, kind: .task, id: task)
+            guard sourceKey != destination else { continue }
+            let target = workspace(for: destination, title: record.title, location: record.workspace?.identity)
+            revealSession(record, in: target)
+            target.presentation.selectedSessionId = record.id
+            target.presentation.content = .terminals
+            if selectedWork == sourceKey, source.presentation.selectedSessionId == record.id {
+                selection = destination.reference
+            }
+            source.presentation.selectedSessionId = nil
+        }
         for workspace in workspaces.values {
             for record in records {
                 let belongs: Bool?
@@ -1016,6 +943,7 @@ final class SessionsWorkspaceRegistry {
                 else { workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity) }
             }
         }
+        return selection
     }
 
     /// One native occurrence per repository. A deliberate eligible Work opening can
@@ -1516,7 +1444,10 @@ private struct SessionsReconciler: View {
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                       let records else { return }
                 store.reconcile(records)
-                if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.openWarmConversations() }
+                if model.sessions.errorMessage == nil {
+                    if let selection = workspaces.reconcileMembership(records) { model.select(selection) }
+                    model.openWarmConversations()
+                }
             }
             .onChange(of: model.roadmap.value) { _, _ in
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
@@ -1745,19 +1676,6 @@ struct SessionsContentView: View {
         let active = currentKey == key
         let terminals = showsTerminals(key, task?.task, entry)
         return VStack(spacing: 0) {
-            if let error = entry.retentionError {
-                Text("Workspace cleanup pending: " + error).font(.caption).textSelection(.enabled).padding(6)
-            } else if let retirement = entry.retirement {
-                if retirement.phase == "retired" {
-                    Text("Task workspace retired. Conversation history remains available.").font(.caption).padding(6)
-                } else if let reason = retirement.reason, reason != "Retained by a host" {
-                    Text("Workspace cleanup pending: " + reason).font(.caption).textSelection(.enabled).padding(6)
-                } else if retirement.phase == "closing" {
-                    Text("Closing the completed Task workspace after its work settles.").font(.caption).padding(6)
-                } else if let due = retirement.dueAt {
-                    Text("Completed workspace retained until " + Date(timeIntervalSince1970: TimeInterval(due)).formatted(date: .omitted, time: .shortened)).font(.caption).padding(6)
-                }
-            }
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
                 HStack {
@@ -1984,15 +1902,6 @@ extension SessionsWorkspace {
         persistenceQuery = query
         persistenceRepo = repoPath
         persistenceTask = Task { [weak self] in await self?.loadPaneIntent() }
-        if key.kind == .task {
-            presenceTask = Task { [weak self] in
-                while !Task.isCancelled {
-                    guard self != nil else { return }
-                    await self?.reportPresence()
-                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
-                }
-            }
-        }
     }
 
     func portableLayout() -> WorkPaneLayout {

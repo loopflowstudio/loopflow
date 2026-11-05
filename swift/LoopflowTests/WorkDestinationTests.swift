@@ -883,8 +883,7 @@ struct WorkDestinationTests {
         let task = try #require(snapshot.waves.first?.tasks.items.first)
         let exact = try oneTask(data, taskId: task.id)
         let barrier = LinkedDestinationBarrier()
-        let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            if args.contains("presence") { return "null" }
+        let (model, _) = destinationModel(query: RegistryQuery { _, _ in
             await barrier.wait("read")
             return exact
         })

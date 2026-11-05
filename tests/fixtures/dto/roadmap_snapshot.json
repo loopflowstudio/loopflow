@@ -164,7 +164,6 @@
           "state": "unstarted",
           "completed_at": null,
           "due_date": null,
-          "regressed_in": null,
           "sync": {
             "connected": false,
             "changes": []
@@ -407,7 +406,7 @@
           "reason": "CI running on #1650"
         },
         "pr": null,
-        "graph_source": "task"
+        "graph_source": null
       },
       {
         "task": {
@@ -420,7 +419,6 @@
           "state": "unstarted",
           "completed_at": null,
           "due_date": null,
-          "regressed_in": null,
           "sync": {
             "connected": false,
             "changes": []
@@ -695,7 +693,7 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "graph_source": "task"
+        "graph_source": null
       },
       {
         "task": {
@@ -708,7 +706,6 @@
           "state": "unstarted",
           "completed_at": null,
           "due_date": null,
-          "regressed_in": null,
           "sync": {
             "connected": false,
             "changes": []
@@ -768,7 +765,7 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": "task"
+        "graph_source": null
       },
       {
         "task": {
@@ -781,7 +778,6 @@
           "state": "completed",
           "completed_at": null,
           "due_date": null,
-          "regressed_in": null,
           "sync": {
             "connected": false,
             "changes": []
@@ -864,7 +860,7 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": "task"
+        "graph_source": null
       }
     ],
     "truncated": false

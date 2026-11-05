@@ -102,7 +102,8 @@ pub(crate) fn spawn_native(
     let (store, session, attachment) = owner;
     crate::agent_input_timing::record("provider_spawn_begin", session);
     steer_environment(&mut command, owner)?;
-    store
+    let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
+    let child = store
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
@@ -121,7 +122,11 @@ pub(crate) fn spawn_native(
             // Preserve the OS error (including NotFound) for the caller's message.
             Ok(spawned)
         })?
-        .map_err(Into::into)
+        .map_err(anyhow::Error::from)?;
+    if let Some(cwd) = cwd {
+        crate::transport::report_directory(&cwd);
+    }
+    Ok(child)
 }
 
 fn steer_environment(
@@ -410,13 +415,14 @@ fn close_agent_process(pid: u32, started: i64) -> Result<()> {
 
 // Leader death alone neither proves group death nor authorizes signaling helpers.
 fn confirmed_group_death(pid: u32) -> Result<()> {
+    crate::os_process::release_agent_lifeline(pid);
     let mut survivors = OsProcess::group(pid)?;
-    if crate::os_process::release_agent_lifeline(pid) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while !survivors.is_empty() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(25));
-            survivors = OsProcess::group(pid)?;
-        }
+    // Recovery in another process holds no lifeline writer, but can still
+    // observe helpers finishing the previous owner's teardown.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !survivors.is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        survivors = OsProcess::group(pid)?;
     }
     if !survivors.is_empty() {
         return Err(anyhow!(

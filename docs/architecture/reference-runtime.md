@@ -93,7 +93,8 @@ completion or cancellation. Git/PR delivery still needs its own evidence. Fresh
 work starts another Graph after inspecting existing execution.
 
 Independent helpers may carry the same Task and independent Git/PR
-operations. Binding to done Work assigns a conversation without reopening it.
+operations. Binding selects an unfinished interactive conversation for done Work without
+reopening the Work.
 Legacy review boundaries remain readable history when their Work is terminal.
 
 Chapter rotation preserves Task, LfSession, PR and worktree

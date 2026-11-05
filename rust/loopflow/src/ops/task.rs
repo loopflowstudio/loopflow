@@ -1,3 +1,5 @@
+pub(crate) mod adoption;
+pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 pub mod workspace;
 pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
@@ -45,8 +47,8 @@ pub mod ship;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
+use crate::config::ConfigSource;
 use crate::work::task::comment::TaskComments;
-use crate::work::wave::setup::SetupSource;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -80,7 +82,6 @@ pub enum TaskWaitUntil {
 pub struct TaskProcessOptions {
     pub wave: Option<String>,
     pub reason: Option<String>,
-    pub agent: Option<String>,
     pub name: Option<String>,
     pub graph: Option<String>,
     /// The step `lf task run --from` starts the Task's Graph at.
@@ -168,8 +169,7 @@ pub struct TaskSnapshot {
     pub workspace_slug: String,
     pub branch: Option<String>,
     pub base_commit: Option<String>,
-    pub agent: Option<String>,
-    pub provider: String,
+    pub provider: Option<String>,
     pub pr: Option<TaskPr>,
     pub latest_event: Option<crate::work::task::TaskEvent>,
     #[serde(with = "time::serde::rfc3339")]
@@ -433,6 +433,11 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         // tip. That commit is its base now; one missing both is refused later.
         let fork_base = match parent.merge_commit.as_deref() {
             Some(merge) if contains_commit(worktree, merge)? => merge.to_string(),
+            _ if !crate::git::commit_exists(worktree, &task.base_commit)? => {
+                // Recover from shared Git history without changing placement on
+                // a read. The owned sync records its verified target on success.
+                crate::git::merge_base(worktree, "HEAD", &format!("origin/{}", parent.branch))?
+            }
             _ => task.base_commit.clone(),
         };
         Ok(Some(StackedSync {
@@ -463,7 +468,7 @@ pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
 }
 
 /// Persist the exact base reached by a successful deterministic sync. Clear
-/// the parent link only when its work is now present on the default branch.
+/// the parent link after landing or an explicitly requested default-branch sync.
 /// Refuses with an actionable authority error if the registry is not usable, so
 /// a post-sync base is never silently dropped — the sync already pushed, so
 /// the operator must know the durable record did not advance with it.
@@ -476,6 +481,19 @@ pub fn record_stack_sync(
     let new_base = new_base.to_string();
     block_on_task(async move {
         let store = task_store().await?;
+        if clear_parent {
+            if let Some(pr) = store.active_task_pr(&task_id).await.map_err(task_error)? {
+                if let Some(github) = pr.github() {
+                    let worktree = stacked.child.worktree()?;
+                    crate::ops::pr::retarget_pr(
+                        worktree,
+                        u64::from(github.number),
+                        &crate::git::get_default_branch(worktree)?,
+                        &|_| {},
+                    )?;
+                }
+            }
+        }
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // sync only repoints the mutable row to the post-merge truth.
@@ -533,8 +551,8 @@ pub enum TaskRunStart {
     Ended,
 }
 
-/// Place the Task and fill what a run leaves unsaid: `agent` as the Task's
-/// agent, `reason` as a steer, and where the run begins. A Task keeps the
+/// Place the Task, record `reason` as a steer, and select where the run begins.
+/// Agent selection belongs to this execution only. A Task keeps the
 /// graph it took up; naming another takes that one up, and a Task with none
 /// takes up its Wave's, its repository's, or `code`.
 pub fn task_place(
@@ -546,7 +564,6 @@ pub fn task_place(
     let TaskProcessOptions {
         graph,
         from,
-        agent,
         reason,
         ..
     } = options.clone();
@@ -564,7 +581,7 @@ pub fn task_place(
             .map_err(task_error)?;
         let start =
             start_task_run(&store, &mut task, graph.as_deref(), from.as_deref(), mode).await?;
-        select_task_agent(&store, &mut task, agent.as_deref()).await?;
+
         if let Some(reason) = reason {
             append_task_comment(&store, &task, reason, true)?;
         }
@@ -612,7 +629,7 @@ impl TaskRunSelection {
 
 /// The graph a Task takes up when it names none: your `lf set graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
-pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, SetupSource)> {
+pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
     let repo = repository_for_task(store, task)?;
     let wave = match &task.wave_id {
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
@@ -626,10 +643,17 @@ pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(Strin
 pub(crate) fn scope_graph_default(
     repo: &Path,
     wave: Option<&str>,
-) -> OpsResult<(String, SetupSource)> {
+) -> OpsResult<(String, ConfigSource)> {
     let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
-    let (name, layer) = crate::config::graph_setting(&layers).map_err(task_error)?;
-    Ok((name, layer.map_or(SetupSource::Default, SetupSource::from)))
+    let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
+    let source = resolved.settings["graph"]
+        .selected()
+        .expect("graph has a builtin default")
+        .source;
+    Ok((
+        resolved.config.graph.expect("graph has a builtin default"),
+        source,
+    ))
 }
 
 /// Load `name` from `repo`, or name the graphs it could have been;
@@ -951,7 +975,7 @@ fn prepare_task(
                     .map_err(task_error)?);
             let placement =
                 prepare_task_placement(&store, &main, &task, branch.as_deref(), &options).await?;
-            let task = place_prepared_task(&store, &task.id, placement).await?;
+            let task = place_prepared_task(&store, &task.id, placement, &options).await?;
             // The checkout claimed the Task; Linear learns who took it.
             let repository = repository_for_task(&store, &task)?;
             super::task_ownership::assert_assignee(&store.sqlite, &repository, &task.id).await;
@@ -1184,8 +1208,36 @@ struct TaskPlacement {
     workspace_slug: String,
     stack_parent: Option<TaskPr>,
     github: Option<GithubPr>,
-    requested_agent: Option<String>,
-    directive: Option<String>,
+}
+
+impl TaskPlacement {
+    fn pr(&self, task_id: &crate::durable::TaskId) -> TaskPr {
+        let now = time::OffsetDateTime::now_utc();
+        TaskPr {
+            id: TaskPrId::new(),
+            task_id: task_id.clone(),
+            sequence: 1,
+            slug: self.workspace_slug.clone(),
+            branch: self.plan.branch.clone(),
+            base_commit: self.plan.base_ref.clone(),
+            parent_pr_id: self.stack_parent.as_ref().map(|parent| parent.id.clone()),
+            publication: self.github.clone().map(|github| PrPublication {
+                requested_at: now,
+                presentation: None,
+                github: Some(github),
+                merge: None,
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 }
 
 fn plan_task_placement(
@@ -1289,16 +1341,21 @@ async fn prepare_task_placement(
     options: &TaskProcessOptions,
 ) -> OpsResult<TaskPlacement> {
     options.validate_directive(None)?;
-    let directive = options
-        .directive
-        .as_deref()
-        .map(str::trim)
-        .map(str::to_owned);
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
     fetch_task_refs(main_repo)?;
-    let (mut plan, workspace_slug) =
-        plan_task_placement(main_repo, task, recorded_branch, options)?;
+    let (plan, workspace_slug) = plan_task_placement(main_repo, task, recorded_branch, options)?;
     let stack_parent = select_new_stack_parent(store, task, options.stack_on.as_deref()).await?;
+    let observe_pr = recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create;
+    prepare_placement(main_repo, plan, workspace_slug, stack_parent, observe_pr)
+}
+
+fn prepare_placement(
+    main_repo: &Path,
+    mut plan: PlacementPlan,
+    workspace_slug: String,
+    stack_parent: Option<TaskPr>,
+    observe_pr: bool,
+) -> OpsResult<TaskPlacement> {
     let mut base_commit = match &stack_parent {
         Some(parent) => {
             let base_ref = format!("origin/{}", parent.branch);
@@ -1311,7 +1368,7 @@ async fn prepare_task_placement(
             base_commit
         }
     };
-    let github = if recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create {
+    let github = if observe_pr {
         super::pr::branch_pr(main_repo, &plan.branch)?
             .map(|pr| {
                 Ok::<_, OpsError>(GithubPr {
@@ -1340,8 +1397,6 @@ async fn prepare_task_placement(
         workspace_slug,
         stack_parent,
         github,
-        requested_agent: options.agent.clone(),
-        directive,
     })
 }
 
@@ -1349,15 +1404,8 @@ async fn place_prepared_task(
     store: &SharedStore,
     task_id: &crate::durable::TaskId,
     prepared: TaskPlacement,
+    options: &TaskProcessOptions,
 ) -> OpsResult<Task> {
-    let TaskPlacement {
-        plan,
-        workspace_slug,
-        stack_parent,
-        github,
-        requested_agent,
-        directive,
-    } = prepared;
     let (mut task, acquisition) = loop {
         let task = store
             .get_task(task_id)
@@ -1391,46 +1439,21 @@ async fn place_prepared_task(
     }
     if task.worktree.is_some() {
         restore_task_checkout(store, &task, None).await?;
-        select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
         return Ok(task);
     }
-    let now = time::OffsetDateTime::now_utc();
-    let pr = TaskPr {
-        id: TaskPrId::new(),
-        task_id: task.id.clone(),
-        sequence: 1,
-        slug: workspace_slug.clone(),
-        branch: plan.branch.clone(),
-        base_commit: plan.base_ref.clone(),
-        parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
-        publication: github.map(|github| PrPublication {
-            requested_at: now,
-            presentation: None,
-            github: Some(github),
-            merge: None,
-        }),
-        merge_commit: None,
-        abandoned_at: None,
-        ci_observation: None,
-        github_observation: None,
-        linear_attachment_id: None,
-        linear_comment_id: None,
-        linear_link_error: None,
-        created_at: now,
-        updated_at: now,
-    };
+    let pr = prepared.pr(task_id);
 
     task = store
         .place_task(
             &task.id,
-            &plan.worktree_path,
-            &workspace_slug,
+            &prepared.plan.worktree_path,
+            &prepared.workspace_slug,
             &pr,
             acquisition,
         )
         .await
         .map_err(task_error)?;
-    if let Some(direction) = directive.as_deref() {
+    if let Some(direction) = options.directive.as_deref().map(str::trim) {
         append_task_comment(store, &task, direction, true)?;
     }
     // A competing reservation may have won. Restore its persisted placement,
@@ -1450,7 +1473,6 @@ async fn place_prepared_task(
         }
         return Err(error);
     }
-    select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
     Ok(task)
 }
 
@@ -1473,25 +1495,37 @@ pub fn task_create(
     wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
-    regressed_in: Option<String>,
+    adoption: TaskAdoptionOptions,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
-    let regression = regressed_in.map(|version| crate::work::task::TaskUpdate {
-        regressed_in: Some(version),
-        ..Default::default()
-    });
-    if let Some(update) = &regression {
-        validate_task_edit_input(update)?;
-    }
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
-        let store = super::planning_sync::planning_store().await?;
+        let store = Arc::new(super::planning_sync::planning_store().await?);
         if let Err(error) =
             super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
         {
             tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
         }
 
+        let source = adoption::resolve_source(&store, repo, &adoption).await?;
+        if let Some(task) = source.task.as_ref() {
+            if let Some(selected) = select_task_creation_wave(&store, &main, wave).await? {
+                if task.wave_id.as_ref() != Some(selected.id()) {
+                    return Err(task_error(format!(
+                        "{} already belongs to different planning; use `lf task move` or file separate work without --session or --worktree",
+                        task.identifier,
+                    )));
+                }
+            }
+            let task =
+                adoption::save(&store, &main, task.id.clone(), None, source, None, false).await?;
+            super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
+            return store
+                .get_task(&task.id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("Promoted Task is missing"));
+        }
         if let Some(name) = wave {
             let locator =
                 crate::work::wave::WaveLocator::discover(&main, name).map_err(task_error)?;
@@ -1517,26 +1551,24 @@ pub fn task_create(
             .sqlite
             .ensure_repository(&main.to_string_lossy())
             .map_err(task_error)?;
-        let task = store
-            .create_task(
-                &crate::work::task::NewTask {
-                    due_date: None,
-                    id: crate::durable::TaskId::new(),
-                    repository_id,
-                    project_id: creation_project,
-                    title: input.title,
-                    description: input.report,
-                },
-                acquisition,
-            )
-            .await
-            .map_err(task_error)?;
-        if let Some(update) = &regression {
-            store
-                .edit_task(&task.id, task.revision, update)
-                .await
-                .map_err(task_error)?;
-        }
+        let creation = crate::work::task::NewTask {
+            due_date: None,
+            id: crate::durable::TaskId::new(),
+            repository_id,
+            project_id: creation_project,
+            title: input.title,
+            description: input.report,
+        };
+        let task = adoption::save(
+            &store,
+            &main,
+            creation.id.clone(),
+            Some(creation),
+            source,
+            acquisition,
+            false,
+        )
+        .await?;
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
         store
             .get_task(&task.id)
@@ -1584,36 +1616,19 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
     title
 }
 
-/// The Task's agent, else its Wave's and repository's configuration.
+/// Current launch preferences at the Task checkout, with no saved Task agent.
 pub(crate) fn resolve_task_agent(
     worktree: &Path,
     wave: Option<&str>,
     personal: &crate::config::PersonalSettings,
-    agent: Option<&str>,
     skill: Option<&crate::graph::Skill>,
-) -> String {
-    let config = crate::config::load_wave_config_with(Some(worktree), wave, personal)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    crate::prompt::process::resolve_agent(agent, skill, &config)
-}
-
-async fn select_task_agent(
-    store: &SharedStore,
-    task: &mut Task,
-    agent: Option<&str>,
-) -> OpsResult<()> {
-    if let Some(agent) = agent {
-        checkout_execution_boundary(task.worktree()?, agent)
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .set_task_agent(&task.id, agent)
-            .await
-            .map_err(|error| task_error(format!("failed to save Task agent: {error}")))?;
-        task.agent = Some(agent.to_string());
-    }
-    Ok(())
+) -> OpsResult<String> {
+    let config =
+        crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
+    Ok(crate::config::settings::resolve(&config, skill)?
+        .config
+        .agent()?
+        .to_owned())
 }
 
 fn task_configuration_refusal(
@@ -1623,12 +1638,18 @@ fn task_configuration_refusal(
     skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
-    checkout_execution_boundary(
-        worktree,
-        &resolve_task_agent(worktree, wave, personal, task.agent.as_deref(), skill),
-    )
-    .err()
-    .map(|error| error.to_string())
+    // A Graph's steps may choose different agents; no general preference is
+    // required to inspect or start the Graph. Each launch resolves its own choice.
+    let agent = match resolve_task_agent(worktree, wave, personal, skill) {
+        Ok(agent) => agent,
+        Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
+            return None
+        }
+        Err(error) => return Some(error.to_string()),
+    };
+    checkout_execution_boundary(worktree, &agent)
+        .err()
+        .map(|error| error.to_string())
 }
 
 /// Why the Task cannot start a process: its configuration, else a
@@ -2263,7 +2284,7 @@ pub struct TaskEdit {
 pub(crate) fn validate_task_edit_input(update: &crate::work::task::TaskUpdate) -> OpsResult<()> {
     if *update == crate::work::task::TaskUpdate::default() {
         return Err(task_error(
-            "task edit requires --title, --notes, --rank, --assignee or --regressed-in",
+            "task edit requires --title, --notes, --rank or --assignee",
         ));
     }
     if update
@@ -2272,13 +2293,6 @@ pub(crate) fn validate_task_edit_input(update: &crate::work::task::TaskUpdate) -
         .is_some_and(|title| title.trim().is_empty())
     {
         return Err(task_error("Task title cannot be empty"));
-    }
-    if let Some(version) = &update.regressed_in {
-        if crate::work::task::release_version(version).as_ref() != Some(version) {
-            return Err(task_error(format!(
-                "--regressed-in {version:?} is not a release version like v0.15.3"
-            )));
-        }
     }
     Ok(())
 }

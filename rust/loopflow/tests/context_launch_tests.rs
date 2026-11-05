@@ -843,7 +843,7 @@ fn graph_context_preview_preserves_absent_store_and_captured_first_skill() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
+        "agent: codex\ncontext: {diff: false, diff_files: false, paste: false}\n",
     );
     repo.create_file(".lf/skills/probe.md", "First input marker.");
     repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
@@ -934,7 +934,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
+        "agent: codex\ncontext: {diff: false, diff_files: false, paste: false}\n",
     );
     repo.create_file(".lf/graphs/inspect.yaml", "- repo/operate\n");
     let preview = |args: &[&str]| {

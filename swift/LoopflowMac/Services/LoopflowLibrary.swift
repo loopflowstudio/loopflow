@@ -6,6 +6,16 @@ import LoopflowFFI
 /// Loopflow's reads and writes served inside the app by its Rust library
 /// (`loopflow.h`), with no `lf` process. Each returns what its `lf` command prints.
 enum LoopflowLibrary {
+    /// File preferences remain available before the Work store is compatible.
+    static func configuration(_ request: [String: Any]) throws -> Data {
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
+        var error: UnsafeMutablePointer<CChar>?
+        let result = lf_config(json, &error)
+        if let error = take(error) { throw RegistryQueryError(error) }
+        guard let text = result.flatMap(take) else { throw RegistryQueryError("Settings returned no value") }
+        return Data(text.utf8)
+    }
+
     /// Serve `read` as `lf <read> --watch` streams it. Loopflow's
     /// wakeup only schedules a pull on this watch's own queue, where the
     /// reading runs; nothing reads on the caller's thread.

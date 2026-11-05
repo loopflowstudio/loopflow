@@ -14,9 +14,22 @@ struct RepositoryWorkspace: Codable, Hashable, Sendable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
+/// Quit fences window teardown so closing windows cannot erase saved warm intent.
+/// Terminal viewers end with the app; no departure is reported.
+@MainActor
+final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
+    let workspaces = RepositoryWorkspaces(
+        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId,
+        runtime: .shared)
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        workspaces.prepareForQuit()
+        return .terminateNow
+    }
+}
+
 /// Application lifetime, keyed by the stable repository scene resolved by WorkLinkRouter.
-/// Closing a window releases host retention. Work and history stay discoverable;
-/// execution and completed-Task retirement settle through lf.
+/// Closing a window releases its mounts, not its Work, drafts or terminal surfaces.
 @MainActor
 final class RepositoryWorkspaces {
     private var repositories: [String: SessionsWorkspaceRegistry] = [:]
@@ -33,29 +46,6 @@ final class RepositoryWorkspaces {
         self.runtime = runtime
     }
 
-    func prepareForQuit() {
-        for registry in repositories.values { registry.prepareForQuit() }
-    }
-
-    /// Every destination gets an independent release attempt within one quit budget.
-    func releaseForQuit(timeout: Duration = .seconds(5)) async {
-        await withTaskGroup(of: Bool.self) { group in
-            for registry in repositories.values {
-                group.addTask {
-                    await registry.releaseForQuit()
-                    return true
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return false
-            }
-            var pending = repositories.count
-            while pending > 0, await group.next() == true { pending -= 1 }
-            group.cancelAll()
-        }
-    }
-
     func registry(for repository: String) -> SessionsWorkspaceRegistry {
         if let retained = repositories[repository] { return retained }
         let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId, runtime: runtime)
@@ -69,6 +59,10 @@ final class RepositoryWorkspaces {
             for registry in self.repositories.values { registry.continueOpenings() }
         }
         return registry
+    }
+
+    func prepareForQuit() {
+        for registry in repositories.values { registry.prepareForQuit() }
     }
 
     /// Repository pools own their views. The application bounds their combined
@@ -94,27 +88,6 @@ final class RepositoryWorkspaces {
         }
     }
 
-}
-
-/// AppKit waits for acknowledged departure, bounded independently of cleanup grace.
-@MainActor
-final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
-    let workspaces = RepositoryWorkspaces(
-        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId,
-        runtime: .shared)
-    private var release: Task<Void, Never>?
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if release == nil {
-            // Fence window-close notifications and retention heartbeats before yielding.
-            workspaces.prepareForQuit()
-            release = Task {
-                await workspaces.releaseForQuit()
-                sender.reply(toApplicationShouldTerminate: true)
-            }
-        }
-        return .terminateLater
-    }
 }
 
 /// Queues are keyed before a window is requested. Registration order and focus

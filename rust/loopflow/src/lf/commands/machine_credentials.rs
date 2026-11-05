@@ -1026,8 +1026,10 @@ pub(super) async fn prepare_launch(
     let launch_provider = if requested.is_empty() && launching {
         let repo = super::util::find_repo_root().ok();
         let config = crate::config::load_config_or_default(repo.as_deref());
-        let agent = cli.agent.as_deref().unwrap_or_else(|| config.agent());
-        crate::config::parse_agent(agent).0.parse::<Provider>().ok()
+        cli.agent
+            .as_deref()
+            .or_else(|| config.agent().ok())
+            .and_then(|agent| crate::config::parse_agent(agent).0.parse::<Provider>().ok())
     } else {
         None
     };

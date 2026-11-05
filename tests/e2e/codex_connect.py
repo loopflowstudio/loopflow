@@ -324,7 +324,12 @@ enabled = false
                     if args.planning_peers:
                         server.hold_seconds = 90
                         results["planning_peers"] = _live_attachment_contract(
-                            binary, work, env, server, shared_agent_process=False, planning_peers=True
+                            binary,
+                            work,
+                            env,
+                            server,
+                            shared_agent_process=False,
+                            planning_peers=True,
                         )
                         return
                     if args.public_connect:
@@ -451,7 +456,7 @@ def _provider_entry() -> None:
         }
         with open(record, "a") as log:
             log.write(json.dumps(launch) + "\n")
-        if "resume" in sys.argv and "--remote" not in sys.argv:
+        if "resume" in sys.argv and not os.environ.get("LF_PROBE_CLIENT"):
             return
     if "app-server" in sys.argv:
         pid = os.getpid()
@@ -811,7 +816,9 @@ def _public_connection_contract(
                     ).fetchall()
                 assert selected == thread
                 assert recovered_events[: len(retained_events)] == retained_events
-                assert len(set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) - launches) == 1
+                assert (
+                    len(set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) - launches) == 1
+                )
                 planning_exchange("dead-driver-resume", session)
                 server.release.set()
                 _, error = recovered.communicate(timeout=20)
@@ -875,16 +882,28 @@ def _live_attachment_contract(
         now = int(time.time())
         with sqlite3.connect(_database(env)) as database:
             database.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
-                "credential_state,routing_state,created_at,updated_at) "
-                "VALUES('codex','peer-fixture',?,'peer-fixture@example.com',"
-                "'connected','automatic',?,?)",
+                "INSERT INTO provider_accounts(provider,account_id,home,"
+                "credential_state,created_at,updated_at) "
+                "VALUES('codex','peer-fixture',?,'connected',?,?)",
                 (str(profile), now, now),
             )
             database.execute(
                 "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?,?,'review',1)",
                 (task, json.dumps(graph)),
             )
+        declared = _command(
+            [
+                str(binary),
+                "set",
+                "--global",
+                "accounts.codex.peer-fixture",
+                "{login_email: peer-fixture@example.com, routing_state: automatic}",
+            ],
+            work,
+            env,
+            timeout=30,
+        )
+        assert declared.returncode == 0, declared.stderr
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
     with sqlite3.connect(_database(env)) as database:
         existing = {row[0] for row in database.execute("SELECT id FROM agent_sessions")}
@@ -1157,24 +1176,36 @@ def _shared_provider_home_contract(
             profile.mkdir(parents=True)
             (profile / "auth.json").write_text(_login(name))
             database.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
-                "credential_state,routing_state,created_at,updated_at) "
-                "VALUES('codex',?,?,?,'connected','automatic',?,?)",
-                (name, str(profile), f"{name}@example.com", now, now),
+                "INSERT INTO provider_accounts(provider,account_id,home,"
+                "credential_state,created_at,updated_at) "
+                "VALUES('codex',?,?,'connected',?,?)",
+                (name, str(profile), now, now),
             )
+    for name in ("first", "second"):
+        lf(
+            "set",
+            "--global",
+            f"accounts.codex.{name}",
+            f"{{login_email: {name}@example.com, routing_state: automatic}}",
+        )
 
     # A native login Loopflow has never seen is kept, not overwritten.
     stranger = _login("stranger")
     (native / "auth.json").write_text(stranger)
     use("first")
     assert login(native) == "first@example.com"
-    kept = rows(
-        "SELECT home,routing_state FROM provider_accounts WHERE login_email=?",
-        "stranger@example.com",
-    )
-    assert len(kept) == 1 and kept[0][1] == "explicit_only", kept
-    assert (Path(kept[0][0]) / "auth.json").read_text() == stranger
-    results["unknown_native_login_kept"] = kept[0][0]
+    kept = [
+        account
+        for account in json.loads(lf("account", "codex", "--cached", "--json"))["accounts"]
+        if account["scope"] == "managed" and account["login"] == "stranger@example.com"
+    ]
+    assert len(kept) == 1 and kept[0]["routing"] == "explicit_only", kept
+    kept_home = rows(
+        "SELECT home FROM provider_accounts WHERE provider='codex' AND account_id=?",
+        kept[0]["account_id"],
+    )[0][0]
+    assert (Path(kept_home) / "auth.json").read_text() == stranger
+    results["unknown_native_login_kept"] = kept_home
 
     # A launch naming no account, or the active one, changes nothing; neither
     # hands the provider a home or a credential.
@@ -1189,7 +1220,7 @@ def _shared_provider_home_contract(
 
     # A provider's id names the same Session as Loopflow's own.
     def session(id: str) -> dict:
-        return json.loads(lf("session", "resume", id, "--json"))
+        return json.loads(lf("session", "resume", id, "--prepare", "--json"))
 
     def history(id: str) -> list:
         return json.loads(lf("session", "history", id, "--json"))

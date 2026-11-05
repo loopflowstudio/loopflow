@@ -481,9 +481,9 @@ shared home, where running Claude picks it up. A Claude access token lasts
 about 8 hours, so a rental's Claude stops about that long after the laptop last
 renewed it. A connect, by hand or before a launch, sends the next token once
 the rental's is within two hours of expiry, and so does the install schedule
-every 2 hours (`lf machine credentials renew`; nothing when no rental is live).
-After a refresh, the laptop sends the new token to every live rental at once. The rental registers the identity
-the laptop verified. Only `sk-ant-oat` subscription tokens are accepted; an API
+every 2 hours (`lf machine credentials renew`; nothing when no rental is
+live). After a refresh, the laptop sends the new token to every live rental at
+once. The rental registers the identity the laptop verified. Only `sk-ant-oat` subscription tokens are accepted; an API
 key bills per token. A background run skips an account whose rental login still
 needs an approval, and `-b --rent` refuses before renting when no account has one.
 

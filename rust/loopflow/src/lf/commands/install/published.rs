@@ -719,28 +719,13 @@ fn launchd_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
 }
 
 fn renewal_plist(home: &Path, binary: &Path, logs: &Path) -> String {
-    let escape = |path: &Path| {
-        path.to_string_lossy()
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-    };
-    let binary_path = escape(binary);
-    let bin = escape(binary.parent().expect("installation binary has a parent"));
-    let home = escape(home);
-    let log = escape(&logs.join("rental-renewal.log"));
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>{RENEWAL_LABEL}</string>
-<key>ProgramArguments</key><array><string>{binary_path}</string><string>machine</string><string>credentials</string><string>renew</string></array>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
-<key>StartInterval</key><integer>{RENEWAL_SECONDS}</integer>
-<key>StandardOutPath</key><string>{log}</string>
-<key>StandardErrorPath</key><string>{log}</string>
-</dict></plist>
-"#
+    launch_agent_plist(
+        RENEWAL_LABEL,
+        home,
+        binary,
+        &["machine", "credentials", "renew"],
+        &logs.join("rental-renewal.log"),
+        &format!("<key>StartInterval</key><integer>{RENEWAL_SECONDS}</integer>"),
     )
 }
 
@@ -830,13 +815,13 @@ fn cron_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
 }
 
 fn renewal_cron_line(home: &Path, binary: &Path, logs: &Path) -> String {
-    let bin = binary.parent().expect("installation binary has a parent");
-    format!(
-        "0 */2 * * * PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' machine credentials renew >> '{}' 2>&1 {RENEWAL_CRON_MARKER}",
-        bin.display(),
-        home.display(),
-        binary.display(),
-        logs.join("rental-renewal.log").display()
+    cron_entry(
+        "0 */2 * * *",
+        home,
+        binary,
+        "machine credentials renew",
+        &logs.join("rental-renewal.log"),
+        RENEWAL_CRON_MARKER,
     )
 }
 
@@ -847,14 +832,34 @@ fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequenc
         InstallFrequency::Hourly => "0 * * * *",
         InstallFrequency::FiveMinutes => "*/5 * * * *",
     };
+    cron_entry(
+        when,
+        home,
+        binary,
+        "install",
+        &logs.join("refresh.log"),
+        CRON_MARKER,
+    )
+}
+
+/// One crontab line running the installed `lf <command>` with its install
+/// directory and PATH, appending to `log`, owned by `marker`.
+fn cron_entry(
+    when: &str,
+    home: &Path,
+    binary: &Path,
+    command: &str,
+    log: &Path,
+    marker: &str,
+) -> String {
     let bin = binary.parent().expect("installation binary has a parent");
     format!(
-        "{when} LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' install >> '{}' 2>&1 {CRON_MARKER}",
+        "{when} LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' {command} >> '{}' 2>&1 {marker}",
         bin.display(),
         bin.display(),
         home.display(),
         binary.display(),
-        logs.join("refresh.log").display()
+        log.display()
     )
 }
 
@@ -885,26 +890,50 @@ fn schedule_calendar(frequency: InstallFrequency) -> String {
 }
 
 fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
+    launch_agent_plist(
+        "com.loopflow.refresh",
+        home,
+        binary,
+        &["install"],
+        &logs.join("refresh.log"),
+        &format!(
+            "<key>RunAtLoad</key><true/>\n<key>StartCalendarInterval</key>{}",
+            schedule_calendar(frequency)
+        ),
+    )
+}
+
+/// A LaunchAgent running the installed `lf args…` with its install directory
+/// and PATH, logging to `log`; `timing` holds its schedule keys.
+fn launch_agent_plist(
+    label: &str,
+    home: &Path,
+    binary: &Path,
+    args: &[&str],
+    log: &Path,
+    timing: &str,
+) -> String {
     let escape = |path: &Path| {
         path.to_string_lossy()
             .replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;")
     };
-    let binary_path = escape(binary);
+    let program: String = std::iter::once(escape(binary))
+        .chain(args.iter().map(|arg| arg.to_string()))
+        .map(|arg| format!("<string>{arg}</string>"))
+        .collect();
     let bin = escape(binary.parent().expect("installation binary has a parent"));
     let home = escape(home);
-    let log = escape(&logs.join("refresh.log"));
-    let calendar = schedule_calendar(frequency);
+    let log = escape(log);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>Label</key><string>com.loopflow.refresh</string>
-<key>ProgramArguments</key><array><string>{binary_path}</string><string>install</string></array>
+<key>Label</key><string>{label}</string>
+<key>ProgramArguments</key><array>{program}</array>
 <key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
-<key>RunAtLoad</key><true/>
-<key>StartCalendarInterval</key>{calendar}
+{timing}
 <key>StandardOutPath</key><string>{log}</string>
 <key>StandardErrorPath</key><string>{log}</string>
 </dict></plist>

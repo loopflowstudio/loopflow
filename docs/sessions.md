@@ -161,7 +161,8 @@ lf --only-account claude=personal@ -b task run LOO-12 # this login only, for eve
 
 A new launch tries the repository's account route, then your default route,
 then any eligible login with room. A resumed Session runs on the active login.
-A Graph carries its selection to every step; run a fresh Graph to choose again. Connecting logins and setting routes: [Ops](ops.md).
+A Graph carries its selection to every step; run a fresh Graph to choose
+again. Connecting logins and setting routes: [Ops](ops.md).
 
 ## Move what a limit blocks
 
@@ -177,7 +178,8 @@ previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
 A login switch is one act every open Claude follows, selected or not, so
 `move` lists each of them and says when the new login cannot take a Session's
-model either. Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
+model either. Interactive Sessions only; nothing is written to your
+preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 
 ## Reference
 

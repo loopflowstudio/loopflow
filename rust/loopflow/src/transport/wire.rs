@@ -168,6 +168,10 @@ pub(super) enum Request {
         state: crate::program_status::State,
         progress: Option<u8>,
     },
+    Directory {
+        key: String,
+        cwd: std::path::PathBuf,
+    },
     /// The direct child's native client began. `exit` replaces the client's own
     /// exit text; a detaching viewer prints `detach`.
     NativeStarted {

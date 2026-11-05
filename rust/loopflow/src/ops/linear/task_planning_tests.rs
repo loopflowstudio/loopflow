@@ -3822,6 +3822,7 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
             Some("New Linear Task".into()),
             Some("Retain this work".into()),
             None,
+            crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
         assert!(saved.linear_id.is_some());

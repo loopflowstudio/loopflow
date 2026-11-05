@@ -1115,6 +1115,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             Ok(())
         }
         TaskCommand::Create {
+            session,
+            worktree,
             request,
             no_wave,
             wave,
@@ -1139,6 +1141,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 title.clone(),
                 report,
                 regressed_in_arg(regressed_in),
+                loopflow::ops::task::TaskAdoptionOptions {
+                    session: session.clone(),
+                    worktree: worktree.clone(),
+                },
             )?;
             match (*json, *run) {
                 (false, _) => println!("{} · {}", issue.title, issue.identifier),

@@ -269,7 +269,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             workspace_slug: "reserved-checkout".into(),
             stack_parent: None,
             github: None,
-            directive: None,
         };
         let saved = runtime
             .block_on(fixture.store.get_task_by_issue("new-issue"))
@@ -280,6 +279,7 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
                 &fixture.store,
                 &saved.id,
                 prepared(checkout.clone()),
+                &Default::default(),
             ))
             .unwrap();
         {

@@ -450,8 +450,20 @@ class Cleaner:
             raise RuntimeError("output still has owners after teardown")
 
     def _ignored_directories(self, checkout: Path) -> set[Path]:
+        # Discovery collects these roots without walking their contents. Give
+        # Git the same boundary, including when output is not gitignored.
+        # _reason still requires the checkout's real ignore rules for deletion.
         output = self._command(
-            ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+            [
+                "git",
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--directory",
+                "-z",
+                *(f"--exclude={name}/" for name in sorted(BUILD_NAMES | {".lf"})),
+            ],
             cwd=checkout,
             timeout=10,
         )
@@ -472,14 +484,15 @@ class Cleaner:
     def _builds(self) -> list[Candidate]:
         candidates = []
         derived = self.home / "Library/Developer/Xcode/DerivedData"
-        pending = deque([(self.src, True), (derived, False)])
-        deadline = time.time() + DISCOVERY_SECONDS
+        pending = deque([(self.src, True, _owning_checkout(self.src)), (derived, False, None)])
+        started = time.time()
+        deadline = started + DISCOVERY_SECONDS
         inspected = 0
         visited: set[Path] = set()
         registered: set[Path] = set()
         ignored_by_checkout: dict[Path, set[Path]] = {}
         while pending:
-            parent, recursive = pending.popleft()
+            parent, recursive, checkout = pending.popleft()
             if parent in visited:
                 continue
             visited.add(parent)
@@ -490,7 +503,6 @@ class Cleaner:
             if parent.is_symlink() or parent.resolve() != parent:
                 continue
             try:
-                checkout = _owning_checkout(parent) if recursive else None
                 ignored: set[Path] = set()
                 if checkout:
                     if checkout not in ignored_by_checkout:
@@ -505,7 +517,7 @@ class Cleaner:
                                     worktree = Path(field[9:])
                                     registered.add(worktree)
                                     if _within(worktree, self.src):
-                                        pending.append((worktree, True))
+                                        pending.append((worktree, True, worktree))
                         ignored_by_checkout[checkout] = self._ignored_directories(checkout)
                         gate = checkout / ".lf/tmp/gate"
                         candidates.extend(
@@ -543,7 +555,9 @@ class Cleaner:
                                 for output in outputs
                                 if output.is_dir()
                             )
-                        elif path.name in BUILD_NAMES and not (path / ".git").exists():
+                            continue
+                        nested_checkout = (path / ".git").exists()
+                        if path.name in BUILD_NAMES and not nested_checkout:
                             if checkout:
                                 if path.name == ".build" and (path / "checkouts").is_dir():
                                     # SwiftPM keeps dependency source beside target
@@ -559,12 +573,16 @@ class Cleaner:
                                     )
                                 else:
                                     candidates.append(Candidate(path, "build", checkout))
-                        elif path not in ignored or (path / ".git").exists():
-                            pending.append((path, True))
+                        elif path not in ignored or nested_checkout:
+                            pending.append((path, True, path if nested_checkout else checkout))
             except FileNotFoundError:
                 continue
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 self._failure(f"discovery {parent}: {exc}")
+        self._note(
+            f"discovered {len(candidates)} candidates across {len(ignored_by_checkout)} checkouts "
+            f"and {len(visited)} directories in {time.time() - started:.1f} seconds"
+        )
         return candidates
 
     def _chrome_copies(self, root: Path) -> list[Path]:
@@ -1035,29 +1053,33 @@ class Cleaner:
             if len(images) > 256:
                 raise RuntimeError("Docker image inventory exceeds 256 entries")
             for identifier in images:
-                metadata = self._command(
-                    [
-                        *docker,
-                        "image",
-                        "inspect",
-                        "--format",
-                        "{{json .Id}}\t{{json .Created}}\t{{json .RepoDigests}}",
-                        identifier,
-                    ]
+                metadata = json.loads(
+                    self._command(
+                        [*docker, "image", "inspect", "--format", "{{json .}}", identifier]
+                    )
                 )
-                image_id, created, digests = map(json.loads, metadata.strip().split("\t"))
-                created = re.sub(r"(\.\d{6})\d+(?=Z|[+-])", r"\1", created)
-                age = (
-                    datetime.now(timezone.utc)
-                    - datetime.fromisoformat(created.replace("Z", "+00:00"))
-                ).total_seconds()
-                if image_id in used or not digests or age < 86400:
+                image_id = metadata["Id"]
+                created = metadata.get("Created")
+                if not created:
+                    reason = "unknown creation time"
+                else:
+                    created = re.sub(r"(\.\d{6})\d+(?=Z|[+-])", r"\1", created)
+                    age = (
+                        datetime.now(timezone.utc)
+                        - datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    ).total_seconds()
+                    reason = (
+                        "in use, recent, or no registry digest"
+                        if image_id in used or not metadata.get("RepoDigests") or age < 86400
+                        else None
+                    )
+                if reason:
                     self.maintenance.append(
                         {
                             "step": "docker image",
                             "image": image_id,
                             "status": "retained",
-                            "reason": "in use, recent, or no registry digest",
+                            "reason": reason,
                         }
                     )
                     continue

@@ -81,6 +81,7 @@ pub struct LfSession {
     /// Causal input reference; grants neither attachment nor Graph authority.
     pub caller_artifact_key: Option<String>,
     pub input_published: bool,
+    /// Selected working directory; existing Process records retain their launch directory.
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,

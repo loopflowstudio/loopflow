@@ -302,8 +302,10 @@ history; mechanical results are step Process exits. A Session reaches its Graph
 through the step Process that captured its input. Do not replace Run with another
 generic attempt object.
 
-Main records have one SQLite owner. Every Task has a repository and optional Project membership; its Wave is derived through that Project. Constructors reject mismatched ancestry. Bind assigns an unassigned conversation once,
-including to done/landed Tasks. Prospective attribution preserves earlier usage owners; the history reader
+Main records have one SQLite owner. Every Task has a repository and optional Project membership; its Wave is derived through that Project. Constructors reject mismatched ancestry. Explicit Session bind permanently assigns an unfinished interactive conversation,
+selects it as primary and immediately sets its cwd to the Task checkout, including
+for done/landed Tasks without reopening them. Repeating bind reselects the same
+conversation; closed Sessions and headless Runs cannot become primary. Prospective attribution preserves earlier usage owners; the history reader
 owns that single choice. Actual work
 reservation claims an unowned Task in the ownership log; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither

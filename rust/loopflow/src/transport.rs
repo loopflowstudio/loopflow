@@ -776,6 +776,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut observed = lifetime::Activity::default();
     let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
+    let mut execution_directory_reported = false;
     let mut planning = None;
     loop {
         #[cfg(test)]
@@ -834,6 +835,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         }
                         Request::DetachViewers { key } if key == control_key => {
                             detach = true;
+                        }
+                        Request::Directory { key, cwd } if key == control_key => {
+                            output.directory(&cwd);
                         }
                         Request::NativeStarted { key, exit, detach }
                             if key == control_key && terminal =>
@@ -1161,6 +1165,23 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     Err(e) => return Err(e.into()),
                 };
                 observed.output += 1;
+                // An exec handoff announces before exec. The provider's first
+                // output establishes that it reached its configured directory.
+                if !execution_directory_reported {
+                    if let Some(record) = &exit_record {
+                        let connected = crate::journal::process_ledger()
+                            .and_then(|store| store.process(&record.attachment.agent_process_id))
+                            .ok()
+                            .flatten()
+                            .is_some_and(|process| {
+                                process.pid.is_some() && process.completed_at.is_none()
+                            });
+                        if connected {
+                            output.directory(&record.cwd);
+                            execution_directory_reported = true;
+                        }
+                    }
+                }
                 let ready = match client.as_mut().filter(|_| terminal) {
                     Some(client) => client.accept(reader.as_raw_fd(), &bytes[..n]),
                     None => bytes[..n].to_vec(),
@@ -2133,6 +2154,26 @@ pub(crate) fn detach_viewers() -> Result<()> {
             key: handoff.key.clone(),
         },
     )
+}
+
+/// The native client has connected in this directory. The owner serializes
+/// its OSC report with provider bytes and retains it for later viewers.
+pub(crate) fn report_directory(cwd: &Path) {
+    let Some(handoff) = HANDOFF.get() else { return };
+    let result = (|| -> Result<()> {
+        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+        send(
+            &mut socket,
+            Request::Directory {
+                key: handoff.key.clone(),
+                cwd: cwd.to_path_buf(),
+            },
+        )
+    })();
+    if let Err(error) = result {
+        tracing::debug!(%error, "terminal directory report unavailable");
+    }
 }
 
 /// A native client running under this execution's owner. Its own exit text is

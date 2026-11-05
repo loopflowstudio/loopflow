@@ -163,6 +163,7 @@ Check (Nov 5): focused lib `task_retirement::`, `ops::task::retirement`,
 suites; fmt, clippy, architecture, inventory — pass. Gate owns affected suites.
 Compress (Nov 5): `transport::lifetime` lib, `transport_tests session_viewers_retain…`, clippy — pass.
 Realign (Nov 5): docs/plan reconciled, no code change, no rerun.
+Publish (Nov 5, after sync onto 555e629ddb): lib retirement/lifetime 17, transport_tests viewer/attachment 5, fmt, clippy — pass. Gate/CI own the full matrix.
 
 ### Delete — do not maintain
 

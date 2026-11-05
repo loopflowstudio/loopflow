@@ -665,7 +665,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: Option<PrCommand>,
     },
-    /// Release operations (run, check, notes, bump, tag, status)
+    /// Release operations (run, check, notes, bump, tag, status, issues, regress, promote)
     Release {
         #[command(subcommand)]
         cmd: ReleaseCommand,
@@ -1328,12 +1328,14 @@ fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
 impl ReleaseCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Check { .. } | Self::Status { .. } => false,
+            Self::Check { .. } | Self::Status { .. } | Self::Issues { .. } => false,
+            Self::Promote { dry_run, .. } => !dry_run,
             Self::Run { .. }
             | Self::Notes { .. }
             | Self::Bump { .. }
             | Self::Tag { .. }
-            | Self::Publish { .. } => true,
+            | Self::Publish { .. }
+            | Self::Regress { .. } => true,
         }
     }
 }
@@ -2081,9 +2083,6 @@ until `lf ship`."
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
-        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
-        #[arg(long, value_name = "VERSION")]
-        regressed_in: Option<String>,
         /// Start it as `lf task run` does, then open its conversation here
         #[arg(long)]
         run: bool,
@@ -2218,9 +2217,6 @@ until `lf ship`."
         /// Assignee identity; provider user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
-        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
-        #[arg(long, value_name = "VERSION")]
-        regressed_in: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -2985,6 +2981,30 @@ pub enum ReleaseCommand {
     },
     /// Check release workflow status
     Status {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// List the regressions reported against a release, and what they hold
+    Issues {
+        /// Release (e.g. v0.15.3); every open regression without one
+        version: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// File a regression against a release
+    Regress {
+        /// Release it regressed in (e.g. v0.15.3)
+        version: String,
+        /// Issue title
+        title: String,
+    },
+    /// Move stable to the newest soaked release no regression covers
+    Promote {
+        /// Say what would move or what holds it, changing nothing
+        #[arg(long)]
+        dry_run: bool,
         #[arg(short = 't', long = "target")]
         target: Option<String>,
     },

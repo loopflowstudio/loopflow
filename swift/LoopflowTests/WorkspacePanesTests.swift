@@ -177,6 +177,66 @@ struct WorkspacePanesTests {
         #expect(sessions.sessions.first?.id == primary.id)
     }
 
+    /// The DTO fixture's finished Task, owned as recorded or by nobody.
+    private func finishedRoadmap(owned: Bool) throws -> RoadmapSnapshot {
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
+        var planning = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        var inventory = try #require(planning["tasks"] as? [String: Any])
+        var tasks = try #require(inventory["items"] as? [[String: Any]])
+        let index = try #require(tasks.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-later" })
+        var runtime = try #require(tasks[index]["runtime"] as? [String: Any])
+        if !owned { runtime["owner"] = NSNull() }
+        tasks[index]["runtime"] = runtime
+        inventory["items"] = tasks
+        planning["tasks"] = inventory
+        return try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))
+    }
+
+    /// The Sessions surface with the finished fixture Task selected; nothing may open work.
+    private func finishedTaskSurface(owned: Bool) throws
+        -> (view: SessionsContentView, registry: SessionsWorkspaceRegistry, workspace: SessionsWorkspace,
+            task: RoadmapTask, query: RegistryQuery) {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let snapshot = try finishedRoadmap(owned: owned)
+        let task = try #require(snapshot.tasks.items.first { $0.id == "issue-later" })
+        let model = WorkModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
+        let workspace = registry.workspace(for: .init(repository: "repo", kind: .task, id: task.id),
+            title: task.task.name, location: location)
+        let view = SessionsContentView(model: model, repoPath: task.task.repo,
+            workspaces: registry, machineId: location.machineId, repository: "repo", query: query)
+        model.select(.task(id: task.id))
+        #expect(registry.selectedWork == workspace.key)
+        return (view, registry, workspace, task, query)
+    }
+
+    @Test("A finished Task nobody owns reveals its conversation into visible panes")
+    func finishedUnownedTaskRevealsIntoPanes() throws {
+        let (view, registry, workspace, task, query) = try finishedTaskSurface(owned: false)
+        #expect(task.isCompleted && task.runtime?.owner == nil && task.conversationIntent == .reveal)
+        #expect(throws: (any Error).self) { try view.inspect().find(WorkspacePanesView.self) }
+        let history = try session("history")
+        registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query).reconcile([history])
+        registry.presentSession(history, in: workspace)
+        let panes = try view.inspect().find(WorkspacePanesView.self).actualView()
+        #expect(panes.workspace === workspace)
+        #expect(workspace.multiplexer.sessionPane?.sessionId == history.id)
+    }
+
+    @Test("A finished Task without history shows its record, never a Start or Open placeholder")
+    func finishedOwnedTaskWithoutHistoryShowsRecord() throws {
+        let (view, _, workspace, task, _) = try finishedTaskSurface(owned: true)
+        #expect(task.isCompleted && task.runtime?.owner != nil && !task.awaitsStart)
+        #expect(workspace.presentation.content != .terminals)
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-task")
+        #expect(throws: (any Error).self) { try view.inspect().find(WorkspacePanesView.self) }
+        #expect(throws: (any Error).self) { try view.inspect().find(TaskStartOffer.self) }
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation") }
+    }
+
     @Test("Every Task pane hides on hover and the header's Show… restores it")
     func hoverHideAndShow() throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }

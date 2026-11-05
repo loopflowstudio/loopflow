@@ -1559,11 +1559,11 @@ struct SessionsContentView: View {
             && showsTerminals(currentKey, fileTask?.task, workspace)
     }
 
-    /// Every primary shows terminals; a Task's show once it is working or owned,
-    /// or once a person chose them.
+    /// Every primary shows terminals; a Task's show once it is working or once a
+    /// person chose them. A finished Task shows its record until a reveal presents
+    /// its conversation; who owns it says nothing about what there is to show.
     private func showsTerminals(_ key: WorkWorkspaceKey, _ task: RoadmapTask?, _ entry: SessionsWorkspace) -> Bool {
-        key.kind != .task || task?.runtime?.owner != nil || task?.conversationIntent == .start
-            || entry.presentation.content == .terminals
+        key.kind != .task || task?.conversationIntent == .start || entry.presentation.content == .terminals
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's

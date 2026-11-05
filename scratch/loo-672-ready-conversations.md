@@ -177,9 +177,10 @@ reconciliation and conversation lookup agree.
   automatic preparation of both absence cases replaced them.
 - The hidden warm host and any launch that depends on a pane mounting.
 - The warm queue's `reveal` naming: it is `openWarmConversations`/`openings`.
-- Proposed (seventh concept review, pending implement): the `runtime?.owner != nil`
-  term in `SessionsContentView.showsTerminals`; a Task's panes follow its state and
-  the person's choice, never its owner.
+- The `runtime?.owner != nil` term in `SessionsContentView.showsTerminals`: deleted
+  November 5 (seventh concept review). A Task's panes follow its state and the
+  person's choice, never its owner; a finished Task shows its record until a reveal
+  presents its conversation.
 - Preserve explicit Start as recovery outside eligible working Task navigation;
   preserve Rust's Start/Reveal/Take back intents, Close and late-result fences,
   selected-first scheduling, input claims and LOO-717 retention. No new launch,
@@ -321,4 +322,8 @@ shared Task matching, the primaries change and these passes. Realign, November 5
 identifiers and the "has not reported" copy absent from `swift/`, `rust/` and
 `builtins/`, refused-reveal tests on `prefetch-15`); origin/main still `384505b120`,
 so the recorded sync findings stand; Wave memory corrected (started unowned Tasks
-open, unstarted offer Start, one placeholder); no code change, no rerun.
+open, unstarted offer Start, one placeholder); no code change, no rerun. Implement,
+November 5 (seventh-review residue): `showsTerminals` loses its owner term, two
+`WorkspacePanesTests` cover a finished unowned Task revealing into panes and a
+finished owned Task without history showing its record; same filter, 167 passed
+in 7 suites; Rust unchanged, no rerun.

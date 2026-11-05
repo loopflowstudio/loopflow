@@ -87,10 +87,12 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   and leaves.
 - Principle written where exercised: AGENTS.md harness guidance and
   `rust/loopflow/src/harness/README.md`. Wave memory (`.lf/wave/infrastructure/
-  MEMORY.md`) carries the lifetime decision under "Idle owners end" and the
-  traced 11-04 cause plus the middleman rule under "Upgrade continuity"; the
-  shipped Session titles and Agent startup profiling detail retired to
-  `a5000ef889` to stay under the 16000-token budget.
+  MEMORY.md`) carries the lifetime decision under "Idle owners end" and, under
+  "Upgrade continuity", the traced 11-04 cause, the middleman rule, the one
+  `RecordingGap` concept, the `store-gap` observation and the quiet Pi/OpenCode
+  behavior; the shipped Session titles and Agent startup profiling sections
+  are trimmed to their pointers (`a5000ef889`, `3b07e13404`) to stay under the
+  16000-token budget.
 
 ## Concept review (2026-11-05, headless)
 
@@ -176,3 +178,5 @@ Implement pass (RecordingGap, gap observation, native_delivery_path, quiet Pi/Op
 `node --check` on both JS hooks; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. Gate owns the affected suites.
 
 Compress pass (one `GapSpan` in `RecordingGap`, one `Settling` slot in the owner, `Ending::confirm` answers yes/no): the same `--lib` filter 34 passed, the same `transport_tests` filter 5 passed, fmt and clippy clean.
+
+Realign (2026-11-05, after compress): code, AGENTS.md, both READMEs and `docs/` agree with Decisions and Delete (every deleted name absent, every pinning test present, `close_gap` writes the `store-gap` observation before `recovered()`); only Wave memory lagged, now folded in. `lf context`: memory 15986/16000 tokens, scratch 3168/12000; no code change, no rerun.

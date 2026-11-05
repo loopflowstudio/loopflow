@@ -305,14 +305,11 @@ etude, kata and fantasia precedes measurement; rollout notes belong in the PR.
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart requested shipping after review; shared LOOPFLOW.md teaches
-self-renaming for lf/plain, interactive/headless, Task/taskless starts. The
-October 11 hook repair (PR #1530) bounds observation and ownership reads
-separately, permits a 15-second receipt wait at Process admission and never
-retries failed early observation at exit; unavailable ownership leaves names
-unchanged. Installed concurrent-Flow acceptance, embedded Codex/exec naming and
-the Kata lock holder behind recurring prompt timeouts (`d4991d61`) remain
-unproved. Demo, lock-fixture and Kata evidence:
+Shipped after Jack Heart's review; LOOPFLOW.md teaches self-renaming for every
+start. The October 11 hook repair (PR #1530) bounds observation and ownership
+reads separately and never retries failed early observation at exit. Installed
+concurrent-Flow acceptance, embedded Codex/exec naming and the Kata lock holder
+(`d4991d61`) remain unproved. Evidence and detail:
 `a5000ef889:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Program Status direction (LOO-398/415/720, reconciled 2026-11-03)
@@ -953,14 +950,19 @@ Promotion stops only Desktop; helpers retain images/bundles until retirement.
 Jack's November 4 report of reopened Sessions losing input/crashing supersedes
 liveness as recovery proof. e46a80 traced the November 4 Codex loss: `lf install`
 raised the reader floor under 177 live processes, the relay treated every store
-error as fatal and read the store before accepting reconnects. Claude, OpenCode
+error as fatal and read the store before accepting reconnects; Claude, OpenCode
 and Pi survived because lf only observes them through hooks. Jack Heart's rule
 (2026-11-05): lf is a session manager, context adder and hook interjector on top
 of a harness, never a middleman; the store records a conversation and never
-carries it. Relay, owner input, settlement and every hook are best-effort and log
-gaps to `logs/lf.log`; hooks wait 1 s for a locked store. Fixtures prove the
-surviving relay, unrecorded input delivery and the provider's own exit, not a
-live install; Sessions already on old builds need `lf resume`.
+carries it. Relay, owner input, settlement and every hook are best-effort. One
+concept, `store::RecordingGap`, logs a failure once per change and once on
+recovery; hooks keep it in a `.store-gap` marker and, per Jack's steer, write one
+`store-gap` observation into the Session's history at the next boundary that
+succeeds, so a missed Stop reads as unknown, never as a live turn. Pi and
+OpenCode match Claude: an lf they cannot run goes to their plugin log, never a
+toast or a line per prompt. Hooks wait 1 s for a locked store. Fixtures prove the
+surviving relay, unrecorded input and the provider's own exit, not a live
+install; Sessions already on old builds need `lf resume`.
 Fixtures and interim main repair prove no corrected-build rollout. Both Machines
 need identity/store/scheduled checks and existing Sessions completing turns with
 continued interaction. Landing is insufficient.
@@ -1157,10 +1159,9 @@ test removal, cache relaxation or retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart requested landing #1505 October 8; the Task stays open for cold-cache
-verification on dedicated macOS with exclusive cache control and native login.
-Readiness requires raw-mode echo of unsubmitted text; Codex reconnect needs an
-untimed seed turn; fresh Homes are not cold OS caches. Copied databases keep
-absolute provider-home paths: strip routes before launch and connect only
-benchmark-created Sessions. Measurements, rejected patches and limits:
-`3b07e13404:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart requested landing #1505 October 8; cold-cache verification on
+dedicated macOS stays open. Readiness requires raw-mode echo of unsubmitted
+text; Codex reconnect needs an untimed seed turn; fresh Homes are not cold OS
+caches; copied databases keep absolute provider-home paths. Measurements,
+rejected patches and limits: `3b07e13404:.lf/wave/infrastructure/MEMORY.md`,
+this heading.

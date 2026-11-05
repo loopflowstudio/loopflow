@@ -193,6 +193,18 @@ Logs: `/tmp/loo593-publication-gate.log` (retains the initial failures),
 and `/tmp/loo593-publication-registration.log`. No single all-suite green run is
 claimed; focused repair results complement the completed consumer/build suites.
 
+Main advanced to `2cce79a27b` (#1780) during verification. The final sync removes
+`regressed_in` from the shared Task create/edit dispatcher while retaining that
+dispatcher and upstream's GitHub regression authority. On the integrated tree,
+66 of 68 focused Rust checks passed initially; two live-promotion fixtures had
+no default agent despite multiple installed harnesses. Both now explicitly select
+their OpenCode stand-in and pass. All 700 headless Desktop tests and platform
+boundaries pass again. The earlier Xcode and installed-replacement checks precede
+this Task-field-only integration; no repeated rendered or upgrade claim follows.
+Logs: `/tmp/loo593-publication-sync-checks.log`,
+`/tmp/loo593-publication-promotion-repair.log` and
+`/tmp/loo593-publication-final-clippy.log`.
+
 ### Remaining proof and delivery
 
 The merged-build automated checks and composed same-build installed replacement

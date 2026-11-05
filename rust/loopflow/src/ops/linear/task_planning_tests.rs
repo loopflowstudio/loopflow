@@ -2447,7 +2447,6 @@ fi
                 rank: 0,
                 assignee: None,
                 due_date: None,
-                regressed_in: None,
                 state: None,
                 completed_at: None,
                 observation: Observation::NotRequired,
@@ -2708,7 +2707,6 @@ esac
                 rank: 0,
                 assignee: None,
                 due_date: None,
-                regressed_in: None,
                 state: None,
                 completed_at: None,
                 observation: Observation::NotRequired,
@@ -3821,7 +3819,6 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
             Some(wave.slug()),
             Some("New Linear Task".into()),
             Some("Retain this work".into()),
-            None,
             crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();

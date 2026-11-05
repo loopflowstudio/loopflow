@@ -242,14 +242,13 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             notes,
             rank,
             assignee,
-            regressed_in,
             wave,
         } => {
             let result = crate::ops::task::task_edit(
                 repo,
                 issue,
                 wave.as_deref(),
-                task_edit_update(title, notes, *rank, assignee, regressed_in),
+                task_edit_update(title, notes, *rank, assignee),
             )?;
             writeln!(io.output, "{}: updated", result.id)?;
             print_planning_sync(&result.sync, io)?;
@@ -356,22 +355,13 @@ pub fn task_edit_update(
     notes: &Option<String>,
     rank: Option<u32>,
     assignee: &Option<String>,
-    regressed_in: &Option<String>,
 ) -> crate::work::task::TaskUpdate {
     crate::work::task::TaskUpdate {
         title: title.clone(),
         description: notes.clone(),
         rank,
         assignee: assignee.clone().map(Some),
-        regressed_in: regressed_in_arg(regressed_in),
     }
-}
-
-/// `0.15.3` reads as `v0.15.3`; an unreadable version reaches validation as typed.
-pub fn regressed_in_arg(version: &Option<String>) -> Option<String> {
-    version.as_deref().map(|version| {
-        crate::work::task::release_version(version).unwrap_or_else(|| version.to_string())
-    })
 }
 
 pub fn selected_task_repository(

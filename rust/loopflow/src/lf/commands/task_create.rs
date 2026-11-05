@@ -15,7 +15,7 @@ use crate::ops::human_session::primary;
 use crate::store::{open_store, storage_config_from_env};
 use crate::work::task::Task;
 
-use super::mutation::{regressed_in_arg, CommandIo};
+use super::mutation::CommandIo;
 
 /// What `lf task create --run --json` prints whenever the Task was filed: the
 /// Task, the graph it took up and its admitted conversation. A headless (`-b`)
@@ -38,7 +38,6 @@ pub fn create(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Res
         wave,
         title,
         notes,
-        regressed_in,
         run,
         graph,
         json,
@@ -59,7 +58,6 @@ pub fn create(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Res
         if *no_wave { None } else { wave.as_deref() },
         title.clone(),
         report,
-        regressed_in_arg(regressed_in),
         crate::ops::task::TaskAdoptionOptions {
             session: session.clone(),
             worktree: worktree.clone(),

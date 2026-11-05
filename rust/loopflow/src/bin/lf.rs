@@ -1111,9 +1111,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     if let Some(due) = &task.due_date {
                         println!("Due: {due}");
                     }
-                    if let Some(version) = &task.regressed_in {
-                        println!("Regressed in: {version}");
-                    }
                     if let Some(ownership) = &status.ownership {
                         println!("{}", loopflow::ops::task_ownership::render(ownership));
                     }
@@ -2102,18 +2099,13 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     notes,
                     rank,
                     assignee,
-                    regressed_in,
                     wave,
                     ..
                 },
         }) => Some((
             wave.as_deref().or(cli.wave.as_deref()),
             loopflow::ops::task::TaskPlanningRequest::Edit(task_edit_update(
-                title,
-                notes,
-                *rank,
-                assignee,
-                regressed_in,
+                title, notes, *rank, assignee,
             )),
         )),
         Some(Commands::Task {

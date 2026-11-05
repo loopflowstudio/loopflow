@@ -1,11 +1,10 @@
 # 337044 questions and assumptions
 
 - **Dependency order, for Jack Heart.** The brief deletes `is_additive` after 843f5c
-  puts the rule in `check_migrations.py`. On 2026-11-05 that rule is unwritten: the
-  843f5c checkout has no `scripts/` change, and its plan still changes floor semantics
-  (outcomes 2-4), which this diff deletes. If this lands first, nothing in CI stops a
-  direct `DROP COLUMN`. Assumption: finish here, land after 843f5c's check, rebase.
-  843f5c was only read, not steered.
+  puts the rule in `check_migrations.py`. On 2026-11-05 (realign) that rule exists on
+  843f5c's branch, unlanded; if this lands first, nothing in CI stops a direct
+  `DROP COLUMN` until it does. Assumption: land in either order and rebase the second;
+  the gap is days of CI measurement, not a store risk. 843f5c was only read, not steered.
 - **`reader_floor` writes stop.** A NULL row reads as "names itself" in shipped builds
   (`applied_floor`), identical to writing the migration's own name, so NULL is harmless
   to them and this build reads nothing. Consequence either way: builds already installed

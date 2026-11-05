@@ -86,14 +86,18 @@ store::sqlite::linear_team_checks` 52 passed (259 s, after the second compress p
 `test(ops::linear::task_planning_tests::) | test(store::sqlite::planning_export::) |
 test(store::sqlite::linear_team_checks::) | binary(lf)` minus the two long
 `ops::linear` fixtures named in scripts/testing.md; website suite for docs/work.md.
-Sync (2026-11-05): main unchanged since base `9178a04c`, no conflicts, no rerun;
-realign found code and plan in agreement and recorded the lesson in Wave memory.
+Sync (2026-11-05): merged main `384505b120` (upgrade-docs audit; it curated
+Wave memory and touched `lf/mod.rs`) without conflicts; `cargo check -p loopflow
+--all-targets` passes on the merge. Realign found code, README, docs and plan in
+agreement; the Wave memory lesson survived main's curation.
 
 ## Remaining (demo step)
 
 - `lf install` the branch, then `lf task sync <id> --retry-creation` for the 19
   listed Tasks (12 loopflow, 6 etude-studio, 1 manabot) or let the drain run;
-  record each identifier in the PR. The live budget sat in the reserve (≈210 of
-  5,000 left) on 2026-11-05 05:37Z; the drain stops spending once installed.
+  record each identifier in the PR. Installed lf 0.15.1 is still draining: the
+  request log for the hour before 2026-11-05 07:55Z shows ~7,000 sent, ~1,200
+  deferred and ~4,300 paused requests, half of them `ListTeams`; the drain stops
+  spending once the branch is installed.
 - Jack decides whether ten minutes is the right healthy-budget window
   (`scratch/questions.md`).

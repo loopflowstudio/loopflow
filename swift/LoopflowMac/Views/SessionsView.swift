@@ -135,14 +135,13 @@ final class SessionsWorkspace {
 
     /// Populate this retained Work even if navigation changes while lf prepares it.
     /// Automatic opening runs through the registry's warm queue; this is Retry.
-    func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
-        if let wave { self.wave = wave }
+    func openPrimaryConversation(store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
         await openConversation {
-            let record = try await store.query.ensurePrimarySession(wave: self.wave, cwd: store.repoPath)
+            let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
             store.reconcile([record])
-            store.adoptPreparation(record)
+            store.adoptPreparation(record, intent: conversationIntent)
             registry.presentSession(record, in: self)
-            await store.select(record.id)
+            await store.select(record.id, intent: conversationIntent)
         }
     }
 
@@ -1557,8 +1556,14 @@ struct SessionsContentView: View {
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
         !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
-            && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || fileTask?.task.conversationIntent == .start
-                || workspace.presentation.content == .terminals)
+            && showsTerminals(currentKey, fileTask?.task, workspace)
+    }
+
+    /// Every primary shows terminals; a Task's show once it is working or owned,
+    /// or once a person chose them.
+    private func showsTerminals(_ key: WorkWorkspaceKey, _ task: RoadmapTask?, _ entry: SessionsWorkspace) -> Bool {
+        key.kind != .task || task?.runtime?.owner != nil || task?.conversationIntent == .start
+            || entry.presentation.content == .terminals
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -1718,8 +1723,7 @@ struct SessionsContentView: View {
         let entry = workspaces.workspace(for: key, title: title(for: key),
             location: key.kind == .task ? location : rootIdentity)
         let active = currentKey == key
-        let terminals = key.kind != .task || task?.task.runtime?.owner != nil || task?.task.conversationIntent == .start
-            || entry.presentation.content == .terminals
+        let terminals = showsTerminals(key, task?.task, entry)
         return VStack(spacing: 0) {
             if let error = entry.retentionError {
                 Text("Workspace cleanup pending: " + error).font(.caption).textSelection(.enabled).padding(6)

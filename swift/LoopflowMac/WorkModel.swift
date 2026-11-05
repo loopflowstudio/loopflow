@@ -814,13 +814,13 @@ final class WorkModel {
         guard let found = task(id: id), let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         await workspace.openConversation {
             let record = try await query.prepareTaskSession(issue: found.task.runtime?.workId ?? found.task.id,
-                                                            cwd: found.task.task.repo)
+                                                            cwd: found.task.task.repo, intent: found.task.conversationIntent)
             // One opened Session updates its own reading; an unrelated inventory failure stays.
             let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
             sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
             let store = registry.sessionStore(repository: repository, repoPath: found.task.task.repo, query: query)
             store.reconcile([record])
-            store.adoptPreparation(record)
+            store.adoptPreparation(record, intent: found.task.conversationIntent)
             _ = placeSession(record, in: workspace, store: store, registry: registry, navigating: false)
         }
     }

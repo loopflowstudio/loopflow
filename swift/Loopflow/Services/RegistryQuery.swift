@@ -968,18 +968,16 @@ public struct RegistryQuery: Sendable {
             .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil, intent: intent)))
     }
 
-    /// Only an authoritative absence offers creation; failed reads stay unknown.
-    public func taskConversationStart(issue: String, cwd: String) async throws -> SessionAction? {
-        let report = try Self.decode(SessionResumeExplanation.self, from: await run(
-            ["session", "resume", "--task", issue, "--explain", "--json"], cwd))
-        guard report.state == nil, report.action?.intent == .start,
+    /// Rust's Start after a refused reveal: only an authoritative absence of
+    /// history offers it. A failed Start reports its own failure, and a failed
+    /// read offers nothing.
+    public func startOffer(refused intent: SessionOpenIntent, issue: String, cwd: String) async -> SessionAction? {
+        guard intent == .reveal,
+              let report = try? Self.decode(SessionResumeExplanation.self, from: await run(
+                  ["session", "resume", "--task", issue, "--explain", "--json"], cwd)),
+              report.state == nil, report.action?.intent == .start,
               report.impediments.isEmpty, report.unavailable.isEmpty else { return nil }
         return report.actions.first { $0.kind == .open && $0.unavailableReason == nil }
-    }
-
-    /// Only a refused reveal can offer Start; a failed Start reports its own failure.
-    public func startOffer(refused intent: SessionOpenIntent, issue: String, cwd: String) async -> SessionAction? {
-        intent == .reveal ? try? await taskConversationStart(issue: issue, cwd: cwd) : nil
     }
 
     /// Prepare without launching. Resume transfers control; Start and reveal never

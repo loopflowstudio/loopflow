@@ -98,8 +98,7 @@ struct WorkCacheTests {
         #expect(registry.preparationCount == 0)
         await source.release()
         await refresh.value
-        let deadline = ContinuousClock.now + .seconds(3)
-        while registry.retained(selected)?.conversationError == nil, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { registry.retained(selected)?.conversationError == nil }
         #expect(returning.selection == .task(id: "issue-review"))
         #expect(registry.retained(selected)?.hostUse == "away")
         #expect(registry.retained(selected)?.conversationError?.contains(machineUnavailable ? "Machine unavailable" : "location changed") == true)
@@ -137,9 +136,8 @@ struct WorkCacheTests {
         returning.bindWorkspaces(registry, repository: repository)
         await returning.refresh()
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
-        let deadline = ContinuousClock.now + .seconds(3)
         let expected = closed ? 1 : 2
-        while store.preparedTaskConversations.count < expected, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { store.preparedTaskConversations.count < expected }
         #expect(registry.selectedWork == selected)
         #expect(store.preparedTaskConversations.count == expected)
         // boundedSelectedFirstPreparation proves admission order; these two reads then race.
@@ -175,8 +173,7 @@ struct WorkCacheTests {
         #expect(registry.restoreCandidates.isEmpty)
         #expect(registry.recentTasks.isEmpty)
         await model.refresh()
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedTasks.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedTasks.count < 2 }
         #expect(model.selection == nil)
         #expect(model.workStatus == .current) // Rendering is not held by preparation.
         #expect(registry.preparationCount == 2)
@@ -186,7 +183,7 @@ struct WorkCacheTests {
         #expect(Set(await source.preparedTasks) == Set(expected.prefix(2)))
         await source.releasePreparations()
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
-        while store.preparedTaskConversations.count < 8, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { store.preparedTaskConversations.count < 8 }
         #expect(store.preparedTaskConversations.count == 8)
         #expect(Set(await source.preparedTasks) == Set(expected))
         #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments.contains("--start-if-free") })
@@ -204,8 +201,7 @@ struct WorkCacheTests {
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
         let key = WorkWorkspaceKey(repository: repository, kind: .task, id: "prefetch-11")
-        let deadline = ContinuousClock.now + .seconds(3)
-        while registry.retained(key)?.conversationError == nil, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { registry.retained(key)?.conversationError == nil }
         let workspace = try #require(registry.retained(key))
         #expect(workspace.conversationError == "Claude account unavailable")
         #expect(workspace.conversationStart == nil)
@@ -219,8 +215,7 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedTasks.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedTasks.count < 2 }
         #expect(registry.preparationCount == 2)
         let prepared = await source.preparedTasks
         let queued = try #require(registry.recentTasks.first { !prepared.contains($0.id) })
@@ -235,10 +230,7 @@ struct WorkCacheTests {
         _ = try view.inspect().find(text: "Opening conversation…")
 
         await source.releasePreparations()
-        while await !source.preparedTasks.contains(queued.id), ContinuousClock.now < deadline {
-            await source.releasePreparations()
-            await Task.yield()
-        }
+        await spin { await source.releasePreparations(); return await !source.preparedTasks.contains(queued.id) }
         #expect(await source.preparedTasks.contains(queued.id))
         registry.prepareForQuit()
     }
@@ -250,8 +242,7 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedTasks.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedTasks.count < 2 }
         let prepared = await source.preparedTasks
         let queued = try #require(registry.recentTasks.first { !prepared.contains($0.id) })
         let workspace = try #require(registry.retained(queued))
@@ -271,14 +262,13 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
-        while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedTasks.count < 8 }
+        await spin { registry.preparationCount > 0 }
         await source.setPreparationFailure("No provider history")
         let id = "prefetch-15" // The fixture's unstarted Task.
         let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
         model.openWarmConversations()
-        while workspace.conversationError == nil, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { workspace.conversationError == nil }
         #expect(workspace.conversationError == "No provider history")
         #expect(workspace.conversationStart != nil)
         #expect(!model.conversationIsOpening(workspace))
@@ -286,8 +276,8 @@ struct WorkCacheTests {
         await source.setPreparationFailure(nil)
         try await source.startTask(id)
         await model.refresh()
-        while await !source.preparedTasks.contains(id), ContinuousClock.now < deadline { await Task.yield() }
-        while workspace.openingConversation, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await !source.preparedTasks.contains(id) }
+        await spin { workspace.openingConversation }
         #expect(await source.preparedTasks.contains(id))
         #expect(workspace.conversationError == nil)
         #expect(workspace.conversationStart == nil)
@@ -300,9 +290,8 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
-        while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedTasks.count < 8 }
+        await spin { registry.preparationCount > 0 }
         let id = "prefetch-15" // The fixture's unstarted Task.
         await source.hold(["session", "resume"])
         let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
@@ -315,8 +304,8 @@ struct WorkCacheTests {
         await model.refresh()
         #expect(workspace.conversationIntent == .start)
         await source.release()
-        while await !source.preparedTasks.contains(id), ContinuousClock.now < deadline { await Task.yield() }
-        while workspace.openingConversation, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await !source.preparedTasks.contains(id) }
+        await spin { workspace.openingConversation }
         #expect(await source.preparedTasks.contains(id))
         #expect(workspace.conversationError == nil)
         #expect(workspace.conversationStart == nil)
@@ -329,9 +318,8 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
-        while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedTasks.count < 8 }
+        await spin { registry.preparationCount > 0 }
         let id = "prefetch-15" // The fixture's unstarted Task.
         await source.hold(["session", "resume"])
         let opening = Task { await model.openTaskLink(TaskLink(issue: "PREFETCH-15", repo: Self.repo, conversation: true)) }
@@ -345,8 +333,8 @@ struct WorkCacheTests {
         #expect(workspace.conversationIntent == .start)
         await source.release()
         await opening.value
-        while await !source.preparedTasks.contains(id), ContinuousClock.now < deadline { await Task.yield() }
-        while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await !source.preparedTasks.contains(id) }
+        await spin { registry.preparationCount > 0 }
         #expect(await source.preparedTasks.contains(id))
         #expect(workspace.conversationError == nil)
         #expect(workspace.conversationStart == nil)
@@ -360,9 +348,8 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let deadline = ContinuousClock.now + .seconds(5)
-        while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
-        while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
+        await spin(for: .seconds(5)) { await source.preparedTasks.count < 8 }
+        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
         #expect(await source.preparedTasks.count == 8) // Warm prefetch stops; five working Tasks remain.
 
         await source.holdPreparations()
@@ -372,7 +359,7 @@ struct WorkCacheTests {
             owner: .init(repository: repository, kind: .repository, id: repository),
             members: (working + [unstarted]).map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
         model.selectWorkingTasksDashboard()
-        while await source.preparedTasks.count < 10, ContinuousClock.now < deadline { await Task.yield() }
+        await spin(for: .seconds(5)) { await source.preparedTasks.count < 10 }
         #expect(registry.preparationCount == 2)
         let prepared = await source.preparedTasks
         let queued = try #require(working.first { !prepared.contains($0) })
@@ -389,7 +376,7 @@ struct WorkCacheTests {
         await source.releasePreparations()
         for id in working {
             let tile = try #require(registry.retained(key(id)))
-            while tile.multiplexer.pane(forSessionId: "conversation-" + id) == nil, ContinuousClock.now < deadline { await Task.yield() }
+            await spin(for: .seconds(5)) { tile.multiplexer.pane(forSessionId: "conversation-" + id) == nil }
             #expect(tile.multiplexer.pane(forSessionId: "conversation-" + id) != nil)
             #expect(tile.conversationIntent == .start)
         }
@@ -411,8 +398,7 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedTasks.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedTasks.count < 2 }
         let id = try #require(await source.preparedTasks.first)
         let workspace = try #require(registry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: id)))
         workspace.multiplexer.reveal(sessionId: "conversation-" + id, location: workspace.location)
@@ -420,8 +406,8 @@ struct WorkCacheTests {
         let focus = workspace.multiplexer.focusedPaneId
         await source.releasePreparations()
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
-        while store.sessions.first(where: { $0.id == "conversation-" + id })?.state != .prepared, ContinuousClock.now < deadline { await Task.yield() }
-        while workspace.openingConversation, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { store.sessions.first(where: { $0.id == "conversation-" + id })?.state != .prepared }
+        await spin { workspace.openingConversation }
         #expect(store.sessions.first { $0.id == "conversation-" + id }?.state == .prepared)
         #expect(workspace.multiplexer.focusedPaneId == focus)
         registry.prepareForQuit()
@@ -438,12 +424,11 @@ struct WorkCacheTests {
         let wave = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-1")
         #expect(registry.warmPrimaries == [repositoryKey, wave])
         #expect(registry.recentTasks.count == 8)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await source.preparedPrimaries.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { await source.preparedPrimaries.count < 2 }
         #expect(await source.preparedPrimaries == ["repository", "wave:product"]) // The selected repository leads.
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
         let primaries = ["primary-repository", "primary-wave:product"]
-        while store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2 }
         #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments.contains("--start-if-free") })
         for key in [repositoryKey, wave] {
             let workspace = try #require(registry.retained(key))
@@ -484,9 +469,8 @@ struct WorkCacheTests {
         await source.setPreparationFailure("Claude account unavailable")
         registry.canPrepare = nil
         registry.continueOpenings()
-        let deadline = ContinuousClock.now + .seconds(3)
         let failed = try #require(registry.retained(repositoryKey))
-        while failed.conversationError == nil, ContinuousClock.now < deadline { await Task.yield() }
+        await spin { failed.conversationError == nil }
         #expect(failed.conversationError == "Claude account unavailable")
         #expect(!model.conversationIsOpening(failed))
         let failedView = WorkspacePanesView(workspace: failed, isFocused: true, sessions: store, model: model,
@@ -975,4 +959,11 @@ private actor Source {
         }
     }
 }
+/// Yield while `condition` holds, for at most `timeout`; the assertion follows.
+@MainActor
+private func spin(for timeout: Duration = .seconds(3), while condition: @MainActor () async -> Bool) async {
+    let deadline = ContinuousClock.now + timeout
+    while await condition(), ContinuousClock.now < deadline { await Task.yield() }
+}
+
 #endif

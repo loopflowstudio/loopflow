@@ -116,8 +116,11 @@ no new wire kind (`SessionRecord.launchRetry` / `heldElsewhere` read it).
 `onWarmthChanged`). A refused reveal clears when the Task's intent becomes Start; a
 superseded refusal records neither error nor offer and the queue retries with the
 current intent, including through `openLinkedTask`. Only a refused reveal fetches
-the explicit Start offer; a failed Start shows its error with Retry on the
-workspace intent. `WorkModel.conversationIsOpening` shows “Opening conversation…”
+the explicit Start offer (`RegistryQuery.startOffer`, one `--explain` read that
+offers nothing on a failed read); a failed Start shows its error with Retry on the
+workspace intent. A primary's Retry (`SessionsWorkspace.openPrimaryConversation`)
+reads the Wave name `prefetchPrimary` left on the workspace; the Dashboard tile's
+in-place opener follows the Task's intent like every other opening. `WorkModel.conversationIsOpening` shows “Opening conversation…”
 for an eligible working Task queued behind the slots or its Sessions read.
 `confirmMachine` replays Sessions so a quiet fresh repository opens its Tasks.
 Warm intent (recent and closed keys) persists per Machine and repository in
@@ -277,6 +280,9 @@ scratch and Wave memory edits only, no rerun. Implement, November 5 (sixth-revie
 implications): `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkspaceRetentionTests|WorkspacePanesTests|WorkNavigationTests|WorkCLISubscriptionTests|WarmPaneMountTests|WorkDestinationTests'`
 165 passed in 7 suites; two `WorkDestinationTests` fixtures inherited from the
 primaries change answered a primary's `session resume` with the Task's record and
-now answer only Task or named-Session resumes; Rust unchanged, no rerun. The
-rendered proof's candidate predates `83b3d64a93`'s shared Task matching, the
-primaries change and this pass.
+now answer only Task or named-Session resumes; Rust unchanged, no rerun. Compress, November 5 (sixth-review
+implications): Swift-only edits (one `startOffer`, `openPrimaryConversation`
+without `wave:`, `showsTerminals`, tile opener on the Task's intent, one `spin`
+wait helper in `WorkCacheTests`); same filter, 165 passed in 7 suites; Rust
+unchanged, no rerun. The rendered proof's candidate predates `83b3d64a93`'s
+shared Task matching, the primaries change and these passes.

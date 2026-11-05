@@ -209,7 +209,7 @@ final class WorkModel {
         let workspace = registry.open(key, title: workspaceTitle(key), location: location, deliberate: deliberate)
         if key.kind == .task, showsSavedWork {
             workspace.requiresLocationValidation = true
-            workspace.retain(false)
+            workspace.present(false)
         }
         workspace.startPersistence(query: query, repoPath: repoPath)
         navigation.workspacePresentation = workspace.presentation

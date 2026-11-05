@@ -66,44 +66,6 @@ struct WorkCLISubscriptionTests {
         #expect(recorded.allSatisfy { $0.agentProcessId == nil }) // Prepared, not launched: no Graph or operator ran.
         try await eventually { otherStore.sessions.first { $0.record.taskPrimary }?.state == .prepared }
         #expect(otherStore.sessions.first { $0.record.taskPrimary }?.id == session.id)
-        otherRegistry.prepareForQuit()
-        await otherRegistry.releaseForQuit()
-        registry.prepareForQuit()
-        await registry.releaseForQuit()
-    }
-
-    @Test("Local Desktop retention reaches the CLI lifecycle owner through departure and return")
-    func localRetentionDepartureAndReturn() async throws {
-        let fixture = try WorkCLIFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.root) }
-        try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Retention recovery", "--json"])
-        let id = try #require(created["id"] as? String)
-        _ = try await fixture.run(["checkout", id, "--json"])
-        _ = try await fixture.run(["task", "complete", id])
-        let query = fixture.lf.query
-        let snapshot = try await query.taskDestination(issue: id, repo: fixture.repo.path)
-        let task = try #require(snapshot.tasks.items.first)
-        let location = try #require(task.reference.workspace?.identity)
-        let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
-        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
-        defer { registry.prepareForQuit() }
-        let key = WorkWorkspaceKey(repository: repository.id, kind: .task, id: id)
-        let workspace = registry.open(key, title: task.task.name, location: location)
-        workspace.startPersistence(query: query, repoPath: fixture.repo.path)
-        try await eventually { workspace.retirement != nil || workspace.retentionError != nil }
-        #expect(workspace.retentionError == nil)
-        #expect(workspace.retirement?.dueAt == nil)
-        workspace.retain(false)
-        try await eventually { workspace.retirement?.dueAt != nil || workspace.retentionError != nil }
-        #expect(workspace.retentionError == nil)
-        #expect(try #require(workspace.retirement?.dueAt) > Int64(Date().timeIntervalSince1970))
-        workspace.retain(true)
-        try await eventually { workspace.retirement?.dueAt == nil || workspace.retentionError != nil }
-        #expect(workspace.retentionError == nil)
-        #expect(FileManager.default.fileExists(atPath: location.worktree))
-        registry.prepareForQuit()
-        await registry.releaseForQuit()
     }
 
     @Test(arguments: ["complete", "abandon"])

@@ -136,7 +136,7 @@ struct WorkDestinationTests {
         #expect(workspace.conversationRequest == nil)
         #expect(model.taskOpening?.status == .failed)
         #expect(workspace.multiplexer.sessionPane?.sessionId == nil)
-        #expect(workspace.hostUse == "away")
+        #expect(!workspace.presented)
         #expect(model.sessions.value?.contains { $0.id == record.id } != true)
         #expect(registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query).sessions.isEmpty)
     }

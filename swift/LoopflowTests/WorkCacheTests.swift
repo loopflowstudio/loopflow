@@ -89,7 +89,7 @@ struct WorkCacheTests {
         #expect(registry.selectedWork == selected)
         #expect(registry.retained(other) == nil)
         #expect(registry.retained(selected)?.location == nil)
-        #expect(registry.retained(selected)?.hostUse == "away")
+        #expect(registry.retained(selected)?.presented == false)
         await source.hold(["desktop", "plan"])
         let refresh = Task { await returning.refresh() }
         await source.waitForHeldRead()
@@ -100,7 +100,7 @@ struct WorkCacheTests {
         await refresh.value
         await spin { registry.retained(selected)?.conversationError == nil }
         #expect(returning.selection == .task(id: "issue-review"))
-        #expect(registry.retained(selected)?.hostUse == "away")
+        #expect(registry.retained(selected)?.presented == false)
         #expect(registry.retained(selected)?.conversationError?.contains(machineUnavailable ? "Machine unavailable" : "location changed") == true)
         #expect(registry.retained(other) == nil)
         #expect(!registry.recentTasks.contains(other))
@@ -143,8 +143,8 @@ struct WorkCacheTests {
         // boundedSelectedFirstPreparation proves admission order; these two reads then race.
         #expect(Set(await source.preparedTasks) == (closed ? [other.id] : [selected.id, other.id]))
         #expect(registry.retained(selected)?.conversationClosed == closed)
-        #expect(registry.retained(selected)?.hostUse == (closed ? "away" : "retained"))
-        #expect(registry.retained(other)?.hostUse == "retained")
+        #expect(registry.retained(selected)?.presented == !closed)
+        #expect(registry.retained(other)?.presented == true)
         // Saved unstarted and shipping Tasks are not working: they reveal history only.
         #expect(store.preparedTaskConversations.allSatisfy { $0.launchArguments.contains("--reveal-existing") })
         registry.prepareForQuit()

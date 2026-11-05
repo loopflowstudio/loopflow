@@ -206,6 +206,7 @@ When editing Rust tests:
   replay a migration with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` (standalone binaries included) for the old name.
 - Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
+- Lifetime tests start a terminal owner with `Fixture::serve(true, …)`: a `--json` viewer on a pipe gets a pipe owner that dies with its stdin, so a retirement bug passes unseen. With `RUST_LOG` set, diagnostics go to stderr (`logs/transport.log` there), not `logs/lf.log`.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 
 # Goals

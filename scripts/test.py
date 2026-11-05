@@ -1705,9 +1705,23 @@ def run_plans(
         recorder.checkpoint()
 
     outcomes: dict[str, SuiteOutcome] = {}
+    stopped_for_security = False
     for plan in plans:
-        if plan.run:
-            outcomes[plan.suite.name] = _run_suite(plan, artifact_root, _checkpoint_phase)
+        if not plan.run:
+            continue
+        if stopped_for_security:
+            outcomes[plan.suite.name] = SuiteOutcome(
+                False,
+                0.0,
+                [_not_run_phase(plan.suite.name, cmd) for cmd in plan.commands],
+                "Not run after host-security pressure; product result: unproven.",
+            )
+            continue
+        outcome = _run_suite(plan, artifact_root, _checkpoint_phase)
+        outcomes[plan.suite.name] = outcome
+        stopped_for_security = any(
+            phase.failure_kind == "host_security_pressure" for phase in outcome.phases
+        )
 
     failed = [(name, outcome) for name, outcome in outcomes.items() if not outcome.ok]
     phases = [phase for outcome in outcomes.values() for phase in outcome.phases]

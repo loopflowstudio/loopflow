@@ -5,7 +5,7 @@
 //! and version, and flags the ones a launch through the entry no longer runs
 //! (`installation::superseded`, the judgement owners and `lf resume` share) or
 //! that can't open the store any more. A superseded owner ends itself once its
-//! Sessions wait for a person and `lf resume` reopens them on the installed lf;
+//! Sessions hold no work or input and `lf resume` reopens them on the installed lf;
 //! rollover does that for every superseded owner at once, including owners that
 //! predate the policy: an idle owner with saved provider history is ended the
 //! way its lifetime policy ends it, and each of its Sessions resumes on the
@@ -764,6 +764,20 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &owner.id, false)
             .unwrap();
+        let sql = |statement: &str, params: &[&dyn rusqlite::ToSql]| {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(statement, params)
+                .unwrap();
+        };
+        let stays = |reason: &str| {
+            let Disposition::Stays(stayed) = owner_disposition(&store, &owner.id).unwrap() else {
+                panic!("rollover must preserve {reason}");
+            };
+            assert_eq!(stayed, format!("{reason} holds the conversation"));
+        };
         store
             .record_session_activity(
                 &session.id,
@@ -777,16 +791,8 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(matches!(
-            owner_disposition(&store, &owner.id).unwrap(),
-            Disposition::Stays(_)
-        ));
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("DELETE FROM session_activity", [])
-            .unwrap();
+        stays("a live turn");
+        sql("DELETE FROM session_activity", &[]);
         assert!(matches!(
             owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Moves(ref sessions) if sessions == &[session.id.as_str().to_owned()]
@@ -804,54 +810,28 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(matches!(
-            owner_disposition(&store, &owner.id).unwrap(),
-            Disposition::Stays(_)
-        ));
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("DELETE FROM session_activity", [])
-            .unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
-                [&session.id],
-            )
-            .unwrap();
-        }
-        let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
-            panic!("rollover must preserve a headless Run");
-        };
-        assert_eq!(reason, "a headless Run holds the conversation");
+        stays("a live turn");
+        sql("DELETE FROM session_activity", &[]);
+        sql(
+            "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+            &[&session.id],
+        );
+        stays("a headless Run");
+        sql(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            &[&session.id],
+        );
         let graph = LfProcessId::new();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
-                [&session.id],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
-                rusqlite::params![graph, owner.id],
-            ).unwrap();
-            conn.execute(
-                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')", [&graph],
-            ).unwrap();
-        }
-        let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
-            panic!("rollover must preserve a running Graph");
-        };
-        assert_eq!(reason, "a running Graph holds the conversation");
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE processes SET completed_at=2 WHERE id=?1", [&graph])
-            .unwrap();
+        sql(
+            "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+            &[&graph, &owner.id],
+        );
+        sql(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+            &[&graph],
+        );
+        stays("a running Graph");
+        sql("UPDATE processes SET completed_at=2 WHERE id=?1", &[&graph]);
         assert!(matches!(
             owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Moves(_)
@@ -859,10 +839,7 @@ mod tests {
         // No active turn is needed to protect either a plain or edited draft.
         for bytes in [b"draft".as_slice(), b"\x7f"] {
             assert!(store.try_record_owner_input(&owner.id, bytes).unwrap());
-            let Disposition::Stays(reason) = owner_disposition(&store, &owner.id).unwrap() else {
-                panic!("rollover must preserve native editor input");
-            };
-            assert_eq!(reason, "native input holds the conversation");
+            stays("native input");
         }
     }
 }

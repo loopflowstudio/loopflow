@@ -346,7 +346,6 @@ async fn local_task(
         branch: issue.into(),
         base_commit: base.into(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

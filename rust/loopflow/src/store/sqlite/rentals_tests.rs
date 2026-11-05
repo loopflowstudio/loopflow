@@ -34,15 +34,43 @@ fn code(max: u32) -> OnDemand {
 }
 
 #[test]
+fn file_edits_change_admission_without_rewriting_live_rentals() {
+    let _env = loopflow_test_support::env_lock().lock().unwrap();
+    let (home, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+    store.add_ondemand(&code(1)).unwrap();
+    let admitted = store.admit_rental("code", None, None, false).unwrap();
+    crate::config::api::run(crate::config::api::Request::Declaration {
+        destination: crate::config::files::Destination::PersonalGlobal {},
+        key: "ondemands.code.max_machines".into(),
+        value: Some("0".into()),
+        unset: false,
+    })
+    .unwrap();
+    assert_eq!(store.ondemand("code").unwrap().unwrap().max_machines, 0);
+    assert!(store.admit_rental("code", None, None, false).is_err());
+    assert_eq!(
+        store.rental(&admitted.id).unwrap().cap_usd,
+        admitted.cap_usd
+    );
+}
+
+#[test]
 fn pools_and_ondemands_share_one_namespace() {
     let (_dir, store) = store();
-    store.add_pool("lab").unwrap();
+    store.add_pool("lab.west").unwrap();
     store.add_ondemand(&code(1)).unwrap();
     assert_eq!(store.ondemand("code").unwrap(), Some(code(1)));
     assert!(store.add_pool("code").is_err());
     let mut lab = code(1);
-    lab.name = "lab".into();
+    lab.name = "lab.west".into();
     assert!(store.add_ondemand(&lab).is_err());
+    store.set_pool_off("lab.west", true).unwrap();
+    assert!(store.pool("lab.west").unwrap().unwrap().off);
+    store.remove_pool("lab.west").unwrap();
+    assert!(store.pool("lab.west").unwrap().is_none());
+    assert!(store.remove_pool("lab.west").is_err());
 }
 
 #[test]
@@ -160,7 +188,6 @@ fn open_task(store: &SqliteStore) -> TaskId {
         branch: "jack/rent".into(),
         base_commit: "deadbeef".into(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         observation: Observation::NotRequired,
@@ -174,6 +201,8 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     // Claiming reads the global Git identity, which isolating tests replace.
     let _env = crate::journal::test_env_lock();
     let (_dir, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", _dir.path().to_str().unwrap());
     store.add_ondemand(&code(1)).unwrap();
     let rental = store.admit_rental("code", None, None, false).unwrap();
     store

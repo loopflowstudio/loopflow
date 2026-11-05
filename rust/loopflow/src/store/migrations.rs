@@ -730,6 +730,10 @@ fn migration_preflight(
     migration: &Migration,
     guards: &mut Vec<File>,
 ) -> StoreResult<()> {
+    if migration_contains(migration, "settings_authority") {
+        crate::config::migrate::preflight(conn, guards)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    }
     if migration_contains(migration, "canonical_structured_ids") {
         super::canonical_ids::preflight(conn, guards)?;
     }
@@ -3459,31 +3463,27 @@ mod tests {
     }
 
     #[test]
-    fn task_agent_migration_preserves_existing_tasks() {
-        let conn = open();
-        apply_before_migration(&conn, "task_agent");
-        conn.execute_batch("INSERT INTO waves (id, name, repo, created_at)
-            VALUES ('wave_agent', 'agent', '/repo', 1);
-            INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
-            VALUES ('project_agent', 'wave_agent', 'linear-project', 1, 1);
-            INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, worktree, workspace_slug, created_at, updated_at)
-            VALUES ('task_agent', 'project_agent', 'linear-issue', 'TEST-1', '/repo.task', 'task-agent', 1, 1);").unwrap();
-        conn.execute_batch(&migration_section_sql("task_agent"))
-            .unwrap();
-        let retained = conn
-            .query_row(
-                "SELECT issue_identifier, worktree, agent FROM tasks WHERE id='task_agent'",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(retained, ("TEST-1".into(), "/repo.task".into(), None));
+    fn settings_authority_preserves_task_history_and_migrates_preferences() {
+        let home = tempfile::tempdir().unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        apply_before_migration(&conn, "settings_authority");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/settings_authority_released.sql"
+        ))
+        .unwrap();
+        let mut guards = Vec::new();
+        crate::config::migrate::preflight(&conn, &mut guards).unwrap();
+        drop(guards);
+        upgrade_from_migration(&conn, "settings_authority");
+        let retained: (String, String) = conn.query_row("SELECT t.worktree,s.provider FROM tasks t JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(retained, ("/repo.task".into(), "claude".into()));
+        let values: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &std::fs::read_to_string(home.path().join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(values["skills"]["design"]["agent"], "codex:o3");
+        assert_eq!(values["skills"]["implement"]["agent"], "codex");
+        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('scope_settings','scope_defaults','provider_routes')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
     }
 
     #[test]

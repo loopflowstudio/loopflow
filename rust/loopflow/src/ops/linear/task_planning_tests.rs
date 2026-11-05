@@ -2450,7 +2450,6 @@ fi
                 state: None,
                 completed_at: None,
                 observation: Observation::NotRequired,
-                agent: None,
             };
             let mut pr = TaskPr {
                 id: TaskPrId::new(),
@@ -2711,7 +2710,6 @@ esac
                 state: None,
                 completed_at: None,
                 observation: Observation::NotRequired,
-                agent: None,
             };
             let pr = TaskPr {
                 id: TaskPrId::new(),

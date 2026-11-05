@@ -406,7 +406,7 @@
           "reason": "CI running on #1650"
         },
         "pr": null,
-        "graph_source": "task"
+        "graph_source": null
       },
       {
         "task": {
@@ -693,7 +693,7 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "graph_source": "task"
+        "graph_source": null
       },
       {
         "task": {
@@ -765,7 +765,7 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": "task"
+        "graph_source": null
       },
       {
         "task": {
@@ -860,7 +860,7 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": "task"
+        "graph_source": null
       }
     ],
     "truncated": false

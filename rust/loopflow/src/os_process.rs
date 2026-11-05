@@ -351,6 +351,7 @@ fn session_environment(
 ) -> Vec<(String, String)> {
     let inherited_context = [
         crate::config::AGENT_OVERRIDE_ENV,
+        "LF_SETTINGS",
         "LF_TRACE_ID",
         "LF_PROCESS_ID",
         crate::lf::WORK_DECLARATION_ENV,

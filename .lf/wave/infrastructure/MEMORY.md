@@ -186,71 +186,86 @@ Jack Heart authorized selective cleanup without retries or a five-minute CI clai
 #1545 merged; installed savings remain unproved. Evidence:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
-## Global agent override (LOO-440, curated 2026-10-11)
+## Settings authority (LOO-714, revised 2026-11-03)
 
-Jack Heart selected global `-a`/`--agent` over Task, Flow, step, skill and child
-choices; omission preserves defaults. October 10 approval authorizes landing and
-completion after verified merge. No logins, credential reads or real-provider tests.
-Six fixture Sessions prove Claude across child overrides; replay/native history
-retain their provider. Conflicting resume explains starting anew.
+Jack Heart replaces DB preferences with one catalogue/file writer, including
+machine/account declarations. Runtime identity,
+observations, secrets and history remain domain-owned.
 
-October 11 gate passed override checks; release-lock failure's cause remains
-unknown. Remote/live/installed acceptance, landing and completion remain unproved.
-Evidence: `6935bfbadb:wave/infrastructure/MEMORY.md`, this heading.
+Every applicable `agent` choice precedes all `default_agent` fallbacks. Within each
+class: CLI > environment > personal files > repository/Wave files > builtins,
+then scope, then occurrence/skill/general. Source, scope and target are independent;
+non-agent merges remain typed.
+No per-skill accounts or builtin agent recommendations. Targets retain Graph
+name/authored ID through composition/export; captures preserve omitted/empty docs.
 
-## Plan ownership (LOO-406, revised 2026-10-08)
+Session/resume `-a` selects that conversation; Graph selection reaches its steps.
+Same-provider fallback refresh without cross-provider import remains an assumption.
+Earlier inheritance proof and unresolved lock cause:
+`d6d7057d97:.lf/wave/infrastructure/MEMORY.md`, Global agent override.
 
-Jack Heart selected identical local plan records/APIs with or without repository-wide
-Linear synchronization. Delete personal/shared namespaces,
-`personal_plans`, personal-only workflows and `project_authority_on`; provider
-mappings are links, not planning authorities. During an outage, local edits succeed
-and show pending sync. Preserve uncertain effects and concurrent edits; no resident
-or automatic turn/Flow retry.
+Jack Heart resolved clone scope November 3: private preferences, including account
+order, belong to independent clones; linked worktrees share root
+`lf.config.local.yaml`. Legacy routes materialize after collision checks.
+Unavailable destinations retain non-executing exports; future clones inherit
+nothing. Reads need no checkout registration.
 
-Jack Heart requires inbound completion/membership/comments during pending writes,
-immediate local saves and active CLI/Desktop propagation without another turn.
-Retain mutation identities, both conflicting values and reconnect deduplication;
-Linear wins observed planning conflicts, while unseen remote edits remain a race.
-LOO-412's accepted ordering uses causality before clock/mutation-ID ties and keeps
-losing edits recoverable. User-keyed Git is the default; shared planning is opt-in, and joining
-cannot silently publish existing plans. Ref separation supplies no privacy.
-Sessions, Processes, captured Workflow positions, reservations and checkouts stay
-local. Shared completion grants no execution or cleanup authority.
-The superseded prototype/delivery narrative and exact October 8 comments remain at
-`616d73b4dcd21dd78c62f3f3420c5e4f9b0d8f21:.lf/wave/infrastructure/MEMORY.md`,
-Plan ownership; LOO-406 owns common writers/Linear and LOO-412 transport.
+Git misses ignored configuration; observation must include absent paths and worker
+reads. One typed edit destination owns path/source/scope/prefix across interfaces.
+Earlier observation and destination-repair proofs:
+`579b48dcfa:.lf/wave/infrastructure/MEMORY.md`, this heading. Mounted Desktop
+remains unproved.
 
-Foreground acquisition and delivery are independent; effect locks block neither.
-Captured receipts retain losing values; only complete-list observations settle
-Project ordering. Every create returns a distinct ID, even for identical titles
-(Jack Heart's October 8 comments removed public creation tokens); LOO-412's
-October 10 redesign owns machine-local execution linked by Task ID, and shared
-completion does not move or stop the local Flow. Observed Linear reopening keeps
-both values and retires delivery, leaving execution; unseen reopening can be
-overwritten. Comments preserve authorship, losing edits and pending direction;
-cancellation resolves the Team's lowest-position state; deletion requires
-trash/acknowledgment, never absence. Earlier checks, writer proofs and schema
-evidence: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md` and
-`078a6642e:wave/infrastructure/MEMORY.md`, Plan ownership; peer and installed
-acceptance remain unproved, full CI open.
+Config-only forwarding left executor skill metadata able to override an origin
+choice. Select one personal profile across files and definition metadata before
+ranking. Preserve locators, choice/fallback keys and occurrence addresses separately
+from bodies/topology; current executor definitions supply host bindings even for
+captured instructions. Retention edits preferences in existing assets only and
+preserves independent edits; direct executor work uses its saved profile.
+Six fixtures cover preparation/inspection, capture/composition and retention
+(`579b48dcfa`); SSH and installed/configured acceptance remain unproved.
 
-Jack Heart's LOO-449 decision makes checkout files own goal, memory and ancestor
-Markdown; edit directly, without a document cache or CLI. Canonical identity
-cannot redirect bytes. SQLite retains identity/execution; `wave_workflows` retains
-Project selection and Task capture. Registry relocation preserves files in place;
-authoring moves them.
-Jack's October 10 decision makes Linear sync pin one committed local default-branch
-revision, never fetch or fall back; local views stay checkout-based. Mocked sync,
-checkout and stand-in launch proofs preserve LOO-444; installed acceptance remains
-unproved. Jack approved #1521 and landing with the default-branch fix (`05b04fa8`).
-Plan: `scratch/read-wave-goals-and-memory.md`.
+Exporting declarations as CLI flags changes authority. Publication is review only.
+Limit recovery stays PR2:
+routing and retry must agree, and failed preparation cannot reattribute an old
+thread. November 2's weekly rejection demonstrated that split.
 
-Export saves UUIDs before acquisition and retains uncertain creates/links;
-acceptance remains unproved. Jack selected unambiguous Task prefixes (4+ hex
-characters), preserving full IDs, receipts and placement; no landing/install.
-Writer/prefix evidence:
-`72dbe0344f73722bd90a4f392c3e801cd976b80f:.lf/wave/infrastructure/MEMORY.md`,
-Plan ownership. Backup/export remains unproved.
+## Plan ownership (LOO-406/412/449, curated 2026-11-03)
+
+Jack Heart selected identical local Project/Task records and APIs with optional
+repository-wide Linear synchronization. Provider mappings are links, not plan
+authorities; personal/shared namespaces and `project_authority_on` are retired.
+Local edits survive outages with pending sync. User-keyed Git is default; joining
+shared planning cannot silently publish existing plans. Ref separation is no privacy.
+
+Jack requires inbound changes during pending writes, immediate local saves and
+CLI/Desktop propagation without another turn. Preserve mutation identities, losing
+values, unseen/uncertain effects and reconnect deduplication. Linear wins observed
+conflicts; unseen remote edits remain a race. LOO-412 orders causality before clock
+and mutation-ID ties. Only complete-list observations settle Project order; reads
+and delivery remain independent. Captured receipts survive later edits. Creates
+always get distinct IDs; cancellation uses the Team's lowest-position state,
+deletion requires trash/acknowledgment, never absence. Comments retain authorship.
+
+Sessions, Processes, checkouts, reservations and execution remain machine-local.
+Shared completion moves no Graph or Process and grants no cleanup. Observed
+reopening retires delivery while retaining execution and both values. No resident
+or automatic turn/Graph retry is authorized. LOO-406 owns common writers/Linear;
+LOO-412 owns transport. Current architecture supersedes old workflow-selection rows.
+
+LOO-449: checkout files own goals, memory and ancestor Markdown; edit directly,
+without a document cache. Canonical identity cannot redirect bytes. Registry
+relocation preserves files; authoring moves them. Jack's October 10 decision pins
+Linear sync to one committed local default-branch revision, with no fetch/fallback;
+local views remain checkout-based. Jack approved #1521 with that fix (`05b04fa8`).
+
+Export saves UUIDs before acquisition and retains uncertain links/creates; backup
+and export acceptance remain unproved. Jack selected unambiguous Task prefixes
+(4+ hex) retaining full identity/receipts/placement, without installation authority.
+Peer/installed acceptance and full CI remain unproved in this evidence. Exact
+October decisions, superseded mechanics, fixture counts and linked archives:
+`04bdec77e312a4bd0166a027113fb4a952732b9e:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Archives neither prove delivery nor restore removed writers.
 
 ## On-demand Linear acquisition (lf-6f396c0, 2026-10-11)
 
@@ -369,10 +384,9 @@ this heading, and `06e88761d:wave/infrastructure/MEMORY.md`.
 
 Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
 version/identity commands suffice: retain versions when identity fails; report
-differences and the update command without a version gate. Named connections live
-on Machine rows. Removal clears label/repo and releases destination uniqueness;
-identity and route survive so a replacement can be added at that
-destination without deleting history or touching remote work. Only explicitly
+differences and the update command without a version gate. LOO-714 moves named
+connections and aliases to file declarations; runtime identity/history remain.
+Removal preserves history and remote work. Only explicitly
 added machines may receive foreground credentials.
 OpenSSH owns destination syntax. Exact-frontier fixtures seed released
 SQL. Local source proofs establish no installed migration or configured remote
@@ -388,7 +402,7 @@ has its own socket scope. Jack selected global `--machine <label>`, removing
 `lf ssh` without an alias; LOO-411 supplies the selector cutover. Loopback proofs
 establish reuse, not installation or account continuity.
 The target parses the command in its saved repository; Task, worktree and Wave
-selectors resolve there. `--machine Y machine add X` edits Y's registry. No SSH
+selectors resolve there. `--machine Y machine add X` edits Y's configuration. No SSH
 alias or per-call repository override remains.
 LOO-411 / PR #1489 merged (`35e759aaf`).
 
@@ -844,8 +858,8 @@ heading and its linked prior memory.
 
 Jack Heart selected reconciliation before decision/publication, demo and authored
 delivery. Preserve captured definitions; locate policy rather than catalog indices.
-Feedback is not a verdict; failed decisions cannot regain authority. Reload Task
-agent choice at each launch, including review, despite PM refresh. Executable and
+Feedback is not a verdict; failed decisions cannot regain authority. LOO-714
+supersedes saved Task-agent policy with per-invocation resolution. Executable and
 Home must agree. The real Codex fixture used synthetic feedback and predates
 generic loop-decide; Claude launch/resume, real five-minute stall and rendered
 Desktop agreement remain unverified. Simulated liveness grants no signal authority;
@@ -969,24 +983,29 @@ proof and limits: `38dd8abd09:.lf/wave/infrastructure/MEMORY.md`, this heading;
 design: `4ca3bbe3d7b30b8a4bb05d466ad55f5eeb368201:scratch/loo-502.md`.
 MTG-117's unknown exit is not proven upgrade-caused.
 
-## Moving onto the installed lf (LOO-705, 2026-11-02)
+## Moving onto the installed lf (LOO-705/724, reconciled 2026-11-04)
 
-Jack Heart requested one rollover mechanism after 0.15.0 refused 0.15.1 attaches
-and rollover moved none. Replacement from durable state, without negotiation,
-remains the headless choice pending Jack. `installation::superseded` compares
-the owner's build with its launch entry (`resolve_lf_binary`), shared by owner,
-resume and inventory. Removed/replaced/superseded owners end when waiting and
-send `<entry> session resume <id>`; viewers execute it without replaying argv
-(LOO-708 execs viewers before Clap). Resume watches an answering busy owner;
-an unanswering one ends with a cut-turn report. Rollover sweeps all superseded
-owners; viewed/artifact-set filters are deleted. Graph runners stay; steps use
-the entry. Jack calls LOO-709's 2m grace sufficient for "move always."
+Jack Heart selected one rollover mechanism; durable-state replacement remains a
+headless choice. Successors never replay; EOF stays unknown. Earlier decisions: `cedb7b52b6:.lf/wave/infrastructure/MEMORY.md`,
+this heading.
 
-Cross-build transport adds optional fields to existing Response variants, never
-variants (`moved` broke 0.15.0). Compare against the relaunch entry, not the
-viewer binary. Unreadable advanced stores keep retrying; mismatched app/CLI
-builds restart each other's owners. Fixtures prove neither Mac `lf resume LOO-618`
-nor a Graph's next step on a newer build.
+Jack Heart requires affected Sessions to complete turns and sustain input with
+identity/history/Work/drafts intact. LOO-582's viewer-write timeout and LOO-718's
+freeze remain unexplained. Interrupted viewers prove no crash; `Uncertain` input
+and same-thread resume prove no draft preservation.
+
+LOO-724 reproduces SQLite contention blocking owner control. Nonblocking writes
+and timed retry retain input before delivery without PTY spinning. Regression:
+control, viewer return, once-only delivery after unlock; no incident attribution.
+
+Dead-leader observation needs no local lifeline; fixtures retain natural-exit
+recovery and persistent-survivor refusal without signaling. Candidate four-turn
+proof covers owner replacement, drafts/history and viewer return without replay,
+not older wire/store or configured recovery. Release's entry-point lesson applies.
+
+The parent's signed `ac8e088f5f` Desktop repair pairs CLI/helper and retains old
+runtimes; it predates LOO-724's repairs and proves no resumed turn. LOO-723 owns
+policy/mini rollout; affected-Session recovery stays coordinated with the parent.
 
 ## Shipped history
 

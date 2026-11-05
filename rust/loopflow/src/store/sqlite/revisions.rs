@@ -90,7 +90,6 @@ mod tests {
         "planning_peer_changes",
         "planning_peer_observed",
         "project_binding_imports",
-        "auth_browser_bindings",
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf ops people`.
         "github_people",

@@ -263,7 +263,7 @@ fn opens_store(store: &Path, catalog: &str) -> Result<bool> {
 /// The stream recorded in `home`'s config.yaml.
 fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
     let config = home.join("config.yaml");
-    let Some(name) = crate::config::read_global_config_at(&config)?
+    let Some(name) = crate::config::files::read(&config)?
         .get("stream")
         .and_then(|value| value.as_str().map(str::to_string))
     else {
@@ -278,7 +278,7 @@ fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
 }
 
 fn record_stream(home: &Path, stream: Stream) -> Result<()> {
-    crate::config::update_global_config_at(home, |config| {
+    crate::config::files::update(&home.join("config.yaml"), |config| {
         config["stream"] = stream.as_str().into();
         Ok(())
     })
@@ -866,7 +866,7 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::{checked, DiskImage};
+    use super::{checked, launchd_schedule, DiskImage, InstallFrequency};
     use super::{
         cron_table, is_current, newest_release, newest_run, opens_store, package_target,
         record_stream, recorded_stream, release_tag, run_verified_installer, Stream, CRON_MARKER,
@@ -1142,6 +1142,81 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
         )
         .unwrap();
         assert!(!is_current(temp.path(), "v9.9.9", None));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launchd_schedule_preserves_frequency_and_reuses_its_job() {
+        use crate::lf::commands::graph::EnvVarGuard;
+        use std::os::unix::fs::symlink;
+
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        symlink("/usr/bin/id", bin.join("id")).unwrap();
+        let launchctl = bin.join("launchctl");
+        fs::write(&launchctl, "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootstrap) : > \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
+        fs::set_permissions(&launchctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
+        let binary = home.path().join("installed & current/lf");
+        let logs = home.path().join("logs");
+        let path = home
+            .path()
+            .join("Library/LaunchAgents/com.loopflow.refresh.plist");
+        let run = |frequency| launchd_schedule(home.path(), &binary, &logs, frequency).unwrap();
+        let read_plist = || -> serde_json::Value {
+            let output = Command::new("/usr/bin/plutil")
+                .args(["-convert", "json", "-o", "-"])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            serde_json::from_slice(&output.stdout).unwrap()
+        };
+        run(None);
+        let plist = read_plist();
+        assert_eq!(
+            plist["ProgramArguments"],
+            serde_json::json!([binary, "install"])
+        );
+        assert!(plist.get("WorkingDirectory").is_none());
+        assert_eq!(plist["RunAtLoad"], true);
+        assert_eq!(
+            plist["StartCalendarInterval"],
+            serde_json::json!({"Hour": 9, "Minute": 0})
+        );
+        for (frequency, expected) in [
+            (
+                InstallFrequency::Daily,
+                serde_json::json!({"Hour": 9, "Minute": 0}),
+            ),
+            (InstallFrequency::Hourly, serde_json::json!({"Minute": 0})),
+            (
+                InstallFrequency::FiveMinutes,
+                serde_json::json!([
+                    {"Minute": 0}, {"Minute": 5}, {"Minute": 10}, {"Minute": 15},
+                    {"Minute": 20}, {"Minute": 25}, {"Minute": 30}, {"Minute": 35},
+                    {"Minute": 40}, {"Minute": 45}, {"Minute": 50}, {"Minute": 55}
+                ]),
+            ),
+            (
+                InstallFrequency::Weekly,
+                serde_json::json!({"Weekday": 1, "Hour": 9, "Minute": 0}),
+            ),
+        ] {
+            run(Some(frequency));
+            assert_eq!(read_plist()["StartCalendarInterval"], expected);
+            assert!(home.path().join("loaded").exists());
+            let modified = fs::metadata(&path).unwrap().modified().unwrap();
+            run(None);
+            assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+            fs::remove_file(home.path().join("loaded")).unwrap();
+            run(None);
+            assert!(home.path().join("loaded").exists());
+            assert_eq!(read_plist()["StartCalendarInterval"], expected);
+        }
     }
 
     #[test]

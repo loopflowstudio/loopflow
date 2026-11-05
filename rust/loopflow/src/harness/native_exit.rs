@@ -30,6 +30,7 @@ pub(crate) struct NativeExit {
     /// The input whose provider session names the account home to return to.
     pub capture_key: Option<String>,
     pub account: Option<ProviderAccountId>,
+    pub isolate: Option<bool>,
     /// The launcher's diagnostics log and its size before the provider ran.
     pub diagnostics: (PathBuf, u64),
 }
@@ -53,7 +54,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
         false
     });
     if let (Some(account), Some(key), false) = (&exit.account, &exit.capture_key, lost) {
-        pin_account_home(&exit.provider, account, key);
+        pin_account_home(&exit.provider, account, key, exit.isolate);
     }
     let command = crate::lf::commands::util::SessionCommandOutcome {
         status,
@@ -141,7 +142,12 @@ pub(crate) fn departure((store, session, attachment): &AttachmentOwner) -> Optio
 
 /// Record which account home the provider session lives in, so reopening
 /// returns there.
-fn pin_account_home(provider: &str, account: &ProviderAccountId, capture_key: &str) {
+fn pin_account_home(
+    provider: &str,
+    account: &ProviderAccountId,
+    capture_key: &str,
+    isolate: Option<bool>,
+) {
     let pinned = (|| -> Result<()> {
         let Ok(provider) = provider.parse::<crate::provider_auth::Provider>() else {
             return Ok(());
@@ -155,6 +161,7 @@ fn pin_account_home(provider: &str, account: &ProviderAccountId, capture_key: &s
             Some(session.agent_session.clone()),
             Some(account.clone()),
             None,
+            isolate,
         )?;
         if let Some(route) = route {
             route.pin_session_blocking(Some(session.agent_session))?;
@@ -218,6 +225,7 @@ mod tests {
                 capture: Some(capture.hand_off()),
                 capture_key: Some(capture.artifact_key()),
                 account: None,
+                isolate: None,
                 diagnostics: (home.join("absent.log"), 0),
             };
             store

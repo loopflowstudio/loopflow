@@ -419,6 +419,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(sys.argv[1]).parent))
 spec = importlib.util.spec_from_file_location("resources", sys.argv[1])
 resources = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = resources

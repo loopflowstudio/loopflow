@@ -29,6 +29,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     // As the children resolve it: `doctor` prints the store's path.
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: codex\n");
     repo.create_file("edit.txt", "before\n");
     repo.stage_all();
     repo.commit("Comparison base");
@@ -142,6 +143,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Read::Waves
         | Read::MachineId
         | Read::Portfolio
+        | Read::Settings { .. }
         | Read::PaneLayout { .. }
         | Read::People { .. }
         | Read::Graphs { .. }
@@ -183,6 +185,13 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 Read::Waves,
                 Read::MachineId,
                 Read::Portfolio,
+                Read::Settings {
+                    directory: repo.path().to_owned(),
+                    wave: None,
+                    skill: Some("implement".into()),
+                    graph: None,
+                    step: None,
+                },
                 Read::PaneLayout {
                     directory: repo.path().to_owned(),
                     work: "repository".into(),

@@ -357,7 +357,6 @@ fn fixture(
         branch: "main".into(),
         base_commit: repo.head_sha(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

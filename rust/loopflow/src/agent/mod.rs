@@ -21,7 +21,7 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::config::{default_agent, parse_agent};
+use crate::config::parse_agent;
 use crate::error::CoreError;
 use crate::os_process::wait_for_exit;
 use crate::platform::kill_process;
@@ -179,6 +179,7 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 9] = [
 pub struct AgentConfig {
     /// Chrome integration for Claude terminal and stream sessions.
     pub chrome: bool,
+    pub isolate: Option<bool>,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
@@ -226,17 +227,15 @@ impl AgentConfig {
     pub(crate) fn apply_agent_override(&mut self) {
         if let Some(agent) = crate::config::agent_override() {
             self.agent = Some(agent.clone());
-            self.env
-                .insert(crate::config::AGENT_OVERRIDE_ENV.into(), agent);
         }
     }
 
-    /// Return the selected agent or Loopflow's compiled default.
-    pub fn agent(&self) -> &str {
-        match self.agent.as_deref() {
-            Some(agent) => agent,
-            None => default_agent(),
-        }
+    /// Resolve the selected agent, or the sole installed harness.
+    ///
+    /// # Errors
+    /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
+    pub fn agent(&self) -> Result<&str, crate::error::LoadError> {
+        crate::config::select_agent(self.agent.as_deref())
     }
 }
 
@@ -272,7 +271,7 @@ impl std::fmt::Debug for AgentConfig {
 
 /// Select and pin a managed Claude/Codex account before publishing a capture.
 pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
-    let (harness, _) = parse_agent(launch.agent());
+    let (harness, _) = parse_agent(launch.agent()?);
     let provider = match harness.as_str() {
         "claude" => Provider::Claude,
         "codex" => Provider::Codex,
@@ -312,6 +311,7 @@ fn resolve_account_route_blocking(
                 .get(crate::work::wave::context::WAVE_ID_ENV)
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
+            launch.isolate,
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),
@@ -864,8 +864,7 @@ fn run_admitted_agent(
     process: &ProcessConfig,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    launch.apply_agent_override();
-    if process.auto && parse_agent(launch.agent()).0 != "claude" {
+    if process.auto && parse_agent(launch.agent()?).0 != "claude" {
         if launch.max_turns.is_some() {
             eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
         }
@@ -881,7 +880,7 @@ fn run_admitted_agent(
         }
     }
     pin_provider_account_id_blocking(&mut launch)?;
-    let (harness, model) = parse_agent(launch.agent());
+    let (harness, model) = parse_agent(launch.agent()?);
     let implicit_capture = if process.capture.is_none() {
         Some(_begin_implicit_capture(&launch, process, &harness, model)?)
     } else {
@@ -980,7 +979,7 @@ fn _run_with_transient_retries(
         result.failure = failure;
         // Pi and OpenCode cannot be resumed without adding a new
         // model-visible input. Preserve failure; only explicit input starts more work.
-        if matches!(parse_agent(launch.agent()).0.as_str(), "opencode" | "pi") {
+        if matches!(parse_agent(launch.agent()?).0.as_str(), "opencode" | "pi") {
             return Ok(result);
         }
         let Some(failure) = failure else {
@@ -1166,7 +1165,7 @@ fn _begin_implicit_capture(
     let capture = if process.auto {
         CaptureHandle::begin_with_request(
             spec,
-            crate::session_record::AgentProcessRequest::from_prepared(launch),
+            crate::session_record::AgentProcessRequest::from_prepared(launch)?,
         )
     } else {
         let context = crate::trace::PreparedTurnContext::from_prompts(
@@ -1178,7 +1177,7 @@ fn _begin_implicit_capture(
             &context,
             Some(crate::session_record::AgentProcessRequest::from_prepared(
                 launch,
-            )),
+            )?),
         )
     };
     capture.map(Into::into).map_err(|error| {
@@ -1211,7 +1210,7 @@ fn _run_harness_once(
     use crate::harness::ApprovalPolicy;
 
     let capture = process.capture.as_ref().map(|capture| &capture.0);
-    let (provider, _) = parse_agent(launch.agent());
+    let (provider, _) = parse_agent(launch.agent()?);
     let account_route = match match provider.as_str() {
         "codex" => resolve_account_route_blocking(Provider::Codex, launch),
         "claude" => resolve_account_route_blocking(Provider::Claude, launch),
@@ -1398,7 +1397,7 @@ fn _run_agent_once(
     retry: bool,
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
-    let (harness, model) = parse_agent(launch.agent());
+    let (harness, model) = parse_agent(launch.agent()?);
     if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }

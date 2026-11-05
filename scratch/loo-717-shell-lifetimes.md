@@ -52,7 +52,7 @@ queued retirement. Confirmed Desktop process exit releases its views without an
 app relaunch (accepted option 1a); do not require the dead app to report again.
 On the built branch this holds for local Tasks. A remote Task's owner sees Desktop
 quit as an SSH hangup, indistinguishable from network loss, so it stays unknown
-until the Session is viewed again (see the open decision below).
+until the Session is viewed again (settled below).
 
 Requested final work, drafts, pending input and running Graphs still protect
 execution. Work finishing after an elapsed deadline does not start another
@@ -208,15 +208,37 @@ Rex presence/native-settlement recipe. No new agent skill or user cleanup ritual
    and actual cleanup tests still pass. Formatting, Clippy and affected checks run
    under repository cadence; previous architecture tests must change with it.
 
-## Open decision for review — remote viewer hangup
+## Remote viewer hangup — settled by accepted decisions (concept review, Nov 5)
 
-Realign (Nov 5) found one tension between 1a and "unknown remote liveness". Quitting
-Desktop, or closing a Rex tab, on a remote Task's viewer hangs up its SSH relay;
-the owner cannot tell that from network loss, so the completed remote checkout is
-retained, with no expiry, until any viewer attaches again. Choices for Jack:
-(a) accept this conservative cost (current build); (b) have Desktop send a
-deliberate leave (Ctrl+]) to its remote viewers at quit, which reintroduces a
-bounded quit-time step; (c) an expiry for unknown holds, which 1a ruled out as
-lease-based release. Local Tasks are unaffected.
+Quitting Desktop, crashing it, or closing a Rex tab on a remote Task's viewer hangs
+up its SSH relay; the owner cannot tell that from network loss. The build keeps
+that hold `unknown` until any viewer attaches again (former option a). This is what
+the accepted decisions already imply, not an open choice:
+
+- Jack's 1a steer: "network loss and Rex client disappearance alone remain unknown";
+  Jack's Nov 5 request: preserve "unknown remote liveness" and remove the generic
+  settlement architecture, including the reverse `lf machine process` probe that
+  previously confirmed a remote Desktop's exit. An expiry (former option c) is
+  lease-based release, which 1a rules out.
+- The LOO-498 handoff: keep cleanup conservative while evidence is unavailable.
+  The cost is retention only; no work or history is lost, and viewing the Session
+  again resolves it.
+- Confirmed Desktop exit recovery holds where the evidence exists: local Tasks
+  (socket close is the viewer's exit) and every deliberate Desktop departure or
+  window close (Ctrl+] leave), local or remote.
+
+Carried to review, not blocking: an orderly Desktop quit could also send Ctrl+] to
+remote viewers (former option b). That reverses this design's deletion of quit-time
+release and needs a bounded quit wait (the byte must cross SSH before hangup), so it
+stays out of this pursue. A relay-side leave on terminal hangup would cover Rex and
+crashes too, but `ssh` inherits the tty today and receives the same SIGHUP.
+
+Concept review also checked: viewer exit is never inferred from provider exit (the
+viewer itself returns on `ChildExited`, so the release follows a real viewer exit;
+a Rex tab left behind is not a hold); no external-host persistence remains in
+Rust, Swift or docs; Desktop departure release is Desktop's accepted host policy.
+Next proof stays the list above; real Ghostty detach timing and Rex end to end
+belong to demo.
+
 Run the explicitly requested pursue Graph through publication, leaving review,
 installation, merge and Task completion separate. Do not run past the Task's demo.

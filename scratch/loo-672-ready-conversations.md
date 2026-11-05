@@ -49,7 +49,9 @@ history opens the repository and each Wave conversation unselected, selection
 reveals the already started Session, returning to an existing Task conversation
 keeps it, and no operator pass or Graph launched (`loo-672-demo.md`, required
 demonstration). `prepare-redemo.py` needs a Wave in the loaded repository for that
-case. `demo.html` and PR #1816's body still describe the Task-only scope.
+case. `demo.html` and PR #1816's body still describe the Task-only scope, and the
+PR head (`eae0d31694`) predates the primaries change and the sixth-review
+implications; publication carries the five commits through `948e1fde7d`.
 
 ## Accepted outcome and constraints
 
@@ -285,4 +287,11 @@ implications): Swift-only edits (one `startOffer`, `openPrimaryConversation`
 without `wave:`, `showsTerminals`, tile opener on the Task's intent, one `spin`
 wait helper in `WorkCacheTests`); same filter, 165 passed in 7 suites; Rust
 unchanged, no rerun. The rendered proof's candidate predates `83b3d64a93`'s
-shared Task matching, the primaries change and these passes.
+shared Task matching, the primaries change and these passes. Realign, November 5
+(sixth-review implications): plan claims checked against the tree by inspection
+(`conversationIntent` is working → Start, `awaitsStart` → `TaskStartOffer`, one
+`ConversationOpenButton` and `openConversation(in:store:)`, the three retired
+identifiers and the "has not reported" copy absent from `swift/`, `rust/` and
+`builtins/`, refused-reveal tests on `prefetch-15`); origin/main still `384505b120`,
+so the recorded sync findings stand; Wave memory corrected (started unowned Tasks
+open, unstarted offer Start, one placeholder); no code change, no rerun.

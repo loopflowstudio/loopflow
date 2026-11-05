@@ -966,12 +966,13 @@ through 717.
 
 Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
 of this task”), ruled out any normal “unopened” state on November 5, then extended
-it: “auto open everything *AND* prefetch everything”. Owned idle/active/moving
-Tasks and the repository and Wave primaries create their Session and start or
-resume the provider during load, before selection; primaries stay warm beside the
-Task bound. Unassigned Tasks stay backlog. Any primary's first turn without a
-request reads and reports, launching no Graph or operator; each start spends one
-provider turn. Start keeps non-replacing intent through argv, execution and claim; only Take back
+it: “auto open everything *AND* prefetch everything”. Started idle/active/moving
+Tasks, owned or not (opening claims nothing), and the repository and Wave primaries
+create their Session and start or resume the provider during load, before
+selection; primaries stay warm beside the Task bound. An unstarted Task has no
+checkout: its pane offers Start, since placing one starts the Task. One placeholder
+and one Retry serve every Work. Any primary's first turn without a request reads
+and reports, launching no Graph or operator; each start spends one provider turn. Start keeps non-replacing intent through argv, execution and claim; only Take back
 replaces input; Close fences late results. A consumed first launch with no history
 costs one Try again. Launch runs from the model: `.hidden()` panes never mount, so
 prepared Sessions start their terminal from the store and the pane adopts it.

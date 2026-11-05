@@ -145,7 +145,13 @@ fn export(conn: &Connection) -> Result<Export> {
         }
     }
     if table(conn, "provider_routes")? {
-        let mut query = conn.prepare("SELECT scope,scope_id,provider,account_id FROM provider_routes ORDER BY scope,scope_id,provider,position")?;
+        // `account:` selects by login; an account with an email has no id selector.
+        let mut query = conn.prepare(
+            "SELECT r.scope,r.scope_id,r.provider,COALESCE(a.login_email,r.account_id)
+             FROM provider_routes r
+             LEFT JOIN provider_accounts a ON a.provider=r.provider AND a.account_id=r.account_id
+             ORDER BY r.scope,r.scope_id,r.provider,r.position",
+        )?;
         let mut routes: BTreeMap<(String, String, String), Vec<String>> = BTreeMap::new();
         for row in query.query_map([], |row| {
             Ok((
@@ -608,6 +614,24 @@ mod tests {
         let journal = std::fs::read_to_string(home.path().join("settings-cutover.json")).unwrap();
         assert!(journal.contains("claude"));
     }
+    #[test]
+    fn exported_routes_name_accounts_the_way_launches_select_them() {
+        let home = tempfile::tempdir().unwrap();
+        let conn = fixture(home.path());
+        conn.execute_batch(
+            "INSERT INTO provider_accounts(provider,account_id,credential_state,routing_state,login_email,created_at,updated_at)
+             VALUES ('claude','loopflow','connected','automatic','jack@loopflow.studio',1,1),
+                    ('claude','local','connected','automatic',NULL,1,1);
+             INSERT INTO provider_routes VALUES
+             ('default','','claude',0,'loopflow',1,1), ('default','','claude',1,'local',1,1);",
+        )
+        .unwrap();
+        preflight(&conn, &mut Vec::new()).unwrap();
+        let global = crate::config::files::read(&home.path().join("config.yaml")).unwrap();
+        assert_eq!(global["account"]["claude"][0], "jack@loopflow.studio");
+        assert_eq!(global["account"]["claude"][1], "local");
+    }
+
     #[test]
     fn absent_origin_route_is_exported_without_becoming_a_global_override() {
         let home = tempfile::tempdir().unwrap();

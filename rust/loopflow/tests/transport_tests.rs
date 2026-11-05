@@ -2669,6 +2669,13 @@ while True:
     } else {
         terminal.input(b"\r");
         assert_eq!(fixture.wait_file("completed-2"), "retained draft");
+        // The superseded owner keeps serving; the person's next `lf resume`
+        // moves the idle conversation onto the installed lf.
+        assert!(fixture.running(&owner), "a superseded owner ended itself");
+        terminal.input(b"\x1d");
+        let output = wait_for_viewer(terminal.child, Duration::from_secs(10));
+        assert!(output.status.success(), "{output:?}");
+        terminal = resume();
         fixture.wait_file("ready-2");
         fixture.ends(&owner);
         let replacement = fixture.owner_of(&session);
@@ -2796,7 +2803,7 @@ while True:
         );
     }
     // A viewed idle terminal cannot settle a quiet supervisor's native turn.
-    let _viewed = fixture.viewer(&owners[1], false);
+    let viewed = fixture.viewer(&owners[1], false);
     fixture
         .sql()
         .execute(
@@ -2852,6 +2859,8 @@ while True:
                 .unwrap();
         }
     }
+    // A removed executable ends nothing; only the detached limit, once unviewed.
+    drop(viewed);
     for owner in &owners {
         fixture.ends(owner);
     }

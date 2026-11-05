@@ -207,7 +207,7 @@ fn watch(
         };
         if retained != retention {
             if let Some(reason) = retention {
-                tracing::info!(%owner, "retaining detached Session past its limit: {reason}");
+                tracing::warn!(%owner, "retaining detached Session past its limit: {reason}");
             }
             retained = retention;
         }

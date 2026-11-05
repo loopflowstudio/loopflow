@@ -132,6 +132,9 @@ pub enum ObserverState {
     Connected,
     /// No live execution exists; the pane shows saved history.
     History,
+    /// The observer stopped; only its lock's absence is known. Retryable.
+    Ended,
+    /// The observer reported an attachment error. Retryable.
     Failed,
     /// It may have attached, or may not have started; only inspection can tell.
     Uncertain,
@@ -158,6 +161,21 @@ pub struct OpenReceipt {
     pub fallback_argv: Vec<String>,
     /// Observers at this destination, separate from native create/reuse `status`.
     pub conversations: Vec<ConversationReadiness>,
+    /// Whether the Task's Rex views retain it, across every occurrence. Reported
+    /// for the shared lifetime owner; opening decides no cleanup from it.
+    pub rex_hold: Option<ViewHold>,
+}
+
+/// What a successful Rex inventory says about a Task's retained views.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewHold {
+    /// At least one occurrence is present in Rex.
+    Held,
+    /// Every occurrence is confirmed absent.
+    Released,
+    /// Some inventory could not be read or a creation is unresolved; never releases.
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -262,6 +280,7 @@ impl Resolved {
             reason,
             fallback_argv: self.fallback_argv(),
             conversations: Vec::new(),
+            rex_hold: None,
         }
     }
 

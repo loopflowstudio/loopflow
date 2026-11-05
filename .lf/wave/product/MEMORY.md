@@ -238,8 +238,6 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
 - A domain follows what a write changes on screen, not its table. Transcript
   lines were 164,192 of 168,336 daily Session events; counting them would
   re-read everything for ten hours a day.
-- A reading restates when it was taken in several fields. Comparing bytes
-  without removing them sends a frame for every reading.
 - Git facts are not commits. Jack (2026-10-05): show them within seconds,
   by watching, not a tighter clock. A linked worktree commits without
   touching a file in its checkout: watch its Git metadata directory too.
@@ -248,10 +246,10 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   1,270 displayed rows a day. Exempt the types readers skip. Usage moves
   its own revision, which only Wave detail reads, at most every 10 s.
 - An unreadable store must not read empty.
-- Merged October 6 (#1452): one `lf monitor work --watch` per window (renamed by #1463)
+- Merged October 6 (#1452): one `lf monitor work --watch` per window
   replaces every timer loop. Reader on a copy of Jack's store: commit to
   frame 0.3 s for a Task, 0.13 s for a Session; a file written in a
-  checkout about 2 s. The window was not re-measured.
+  checkout about 2 s.
 - Measure before merging readers: the second reader per window, listed as
   a taboo, used 0.2% of a core and 25 MB. It stayed.
 - Jack (2026-10-05): which Waves and Tasks are current must be simple and
@@ -588,14 +586,16 @@ templates; Rex owns edits, shells and restoration.
 Reopen preserves native work; confirmed absence permits template launch.
 IDs/receipts support reuse and uncertain creation, not retention or replay.
 Named copies and prepared handoff remain required. Transport separates passive
-attachment from explicit input transfer. Receipts describe native creation, not
-observer readiness; composed retry and configured handoff are unproved.
+attachment from explicit input transfer. Receipts report native creation and,
+separately, each conversation observer's readiness (connected/history/failed/
+uncertain); `--retry-observers` adds a pane beside the retained one. Composed
+retry and restart pass on isolated Rex; a real provider's handoff is unproved.
 Started Tasks arrive passively; backlog is explicit. Native splits must use their
 Task's worktree/Machine.
-Jack (November 5): a raw split without cwd starting in HOME is no verdict; no
-scoped-default API is needed; the app inherits the source terminal's reported or process
-directory. The owner publishes its directory to viewers; controllers withdraw it on
-leaving; shells never report. App Split unproved.
+Jack (November 5): a cwd-less raw split landing in HOME is no verdict; the app
+inherits the source terminal's reported or process directory. The owner publishes
+its directory to viewers; controllers withdraw it on leaving; shells never report.
+App Split unproved.
 
 Jack superseded Rex away/native-settlement: retained Task Session terminals prevent
 cleanup regardless of focus; confirmed final removal releases the hold, unknown

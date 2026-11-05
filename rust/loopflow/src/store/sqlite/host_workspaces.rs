@@ -82,6 +82,32 @@ impl SqliteStore {
         })?;
         rows.map(|row| row?).collect()
     }
+    /// Every recorded occurrence of a Task with its workspace, across hosts,
+    /// servers and named copies.
+    pub fn task_host_occurrences(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<(HostWorkspace, HostOccurrence)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT h.id,h.repository_id,h.host,h.server,h.selection_json,h.copy_name,h.container_id,h.creation_pending,h.updated_at,
+                    o.id,o.destination_id,o.creation
+             FROM host_work_occurrences o JOIN host_workspaces h ON h.id=o.workspace_id
+             WHERE o.task_id=?1 ORDER BY o.id",
+        )?;
+        let rows = statement.query_map([task.as_str()], |row| {
+            let occurrence = HostOccurrence {
+                id: row.get(9)?,
+                workspace_id: row.get(0)?,
+                task_id: task.clone(),
+                destination_id: row.get(10)?,
+                creation: row.get(11)?,
+            };
+            Ok(map_workspace(row).map(|workspace| (workspace, occurrence)))
+        })?;
+        rows.map(|row| row?).collect()
+    }
+
     pub fn host_workspace(&self, id: &str) -> StoreResult<Option<HostWorkspace>> {
         self.conn.lock().expect("store mutex poisoned").query_row(
             "SELECT id,repository_id,host,server,selection_json,copy_name,container_id,creation_pending,updated_at FROM host_workspaces WHERE id=?1",

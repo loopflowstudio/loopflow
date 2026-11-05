@@ -76,3 +76,10 @@ later disposable real-data demonstration and native Split review still owed.
 Merged installer work in #1815 changes the available repair path, not those past
 observations or proof of current configured behavior. Synthetic Tasks and manual
 observer-socket wiring are supporting evidence; Jack requested real Work for review.
+
+**Concept review, November 5:** retention hold evidence is a Task occurrence's
+native destination present in a successful Rex inventory; observer liveness stays
+readiness-only. Settled from Jack Heart's confirmed-removal/unknown-is-not-release
+contract, not a new decision. Reversible if the demo shows restored, forgotten tabs
+holding completed Tasks is unwelcome. Readiness `failed` for a stopped observer
+becomes `ended` (naming only).

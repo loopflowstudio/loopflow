@@ -315,7 +315,9 @@ configured demonstration after this sync.
 #1817 (`589b7ac3c4`), in the November 5 sync, makes `pursue` begin by editing user
 docs and lets an attached Desktop present them in Files through `lf open --file`.
 docs/workspaces.md already follows that order; this realign added Rex to the docs
-index and to the `lf open` help text. No workspace behavior changed.
+index and to the `lf open` help text. No workspace behavior changed. The later
+November 5 sync (`2e9ffc2aed`, #1825 and #1826) touched settings migration,
+installer help and ops docs only; it did not reach workspace code, docs or tests.
 
 The `c6fa1074c0` sync includes #1807 (`c59cfcc631`): promotion/binding
 preserves the conversation and immediately updates its selected Task directory,
@@ -339,11 +341,10 @@ already conveys Jack Heart's revised contract to LOO-717; that accepted directio
 has not yet changed its API. No new cleanup owner or Rex-closure requirement follows.
 
 This checkout has no Task presence API. Retention integration needs the shared
-owner to support the accepted smaller contract: a reliable terminal-to-Session
-association, a hold independent of focus, confirmed final release and unknown
-inventory preserving uncertainty. IDs and creation receipts cannot stand in for
-live holds, including after restart. A parallel adapter cleanup loop, layout mirror
-or shell runtime would conflict with the accepted ownership boundary.
+owner to support the accepted smaller contract: a hold independent of focus,
+confirmed final release and unknown inventory preserving uncertainty. The concept
+review below settles which evidence is the hold. A parallel adapter cleanup loop,
+layout mirror or shell runtime would conflict with the accepted ownership boundary.
 
 Desktop's accepted two-minute eligible-idle/fifteen-minute completed-and-away
 policy is unchanged. Final requested work, drafts and pending requests retain their
@@ -353,11 +354,52 @@ authority to settle or delete those resources.
 
 ## Remaining work and decisions
 
+### Concept review (November 5) — next implement direction
+
+The branch now answers two different questions about a Rex terminal with one kind
+of evidence, and the plan had reached for a third. Separate them:
+
+| Question | Evidence | Owner |
+| --- | --- | --- |
+| Does the Task keep a retained view? (cleanup hold) | Its `HostOccurrence` destination is present in a successful Rex inventory | Rex adapter reports; LOO-717 decides |
+| Is this view's Conversation live? (readiness) | Observer record plus its OS lock | `lf open` receipt only |
+| May LF replay or repair a pane? | Nothing; never | — |
+
+Settled by accepted decisions, not new ones: Jack Heart's contract releases a hold
+only on *confirmed removal* of the last relevant terminal, regardless of focus;
+unknown inventory never releases. A tab Rex keeps after its observer exits
+(Ctrl+], finished conversation, host restart with fresh shells) is still a view the
+person retained. Native IDs therefore *do* establish the hold, while still never
+authorizing replay or proving process continuity. This replaces the earlier claim
+that IDs cannot stand in for holds after restart, and removes the need for a new
+terminal-to-Session association: `HostOccurrence` already records Task →
+destination. Terminals where someone ran `lf resume`/`lf task run` by hand are
+already held by their live attached viewer through the shared lifetime owner; once
+that exits the pane is an ordinary shell and holds nothing.
+
+Implemented (November 5): `workspace/hold.rs` reads every Rex occurrence of a
+Task (copies and Wave containers included) into `held · released · unknown`;
+held wins, unknown beats released, a pending creation or unread inventory is
+unknown. `lf open` reports it per Task as `rex_hold` with no cleanup decision.
+It finds containers and windows exactly as reopening does (`find_native`: recorded ID, else
+the `[lf:<id>]` label marker), so a restored relabelled view still holds.
+Check: lib `open::`/`transport::` pass; `work_open_tests::`+`dto_fixtures::` 78/79, the
+moved-viewer Rex case passes alone (intermittent, gate); clippy clean.
+Observer records stay readiness-only; a stopped observer now reads `ended`,
+`failed` only for a reported attachment error. Remaining: LOO-717's shared owner
+consumes `hold::task_hold` (or `task status` evidence surfaces it) once its API lands.
+
+Counterexample kept open: a restored but forgotten Rex tab holds a completed Task's
+checkout until the person closes it. That follows Jack's "retaining a view is the
+reason to keep" direction; if demo shows it is unwelcome, that is a new product
+choice for Jack, not something the adapter should paper over with away detection.
+
 ### Outstanding acceptance
 
-1. **Retention integration:** shared lifetime owner plus Rex observation must
-   enforce the revised hold/release contract, including unfocused terminals,
-   unavailable inventory and restart identity. No LF closure of Rex shells.
+1. **Retention integration:** shared lifetime owner plus Rex occurrence
+   inventory (above) must enforce the revised hold/release contract, including
+   unfocused terminals, unavailable inventory and restored tabs. No LF closure of
+   Rex shells.
 2. **Native split verification:** LF's directory path is implemented. Pressing
    Split in the Rex app from each pane remains owed; automated checks prove both
    sources agree, not which the app reads, or that it accepts LF's report host.
@@ -400,6 +442,4 @@ Earlier complete plans/results: `cc607dc3e1:scratch/rex-workspace.md` and
 `7b886d04cc:scratch/rex-workspace.md`; dated demo evidence is in
 [workspace-demo.md](workspace-demo.md).
 
-Check (November 5 implement): lib `transport::`/`open::` 70 passed; `work_open_tests::` 31 passed; `documented_commands::`/`dto_fixtures::` 52 passed; clippy passed; `transport_tests` with `REX_*` inherited 67 passed, 1 failed (`contended_input_retention_keeps_control_and_delivers_once_after_unlock`, then 3/3 alone); native Rex: restart and handoff passed, `rex_native_workspace_keeps_window_and_block_identity` failed its 15s arrival deadline once when run beside the restart test, then 2/2 alone. Gate owns the combined run and those intermittent cases, authored demo owns the app's Split.
-
-Check (November 5 compress): `open::` lib 13, `work_open_tests::` 31, `prepared_destination` 1 and native Rex handoff, restart and identity proofs each passed; clippy passed. Reduction only, no behavior change. The combined run stays with gate.
+Check (November 5 implement, compress, realign): lib `transport::`/`open::` 70, `work_open_tests::` 31, `documented_commands::`/`dto_fixtures::` 52 and `prepared_destination` 1 passed; clippy passed; `transport_tests` hermetic to `REX_*` 67 passed, 1 intermittent (`contended_input_retention_keeps_control_and_delivers_once_after_unlock`, 3/3 alone); native Rex restart, handoff and identity proofs passed one at a time, identity once missed its 15s arrival deadline beside restart. Realign reconciled plan and memory only, no rerun; gate owns the combined run and those intermittent cases, authored demo owns the app's Split.

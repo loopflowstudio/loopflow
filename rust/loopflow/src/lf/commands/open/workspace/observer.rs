@@ -62,7 +62,7 @@ impl Observer {
 
     /// The receipt entry, offering `retry` when a retry applies.
     pub fn readiness(&self, retry: &[String]) -> ConversationReadiness {
-        use ObserverState::{Connected, Failed, History, Uncertain};
+        use ObserverState::{Connected, Ended, Failed, History, Uncertain};
         let (state, reason) = match &self.recorded {
             Recorded::Pending => (
                 Uncertain,
@@ -72,7 +72,7 @@ impl Observer {
             Recorded::Launched => (Uncertain, Some("Observer has not reported an attachment")),
             Recorded::Connected if self.running => (Connected, None),
             Recorded::Connected => (
-                Failed,
+                Ended,
                 Some("Observer is no longer running; reopening does not restart it"),
             ),
             Recorded::History => (
@@ -291,7 +291,7 @@ mod tests {
     fn only_a_running_acknowledged_observer_is_connected() {
         assert_eq!(state(Recorded::Connected, true), ObserverState::Connected);
         // Host restart and leaving look alike: the process holding the lock is gone.
-        assert_eq!(state(Recorded::Connected, false), ObserverState::Failed);
+        assert_eq!(state(Recorded::Connected, false), ObserverState::Ended);
         assert!(observer(Recorded::Connected, false).retryable());
         for recorded in [Recorded::Pending, Recorded::Launched] {
             assert_eq!(state(recorded, false), ObserverState::Uncertain);

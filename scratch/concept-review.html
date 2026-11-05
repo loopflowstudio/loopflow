@@ -1,60 +1,121 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-498 — Launch templates, let Rex own the workspace</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-498 concept review — what holds a Task in Rex</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf9f6;--fg:#242724;--muted:#656962;--line:#d5d9d0;--accent:#3b6351;--panel:#edf1e9}
-@media(prefers-color-scheme:dark){:root{--bg:#181c1a;--fg:#e5e9e1;--muted:#a4afa5;--line:#414a42;--accent:#a3cfb5;--panel:#222b25}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 system-ui,sans-serif}main{max-width:830px;margin:auto;padding:44px 24px 70px}header{font-size:13px;color:var(--muted)}h1{font-size:clamp(29px,5vw,43px);line-height:1.15;letter-spacing:-.025em;margin:28px 0 20px}h2{font-size:22px;line-height:1.3;margin:36px 0 15px}p{margin:14px 0}a{color:var(--accent)}code{font: .88em ui-monospace,monospace;overflow-wrap:anywhere}pre{padding:17px;background:var(--panel);overflow:auto;line-height:1.8}aside{border-left:3px solid var(--accent);padding:3px 19px;margin:24px 0}table{border-collapse:collapse;width:100%;font-size:15px}th,td{text-align:left;padding:13px 9px;border-bottom:1px solid var(--line);vertical-align:top}th:first-child,td:first-child{padding-left:0}small,.muted{color:var(--muted)}li{margin:12px 0}ol{padding-left:24px}.choice{display:block;margin:7px 0}
+  :root { color-scheme: light dark; --fg:#1d1d1f; --muted:#6b6b70; --bg:#fbfbf8; --rule:#ddd9cf; --new:#2f6f4f; --old:#9a3b2e; --code:#f1efe8; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e9e7e1; --muted:#9a988f; --bg:#17171a; --rule:#34332f; --new:#7fc8a0; --old:#e58a7c; --code:#222226; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:17px/1.6 Charter, Georgia, serif; }
+  main { max-width: 42rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  header { color:var(--muted); font:14px/1.5 -apple-system, system-ui, sans-serif; margin-bottom:2.5rem; }
+  h1 { font-size:1.9rem; line-height:1.2; margin:.2rem 0 1rem; }
+  h2 { font-size:1.2rem; margin:2.8rem 0 .6rem; }
+  code { font:14px ui-monospace, Menlo, monospace; background:var(--code); padding:.05em .3em; border-radius:3px; }
+  table { border-collapse:collapse; width:100%; font:15px/1.45 -apple-system, system-ui, sans-serif; margin:1rem 0; }
+  th, td { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--rule); }
+  th { font-weight:600; }
+  .proposed { border-left:3px solid var(--new); padding-left:1rem; }
+  .existing { border-left:3px solid var(--rule); padding-left:1rem; }
+  .was { color:var(--old); text-decoration: line-through; }
+  .tag { font:600 13px -apple-system, system-ui, sans-serif; color:var(--new); }
+  .tag.ex { color:var(--muted); }
+  ol li { margin:.5rem 0; }
+  .wrap { overflow-x:auto; }
 </style>
+</head>
+<body>
 <main>
-<header>LOO-498 · Revised build approved · November 4, 2026<br>
-Sources: <a href="rex-workspace.md">working design</a>, <a href="../docs/workspaces.md">usage guide</a>, <a href="../rust/loopflow/src/lf/commands/open/workspace.rs">Rex opening</a>, <a href="../rust/loopflow/src/store/migrations/rex_workspaces.sql">stored records</a></header>
-<h1>Launch a template.<br>Let Rex own the workspace.</h1>
-<p>Accepted: LF cleans up only Desktop-owned shells. Rex owns its terminals. A retained Rex terminal for a Task Session prevents Task cleanup, regardless of focus. Jack Heart approved building this boundary.</p>
-<aside><strong>Already agreed:</strong> LF owns its layouts and templates. Rex consumes them “as faithfully as possible,” then owns its edits and restoration. That phrase stays intentionally loose. <strong>Rex shell ownership and retention are now accepted. The named-copy reduction remains a proposal.</strong></aside>
+<header>
+  LOO-498 · concept-review step (headless) · November 5, 2026<br>
+  Built from <code>scratch/rex-workspace.md</code>, <code>docs/workspaces.md</code>,
+  <code>scratch/questions.md</code>, <code>open/workspace/observer.rs</code>,
+  <code>store/sqlite/host_workspaces.rs</code>
+</header>
 
-<h2>The interaction</h2>
-<pre><code>lf open --wave product
-lf open --task LOO-498</code></pre>
-<p>Open Product → find its existing Task tabs or launch templates → rearrange them in Rex → return to the same tabs. Newly started Tasks appear passively without taking focus. Backlog stays explicitly selectable.</p>
-<p>After a Rex restart, reuse what Rex restored. An explicit open can create a missing tab from LF’s template. Leave a surviving tab alone; its old ID does not prove its programs survived.</p>
+<h1>A kept tab holds the Task. A live observer only says it's ready.</h1>
 
-<h2>Three concepts, existing operations</h2>
+<p>No decision is needed from you to continue. This page records one
+consequence of your November 4 contract, which the branch had blurred, so
+implementation can follow it. The questions at the end are for the demo, not
+for this step.</p>
+
+<h2>What you do</h2>
+<p class="existing"><span class="tag ex">existing</span><br>
+<code>lf open</code> → Rex Task tabs appear → you work, switch tabs, press
+Ctrl+] to leave a conversation, quit Rex, come back days later, close a tab
+when you're done with it.</p>
+
+<h2>Two questions, one piece of evidence</h2>
+<p>Each Rex Conversation pane now carries an observer record with an OS lock.
+It answers <em>is this conversation live right now</em>, and <code>lf open</code>
+reports it. The plan then said retention still needed “a reliable
+terminal-to-Session association” and that native IDs “cannot stand in for live
+holds, including after restart.” Read together, that pushes toward using
+observer liveness, or something new, as the cleanup hold.</p>
+
+<p>Your contract says something different. A retained terminal holds the Task
+<em>regardless of focus</em>. Only <em>confirmed removal</em> releases it.
+Unknown inventory never does. A tab Rex keeps after its observer exits is still
+a view you kept.</p>
+
+<div class="wrap">
 <table>
-<thead><tr><th>Action</th><th>Concept</th><th>Owner / API</th></tr></thead>
-<tbody>
-<tr><td>Select Tasks</td><td>Work selection</td><td>Existing LF selection and Work updates</td></tr>
-<tr><td>Choose initial tools</td><td>Launch template</td><td>LF Task layout → Wave default → builtin; adapter reads only</td></tr>
-<tr><td>Open or return</td><td>Host destination</td><td><code>lf open</code> → native inventory, create and focus</td></tr>
-<tr><td>Rearrange / restore</td><td>The same native destination</td><td>Rex controls and persistence</td></tr>
-</tbody></table>
-<p class="muted">Conversation, Shell, Files, Changes and Task &amp; workflow remain the tools. Automatic arrivals call the same opening path; they do not introduce another kind of workspace.</p>
+  <tr><th>Question</th><th>Evidence</th><th>Who reads it</th></tr>
+  <tr><td>Does this Task have a kept view?</td>
+      <td><span class="tag">proposed</span> its <code>HostOccurrence</code> destination appears in a successful Rex inventory</td>
+      <td>Rex adapter reports <code>held · released · unknown</code>; LOO-717 decides cleanup</td></tr>
+  <tr><td>Is this Conversation live?</td>
+      <td><span class="tag ex">existing</span> observer record + OS lock</td>
+      <td><code>lf open</code> receipt only</td></tr>
+  <tr><td>May LF replay or repair a pane?</td>
+      <td>nothing, ever</td><td>—</td></tr>
+</table>
+</div>
 
-<h2>Where the design grew too far</h2>
+<h2>Walk it through</h2>
+<div class="wrap">
 <table>
-<thead><tr><th>Current branch / earlier plan</th><th>Proposed reduction</th></tr></thead>
-<tbody>
-<tr><td>Durable host workspace and occurrence records; six observation states; activation and follower recovery</td><td>Discover destinations. Retain only the locator and operation receipts needed for reliable reuse and duplicate prevention.</td></tr>
-<tr><td>Named copies with separate lifecycle, plus planned coordinated handoff</td><td>Native movement; explicitly launch another template view. Conversation resume stays its own action.</td></tr>
-<tr><td>Planned presence renewal, away detection, native closure and cleanup acknowledgement</td><td>Observe retained Rex Task Session terminals as cleanup holds. No away inference, Rex shell closure or native settlement. LF cleans up Desktop-owned shells only.</td></tr>
-</tbody></table>
-<aside><strong>The consequential mismatch:</strong> an initial-template launcher has grown into a manager of native workspace lifetime. Jack Heart revised that boundary explicitly: observe retained Task Session terminals, leave Rex shells alone.</aside>
+  <tr><th>Moment</th><th>Readiness</th><th>Hold</th></tr>
+  <tr><td>Open, conversation attaches</td><td><code>connected</code></td><td>held</td></tr>
+  <tr><td>Ctrl+] in that pane</td><td><span class="was">failed</span> <code>ended</code></td><td>held (tab still there)</td></tr>
+  <tr><td>Rex restarts, restores tabs with fresh shells</td><td><code>ended</code>, retry offered</td><td>held</td></tr>
+  <tr><td>Rex server unreachable</td><td>unknown</td><td>unknown, so not released</td></tr>
+  <tr><td>You close the last Task tab and copy</td><td>—</td><td>released; normal cleanup conditions apply</td></tr>
+  <tr><td>You ran <code>lf resume</code> by hand in a pane, then quit it</td><td>—</td><td>held while attached (existing lifetime), nothing after</td></tr>
+</table>
+</div>
 
-<h2>A small locator may still earn its place</h2>
-<p>The database contains IDs and observations, <em>not</em> Rex’s live split tree. Remembering Work → native ID can preserve reopening after a rename. The current fallback is a visible title marker; rename it away and stateless discovery can fail. Hidden native metadata has not been established.</p>
-<p>A locator answers “where did this open?” It must not decide what is running, restore tools or authorize cleanup. Moving the existing state machine to a file would leave the same design intact.</p>
-
-<h2>Failure without repair machinery</h2>
-<p>If Rex is unavailable, report it. If creation returns an uncertain result, inspect native state before retrying and keep the minimum receipt necessary to avoid duplicates. Preserve partial work. Following adds missing Tasks; it never repairs programs or rearranges existing panes.</p>
-<p>Correct Task worktrees, later native splits, remote placement and bare <code>lf open</code> from an LLM remain requirements. This proposal does not waive their outstanding evidence. Passive arrivals and explicit tool opening also remain; their implementation still needs safe one-time creation.</p>
-
-<h2>Choices for this conversation</h2>
-<ol>
-<li><strong>Retention — decided</strong><span class="choice">Retained Rex Task Session terminals prevent cleanup, even in the background. Confirmed removal of the last one releases the Rex hold, subject to other cleanup conditions. Unavailable host state is not release. LF never closes Rex shells.</span></li>
-<li><strong>Move and copy</strong><span class="choice">a. Recommended: use native movement and explicit template copies; remove LF-managed named copies and coordinated handoff.</span><span class="choice">b. Keep named copies and their reliable reuse as a product feature.</span></li>
+<h2>What changes in the next implement pass</h2>
+<ol class="proposed">
+  <li>One Rex inventory read per Task produces <code>held · released · unknown</code>
+      from its occurrences, including named copies and Wave conversation
+      containers. It goes to the shared lifetime owner. No adapter timer,
+      closure or settlement.</li>
+  <li>Observer records stay readiness-only.</li>
+  <li><code>failed</code> for an observer that simply stopped becomes
+      <code>ended</code>. Only the lock's absence is known.
+      <code>failed</code> keeps meaning an attachment error was reported.</li>
 </ol>
-<p class="muted">Jack Heart authorized implementation through the existing Task Graph to demo. No Auto-Ship or merge approval. Named-copy behavior stays unless its separate proposal is accepted.</p>
+<p>Nothing new is needed for terminal-to-Session association:
+<code>HostOccurrence</code> already records Task → destination. Native IDs still never
+authorize replay or prove the original programs survived. Those are separate
+questions.</p>
+
+<h2>Counterexample kept open</h2>
+<p>You restore a Rex session, forget a completed Task's tab, and its checkout
+stays until you close that tab. That follows from “retaining a view is the reason
+to keep.” If the demo shows you don't want it, it's a new product choice. It
+should not be handled by reintroducing away detection.</p>
+
+<h2>For the demo</h2>
+<ol>
+  <li>Should a restored, unfocused Rex tab keep a completed Task's checkout?
+      (a) yes, until you close it, which is the current reading; (b) no, a host restart
+      releases it.</li>
+  <li>When an observer stops, which label should it get? (a) <code>ended</code>; (b) keep <code>failed</code>.</li>
+</ol>
 </main>
+</body>
 </html>

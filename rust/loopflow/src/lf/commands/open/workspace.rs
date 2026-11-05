@@ -1,6 +1,7 @@
 //! Native Rex workspaces. The registry keeps locators and creation receipts;
 //! Rex alone owns geometry and ordinary processes. Reads never execute resume argv.
 mod herdr;
+mod hold;
 mod layout;
 mod observer;
 
@@ -19,7 +20,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     ConversationReadiness, ObserverState, OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus,
-    Opening, Resolved,
+    Opening, Resolved, ViewHold,
 };
 use crate::durable::{RepositoryId, TaskId};
 use crate::id::WaveId;
@@ -316,6 +317,27 @@ fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {
     }
 }
 
+/// The item recorded under `key` as `id`, else the one LF labelled `[lf:<owner>]`.
+/// Native labels may change, so the recorded identity wins over the marker.
+fn find_native<'a>(
+    items: &'a [Value],
+    key: &str,
+    id: Option<&str>,
+    owner: &str,
+) -> Option<&'a Value> {
+    let marker = format!("[lf:{owner}]");
+    items
+        .iter()
+        .find(|item| id.is_some_and(|id| item[key] == id))
+        .or_else(|| {
+            items.iter().find(|item| {
+                item["label"]
+                    .as_str()
+                    .is_some_and(|label| label.ends_with(&marker))
+            })
+        })
+}
+
 pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     anyhow::ensure!(
         args.copy
@@ -363,6 +385,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
                     .map(|id| format!(" ({id})"))
                     .unwrap_or_default()
             );
+            if let Some(hold) = receipt.rex_hold {
+                println!("  Rex views: {}", hold_text(hold));
+            }
             for conversation in &receipt.conversations {
                 print_conversation(conversation);
             }
@@ -383,10 +408,19 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     Ok(())
 }
 
+fn hold_text(hold: ViewHold) -> &'static str {
+    match hold {
+        ViewHold::Held => "held (a retained view keeps this Task)",
+        ViewHold::Released => "released (every view is confirmed closed)",
+        ViewHold::Unknown => "unknown (inventory unread; the hold stays)",
+    }
+}
+
 fn print_conversation(conversation: &ConversationReadiness) {
     let state = match conversation.state {
         ObserverState::Connected => "connected",
         ObserverState::History => "history",
+        ObserverState::Ended => "ended",
         ObserverState::Failed => "failed",
         ObserverState::Uncertain => "uncertain",
     };
@@ -644,21 +678,10 @@ fn ensure_container(
         *workspace = current;
     }
     let inventory = rex.sessions()?;
-    let retained = inventory.iter().find(|item| {
-        workspace
-            .container_id
-            .as_ref()
-            .is_some_and(|id| item["session_id"] == *id)
-    });
-    let marker = format!("[lf:{}]", workspace.id);
-    // Native labels may have changed; the recorded identity wins over a marker.
-    if let Some(item) = retained.or_else(|| {
-        inventory.iter().find(|item| {
-            item["label"]
-                .as_str()
-                .is_some_and(|label| label.ends_with(&marker))
-        })
-    }) {
+    let recorded = workspace.container_id.as_deref();
+    let found = find_native(&inventory, "session_id", recorded, &workspace.id);
+    let retained = found.filter(|item| recorded.is_some_and(|id| item["session_id"] == id));
+    if let Some(item) = found {
         workspace.container_id = Some(
             item["session_id"]
                 .as_str()
@@ -691,7 +714,7 @@ fn ensure_container(
         }
         let result = rex.call(
             "session.create",
-            json!({"label":format!("{label} {marker}"),"initial_windows":windows}),
+            json!({"label":format!("{label} [lf:{}]", workspace.id),"initial_windows":windows}),
         )?;
         workspace.container_id = Some(
             result["session_id"]
@@ -850,6 +873,10 @@ fn open(
                 receipt.reason = Some(format!("{error:#}"));
             }
         }
+        receipt.rex_hold = hold::task_hold(store, &task.id).unwrap_or_else(|error| {
+            tracing::debug!(%error, "Task occurrences are unreadable; the hold stays");
+            Some(ViewHold::Unknown)
+        });
         receipts.push(receipt);
     }
     if receipts.is_empty() && !explicit {
@@ -982,21 +1009,12 @@ fn materialize(
         creation: HostCreation::Complete,
     });
     let inventory = rex.windows(container)?;
-    let retained = occurrence
-        .destination_id
-        .as_ref()
-        .and_then(|id| inventory.iter().find(|window| window["window_id"] == *id));
-    if retained.is_none() && presentation.passive && occurrence.destination_id.is_some() {
+    let recorded = occurrence.destination_id.as_deref();
+    let existing = find_native(&inventory, "window_id", recorded, &occurrence.id);
+    let retained = existing.filter(|window| recorded.is_some_and(|id| window["window_id"] == id));
+    if retained.is_none() && presentation.passive && recorded.is_some() {
         bail!("Task view was explicitly closed; following leaves it closed");
     }
-    let marker = format!("[lf:{}]", occurrence.id);
-    let existing = retained.or_else(|| {
-        inventory.iter().find(|window| {
-            window["label"]
-                .as_str()
-                .is_some_and(|label| label.ends_with(&marker))
-        })
-    });
     if let Some(window) = existing {
         if retained.is_none() {
             occurrence.destination_id = Some(
@@ -1063,7 +1081,7 @@ fn materialize(
             .filter(|c| !c.is_control())
             .take(80)
             .collect();
-        let result = rex.call("session.new_window", json!({"session_id":container,"window_label":format!("{label} {marker}"),"focus":false,"layout":layout}))?;
+        let result = rex.call("session.new_window", json!({"session_id":container,"window_label":format!("{label} [lf:{}]", occurrence.id),"focus":false,"layout":layout}))?;
         result["window_id"]
             .as_str()
             .context("Rex create reply omitted window identity; outcome is unknown")?

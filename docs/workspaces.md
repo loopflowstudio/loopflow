@@ -234,7 +234,8 @@ state for every Conversation observer in it:
 | --- | --- |
 | `connected` | The Session's execution owner acknowledged the observer, and it still runs |
 | `history` | No live execution exists; the pane shows saved history |
-| `failed` | The observer could not attach, or it no longer runs |
+| `ended` | The observer stopped; nothing more is known about why |
+| `failed` | The observer reported that it could not attach |
 | `uncertain` | The owner never answered, or the observer has not reported; inspect the destination |
 
 A native create or reuse never counts as readiness. `lf open` waits briefly for
@@ -242,7 +243,7 @@ observers it just launched, so a slow attachment can read `uncertain` and settle
 later. Opening again reports the current state.
 
 Reopening a retained tab does not restart an exited observer. Its pane stays as
-it was, including any error. A `failed` or `uncertain` observer that has stopped
+it was, including any error. An `ended`, `failed` or `uncertain` observer that has stopped
 gets a retry command in the report:
 
 ```bash
@@ -265,7 +266,7 @@ server is Rex's restoration responsibility: the host may restore the layout with
 new shells. Familiar pane IDs do not prove that the original programs survived;
 LF does not replay commands over new work you have already started. Opening
 after a restart reuses every destination Rex still has and reports its stopped
-Conversation observers as `failed`, with the retry command above.
+Conversation observers as `ended`, with the retry command above.
 
 Once a destination is confirmed gone, opening creates it again from the Loopflow
 template, as faithfully as the host supports. That does not recover edits made

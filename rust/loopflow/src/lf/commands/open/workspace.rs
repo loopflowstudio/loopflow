@@ -10,7 +10,7 @@ mod observer;
 use layout::{layout, Host};
 pub(crate) use observer::ObserverReport;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -297,7 +297,7 @@ enum Native {
 }
 
 /// The outer container for this launch: a Rex session, Herdr workspace or cmux
-/// group. `None` in cmux means the caller's window.
+/// group. `None` in cmux means the caller's ungrouped window.
 #[derive(Debug, Clone)]
 struct Container {
     id: Option<String>,
@@ -349,9 +349,9 @@ impl Native {
                 id: Some(id),
                 spare_tab: None,
             }),
-            // cmux places a new workspace in the caller's window by default.
-            Self::Cmux(_) => Some(Container {
-                id: None,
+            // The caller's group, else its window (cmux's default placement).
+            Self::Cmux(cmux) => Some(Container {
+                id: cmux.caller_group()?,
                 spare_tab: None,
             }),
         })
@@ -598,7 +598,7 @@ fn open_machines(
     let plan = workspace_plan(store, &RepositoryId::parse(repository)?, selected.clone())?;
     let local = store.local_machine()?.id;
     let mut local_tasks = Vec::new();
-    let mut peers = BTreeSet::new();
+    let mut peers = BTreeMap::<String, Vec<Candidate>>::new();
     let mut receipts = Vec::new();
     let mut unknown = plan.resolution.unavailable.clone();
     for content in plan
@@ -606,35 +606,49 @@ fn open_machines(
         .iter()
         .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
         .filter(|content| target.task.is_some() || !content.states.contains(&SelectionState::Done))
+        .filter(|content| {
+            args.arrive_task.is_empty() || args.arrive_task.contains(&content.work.id)
+        })
     {
-        match store.task_execution_route(&TaskId::parse(&content.work.id)?) {
+        let task = TaskId::parse(&content.work.id)?;
+        match store.task_execution_route(&task) {
             Ok(route) if route.machine_id == local => {
                 if eligible(content, target.task.is_some()) {
                     local_tasks.push(content);
                 }
             }
-            Ok(route) => {
-                peers.insert(route.machine_id.to_string());
-            }
+            Ok(route) => peers
+                .entry(route.machine_id.to_string())
+                .or_default()
+                .push(Candidate::read(store, &task)?),
             Err(error) => unknown.push(format!(
                 "{}: execution Machine unavailable: {error}",
                 content.title
             )),
         }
     }
+    // A broad Rex launch is the one follower for every Machine it reaches.
+    let follows = host == OpenHost::Rex && target.task.is_none() && !args.local_workspace;
+    let mut remotes = Remotes::default();
     if !args.local_workspace {
-        for peer in peers {
+        for (peer, candidates) in peers {
             let mut remote_args = args.clone();
             remote_args.session = target.session.clone();
             remote_args.diff |= target.url.diff;
-            match remote_open(
+            let outcome = remote_open(
                 store,
                 host,
                 peer.as_str(),
                 repository,
                 &selected,
                 &remote_args,
-            ) {
+            );
+            let (placement, opened) = settle_remote(&outcome, None, &candidates);
+            remotes.seen.extend(opened);
+            if let Some(entry) = placement.argument(&peer) {
+                remotes.containers.push(entry);
+            }
+            match outcome {
                 Ok(mut report) => {
                     // The peer's own command means nothing on this Machine.
                     for conversation in report
@@ -662,11 +676,18 @@ fn open_machines(
             }
         }
     }
-    // A broad Rex workspace keeps following even when its working set is empty.
-    let follows = host == OpenHost::Rex && target.task.is_none();
     if !local_tasks.is_empty() || follows {
-        let result = Native::resolve(host, args.server.as_deref())
-            .and_then(|native| launch(store, &native, target, &selected, args, &local_tasks));
+        let result = Native::resolve(host, args.server.as_deref()).and_then(|native| {
+            launch(
+                store,
+                &native,
+                target,
+                &selected,
+                args,
+                &local_tasks,
+                follows.then_some(&remotes),
+            )
+        });
         match result {
             Ok(mut opened) => receipts.append(&mut opened),
             Err(error) => receipts.push(target.receipt(
@@ -685,6 +706,114 @@ fn open_machines(
         ));
     }
     Ok(OpenReport { receipts, unknown })
+}
+
+/// A Task another Machine may open, with the identifier its receipts name.
+#[derive(Debug, Clone)]
+struct Candidate {
+    id: String,
+    identifier: String,
+}
+
+impl Candidate {
+    fn read(store: &SqliteStore, task: &TaskId) -> Result<Self> {
+        Ok(Self {
+            id: task.to_string(),
+            identifier: store.task(task)?.context("Task is unavailable")?.identifier,
+        })
+    }
+}
+
+/// What a broad launch hands its follower about other Machines, through argv.
+#[derive(Debug, Default)]
+struct Remotes {
+    /// Tasks another Machine opened, or may have opened.
+    seen: Vec<String>,
+    /// `--remote` values: `<machine>=<container>`, empty when creation is uncertain.
+    containers: Vec<String>,
+}
+
+/// One Machine's native container, held only for a follower's lifetime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Placement {
+    /// Nothing was opened there; the first arrival creates its container.
+    Unopened,
+    Container(String),
+    /// A create may have succeeded without a reply; nothing more is created there.
+    Uncertain,
+}
+
+impl Placement {
+    fn argument(&self, machine: &str) -> Option<String> {
+        match self {
+            Self::Unopened => None,
+            Self::Container(container) => Some(format!("{machine}={container}")),
+            Self::Uncertain => Some(format!("{machine}=")),
+        }
+    }
+
+    fn parse(values: &[String]) -> Result<HashMap<String, Placement>> {
+        values
+            .iter()
+            .map(|value| {
+                let (machine, container) = value
+                    .split_once('=')
+                    .context("--remote takes <machine>=<container>")?;
+                Ok((
+                    machine.to_owned(),
+                    if container.is_empty() {
+                        Self::Uncertain
+                    } else {
+                        Self::Container(container.to_owned())
+                    },
+                ))
+            })
+            .collect()
+    }
+}
+
+/// Read one remote launch: the container it used and the candidates it opened or
+/// may have opened. A launch-wide failure is uncertain for every candidate.
+fn settle_remote(
+    outcome: &Result<OpenReport>,
+    known: Option<&str>,
+    candidates: &[Candidate],
+) -> (Placement, Vec<String>) {
+    let everything = || candidates.iter().map(|task| task.id.clone()).collect();
+    let known = known.map(|container| Placement::Container(container.into()));
+    let Ok(report) = outcome else {
+        return (known.unwrap_or(Placement::Uncertain), everything());
+    };
+    let task_of = |receipt: &OpenReceipt| match crate::work::link::WorkUrl::parse(&receipt.url)
+        .map(|url| url.target)
+    {
+        Ok(crate::work::link::WorkTarget::Task(identifier)) => candidates
+            .iter()
+            .find(|task| task.identifier == identifier)
+            .map(|task| task.id.clone()),
+        _ => None,
+    };
+    let mut opened = Vec::new();
+    let mut failed = false;
+    let mut launch_failed = false;
+    for receipt in &report.receipts {
+        let task = task_of(receipt);
+        failed |= receipt.status == OpenStatus::Failed;
+        launch_failed |= receipt.status == OpenStatus::Failed && task.is_none();
+        opened.extend(task);
+    }
+    let container = report
+        .receipts
+        .iter()
+        .find_map(|receipt| receipt.container.clone())
+        .map(Placement::Container)
+        .or(known);
+    let placement = match container {
+        Some(container) => container,
+        None if failed => Placement::Uncertain,
+        None => Placement::Unopened,
+    };
+    (placement, if launch_failed { everything() } else { opened })
 }
 
 fn remote_open(
@@ -723,6 +852,12 @@ fn remote_open(
     }
     if args.no_focus {
         argv.push("--no-focus".into());
+    }
+    if !args.arrive_task.is_empty() {
+        argv.extend(["--arrive-task".into(), args.arrive_task.join(",")]);
+    }
+    if let Some(into) = &args.into {
+        argv.extend(["--into".into(), into.clone()]);
     }
     let bytes = tokio::runtime::Runtime::new()?
         .block_on(super::super::ssh::request(&machine, &argv, None))?;
@@ -811,14 +946,24 @@ fn launch(
     selected: &Selection,
     args: &OpenArgs,
     local_tasks: &[&ViewContent],
+    follow: Option<&Remotes>,
 ) -> Result<Vec<OpenReceipt>> {
     let host = native.open_host();
     let repo = target.repository_path.as_path();
     let explicit = target.task.is_some();
-    // A Task joins the container the caller is in; a repository or Wave gets its own.
-    let mut container = match native.here()?.filter(|_| explicit) {
-        Some(here) => here,
-        None => native.create_container(&container_name(store, target, selected)?, repo)?,
+    let arriving = !args.arrive_task.is_empty();
+    // An arrival appends to its follower's container. A Task joins the container
+    // the caller is in; a repository or Wave gets its own.
+    let mut container = if let Some(into) = &args.into {
+        Container {
+            id: Some(into.clone()),
+            spare_tab: None,
+        }
+    } else {
+        match native.here()?.filter(|_| explicit) {
+            Some(here) => here,
+            None => native.create_container(&container_name(store, target, selected)?, repo)?,
+        }
     };
     let mut receipts = Vec::new();
     let mut launched = Vec::new();
@@ -864,10 +1009,15 @@ fn launch(
                 content,
                 repo,
                 template.as_ref(),
-                Presentation {
-                    session: target.session.as_deref(),
-                    diff: args.diff || target.url.diff,
-                    observer: Some(&key),
+                // Arrivals start no observer and select no Session.
+                if arriving {
+                    Presentation::default()
+                } else {
+                    Presentation {
+                        session: target.session.as_deref(),
+                        diff: args.diff || target.url.diff,
+                        observer: Some(&key),
+                    }
                 },
             )
         });
@@ -886,14 +1036,15 @@ fn launch(
         settle_receipt(&mut receipt, opened, &key, &mut launched);
         receipts.push((receipt, key));
     }
-    if let (Native::Rex(rex), false) = (native, explicit) {
+    if let (Native::Rex(rex), Some(remotes)) = (native, follow) {
         let session = container.id.clone().expect("Rex containers are sessions");
+        seen.extend(remotes.seen.iter().cloned());
         let mut receipt =
             target.receipt(Some(host), Some(session.clone()), OpenStatus::Opening, None);
         receipt.label = "Following".into();
         let url = target.url.to_string();
         receipt.reason = Some(
-            match start_follower(rex, &session, &url, repo, args, &seen) {
+            match start_follower(rex, &session, &url, repo, &seen, &remotes.containers) {
                 Ok(()) => {
                     "Newly started Tasks arrive in this Rex session while its Workspace tab runs"
                         .into()
@@ -910,6 +1061,7 @@ fn launch(
     Ok(receipts
         .into_iter()
         .map(|(mut receipt, key)| {
+            receipt.container = container.id.clone();
             if !key.is_empty() {
                 receipt.conversations = observer::read(&key)
                     .iter()
@@ -974,14 +1126,15 @@ fn eligible(content: &ViewContent, explicit: bool) -> bool {
 // ---------------------------------------------------------------------------
 
 /// The follower's argv carries everything it needs: server, session, the Work
-/// address and the Tasks this launch already opened. Nothing is written for it.
+/// address, the Tasks this launch already opened and other Machines' containers.
+/// Nothing is written for it.
 fn start_follower(
     rex: &Rex,
     session: &str,
     url: &str,
     repo: &Path,
-    args: &OpenArgs,
     seen: &[String],
+    remotes: &[String],
 ) -> Result<()> {
     let mut words = vec![
         "open".to_owned(),
@@ -996,8 +1149,8 @@ fn start_follower(
     if !seen.is_empty() {
         words.extend(["--seen".into(), seen.join(",")]);
     }
-    if args.local_workspace {
-        words.push("--local-workspace".into());
+    for remote in remotes {
+        words.extend(["--remote".into(), remote.clone()]);
     }
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
     rex.call(
@@ -1029,9 +1182,10 @@ fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
     Ok(argv)
 }
 
-/// Add newly started local Tasks to one Rex session while this tab runs. Seen
-/// Tasks, including tabs someone closed, stay in memory and never reappear here.
-/// Other Machines' Tasks arrive in the session opened on their own Machine.
+/// Add newly started Tasks while this tab runs: local ones to this Rex session,
+/// another Machine's to the container held for it here. A Machine with none gets
+/// one on its first arrival. Seen Tasks, including tabs someone closed, stay in
+/// memory and never reappear. Containers live only as long as this process.
 fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
     let server = args
         .server
@@ -1054,10 +1208,11 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
             .context("Repository has no Work identity")?,
     )?;
     let repo: PathBuf = target.repository_path.clone();
+    let mut remotes = Placement::parse(&args.remote)?;
     println!("Loopflow workspace\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
     let watched = repository.clone();
     let subscription = super::super::watch::start(
-        selected,
+        selected.clone(),
         super::super::watch::Watched::every(super::super::watch::ACTIVITY_CLOCK),
         move |store, selected| {
             let repository = watched.clone();
@@ -1098,10 +1253,11 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
                 continue;
             }
             let plan: ViewPlan = serde_json::from_value(frame["body"].clone())?;
+            let mut arriving = BTreeMap::<String, Vec<Candidate>>::new();
             for content in plan
                 .contents
                 .iter()
-                .filter(|content| eligible(content, false))
+                .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
                 .filter(|content| !content.states.contains(&SelectionState::Done))
             {
                 if seen.contains(&content.work.id) {
@@ -1110,8 +1266,19 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
                 let task_id = TaskId::parse(&content.work.id)?;
                 match store.task_execution_route(&task_id) {
                     Ok(route) if route.machine_id == local => {}
-                    // Remote and unknown routes never fall back to a local tab.
-                    _ => continue,
+                    // Remote checkout state is not in this plan; its Machine decides.
+                    Ok(route) => {
+                        arriving
+                            .entry(route.machine_id.to_string())
+                            .or_default()
+                            .push(Candidate::read(&store, &task_id)?);
+                        continue;
+                    }
+                    // Unknown routes never fall back to a local tab.
+                    Err(_) => continue,
+                }
+                if !eligible(content, false) {
+                    continue;
                 }
                 // Mark before creating: an uncertain create is never retried.
                 seen.insert(content.work.id.clone());
@@ -1129,6 +1296,20 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
                     Ok(_) => println!("Added {}", content.title),
                     Err(error) => eprintln!("{}: {error:#}; not retried", content.title),
                 }
+            }
+            for (machine, candidates) in arriving {
+                let placement = remotes
+                    .entry(machine.clone())
+                    .or_insert(Placement::Unopened);
+                seen.extend(arrive_remote(
+                    &store,
+                    &machine,
+                    placement,
+                    &candidates,
+                    repository.as_str(),
+                    &selected,
+                    args,
+                ));
             }
         }
         // Remote starts and recovered connections need not change this Machine's
@@ -1156,10 +1337,72 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
     }
 }
 
+/// Ask `machine` to open its newly started Tasks: into the container held for it
+/// here, or a new one on its first arrival. Nothing more is asked of a Machine
+/// whose creation is uncertain. Returns the Tasks that must never arrive again.
+fn arrive_remote(
+    store: &SqliteStore,
+    machine: &str,
+    placement: &mut Placement,
+    candidates: &[Candidate],
+    repository: &str,
+    selected: &Selection,
+    args: &OpenArgs,
+) -> Vec<String> {
+    let known = match placement {
+        Placement::Uncertain => return Vec::new(),
+        Placement::Unopened => None,
+        Placement::Container(container) => Some(container.clone()),
+    };
+    // Arrivals select no Session and take no focus.
+    let arrival = OpenArgs {
+        arrive_task: candidates.iter().map(|task| task.id.clone()).collect(),
+        into: known.clone(),
+        no_focus: true,
+        session: None,
+        diff: false,
+        ..args.clone()
+    };
+    let outcome = remote_open(
+        store,
+        OpenHost::Rex,
+        machine,
+        repository,
+        selected,
+        &arrival,
+    );
+    let (next, opened) = settle_remote(&outcome, known.as_deref(), candidates);
+    match &outcome {
+        Ok(report) => {
+            for receipt in &report.receipts {
+                match (receipt.status, &receipt.destination) {
+                    (OpenStatus::Failed, _) => eprintln!(
+                        "{} on {machine}: {}",
+                        receipt.label,
+                        receipt.reason.as_deref().unwrap_or("failed")
+                    ),
+                    (_, Some(_)) => println!("Added {} on {machine}", receipt.label),
+                    _ => {}
+                }
+            }
+        }
+        Err(error) => eprintln!(
+            "Machine {machine}: {error:#}; arrivals there were not retried and no local fallback was used"
+        ),
+    }
+    if next == Placement::Uncertain {
+        eprintln!("Machine {machine}: its workspace may exist without a reply; later arrivals there wait for another lf open");
+    }
+    *placement = next;
+    opened
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{array, eligible, listening_endpoint, view_again_argv};
-    use crate::lf::commands::open::OpenHost;
+    use super::{
+        array, eligible, listening_endpoint, settle_remote, view_again_argv, Candidate, Placement,
+    };
+    use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
     use crate::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
@@ -1220,6 +1463,72 @@ mod tests {
             assert_eq!(eligible(&content, false), expected);
             assert!(eligible(&content, true));
         }
+    }
+
+    fn remote(receipts: Vec<(&str, Option<&str>, OpenStatus)>) -> anyhow::Result<OpenReport> {
+        Ok(OpenReport {
+            receipts: receipts
+                .into_iter()
+                .map(|(url, container, status)| OpenReceipt {
+                    label: url.into(),
+                    url: url.into(),
+                    host: Some(OpenHost::Rex),
+                    destination: None,
+                    container: container.map(str::to_owned),
+                    status,
+                    reason: None,
+                    fallback_argv: Vec::new(),
+                    conversations: Vec::new(),
+                })
+                .collect(),
+            unknown: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn remote_receipts_settle_the_container_and_what_never_returns() {
+        let tasks = [
+            Candidate {
+                id: "t1".into(),
+                identifier: "A-1".into(),
+            },
+            Candidate {
+                id: "t2".into(),
+                identifier: "A-2".into(),
+            },
+        ];
+        // Created one Task; the other was not started there and stays a candidate.
+        let created = remote(vec![(
+            "loopflow://r/task/A-1",
+            Some("s"),
+            OpenStatus::Opening,
+        )]);
+        assert_eq!(
+            settle_remote(&created, None, &tasks),
+            (Placement::Container("s".into()), vec!["t1".into()])
+        );
+        // Nothing started there: no container, nothing seen.
+        let declined = remote(vec![("loopflow://r", None, OpenStatus::Opening)]);
+        assert_eq!(
+            settle_remote(&declined, None, &tasks),
+            (Placement::Unopened, vec![])
+        );
+        // A launch-wide failure or lost reply may have created anything.
+        let failed = remote(vec![("loopflow://r", None, OpenStatus::Failed)]);
+        for outcome in [failed, Err(anyhow::anyhow!("timed out"))] {
+            assert_eq!(
+                settle_remote(&outcome, None, &tasks),
+                (Placement::Uncertain, vec!["t1".into(), "t2".into()])
+            );
+        }
+        // A held container survives a lost reply.
+        assert_eq!(
+            settle_remote(&Err(anyhow::anyhow!("lost")), Some("s"), &tasks).0,
+            Placement::Container("s".into())
+        );
+        let parsed = Placement::parse(&["m1=s".into(), "m2=".into()]).unwrap();
+        assert_eq!(parsed["m1"], Placement::Container("s".into()));
+        assert_eq!(parsed["m2"], Placement::Uncertain);
     }
 
     #[test]

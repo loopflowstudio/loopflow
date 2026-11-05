@@ -387,6 +387,54 @@ fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
 }
 
 #[test]
+fn cmux_task_joins_the_group_its_caller_is_in_now() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let log = bin.path().join("cmux.log");
+    // The caller's workspace moved into group G-2 after it launched.
+    let groups = r#"{"window_id":"W","groups":[{"id":"G-1","anchor_workspace_id":"A","member_workspace_ids":["A"]},{"id":"G-2","anchor_workspace_id":"B","member_workspace_ids":["B","CALLER"]}]}"#;
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$1 $2\" in\n  'workspace-group list') printf '%s\\n' '{groups}' ;;\n  *) echo 'OK workspace:9' ;;\nesac\n",
+        log.display()
+    );
+    let path = bin.path().join("cmux");
+    std::fs::write(&path, script).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let report = json(&lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[("CMUX_WORKSPACE_ID", "CALLER")],
+        &[
+            "open",
+            "--task",
+            "INF-123",
+            "--host",
+            "cmux",
+            "--no-focus",
+            "--json",
+        ],
+    ));
+    let receipt = &report["receipts"][0];
+    assert_eq!(receipt["destination"], "workspace:9");
+    assert_eq!(receipt["container"], "G-2");
+    let calls = std::fs::read_to_string(log).unwrap();
+    let created = calls
+        .lines()
+        .find(|line| line.starts_with("new-workspace "))
+        .unwrap();
+    assert!(
+        created.contains("--group G-2 --group-placement end"),
+        "{calls}"
+    );
+    assert!(!calls.contains("workspace-group create"), "{calls}");
+}
+
+#[test]
 fn herdr_without_server_context_creates_no_session() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -1208,6 +1256,138 @@ cat '{bin}/'"$method.reply"
 
 fn rex_reply(bin: &Path, method: &str, reply: Value) {
     std::fs::write(bin.join(format!("{method}.reply")), reply.to_string()).unwrap();
+}
+
+/// One follower produces every Machine's arrivals. A Machine with nothing open gets
+/// its container on the first arrival; later arrivals append to the handle the
+/// follower holds; an uncertain creation is never followed by another.
+#[test]
+fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
+    use loopflow::durable::MachineId;
+    use loopflow::store::sqlite::SqliteStore;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let peer = MachineId::new();
+    store
+        .add_machine(&peer, "remote.invalid", "Remote")
+        .unwrap();
+    store.claim_task(&registered.task.id).unwrap();
+    store.handoff_task(&registered.task.id, &peer).unwrap();
+    // Remote checkout state is not copied here; the peer decides eligibility.
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET worktree=NULL WHERE id=?1",
+            [registered.task.id.as_str()],
+        )
+        .unwrap();
+    rex_peer(bin.path());
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture"}]}),
+    );
+    let url = format!("loopflow://{}", folder(repo.path()));
+    let receipt = serde_json::json!({"receipts":[{
+        "label":"INF-123 · Task","url":format!("{url}/task/INF-123"),"host":"rex",
+        "destination":"window:remote","container":"session:remote","status":"opening",
+        "reason":"Created","fallback_argv":[],"conversations":[]}],"unknown":[]});
+    let requests = host(bin.path(), "ssh", &receipt.to_string(), 0);
+    let follow = |remote: Option<String>| {
+        let mut args = vec![
+            "open".to_owned(),
+            url.clone(),
+            "--host".into(),
+            "rex".into(),
+            "--server".into(),
+            "unix:///fixture/rex.sock".into(),
+            "--follow".into(),
+            "session:fixture".into(),
+        ];
+        args.extend(
+            remote
+                .into_iter()
+                .flat_map(|value| ["--remote".into(), value]),
+        );
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let output = lf(home.path(), repo.path(), Some(bin.path()), &args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let sent = std::fs::read_to_string(&requests).unwrap_or_default();
+        let _ = std::fs::remove_file(&requests);
+        (sent, String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+
+    let (sent, stdout) = follow(None);
+    assert!(
+        sent.contains("--arrive-task")
+            && sent.contains(registered.task.id.as_str())
+            && sent.contains("--local-workspace")
+            && sent.contains("--no-focus"),
+        "{sent}"
+    );
+    assert!(
+        !sent.contains("--into"),
+        "the first arrival creates: {sent}"
+    );
+    assert!(stdout.contains("Added INF-123"), "{stdout}");
+
+    let (sent, _) = follow(Some(format!("{peer}=session:remote")));
+    assert!(sent.contains("'--into' 'session:remote'"), "{sent}");
+
+    let (sent, _) = follow(Some(format!("{peer}=")));
+    assert!(
+        sent.is_empty(),
+        "uncertain creation is not followed: {sent}"
+    );
+
+    assert!(
+        !bin.path().join("session.new_window.requests").exists(),
+        "no local fallback"
+    );
+    assert!(!bin.path().join("session.create.requests").exists());
+
+    // A broad launch hands the peer's container and opened Tasks to its one
+    // follower; the peer starts no follower of its own.
+    let launch = lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[
+            "open",
+            &url,
+            "--host",
+            "rex",
+            "--server",
+            "unix:///fixture/rex.sock",
+            "--json",
+        ],
+    );
+    assert!(
+        launch.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launch.stderr)
+    );
+    let sent = std::fs::read_to_string(&requests).unwrap();
+    assert!(
+        sent.contains("'--local-workspace'") && !sent.contains("--arrive-task"),
+        "{sent}"
+    );
+    let workspace =
+        std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
+    assert!(
+        workspace.contains(&format!("{peer}=session:remote"))
+            && workspace.contains(registered.task.id.as_str()),
+        "{workspace}"
+    );
 }
 
 #[test]

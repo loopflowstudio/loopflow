@@ -17,8 +17,9 @@ command again creates another Task tab from LF's current source layout; it does
 not search for, repair or change the earlier tab.
 
 Container choice comes from where you are, never from a stored mapping. Inside a
-Rex session or Herdr workspace, a Task tab joins it; in cmux, a Task workspace
-joins your window, not yet the group your workspace is in. Outside one, or when
+Rex session or Herdr workspace, a Task tab joins it. In cmux, a Task workspace
+joins the group your workspace is in now, or your window when it has no group.
+Outside one, or when
 opening a repository or Wave, `lf open` creates a new container named for the
 Wave or repository.
 
@@ -109,6 +110,8 @@ Set `task_layout` in the existing configuration scopes:
 Task worktrees share the repository's private configuration, using the existing
 Wave identity and precedence rules. See [Configuration](config.md#where-settings-live).
 There is no separate host-layout file or database preference layer.
+`lf set task_layout` and configuration reads reject a template that a launch
+could not use, such as one that captures a Session.
 
 ```yaml
 # .lf/wave/product/config.yaml
@@ -203,9 +206,11 @@ reconstruct that workspace after the follower exits.
 
 Another `lf open --wave product` launches a new session with fresh Task tabs for
 the current started, unfinished set. Starting a Task does not open a closed host
-app. Each Machine's launch follows its own Tasks. Today a Task that first starts
-on a Machine where this launch opened nothing arrives only with the next open;
-that is current behavior under review, not the accepted contract.
+app. One Workspace tab follows every Machine the launch reaches. Other Machines'
+Tasks arrive in a session on their own Machine. If the launch opened nothing on
+that Machine, its first arrival creates the session, and later arrivals join it.
+If that creation's reply is lost, nothing more is created there until you open
+again.
 
 ## Split where you are working
 

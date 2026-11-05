@@ -156,6 +156,8 @@ pub struct OpenReceipt {
     pub host: Option<OpenHost>,
     /// The host's own identifier for the destination it created.
     pub destination: Option<String>,
+    /// The native container (Rex session, Herdr workspace, cmux group) holding it.
+    pub container: Option<String>,
     pub status: OpenStatus,
     pub reason: Option<String>,
     pub fallback_argv: Vec<String>,
@@ -261,6 +263,7 @@ impl Resolved {
             url: self.url.to_string(),
             host,
             destination,
+            container: None,
             status,
             reason,
             fallback_argv: self.fallback_argv(),
@@ -1586,6 +1589,15 @@ pub struct OpenArgs {
     /// Open only this Machine's part of a routed workspace
     #[arg(long, hide = true)]
     pub local_workspace: bool,
+    /// Add these newly started Tasks from a routed selection, only those started here
+    #[arg(long, hide = true, requires = "local_workspace", value_delimiter = ',')]
+    pub arrive_task: Vec<String>,
+    /// Append the arrival to this native container instead of creating one
+    #[arg(long, hide = true, requires = "arrive_task")]
+    pub into: Option<String>,
+    /// `<machine>=<container>` another Machine opened for this launch; empty when its creation is uncertain
+    #[arg(long = "remote", hide = true, requires = "follow")]
+    pub remote: Vec<String>,
 }
 
 /// The Work an invocation names: every available conversation, an address,

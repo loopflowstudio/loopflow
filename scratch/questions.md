@@ -13,16 +13,14 @@ Older judgments are in `9187804aee:scratch/questions.md`.
   Task tab with its splits, no focus, no new provider. Stated implementation
   choice of Jack's hierarchy, not a verbatim selection; keep it visible in demo.
 - **Container defaults.** A Task opened inside a Rex session or Herdr workspace joins
-  it; in cmux it joins the caller's window. Otherwise, and for every repository or
-  Wave open, a new container named for the Wave or repository. There is no flag to
-  put a repository/Wave launch into the current session; add one if demo wants it.
-- **Repository = one session.** A repository launch is one session with every
-  Task tab; it no longer splits into per-Wave sessions, and includes no Wave
-  conversations. A Wave launch includes its primary conversation tab.
-- **Followers are Rex-only and per Machine.** The source follower ignores other
-  Machines' Tasks; each Machine's launch follows its own. A Task that first starts on
-  a Machine where the launch opened nothing arrives with the next open. `--arrive-task`
-  forwarding was removed because it needed a remote container record.
+  it. In cmux it joins the group its caller's workspace is in now, else the window.
+  Otherwise, and for every repository or Wave open, it gets a new container named
+  for the Wave or repository. No flag puts a repository/Wave launch into the
+  current session; add one if the demo wants it.
+- **One follower per broad launch.** The source follower adds every Machine's
+  arrivals. A peer's container comes from its receipt, or from that Machine's
+  first arrival. A remote first arrival creates a container named for the Task's
+  Wave or repository, chosen by the peer's own scope resolution.
 - **Uncertain creation.** The follower marks a Task seen before creating its tab, so
   a lost reply is reported once and never retried.
 - **Readiness.** Records live under a per-tab launch key and are deleted after the
@@ -49,23 +47,17 @@ No separate Task was requested or created.
 
 ## Still open
 
-- **Retained-terminal protection** (requirement, not waived). LOO-717's consumer
-  is `lf task presence` with a 30 s lease in `task_host_occurrences` (PR #1811,
-  `b81df60579`, conflicting with main). Decision for Jack: does that lease table
-  count as the rejected LF occurrence persistence? Without an LF registry, live
-  viewers can lease their own `REX_BLOCK`; exited-but-retained blocks need 717's
-  executor to query `session.list_blocks` by id at cleanup time. Details:
-  rex-workspace.md "Remaining".
-- **Arrivals on a Machine with no initial workspace** (requirement, not waived).
-  Today they wait for another open; the prior `--arrive-task` forwarding needed the
-  deleted registry. Decision for Jack: open on every routed Machine at launch, or
-  forward each arrival as a fresh single-Task launch.
-- **cmux group.** A Task opened inside cmux joins the caller's window, not its
-  group. Resolving the group from `CMUX_WORKSPACE_ID` is reversible and untested
-  against a live app.
-- **Template validation at `lf set`.** Invalid `task_layout` is rejected only when
-  a launch reads it. Validating in the setter is small; not done.
-- **Native app Split** in Rex/Herdr/Desktop remains owed to the demo (needs a focused
-  app window; this run sat inside Jack's live Rex).
-- **Bound-later conversations** report their selected directory on later attachments
-  though the running provider keeps its original cwd (reversible, one line).
+Jack Heart's prohibition on LF host, workspace and occurrence persistence covers
+lease tables too. It is settled and not a question.
+
+- **Retained-terminal protection** (requirement, not waived). It is an external
+  integration dependency on LOO-717, whose API must take a shape compatible with
+  that prohibition. Facts and its current incompatibility are in rex-workspace.md
+  "Remaining". This Task neither changes nor launches LOO-717.
+- **cmux group JSON** comes from cmux source, not a live app. Running cmux here
+  would act on Jack's live app.
+- **Native app Split** in Rex/Herdr/Desktop is still owed to the demo. It needs a
+  focused app window, and this run sat inside Jack's live Rex.
+- **Bound-later conversations** report their selected directory on later
+  attachments, though the running provider keeps its original cwd (reversible,
+  one line).

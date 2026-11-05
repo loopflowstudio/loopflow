@@ -204,60 +204,47 @@ snapshot keeps whatever draft tables it has.
 Rex); arrivals do not change the active window (native Rex); a Task opened from a
 Rex shell joins that session; source drafts never reach argv (layout unit test).
 
-### Remaining (reconciled November 5, realign)
+### Pass 2 (November 5) — implemented
 
-Jack Heart's two unresolved requirements stay requirements; neither is waived here.
+- **Remote arrivals.** A broad Rex launch's one follower produces every Machine's
+  arrivals. Peers launched by `--local-workspace` start no follower of their own.
+  Their receipts carry the native `container`, and the source passes it to the
+  follower as `--remote <machine>=<container>`, alongside `--seen` for the Tasks
+  they opened. On the first arrival for a Machine with nothing open, the follower
+  forwards `open --local-workspace --arrive-task <ids> --no-focus`, and the peer
+  creates its container there. Later arrivals add `--into <container>`. The peer
+  decides eligibility, because remote checkout state is not in the local plan.
+  A lost reply or launch-wide failure marks every candidate seen. If no container
+  is held, it also marks the Machine uncertain: nothing more is created there
+  until another `lf open`. Handles live in argv and memory, never in LF storage.
+  Cost: one batched SSH request per Machine with unseen candidates, on each Work
+  frame (at least every 15 s).
+- **cmux group.** A Task opened inside cmux reads `workspace-group list --json`.
+  It joins the group whose anchor or members include `CMUX_WORKSPACE_ID` now
+  (`--group <id> --group-placement end`), else the caller's window. A failed
+  lookup opens nothing. The JSON keys come from cmux source
+  (`ControlCommandCoordinator+WorkspaceGroup.swift`); a live app is untested.
+- **Setter validation.** `validate_value` instantiates `task_layout` the way a
+  launch does, so `lf set` and config reads reject captured Sessions or a tree
+  missing Desktop's Task panes.
 
-1. **Retained Rex Task Session terminals must protect checkout cleanup.** Nothing
-   enforces it. The consumer is LOO-717 (PR #1811 at `b81df60579`, conflicting with
-   main): `lf task presence <issue> --occurrence <id> --state retained|away|closed|unknown
-   --revision <n> --native-settled <bool> [--owner '{"machine_id","pid","started_at",
-   "settles_on_exit"}']`, a 30 s lease (`HOST_LEASE`), a 15 min grace, stored in
-   `task_host_occurrences` (`task_workspace_lifetimes.sql`); lease expiry is unknown,
-   never release. **Conflict:** that table persists host occurrences in LF, which
-   Jack's November 5 decision rejects anywhere. Open decision for Jack: is 717's
-   lease the one exception (an observation, not a workspace recipe), or does 717's
-   API need a stateless shape?
-   Native inventory without an LF registry (isolated Rex probe, November 5):
-   `session.list_blocks` returns block_id, label, flavor, window_id, owner and
-   host_id; block methods `pwd` (last OSC 7 report, owner pid) and `process` (child
-   pid/path/home). No argv, cwd option or env is readable. So:
-   - Live LF tools in a block (`session view`, `task view`, `task tool`) see their
-     own `REX_BLOCK`/`REX_SESSION`; each can lease occurrence
-     `rex:<endpoint>#<block>` as retained with `--owner` its own pid, renewing
-     under 30 s, and report `closed` on SIGHUP. Concrete LF work once 717 lands.
-   - An exited program in a retained block (observer `exit.on_completion=false`)
-     renews nothing, so the lease goes unknown and blocks cleanup until a
-     cleanup-time host query: `session.list_blocks` by block id says present
-     (still retained, regardless of focus) or absent (closed). Keyed by id, so
-     renamed tabs keep their association. Needs 717's executor to call the host,
-     which it does not today (it observes `--owner` exit through `lf machine process`).
-   - Matching window labels to Task titles is rename-fragile; not the primary path.
-2. **Automatic arrivals on a Machine with no initial workspace wait for another
-   open.** `open_machines` launches remotely only on peers holding a started,
-   unfinished Task now, and the follower skips remote routes. At `9187804aee` the
-   follower forwarded `--arrive-task` through `remote_open` into the registry's
-   remote container; the registry left, so that path left. Options for Jack:
-   (a) a repository/Wave launch opens on every routed Machine (`store.machines()`),
-   each with its own session and follower, at the cost of an SSH request and a
-   failure receipt per unreachable Machine; (b) the follower forwards
-   `open --task <id> --host rex --local-workspace --no-focus` on arrival, creating a
-   fresh session there each time (fresh-launch semantics, no container reuse).
-3. **cmux container.** Rex and Herdr Tasks join the caller's container; cmux Tasks
-   join the caller's window (`Container { id: None }`), outside any group the
-   caller's workspace belongs to. `cmux identify` and `workspace-group list --json`
-   can resolve the caller's group from `CMUX_WORKSPACE_ID`; `new-workspace --group
-   <id> --group-placement afterCurrent --group-reference <ws>` places it. Reversible,
-   unverified against a live app; it would match the Rex/Herdr hierarchy.
-4. **Template authoring validation.** `task_layout` parses as `TaskLayoutTemplate`
-   at config read; `instantiate` rejects captured Session/location/shell execution/
-   files and runs `WorkPaneLayout::validate` only when a launch reads it. `lf set
-   task_layout` accepts an invalid tree, and the first `lf open` fails with
-   "task_layout setting". Validating in the setter with a placeholder key is small
-   and reversible; not done.
-5. Demo: app Split from each pane (Rex, Herdr, Desktop), cmux end to end, agent-tool
-   routing after viewer move, two-Machine open, real-provider input transfer through
-   "view again". `workspace-demo.md` holds the dated failed demos.
+### Remaining
+
+1. **Retained Rex Task Session terminals must protect checkout cleanup**
+   (requirement, not waived). Jack Heart already prohibited LF persistence of host
+   occurrences anywhere, including a lease table. This is settled; do not ask again.
+   The protection is an integration dependency on LOO-717, which owns the API.
+   LOO-717 needs a stateless shape compatible with that decision. Its current PR
+   #1811 (`b81df60579`) stores `task_host_occurrences` leases, so it is not yet
+   compatible. This Task does not change or launch LOO-717. The isolated Rex probe
+   gives the native facts a stateless check can use: `session.list_blocks` returns
+   block_id, label, window_id and owner; `pwd`/`process` work per block; argv, cwd
+   and env are not readable. Live LF tools know their own `REX_BLOCK`. An exited
+   program's retained block can be checked by block id at cleanup time.
+2. Demo: app Split from each pane (Rex, Herdr, Desktop), cmux end to end
+   (including group join), agent-tool routing after viewer move, two-Machine open
+   with a remote first arrival, real-provider input through "view again".
+   `workspace-demo.md` holds the dated failed demos.
 
 ### Carried evidence
 
@@ -276,6 +263,13 @@ Jack Heart's two unresolved requirements stay requirements; neither is waived he
   `/Applications/cmux.app/Contents/Resources/bin/cmux`) capabilities as above.
 
 ## Verification
+
+Pass 2 (November 5): lib `open::` 18/18, `config::` 77/77, `work_open_tests::`
+23/23 (+2 ignored), native `rex_native_fresh…` with `--host rex` on an isolated
+server passed, fmt + clippy clean. Gate owns the affected suites.
+
+Compress pass 2 (November 5): follower's per-Machine arrival moved into
+`arrive_remote`; lib `open::` 18/18, clippy clean; gate owns the rest.
 
 Compress (November 5): `cargo clippy -p loopflow --all-targets -- -D warnings` clean
 after merging template validation into `instantiate`, sharing Task-tab creation

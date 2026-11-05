@@ -102,11 +102,14 @@ engine so both adapters reach it.
 | `task.interrupt` | `lf task interrupt <issue>` | acknowledgement |
 | `session.steer` | `lf session steer <id> <message>` | the saved steer |
 | `session.asks` (read, subscribable) | none; Desktop's Waiting navigation (LOO-402) reads it internally | the questions agents are waiting on, per Session |
-| `session.answer` | typing into the terminal | the Ask answered without the terminal |
 
-`session.asks` and `session.answer` are the mobile feature: open the app, see what
-agents are waiting on, answer. They fall out of complete readings and a typed
-write; nothing in the surveyed systems (Rex, Happy, cmux) offers them.
+`session.asks` is the mobile reading: open the app, see what agents are waiting
+on. Answering happens in the Session's real terminal, attached through
+`terminal.attach` (the phone gets it through LOO-718). Jack Heart (November 5):
+"I want to have an actual terminal on the actual Claude Code session." There is
+no write that types into a Session on a person's behalf; lf is never in the byte
+path pretending to be the keyboard. A `session.answer` built on synthetic input
+was removed on that direction.
 
 ## Namespace alignment
 
@@ -178,8 +181,8 @@ own tests before the next begins.
 1. **task.\* and the core loop.** Lift `task.run`, `task.ship`, `task.hold`,
    `task.steer`, `task.comment`, `task.wait`, `task.interrupt` into the engine;
    CLI handlers become adapters; delete the scraper for the task namespace.
-2. **session.asks and session.answer.** The Asks reading and the answer write;
-   Desktop's Waiting navigation reads the same operation.
+2. **session.asks.** The Asks reading; Desktop's Waiting state reads the same
+   operation. Answering is the terminal.
 3. **Namespace alignment.** The table above: CLI renames with one-release aliases,
    config keys under the typed catalogue, `ops` dissolved, `desktop` left with
    arrangement only.

@@ -24,7 +24,7 @@ not permission to run its operator.
 **Primaries (implemented November 5).** The registry keeps a `warmPrimaries` set
 beside `recentTasks`: the repository and every Wave the window's roadmap shows are
 prefetched on every `openWarmConversations` pass through `prefetchPrimary`, retained
-outside the eight-Task bound, and dropped only by Close (a deliberate visit
+outside the sixteen-Task bound, and dropped only by Close (a deliberate visit
 readmits). `warmWork` orders selected, visible tiles, primaries, then recent Tasks,
 under the same two preparation slots. A primary workspace's intent is always Start;
 a Task's still follows its state. With no Session the queue calls
@@ -91,9 +91,9 @@ recent working Tasks, other working Tasks by shared update time, then other save
 unfinished Tasks. Prefetch uses the reveal queue and location validation,
 preserves Close, and never waits before rendering.
 
-Provisional engineering limits, not a measured budget or Jack's numbers: eight
-recent unfinished Task conversations across repository windows and two concurrent
-preparations. Visible panes stay retained, with exceptions reported. No NSView is
+Jack Heart set the warm bound to sixteen on November 5 (“make it 16”): sixteen
+recent unfinished Task conversations across repository windows. Two concurrent
+preparations remain a provisional engineering limit. Visible panes stay retained, with exceptions reported. No NSView is
 shared between windows. Eviction releases Desktop's viewer and hold; protected
 work and other hosts may keep the provider running. Shells keep their own lifecycle.
 
@@ -157,7 +157,7 @@ marker only after acknowledged control; `GhosttyManager` turns it into
 `PRIMARY_MESSAGE` in `first_turn` and the three session skills say to read, report,
 leave a stopped run stopped, claim or start nothing and treat steers as recorded
 direction. Each automatic start spends one provider turn, so a load can spend up to
-eight Task turns plus one per primary; the “no new agent turn” acceptance holds
+sixteen Task turns plus one per primary; the “no new agent turn” acceptance holds
 only for existing history.
 
 **Folder trust.** `restore_task_checkout` now calls `mark_lf_created`, so Task

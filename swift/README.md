@@ -98,7 +98,7 @@ A prepared conversation starts its provider at once, before any pane shows it;
 selecting the Work shows the running terminal. A small **Connecting…** indicator
 remains until the live relay accepts input.
 
-Recent unfinished Tasks stay warm for immediate return: Desktop retains eight, plus
+Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
 any additional visible panes; a Task shown as a Dashboard tile stays warm after the
 Dashboard leaves. Repository and Wave conversations stay warm beside that bound.
 Return lands at the bottom. Older conversations reconnect or resume the same

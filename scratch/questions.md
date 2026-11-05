@@ -23,9 +23,9 @@ Jack Heart selected:
   stack parent is LOO-717/#1811. The stopped November 2 implementation was an
   operator error, not prior work to replay.
 
-Engineering assumptions, not choices attributed to Jack: eight warm unfinished
-conversations across repository windows, visible-pane exceptions, selected-first
-restore and two concurrent preparations. Memory and usable-input measurements
+Jack Heart set sixteen warm unfinished conversations across repository windows
+(November 5, “make it 16”). Engineering assumptions, not choices attributed to
+Jack: visible-pane exceptions, selected-first restore and two concurrent preparations. Memory and usable-input measurements
 remain outstanding. Native readiness uses the live relay event separately from
 saved frames and program status; configured-provider readiness remains unproven.
 
@@ -75,7 +75,7 @@ one **Try again** for that Task. To make it clickless, allow one automatic retry
 for a Task primary with no stored request.
 
 Concept-review assumption, November 4: a conversation that finished its automatic reading pass
-counts as Available like any other idle conversation. So after a load, up to eight Tasks appear in
+counts as Available like any other idle conversation. So after a load, up to sixteen Tasks appear in
 the sidebar's Available filter and as available on the Wave board, though nobody asked them anything.
 Availability is judged in Rust from provider evidence, and a report is waiting there. To keep the
 filter for conversations a person has engaged, exclude a Session whose only turn is the automatic one.
@@ -104,7 +104,7 @@ restrictions. Accepted scope and constraints: `loo-672-load-prefetch.md`.
 
 Implementation assumptions, November 5 (primaries):
 
-- Repository and Wave conversations are warm outside the eight-Task bound, not
+- Repository and Wave conversations are warm outside the sixteen-Task bound, not
   inside it: a repository has one plus a few Waves, and counting them against the
   Task bound would evict working Tasks to keep Waves warm. Close still releases
   them; a deliberate visit readmits. To bound them too, move them into `recentTasks`.

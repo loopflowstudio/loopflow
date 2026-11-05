@@ -153,12 +153,12 @@ struct WorkCacheTests {
     @Test("Fresh repository load prefetches working Tasks without saved visits and honors Close", arguments: [false, true])
     func loadPrefetchesWorkingTasks(closed: Bool) async throws {
         let source = try Source()
-        try await source.populateWorkingTasks()
+        try await source.populateWorkingTasks(owned: Prefetch.owned)
         await source.setLocationFailure(nil)
         await source.holdPreparations()
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
-        let closedKey = WorkWorkspaceKey(repository: repository, kind: .task, id: "prefetch-11")
+        let closedKey = WorkWorkspaceKey(repository: repository, kind: .task, id: Prefetch.newestOwned)
         if closed {
             let previous = SessionsWorkspaceRegistry(localMachineId: "home-a")
             previous.loadWarmIntent(repository: repository)
@@ -178,17 +178,19 @@ struct WorkCacheTests {
         #expect(model.workStatus == .current) // Rendering is not held by preparation.
         #expect(registry.preparationCount == 2)
         // The newest row is the started Task nobody owns; it opens like any working Task.
-        let expected = ["prefetch-16"] + stride(from: closed ? 10 : 11, through: closed ? 4 : 5, by: -1).map { "prefetch-\($0)" }
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        let newest = Prefetch.owned - (closed ? 2 : 1)
+        let expected = [Prefetch.unowned] + stride(from: newest, through: newest - (limit - 2), by: -1).map { "prefetch-\($0)" }
         #expect(registry.recentTasks.map(\.id) == expected)
         #expect(Set(await source.preparedTasks) == Set(expected.prefix(2)))
         await source.releasePreparations()
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
-        await spin { store.preparedTaskConversations.count < 8 }
-        #expect(store.preparedTaskConversations.count == 8)
+        await spin { store.preparedTaskConversations.count < limit }
+        #expect(store.preparedTaskConversations.count == limit)
         #expect(Set(await source.preparedTasks) == Set(expected))
         #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments.contains("--start-if-free") })
         model.openWarmConversations()
-        #expect(registry.recentTasks.count == 8)
+        #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         if closed { #expect(registry.retained(closedKey) == nil) }
         registry.prepareForQuit()
     }
@@ -200,7 +202,7 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        let key = WorkWorkspaceKey(repository: repository, kind: .task, id: "prefetch-11")
+        let key = WorkWorkspaceKey(repository: repository, kind: .task, id: Prefetch.newestOwned)
         await spin { registry.retained(key)?.conversationError == nil }
         let workspace = try #require(registry.retained(key))
         #expect(workspace.conversationError == "Claude account unavailable")
@@ -262,10 +264,10 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        await spin { await source.preparedTasks.count < 8 }
+        await spin { await source.preparedTasks.count < SessionsWorkspaceRegistry.warmConversationLimit }
         await spin { registry.preparationCount > 0 }
         await source.setPreparationFailure("No provider history")
-        let id = "prefetch-15" // The fixture's unstarted Task.
+        let id = Prefetch.unstarted
         let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
         model.openWarmConversations()
         await spin { workspace.conversationError == nil }
@@ -290,9 +292,9 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        await spin { await source.preparedTasks.count < 8 }
+        await spin { await source.preparedTasks.count < SessionsWorkspaceRegistry.warmConversationLimit }
         await spin { registry.preparationCount > 0 }
-        let id = "prefetch-15" // The fixture's unstarted Task.
+        let id = Prefetch.unstarted
         await source.hold(["session", "resume"])
         let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
         model.openWarmConversations()
@@ -318,11 +320,11 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        await spin { await source.preparedTasks.count < 8 }
+        await spin { await source.preparedTasks.count < SessionsWorkspaceRegistry.warmConversationLimit }
         await spin { registry.preparationCount > 0 }
-        let id = "prefetch-15" // The fixture's unstarted Task.
+        let id = Prefetch.unstarted
         await source.hold(["session", "resume"])
-        let opening = Task { await model.openTaskLink(TaskLink(issue: "PREFETCH-15", repo: Self.repo, conversation: true)) }
+        let opening = Task { await model.openTaskLink(TaskLink(issue: Prefetch.unstarted.uppercased(), repo: Self.repo, conversation: true)) }
         await source.waitForHeldRead()
         let workspace = try #require(registry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: id)))
         #expect(workspace.conversationIntent == .reveal)
@@ -348,18 +350,19 @@ struct WorkCacheTests {
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        await spin(for: .seconds(5)) { await source.preparedTasks.count < 8 }
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        await spin(for: .seconds(5)) { await source.preparedTasks.count < limit }
         await spin(for: .seconds(5)) { registry.preparationCount > 0 }
-        #expect(await source.preparedTasks.count == 8) // Warm prefetch stops; five working Tasks remain.
+        #expect(await source.preparedTasks.count == limit) // Warm prefetch stops; five working Tasks remain.
 
         await source.holdPreparations()
-        let working = (0..<12).map { "prefetch-\($0)" } + ["prefetch-16"], unstarted = "prefetch-15"
+        let working = Prefetch.working, unstarted = Prefetch.unstarted
         func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
         model.applySelectionPlans([fixtureViewPlan(
             owner: .init(repository: repository, kind: .repository, id: repository),
             members: (working + [unstarted]).map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
         model.selectWorkingTasksDashboard()
-        await spin(for: .seconds(5)) { await source.preparedTasks.count < 10 }
+        await spin(for: .seconds(5)) { await source.preparedTasks.count < limit + 2 }
         #expect(registry.preparationCount == 2)
         let prepared = await source.preparedTasks
         let queued = try #require(working.first { !prepared.contains($0) })
@@ -424,7 +427,7 @@ struct WorkCacheTests {
         // The fixture's second Wave belongs to another repository; this window never loads it.
         let wave = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-1")
         #expect(registry.warmPrimaries == [repositoryKey, wave])
-        #expect(registry.recentTasks.count == 8)
+        #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         await spin { await source.preparedPrimaries.count < 2 }
         #expect(await source.preparedPrimaries == ["repository", "wave:product"]) // The selected repository leads.
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
@@ -445,7 +448,7 @@ struct WorkCacheTests {
     @Test("A queued or failed primary shows opening or its failure with Retry, never an Open gate")
     func primaryPaneNeverOffersAnOpenGate() async throws {
         let source = try Source()
-        try await source.populateWorkingTasks()
+        try await source.populateWorkingTasks(owned: Prefetch.owned)
         await source.setLocationFailure(nil)
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
@@ -483,7 +486,7 @@ struct WorkCacheTests {
     }
 
     private func loadWorkingTasks(from source: Source, repository: String) async throws -> (SessionsWorkspaceRegistry, WorkModel) {
-        try await source.populateWorkingTasks()
+        try await source.populateWorkingTasks(owned: Prefetch.owned)
         await source.setLocationFailure(nil)
         let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
         let model = WorkModel(query: source.query, repoPath: Self.repo)
@@ -766,6 +769,18 @@ private extension SessionsStore {
     var preparedTaskConversations: [SessionItem] { sessions.filter { $0.state == .prepared && $0.record.taskPrimary } }
 }
 
+/// `populateWorkingTasks` rows: `owned` working Tasks, oldest first, then shipping,
+/// done, abandoned and unstarted Tasks, then a started Task nobody owns.
+@MainActor
+private enum Prefetch {
+    /// Five more working Tasks than the warm bound.
+    static let owned = SessionsWorkspaceRegistry.warmConversationLimit + 4
+    static let newestOwned = "prefetch-\(owned - 1)"
+    static let unstarted = "prefetch-\(owned + 3)"
+    static let unowned = "prefetch-\(owned + 4)"
+    static let working = (0..<owned).map { "prefetch-\($0)" } + [unowned]
+}
+
 private actor Source {
     private var roadmap: String
     private let sessions: String
@@ -801,12 +816,12 @@ private actor Source {
         for waiter in waiters { waiter.resume() }
     }
 
-    func populateWorkingTasks() throws {
+    func populateWorkingTasks(owned: Int) throws {
         var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
         var inventory = wire["tasks"] as! [String: Any]
         let template = (inventory["items"] as! [[String: Any]])[0]
         // The newest row is a started Task nobody owns; it opens like any working Task.
-        let states = (0..<12).map { ["idle", "active", "moving"][$0 % 3] } + ["shipping", "done", "abandoned", "unstarted", "idle"]
+        let states = (0..<owned).map { ["idle", "active", "moving"][$0 % 3] } + ["shipping", "done", "abandoned", "unstarted", "idle"]
         inventory["items"] = states.enumerated().map { index, state in
             var row = template
             var task = row["task"] as! [String: Any]

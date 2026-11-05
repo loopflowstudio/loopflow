@@ -526,7 +526,7 @@ final class SessionsWorkspace {
 @MainActor
 @Observable
 final class SessionsWorkspaceRegistry {
-    static let warmConversationLimit = 8
+    static let warmConversationLimit = 16
     static let preparationLimit = 2
 
     // Observable only for environment delivery; lazy creation must not invalidate views.

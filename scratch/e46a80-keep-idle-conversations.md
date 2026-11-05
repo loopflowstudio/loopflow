@@ -186,16 +186,4 @@ Not runnable headless here; fixtures below stand in.
 
 ## Checks
 
-Implement pass (RecordingGap, gap observation, native_delivery_path, quiet Pi/OpenCode):
-`cargo test -p loopflow --lib -- store::recording_gap:: lf::commands::context:: transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::task_updates::` 34 passed;
-`cargo test -p loopflow --test integration context_block_tests::` 2 passed;
-`cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed;
-`node --check` on both JS hooks; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. Gate owns the affected suites.
-
-Compress pass (one `GapSpan` in `RecordingGap`, one `Settling` slot in the owner, `Ending::confirm` answers yes/no): the same `--lib` filter 34 passed, the same `transport_tests` filter 5 passed, fmt and clippy clean.
-
-Realign (2026-11-05, after compress): code, AGENTS.md, both READMEs and `docs/` agree with Decisions and Delete (every deleted name absent, every pinning test present, `close_gap` writes the `store-gap` observation before `recovered()`); only Wave memory lagged, now folded in. `lf context`: memory 15986/16000 tokens, scratch 3168/12000; no code change, no rerun.
-
-Implement pass (busy-store input bound): `cargo test -p loopflow --lib transport::input_retry_tests::` 3 passed (the locked fixture delivers in about one second); `cargo fmt` and `cargo clippy --all-targets -D warnings` clean.
-
-Compress pass (busy-store input bound): the fixture keeps one `DELIVERY` bound and two functions in place of a `Broken` struct; `cargo test -p loopflow --lib transport::input_retry_tests::` 3 passed, `cargo fmt` and `cargo clippy --all-targets -D warnings` clean.
+At HEAD (`670ffdadf1`), unchanged since: `cargo test -p loopflow --lib -- store::recording_gap:: lf::commands::context:: transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::task_updates::` 34 passed (the locked input fixture delivers in about one second); `cargo test -p loopflow --test integration context_block_tests::` 2 passed; `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed; `node --check` on both JS hooks; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. `lf context`: memory 15986/16000 tokens, scratch under budget. Gate owns the affected suites; the Demo needs the installed build and is for Jack.

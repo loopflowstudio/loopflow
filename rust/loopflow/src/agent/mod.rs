@@ -1101,15 +1101,16 @@ fn _run_with_transient_retries(
                 retry_at: Some(retry_at),
             }) if process.wait_for_capacity => {
                 failovers = 0;
-                earliest_reset = Some(earliest_reset.map_or(retry_at, |at| at.min(retry_at)));
+                let reset = earliest_reset.map_or(retry_at, |at| at.min(retry_at));
                 let origin = origin.get_or_insert_with(|| attempt_config.clone());
                 rung += 1;
                 if rung == rungs.len() {
                     rung = 0;
-                    let reset = earliest_reset.take().unwrap_or(retry_at);
+                    earliest_reset = None;
                     wait(capacity.pause(&provider, &error, reset));
                     attempt_config = origin.clone();
                 } else {
+                    earliest_reset = Some(reset);
                     let next = &rungs[rung];
                     tracing::warn!(error, agent = %next, "every account held back; falling through");
                     _record_limit_recovery(

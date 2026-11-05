@@ -163,21 +163,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             json,
         } => {
             use crate::ops::human_session::moves_bulk::{move_sessions, MoveTarget};
-            if !selector.blocked && selector.on.is_none() {
-                bail!(
-                    "lf session move needs a selector: --blocked or --on <account|harness[:model]>"
-                );
-            }
-            let target = match (account, cli.agent.as_deref()) {
-                (Some(email), None) => MoveTarget::Account(email.clone()),
-                (None, Some(agent)) => MoveTarget::Agent(agent.to_owned()),
-                (Some(_), Some(_)) => {
-                    bail!("name one target: --account <email> or -a harness[:model]")
-                }
-                (None, None) => {
-                    bail!("lf session move needs a target: --account <email> or -a harness[:model]")
-                }
-            };
+            let target = MoveTarget::parse(account.as_deref(), cli.agent.as_deref())?;
             let filter = crate::session::SessionFilter {
                 blocked: selector.blocked,
                 on: selector.on.clone(),
@@ -497,15 +483,7 @@ pub(crate) fn moved(
     account: Option<&str>,
 ) -> anyhow::Result<crate::ops::human_session::moves_bulk::MoveReport> {
     use crate::ops::human_session::moves_bulk::{move_sessions, MoveTarget};
-    anyhow::ensure!(
-        blocked || on.is_some(),
-        "a Session move needs a selector: blocked or on"
-    );
-    let target = match (account, agent) {
-        (Some(email), None) => MoveTarget::Account(email.to_owned()),
-        (None, Some(agent)) => MoveTarget::Agent(agent.to_owned()),
-        _ => bail!("a Session move needs one target: an account or an agent"),
-    };
+    let target = MoveTarget::parse(account, agent)?;
     let filter = crate::session::SessionFilter {
         blocked,
         on: on.map(str::to_owned),

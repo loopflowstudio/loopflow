@@ -26,6 +26,28 @@ pub(crate) enum MoveTarget {
     Agent(String),
 }
 
+impl MoveTarget {
+    /// The one target a move names: `--account <email>` or `-a harness[:model]`.
+    pub(crate) fn parse(account: Option<&str>, agent: Option<&str>) -> Result<Self> {
+        match (account, agent) {
+            (Some(email), None) => Ok(Self::Account(email.to_owned())),
+            (None, Some(agent)) => {
+                let (harness, _) = crate::config::parse_agent(agent);
+                if crate::harness::HarnessKind::parse(&harness).is_none() {
+                    bail!(
+                        "unknown agent {agent}: name harness[:model], such as claude:opus or codex"
+                    );
+                }
+                Ok(Self::Agent(agent.to_owned()))
+            }
+            (Some(_), Some(_)) => bail!("name one target: --account <email> or -a harness[:model]"),
+            (None, None) => {
+                bail!("a Session move needs a target: --account <email> or -a harness[:model]")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct MoveReport {
     pub moved: Vec<Moved>,
@@ -50,11 +72,8 @@ pub(crate) struct Skipped {
 
 impl MoveReport {
     pub(crate) fn print(&self) {
-        for moved in &self.moved {
+        for moved in self.moved.iter().chain(&self.pending) {
             println!("{}  {}: {}", moved.id, moved.title, moved.how);
-        }
-        for pending in &self.pending {
-            println!("{}  {}: {}", pending.id, pending.title, pending.how);
         }
         for skipped in &self.skipped {
             println!(
@@ -66,25 +85,49 @@ impl MoveReport {
             println!("No Sessions selected.");
         }
     }
+
+    fn moved(&mut self, session: &SessionRecord, how: String) {
+        self.moved.push(Moved::new(session, how));
+    }
+
+    fn pending(&mut self, session: &SessionRecord, how: String) {
+        self.pending.push(Moved::new(session, how));
+    }
+
+    fn skip(&mut self, session: &SessionRecord, reason: impl Into<String>) {
+        self.skipped.push(Skipped {
+            id: session.id.clone(),
+            title: session.title.clone(),
+            reason: reason.into(),
+        });
+    }
 }
 
-/// Move the interactive Sessions `filter` selects to `target`.
+impl Moved {
+    fn new(session: &SessionRecord, how: String) -> Self {
+        Self {
+            id: session.id.clone(),
+            title: session.title.clone(),
+            how,
+        }
+    }
+}
+
+/// Move the interactive Sessions `filter` selects to `target`. The filter
+/// must select by `blocked` or `on`; nothing moves every Session.
 pub(crate) async fn move_sessions(
     store: &SharedStore,
     filter: &SessionFilter,
     target: &MoveTarget,
 ) -> Result<MoveReport> {
+    if !filter.blocked && filter.on.is_none() {
+        bail!("a Session move needs a selector: --blocked or --on <account|harness[:model]>");
+    }
     let mut selection = filter.clone();
     selection.interactive = Some(true);
     selection.limit = 0;
     selection.offset = 0;
     selection.after = None;
-    if let MoveTarget::Agent(agent) = target {
-        let (harness, _) = crate::config::parse_agent(agent);
-        if crate::harness::HarnessKind::parse(&harness).is_none() {
-            bail!("unknown agent {agent}: name harness[:model], such as claude:opus or codex");
-        }
-    }
     let mut report = MoveReport::default();
     let mut logins: Vec<(Provider, Result<ProviderAccount>)> = Vec::new();
     for session in list(store, &selection).await? {
@@ -125,32 +168,31 @@ async fn move_login(
         );
         return;
     }
-    if !logins.iter().any(|(switched, _)| *switched == provider) {
-        let switched = switch_login(store, provider, email).await;
-        logins.push((provider, switched));
-    }
-    let switched = &logins
+    let switched = match logins
         .iter()
-        .find(|(switched, _)| *switched == provider)
-        .expect("the provider's login was just switched")
-        .1;
+        .position(|(switched, _)| *switched == provider)
+    {
+        Some(index) => &logins[index].1,
+        None => {
+            logins.push((provider, switch_login(store, provider, email).await));
+            &logins[logins.len() - 1].1
+        }
+    };
     match switched {
-        Ok(account) => report.moved.push(Moved {
-            id: session.id.clone(),
-            title: session.title.clone(),
-            how: match provider {
-                Provider::Claude => format!(
-                    "{} is signed in as {}; it follows at its next request",
+        Ok(account) => {
+            let follows = match provider {
+                Provider::Claude => "at its next request",
+                _ => "when resumed",
+            };
+            report.moved(
+                session,
+                format!(
+                    "{} is signed in as {}; it follows {follows}",
                     provider.display_name(),
                     account_login(account)
                 ),
-                _ => format!(
-                    "{} is signed in as {}; it follows when resumed",
-                    provider.display_name(),
-                    account_login(account)
-                ),
-            },
-        }),
+            );
+        }
         Err(error) => report.skip(session, format!("{error:#}")),
     }
 }
@@ -187,32 +229,14 @@ async fn move_agent(
         && matches!(session.state, SessionState::Active | SessionState::Detached);
     if busy {
         match store.sqlite.record_session_move(session.id.as_str(), agent) {
-            Ok(()) => report.pending.push(Moved {
-                id: session.id.clone(),
-                title: session.title.clone(),
-                how: format!("continues on {agent} after its turn"),
-            }),
+            Ok(()) => report.pending(session, format!("continues on {agent} after its turn")),
             Err(error) => report.skip(session, format!("{error:#}")),
         }
         return;
     }
     match new_thread(store, session.id.as_str(), Some(agent), false, false).await {
-        Ok(_) => report.moved.push(Moved {
-            id: session.id.clone(),
-            title: session.title.clone(),
-            how: format!("continues on {agent} at its next open"),
-        }),
+        Ok(_) => report.moved(session, format!("continues on {agent} at its next open")),
         Err(error) => report.skip(session, format!("{error:#}")),
-    }
-}
-
-impl MoveReport {
-    fn skip(&mut self, session: &SessionRecord, reason: impl Into<String>) {
-        self.skipped.push(Skipped {
-            id: session.id.clone(),
-            title: session.title.clone(),
-            reason: reason.into(),
-        });
     }
 }
 

@@ -2,7 +2,7 @@
 
 Status: implemented, compressed, synced onto main through #1826, thread following
 implemented and compressed (no cuts), realigned 2026-11-05; concept review 2 moved lf's
-configuration onto the app-server (implemented and compressed 2026-11-05; gate next).
+configuration onto the app-server (implemented and compressed 2026-11-05); concept review 3 found nothing to change (2026-11-05; gate next).
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -101,6 +101,9 @@ for per-thread config is deleted.
 - The observer copies the Session's context binding to a `/new` or `/fork` thread
   before selecting it (`context_block::follow_codex_session`).
 - Headless Codex keeps its config on `thread/start` (out of scope; its fakes read it).
+  Reviewed 2026-11-05: not a second implementation of one rule. A Run has no `/new`, and
+  thread config layers over what the server inherits, so headless needs no `config/read`
+  probe (~0.25 s per Run). Moving it onto the server would buy only symmetry.
 
 Evidence (codex-cli 0.166.0): a client-started thread with no `config` on an app-server
 run with `-c developer_instructions=X` sends X to the Responses server. Real

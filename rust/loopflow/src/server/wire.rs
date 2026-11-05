@@ -23,6 +23,9 @@ pub enum ClientMessage {
     Status,
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
     Request { id: String, operation: Operation },
+    /// A read with a watch; answers `subscribed`, then `reading` messages
+    /// until cancelled. The id follows the same rules as a request's.
+    Subscribe { id: String, operation: Read },
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     Checkpoint { id: String, checkpoint: u64 },
@@ -48,29 +51,32 @@ pub struct ClientIdentity {
     pub version: String,
 }
 
+/// What a request asks for, named by its `kind`: a dotted resource and verb
+/// (`task.complete`, `plan.get`). `desktop.*` kinds are Desktop's own
+/// arrangement state, not part of what other clients are offered.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(untagged)]
 pub enum Operation {
-    SessionOwner {
-        session: crate::id::LfSessionId,
-    },
-    Read {
-        query: Read,
-    },
-    /// Answers `subscribed`, then `reading` messages until cancelled.
-    Subscribe {
-        query: Read,
-    },
+    Server(ServerOperation),
+    Read(Read),
+    Write(Write),
+}
+
+/// Operations the server owns rather than a shared read or write.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+pub enum ServerOperation {
+    /// The owner Process of a Session's terminal, if one is recorded.
+    #[serde(rename = "session.owner")]
+    SessionOwner { session: crate::id::LfSessionId },
+    /// Settings files: catalogue, declaration, explanation and theme.
+    #[serde(rename = "config.file")]
     Configuration {
         request: crate::config::api::Request,
     },
-    Command {
-        change: Write,
-    },
     /// Switch this connection to the existing owner protocol after `bridged`.
-    Attach {
-        owner: LfProcessId,
-    },
+    #[serde(rename = "terminal.attach")]
+    Attach { owner: LfProcessId },
 }
 
 /// One message from the server.
@@ -277,7 +283,7 @@ mod tests {
             serde_json::from_str::<ServerMessage>(r#"{"type":"reading","id":"tasks-1"}"#).is_err()
         );
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"request","id":"b","operation":{"kind":"bootstrap"}}"#
+            r#"{"type":"request","id":"b","operation":{"kind":"task.complete","issue":"A"}}"#
         )
         .is_err());
     }

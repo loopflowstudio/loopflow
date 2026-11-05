@@ -114,7 +114,7 @@ struct ServerClientTests {
         let subscription = Mutex<String?>(nil)
         peer.serve { message, respond in
             switch (message["type"] as? String, (message["operation"] as? [String: Any])?["kind"] as? String) {
-            case ("request", "subscribe"):
+            case ("subscribe", _):
                 let id = message["id"] as! String
                 subscription.set(id)
                 respond(["type": "response", "id": id, "result": ["kind": "subscribed"]])

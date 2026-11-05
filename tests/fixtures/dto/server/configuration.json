@@ -2,7 +2,7 @@
   "type": "request",
   "id": "config-1",
   "operation": {
-    "kind": "configuration",
+    "kind": "config.file",
     "request": {
       "action": "declaration",
       "destination": { "kind": "personal_global" },

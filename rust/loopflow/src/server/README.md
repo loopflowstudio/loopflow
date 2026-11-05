@@ -46,8 +46,8 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
-→ {"type":"request","id":"a","operation":{"kind":"read","query":{"read":"roadmap",…}}}
-→ {"type":"request","id":"b","operation":{"kind":"subscribe","query":{…}}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true}}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null}}
 ← {"type":"response","id":"a","result":{"kind":"read","value":{…}}}
 ← {"type":"response","id":"b","result":{"kind":"subscribed"}}
 ← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
@@ -102,19 +102,42 @@ on `code`; only `outcome_unknown` means the request may have taken effect:
 A shared operation names its code by returning `wire::ServerError` inside its
 error; anything else a read returns is `unavailable`.
 
-- `configuration {request}` uses `config::api::Request` for catalogue, declaration,
+Every operation names its `kind` as a dotted resource and verb, beside its
+fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
+the shared kinds; `wire::ServerOperation` owns the server's own:
+
+| Resource | Reads | Writes |
+| --- | --- | --- |
+| `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs` | `task.create`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.hold`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
+| `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new` |
+| `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
+| `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repository.path` | |
+| `graph` | `graph.list`, `graph.run` | `graph.customize` |
+| `machine`, `process` | `machine.self`, `machine.list`, `machine.doctor`, `process.list` | |
+| `usage`, `history` | `usage.get`, `history.list`, `history.retention` | |
+| `work`, `view`, `config` | `work.resolve`, `view.list`, `view.get`, `config.settings` | `config.file` |
+| `terminal` | | `terminal.attach` |
+| `desktop` | `desktop.portfolio`, `desktop.layout` | `desktop.portfolio.set`, `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
+
+`desktop.*` is Desktop's own arrangement state: which repositories its windows
+show, saved pane layouts and Dashboards. It is served for Desktop and is not
+part of what a phone or bot client is offered.
+
+- `config.file {request}` uses `config::api::Request` for catalogue, declaration,
   explanation and theme access. CLI and Desktop share the same Rust validation
   and file writer. It returns the ordinary command receipt and never replays a
   failed or uncertain save. Setting values are omitted from request telemetry.
-- `read {query}` uses the existing `Read` shape and answers `read {value}`: the
+- A read uses the existing `Read` shape and answers `read {value}`: the
   JSON the command prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is
-  supported. Repository IDs resolve on the destination with `repository_path`;
-  paths in local reads are destination paths. `view_plan` returns the existing
+  supported. Repository IDs resolve on the destination with `repository.path`;
+  paths in local reads are destination paths. `view.get` returns the existing
   WorkViewPlan, including the recorded primary Session; roadmap membership alone
   cannot select one. A missing primary stays absent. Resolve its owner with
-  `session_owner` before attachment.
-- `subscribe {query}` supports every shared read with a watch. It answers
+  `session.owner` before attachment.
+- `subscribe {id, operation}` takes a read with a watch: `view.list`,
+  `session.list` without `limit`, `task.get`, `history.list`, `plan.get`,
+  `repository.planning` and `process.list`. It answers
   `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
@@ -124,21 +147,21 @@ error; anything else a read returns is `unavailable`.
   ends the subscription; the connection stays open. A read with no watch is
   `invalid`. Reconnect opens a fresh subscription
   and receives a complete reading; no replay cursor exists.
-- `command {change}` accepts the shared `Write` shape. The server calls the same
+- A write uses the shared `Write` shape. The server calls the same
   Rust mutation dispatcher as the CLI, with the request's directory and streams.
   `command {trace_id,code,value,output,stderr}` returns its exit status, output
   and diagnostics; `value` is stdout parsed as JSON when the command's spelling
-  carries `--json` and stdout parses, otherwise null. `task_from_session
+  carries `--json` and stdout parses, otherwise null. `task.create
   {directory,id,title}` adopts the selected conversation and returns the Task
   without launching work; CLI and server share its creation handler. Ordinary
   writes start no CLI child. Machine routing still uses SSH and never falls back
   to local execution. Requests create no Process rows. A lost response means
   outcome unknown; inspect state before retrying. IDs correlate diagnostics and
   are **not** durable deduplication receipts. No automatic resubmission.
-- `session_owner {session}` resolves a Session ID to `session_owner {owner}`.
+- `session.owner {session}` resolves a Session ID to `session_owner {owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.
-- `attach {owner}` takes the exact existing owner Process ID on a connection of
+- `terminal.attach {owner}` takes the exact existing owner Process ID on a connection of
   its own: hello, one attach request, `bridged`, then the unchanged binary owner
   protocol in `transport/README.md` and `transport/wire.rs`. An owner whose
   endpoint refuses is `not_found {owner}`: it ended. Each terminal has

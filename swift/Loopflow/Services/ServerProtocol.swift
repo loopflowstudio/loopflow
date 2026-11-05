@@ -44,6 +44,8 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// A pre-hello readiness probe; the server answers `status` and closes.
     case status
     case request(id: String, operation: ServerOperation)
+    /// A read with a watch: `subscribed`, then readings until cancelled.
+    case subscribe(id: String, operation: ServedRead)
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     case checkpoint(id: String, checkpoint: UInt64)
@@ -64,6 +66,10 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode("request", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
+        case .subscribe(let id, let operation):
+            try box.encode("subscribe", forKey: .type)
+            try box.encode(id, forKey: .id)
+            try box.encode(operation, forKey: .operation)
         case .checkpoint(let id, let checkpoint):
             try box.encode("checkpoint", forKey: .type)
             try box.encode(id, forKey: .id)
@@ -75,35 +81,31 @@ public enum ServerClientMessage: Encodable, Sendable {
     }
 }
 
+/// What a request asks for, named by its `kind`: a dotted resource and verb.
+/// A read or write encodes its own `kind` and fields.
 public enum ServerOperation: Encodable, Sendable {
     case sessionOwner(session: String)
     case read(ServedRead)
-    case subscribe(ServedRead)
     case command(ServedWrite)
     case configuration(JSONValue)
     case attach(owner: String)
 
-    private enum Keys: String, CodingKey { case kind, query, change, owner, session, request }
+    private enum Keys: String, CodingKey { case kind, owner, session, request }
     public func encode(to encoder: Encoder) throws {
-        var box = encoder.container(keyedBy: Keys.self)
         switch self {
+        case .read(let query): try query.encode(to: encoder)
+        case .command(let change): try change.encode(to: encoder)
         case .sessionOwner(let session):
-            try box.encode("session_owner", forKey: .kind)
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("session.owner", forKey: .kind)
             try box.encode(session, forKey: .session)
-        case .read(let query):
-            try box.encode("read", forKey: .kind)
-            try box.encode(query, forKey: .query)
-        case .subscribe(let query):
-            try box.encode("subscribe", forKey: .kind)
-            try box.encode(query, forKey: .query)
         case .configuration(let request):
-            try box.encode("configuration", forKey: .kind)
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("config.file", forKey: .kind)
             try box.encode(request, forKey: .request)
-        case .command(let change):
-            try box.encode("command", forKey: .kind)
-            try box.encode(change, forKey: .change)
         case .attach(let owner):
-            try box.encode("attach", forKey: .kind)
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("terminal.attach", forKey: .kind)
             try box.encode(owner, forKey: .owner)
         }
     }

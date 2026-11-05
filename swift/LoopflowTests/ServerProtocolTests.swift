@@ -52,8 +52,8 @@ struct ServerProtocolTests {
     }
 
     @Test func subscriptionsCarryTheirRequestId() throws {
-        let request = ServerClientMessage.request(id: "tasks-1", operation: .subscribe(
-            .roadmap(directory: "/", wave: nil, task: nil, all: true)))
+        let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
+            .roadmap(directory: "/", wave: nil, task: nil, all: true))
         #expect(try encoded(request) == value("subscribe"))
         guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")

@@ -1,1 +1,1 @@
-{"type":"request","id":"tasks-1","operation":{"kind":"subscribe","query":{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true}}}
+{"type":"subscribe","id":"tasks-1","operation":{"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true}}

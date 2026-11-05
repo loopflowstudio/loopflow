@@ -4684,7 +4684,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
-    let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
+    let query = json!({"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let tasks = watch
         .subscribe(serde_json::from_value(query).unwrap())
@@ -4714,7 +4714,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     // The read shares the watch's connection.
     let Reply::Read { value: socket_plan } = watch
         .request(
-            serde_json::from_value(json!({"kind":"read","query":{"read":"view_plan","directory":fixture.repo.path(),"expression":"task:INF-123"}}))
+            serde_json::from_value(json!({"kind":"view.get","directory":fixture.repo.path(),"expression":"task:INF-123"}))
                 .unwrap(),
         )
         .unwrap()
@@ -5246,7 +5246,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let session = fixture.session_of_owner(&owner);
     let first_instance = service.ready();
     let loopflow::server::wire::Reply::SessionOwner { owner: resolved } =
-        service.request(json!({"kind":"session_owner","session":session}))
+        service.request(json!({"kind":"session.owner","session":session}))
     else {
         panic!("expected the Session owner")
     };

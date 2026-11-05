@@ -223,7 +223,7 @@ final class ServerLink: @unchecked Sendable {
             return nil
         }
         if let refused { throw refused }
-        do { try send(.request(id: subscription.id, operation: .subscribe(query))) } catch {
+        do { try send(.subscribe(id: subscription.id, operation: query)) } catch {
             _ = state.withLock { subscriptions.removeValue(forKey: subscription.id) }
             throw error
         }

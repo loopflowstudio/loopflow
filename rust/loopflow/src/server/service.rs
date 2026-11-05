@@ -17,8 +17,8 @@ use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation, Reply,
-    ServerError, ServerMessage, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
-    REVISION,
+    ServerError, ServerMessage, ServerOperation, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE,
+    MIN_REVISION, REVISION,
 };
 use crate::lf::commands::{read::Read, watch::Subscription, write::Write};
 
@@ -325,46 +325,9 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                         return Ok(());
                     }
                 };
-                match message {
-                    ClientMessage::Request { id, operation } => {
-                        admitted.requested();
-                        if id.is_empty() || id.len() > 128 {
-                            send(&mut lines, &error(Some(id), ErrorCode::Invalid, "request ID must contain 1–128 bytes")).await?;
-                            continue;
-                        }
-                        if inflight.contains_key(&id) {
-                            send(&mut lines, &ServerError::new(ErrorCode::Conflict, "request ID is still unanswered").with(serde_json::json!({ "id": id })).into_message(Some(id))).await?;
-                            continue;
-                        }
-                        let entry = match operation {
-                            Operation::Attach { owner } => {
-                                let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
-                                    Ok(destination) => destination,
-                                    Err(failure) => {
-                                        // A missing owner endpoint means the owner ended.
-                                        send(&mut lines, &ServerError::new(ErrorCode::NotFound, format!(
-                                            "Session owner is not running; no provider restarted and no input replayed: {failure}"
-                                        )).with(serde_json::json!({ "owner": owner })).into_message(Some(id))).await?;
-                                        continue;
-                                    }
-                                };
-                                send(&mut lines, &ServerMessage::Response { id, result: Reply::Bridged }).await?;
-                                // The connection now speaks only the owner protocol; other
-                                // answers on it are dropped with the task set.
-                                return bridge(lines, destination).await;
-                            }
-                            Operation::Subscribe { query } => {
-                                let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                                let task = tasks.spawn(subscription(id.clone(), query, outgoing.clone(), inbox));
-                                Inflight { task, checkpoints: Some(checkpoints) }
-                            }
-                            operation => {
-                                let task = tasks.spawn(request(id.clone(), operation, instance.clone(), outgoing.clone()));
-                                Inflight { task, checkpoints: None }
-                            }
-                        };
-                        inflight.insert(id, entry);
-                    }
+                let (id, admission) = match message {
+                    ClientMessage::Request { id, operation } => (id, Admission::Request(operation)),
+                    ClientMessage::Subscribe { id, operation } => (id, Admission::Subscribe(operation)),
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
@@ -377,18 +340,57 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                             }
                             None => send(&mut lines, &ServerError::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })).into_message(Some(id))).await?,
                         }
+                        continue;
                     }
                     ClientMessage::Cancel { id } => {
                         // An answered request has nothing left to forget.
                         if let Some(entry) = inflight.remove(&id) {
                             entry.task.abort();
                         }
+                        continue;
                     }
                     ClientMessage::Hello(_) | ClientMessage::Status => {
                         send(&mut lines, &error(None, ErrorCode::Invalid, "hello was already exchanged")).await?;
                         return Ok(());
                     }
+                };
+                admitted.requested();
+                if id.is_empty() || id.len() > 128 {
+                    send(&mut lines, &error(Some(id), ErrorCode::Invalid, "request ID must contain 1–128 bytes")).await?;
+                    continue;
                 }
+                if inflight.contains_key(&id) {
+                    send(&mut lines, &ServerError::new(ErrorCode::Conflict, "request ID is still unanswered").with(serde_json::json!({ "id": id })).into_message(Some(id))).await?;
+                    continue;
+                }
+                let entry = match admission {
+                    Admission::Request(Operation::Server(ServerOperation::Attach { owner })) => {
+                        let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
+                            Ok(destination) => destination,
+                            Err(failure) => {
+                                // A missing owner endpoint means the owner ended.
+                                send(&mut lines, &ServerError::new(ErrorCode::NotFound, format!(
+                                    "Session owner is not running; no provider restarted and no input replayed: {failure}"
+                                )).with(serde_json::json!({ "owner": owner })).into_message(Some(id))).await?;
+                                continue;
+                            }
+                        };
+                        send(&mut lines, &ServerMessage::Response { id, result: Reply::Bridged }).await?;
+                        // The connection now speaks only the owner protocol; other
+                        // answers on it are dropped with the task set.
+                        return bridge(lines, destination).await;
+                    }
+                    Admission::Subscribe(query) => {
+                        let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
+                        let task = tasks.spawn(subscription(id.clone(), query, outgoing.clone(), inbox));
+                        Inflight { task, checkpoints: Some(checkpoints) }
+                    }
+                    Admission::Request(operation) => {
+                        let task = tasks.spawn(request(id.clone(), operation, instance.clone(), outgoing.clone()));
+                        Inflight { task, checkpoints: None }
+                    }
+                };
+                inflight.insert(id, entry);
             }
             Some(message) = queue.recv() => send(&mut lines, &message).await?,
             Some(finished) = tasks.join_next_with_id() => {
@@ -405,6 +407,12 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
             }
         }
     }
+}
+
+/// What a request or subscription asks the session to start.
+enum Admission {
+    Request(Operation),
+    Subscribe(Read),
 }
 
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
@@ -467,7 +475,7 @@ async fn request(
 
 async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply, ServerError> {
     Ok(match operation {
-        Operation::SessionOwner { session } => {
+        Operation::Server(ServerOperation::SessionOwner { session }) => {
             let owner = tokio::task::spawn_blocking(move || -> Result<_> {
                 let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
                     ServerError::new(ErrorCode::Unavailable, "Machine registry is unavailable")
@@ -480,7 +488,7 @@ async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply
             .map_err(unavailable)?;
             Reply::SessionOwner { owner }
         }
-        Operation::Read { query } => Reply::Read {
+        Operation::Read(query) => Reply::Read {
             value: tokio::task::spawn_blocking(move || {
                 crate::journal::request::isolate(|| query.read())
             })
@@ -488,7 +496,7 @@ async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply
             .map_err(unavailable)?
             .map_err(unavailable)?,
         },
-        Operation::Configuration { request } => {
+        Operation::Server(ServerOperation::Configuration { request }) => {
             let mut target = serde_json::to_value(&request).map_err(unavailable)?;
             target
                 .as_object_mut()
@@ -502,11 +510,11 @@ async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply
             .await
             .map_err(outcome_unknown)?
         }
-        Operation::Command { change } => command(change, id, instance)
+        Operation::Write(change) => command(change, id, instance)
             .await
             .map_err(outcome_unknown)?,
-        Operation::Subscribe { .. } | Operation::Attach { .. } => {
-            unreachable!("the session dispatches subscriptions and attachment")
+        Operation::Server(ServerOperation::Attach { .. }) => {
+            unreachable!("the session dispatches attachment")
         }
     })
 }
@@ -721,7 +729,7 @@ mod tests {
     use crate::lf::commands::read::Read;
     use crate::server::wire::{
         ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, Reply, ServerMessage,
-        MAX_MESSAGE, REVISION,
+        ServerOperation, MAX_MESSAGE, REVISION,
     };
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
@@ -786,9 +794,9 @@ mod tests {
     }
 
     fn catalog() -> Operation {
-        Operation::Configuration {
+        Operation::Server(ServerOperation::Configuration {
             request: crate::config::api::Request::Catalog,
-        }
+        })
     }
 
     /// Serialize the tests that read an empty Machine registry through env.
@@ -963,11 +971,9 @@ mod tests {
             ));
             // Live processes need no Machine registry: an empty activity reading.
             client
-                .send(&ClientMessage::Request {
+                .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Operation::Subscribe {
-                        query: Read::MonitorPs,
-                    },
+                    operation: Read::MonitorPs,
                 })
                 .await;
             assert!(matches!(

@@ -68,7 +68,7 @@ is followed by `reading` messages carrying the same `id` until the client sends
 subscription and releases every waiting client; an admitted mutation still
 completes, as today.
 
-`attach` stays a dedicated connection: hello, one attach request, `bridged`,
+`terminal.attach` stays a dedicated connection: hello, one attach request, `bridged`,
 then the unchanged binary owner protocol. Mixing terminal bytes into the
 control connection would make every reading wait behind terminal output, and
 it would tie the person's byte path to the control path's health. Jack's
@@ -83,8 +83,8 @@ bridges; the owner and its Session survive, and Desktop reconnects.
 ```text
 client ── hello{revision 2, min 2, client} ──▶ server
 client ◀── welcome{client_id, revision 2, server 2, min 2, instance, build, limits, capabilities} ── server
-client ── request{id a, read roadmap} ──▶
-client ── request{id b, subscribe desktop_sessions} ──▶
+client ── request{id a, plan.get} ──▶
+client ── subscribe{id b, session.list} ──▶
 client ◀── response{id a, value}
 client ◀── response{id b, subscribed}
 client ◀── reading{id b, frame}
@@ -92,6 +92,15 @@ client ── checkpoint{id b, checkpoint 3} ──▶
 client ◀── reading{id b, …}
 client ── cancel{id b} ──▶
 ```
+
+### Operations
+
+Each operation is named by its `kind`, a dotted resource and verb beside its
+fields: `task.complete`, `plan.get`, `session.bind`. The Rust `Read` and
+`Write` enums stay internal; their serde names are the wire names. A `request`
+carries any operation; a `subscribe` message carries a read with a watch.
+`desktop.*` operations are Desktop's own arrangement state (portfolio, pane
+layouts, Dashboards) and are not offered to a phone or bot client.
 
 ### Carrier framing
 

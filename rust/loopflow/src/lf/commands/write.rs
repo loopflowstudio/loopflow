@@ -7,20 +7,26 @@ use serde::{Deserialize, Serialize};
 
 /// A typed mutation with the same defaults and effects as its CLI spelling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
+/// On the wire each write is a resource-named `kind` (`task.complete`);
+/// `desktop.*` writes are Desktop's own arrangement state.
+#[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Write {
     /// `lf task create --session <id> --title <title> --json`, without launching.
+    #[serde(rename = "task.create")]
     TaskFromSession {
         directory: PathBuf,
         id: String,
         title: String,
     },
     /// `lf task complete <issue>`.
+    #[serde(rename = "task.complete")]
     TaskComplete { directory: PathBuf, issue: String },
     /// `lf task reopen <issue>`.
+    #[serde(rename = "task.reopen")]
     TaskReopen { directory: PathBuf, issue: String },
     /// `lf task edit <issue> --notes=<notes>`.
+    #[serde(rename = "task.update")]
     TaskNotes {
         directory: PathBuf,
         issue: String,
@@ -28,17 +34,19 @@ pub enum Write {
     },
     /// `lf task abandon <issue>`: cancels the Task and removes its PRs and
     /// branches.
+    #[serde(rename = "task.abandon")]
     TaskAbandon { directory: PathBuf, issue: String },
-    /// `lf task claim <issue> --json`, or `lf task unassign <issue> --json`
-    /// when not `claimed`.
-    TaskOwnership {
-        directory: PathBuf,
-        issue: String,
-        claimed: bool,
-    },
+    /// `lf task claim <issue> --json`.
+    #[serde(rename = "task.claim")]
+    TaskClaim { directory: PathBuf, issue: String },
+    /// `lf task unassign <issue> --json`.
+    #[serde(rename = "task.unassign")]
+    TaskUnassign { directory: PathBuf, issue: String },
     /// `lf --task <issue> ship --stop`: withdraws the Task's Auto-Ship approval.
+    #[serde(rename = "task.hold")]
     ShipStop { directory: PathBuf, issue: String },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
+    #[serde(rename = "task.move")]
     TaskMove {
         directory: PathBuf,
         issue: String,
@@ -46,6 +54,7 @@ pub enum Write {
     },
     /// `lf task save <issue> <path> --revision <revision> --json`, with
     /// `content` on stdin.
+    #[serde(rename = "task.save")]
     TaskSave {
         directory: PathBuf,
         issue: String,
@@ -54,20 +63,25 @@ pub enum Write {
         content: String,
     },
     /// `lf session rename --json -- <id> <name>`.
+    #[serde(rename = "session.rename")]
     SessionRename {
         directory: PathBuf,
         id: String,
         name: String,
     },
-    /// `lf session bind --json --task <task> -- <id>`.
+    /// `lf session bind --json --task <task> -- <id>`; with `preview`,
+    /// `--dry-run`: the Task a bind would assign, assigning nothing.
+    #[serde(rename = "session.bind")]
     SessionBind {
         directory: PathBuf,
         id: String,
         task: String,
+        preview: bool,
     },
     /// `lf [--agent <agent>] session resume [<id>] [--task <task>] [--wave <wave>]
     /// --prepare --json`, with `--repo <directory>` when it names none of them:
     /// the conversation and the command that opens it, no provider started.
+    #[serde(rename = "session.resume")]
     SessionResume {
         directory: PathBuf,
         id: Option<String>,
@@ -77,6 +91,7 @@ pub enum Write {
     },
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
     /// conversation on a fresh provider thread, not yet started.
+    #[serde(rename = "session.new")]
     SessionNew {
         directory: PathBuf,
         id: String,
@@ -84,15 +99,18 @@ pub enum Write {
     },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
+    #[serde(rename = "wave.create")]
     WaveAdd {
         directory: PathBuf,
         wave: String,
         objective: Option<String>,
     },
     /// `lf wave status <wave> --sync --json`: the planning refresh.
+    #[serde(rename = "wave.sync")]
     PlanningRefresh { directory: PathBuf, wave: String },
     /// `lf wave new-chapter --all <name> --plan /dev/stdin --json`, with
     /// `plan` (JSON) on stdin; `--dry-run` when `preview`, which records nothing.
+    #[serde(rename = "chapter.start")]
     NewChapter {
         directory: PathBuf,
         name: String,
@@ -101,40 +119,59 @@ pub enum Write {
     },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
     /// recording nothing.
+    #[serde(rename = "graph.customize")]
     GraphCustomize { directory: PathBuf, name: String },
     /// `lf portfolio <change> --json`, run from `/`: which repositories the
     /// app shows.
+    #[serde(rename = "desktop.portfolio.set")]
     Portfolio { change: Vec<String> },
     /// `lf desktop query [--revision <revision>] -- <id> <expression>`.
+    #[serde(rename = "desktop.dashboard.query")]
     DashboardQuery {
         directory: PathBuf,
         id: String,
         expression: String,
         revision: Option<i64>,
     },
-    /// `lf desktop pin|unpin <id> --revision <revision>`.
+    /// `lf desktop pin <id> --revision <revision>`.
+    #[serde(rename = "desktop.dashboard.pin")]
     DashboardPin {
         directory: PathBuf,
         id: String,
-        pinned: bool,
+        revision: i64,
+    },
+    /// `lf desktop unpin <id> --revision <revision>`.
+    #[serde(rename = "desktop.dashboard.unpin")]
+    DashboardUnpin {
+        directory: PathBuf,
+        id: String,
         revision: i64,
     },
     /// `lf desktop rename --revision <revision> -- query:<id> <name>`.
+    #[serde(rename = "desktop.dashboard.rename")]
     DashboardRename {
         directory: PathBuf,
         id: String,
         name: String,
         revision: i64,
     },
-    /// `lf desktop hide|show -p query:<id>/<member>`.
-    DashboardTile {
+    /// `lf desktop hide -p query:<id>/<member>`.
+    #[serde(rename = "desktop.dashboard.hide")]
+    DashboardHide {
         directory: PathBuf,
         id: String,
         member: String,
-        hidden: bool,
+    },
+    /// `lf desktop show -p query:<id>/<member>`.
+    #[serde(rename = "desktop.dashboard.show")]
+    DashboardShow {
+        directory: PathBuf,
+        id: String,
+        member: String,
     },
     /// `lf desktop layout query:<id> --save --revision <revision>`, with
     /// `slots` (JSON) on stdin.
+    #[serde(rename = "desktop.dashboard.slots")]
     DashboardSlots {
         directory: PathBuf,
         id: String,
@@ -143,6 +180,7 @@ pub enum Write {
     },
     /// `lf desktop move -p <board>/<member> --destination <destination>`: a
     /// Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
+    #[serde(rename = "desktop.dashboard.move")]
     TileMove {
         directory: PathBuf,
         board: String,
@@ -150,6 +188,7 @@ pub enum Write {
         destination: String,
     },
     /// `lf desktop layout <work> --save`, with `layout` (JSON) on stdin.
+    #[serde(rename = "desktop.layout.save")]
     PaneLayout {
         directory: PathBuf,
         work: String,
@@ -181,14 +220,8 @@ impl Write {
                 notes_flag = format!("--notes={notes}");
                 vec!["task", "edit", issue, &notes_flag]
             }
-            Self::TaskOwnership { issue, claimed, .. } => {
-                vec![
-                    "task",
-                    if *claimed { "claim" } else { "unassign" },
-                    issue,
-                    "--json",
-                ]
-            }
+            Self::TaskClaim { issue, .. } => vec!["task", "claim", issue, "--json"],
+            Self::TaskUnassign { issue, .. } => vec!["task", "unassign", issue, "--json"],
             Self::ShipStop { issue, .. } => vec!["--task", issue, "ship", "--stop"],
             Self::TaskMove { issue, wave, .. } => match wave {
                 Some(wave) => vec!["task", "move", issue, "--wave", wave],
@@ -211,8 +244,15 @@ impl Write {
             Self::SessionRename { id, name, .. } => {
                 vec!["session", "rename", "--json", "--", id, name]
             }
-            Self::SessionBind { id, task, .. } => {
-                vec!["session", "bind", "--json", "--task", task, "--", id]
+            Self::SessionBind {
+                id, task, preview, ..
+            } => {
+                let mut words = vec!["session", "bind", "--json", "--task", task];
+                if *preview {
+                    words.push("--dry-run");
+                }
+                words.extend(["--", id]);
+                words
             }
             Self::SessionResume {
                 directory,
@@ -295,14 +335,13 @@ impl Write {
                 words.extend(["--", id, expression]);
                 words
             }
-            Self::DashboardPin {
-                id,
-                pinned,
-                revision,
-                ..
-            } => {
+            Self::DashboardPin { id, revision, .. } | Self::DashboardUnpin { id, revision, .. } => {
                 revision_flag = format!("--revision={revision}");
-                let verb = if *pinned { "pin" } else { "unpin" };
+                let verb = if matches!(self, Self::DashboardPin { .. }) {
+                    "pin"
+                } else {
+                    "unpin"
+                };
                 vec!["desktop", verb, &revision_flag, "--", id]
             }
             Self::DashboardRename {
@@ -312,11 +351,13 @@ impl Write {
                 query = format!("query:{id}");
                 vec!["desktop", "rename", &revision_flag, "--", &query, name]
             }
-            Self::DashboardTile {
-                id, member, hidden, ..
-            } => {
+            Self::DashboardHide { id, member, .. } | Self::DashboardShow { id, member, .. } => {
                 path = format!("query:{id}/{member}");
-                let verb = if *hidden { "hide" } else { "show" };
+                let verb = if matches!(self, Self::DashboardHide { .. }) {
+                    "hide"
+                } else {
+                    "show"
+                };
                 vec!["desktop", verb, "-p", &path]
             }
             Self::DashboardSlots { id, revision, .. } => {
@@ -357,7 +398,8 @@ impl Write {
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
             | Self::TaskNotes { directory, .. }
-            | Self::TaskOwnership { directory, .. }
+            | Self::TaskClaim { directory, .. }
+            | Self::TaskUnassign { directory, .. }
             | Self::ShipStop { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
@@ -371,8 +413,10 @@ impl Write {
             | Self::GraphCustomize { directory, .. }
             | Self::DashboardQuery { directory, .. }
             | Self::DashboardPin { directory, .. }
+            | Self::DashboardUnpin { directory, .. }
             | Self::DashboardRename { directory, .. }
-            | Self::DashboardTile { directory, .. }
+            | Self::DashboardHide { directory, .. }
+            | Self::DashboardShow { directory, .. }
             | Self::DashboardSlots { directory, .. }
             | Self::TileMove { directory, .. }
             | Self::PaneLayout { directory, .. } => directory,
@@ -393,12 +437,12 @@ mod tests {
     fn desktop_encodings_name_their_writes() {
         let write = |json: &str| serde_json::from_str::<Write>(json).unwrap().argv();
         assert_eq!(
-            write(r#"{"write":"task_move","directory":"/r","issue":"FIX-1","wave":null}"#),
+            write(r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#),
             ["--cwd", "/r", "task", "move", "FIX-1", "--no-wave"]
         );
         assert_eq!(
             write(
-                r#"{"write":"dashboard_pin","directory":"/r","id":"picked","pinned":false,"revision":3}"#
+                r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#
             ),
             [
                 "--cwd",
@@ -412,7 +456,7 @@ mod tests {
         );
         assert_eq!(
             write(
-                r#"{"write":"dashboard_query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#
+                r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#
             ),
             [
                 "--cwd",
@@ -425,22 +469,22 @@ mod tests {
             ]
         );
         assert_eq!(
-            write(r#"{"write":"ship_stop","directory":"/r","issue":"FIX-1"}"#),
+            write(r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#),
             ["--cwd", "/r", "--task", "FIX-1", "ship", "--stop"]
         );
         assert_eq!(
-            write(r#"{"write":"portfolio","change":["remove","/r"]}"#),
+            write(r#"{"kind":"desktop.portfolio.set","change":["remove","/r"]}"#),
             ["--cwd", "/", "portfolio", "remove", "/r", "--json"]
         );
         let chapter = serde_json::from_str::<Write>(
-            r#"{"write":"new_chapter","directory":"/r","name":"October","plan":"{}","preview":true}"#,
+            r#"{"kind":"chapter.start","directory":"/r","name":"October","plan":"{}","preview":true}"#,
         )
         .unwrap();
         assert_eq!(chapter.input(), Some("{}"));
         assert_eq!(chapter.argv().last().map(String::as_str), Some("--dry-run"));
         assert_eq!(
             write(
-                r#"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
+                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
             ),
             [
                 "--cwd",
@@ -454,7 +498,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            write(r#"{"write":"session_new","directory":"/r","id":"session_1","agent":"codex"}"#),
+            write(r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#),
             [
                 "--cwd",
                 "/r",
@@ -468,7 +512,7 @@ mod tests {
             ]
         );
         let save = serde_json::from_str::<Write>(
-            r#"{"write":"task_save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
+            r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
         )
         .unwrap();
         assert_eq!(save.input(), Some("text"));
@@ -517,6 +561,7 @@ mod tests {
                 directory: directory.clone(),
                 id: "session_1".into(),
                 task: "FIX-1".into(),
+                preview: false,
             },
             Write::WaveAdd {
                 directory: directory.clone(),
@@ -540,10 +585,9 @@ mod tests {
             Write::Portfolio {
                 change: vec!["add".into(), "/tmp/repo".into()],
             },
-            Write::TaskOwnership {
+            Write::TaskUnassign {
                 directory: directory.clone(),
                 issue: "FIX-1".into(),
-                claimed: false,
             },
             Write::ShipStop {
                 directory: directory.clone(),
@@ -580,10 +624,9 @@ mod tests {
                 expression: "-state:done".into(),
                 revision: Some(3),
             },
-            Write::DashboardPin {
+            Write::DashboardUnpin {
                 directory: directory.clone(),
                 id: "picked".into(),
-                pinned: false,
                 revision: 3,
             },
             Write::DashboardRename {
@@ -592,11 +635,10 @@ mod tests {
                 name: "-n".into(),
                 revision: 3,
             },
-            Write::DashboardTile {
+            Write::DashboardHide {
                 directory: directory.clone(),
                 id: "picked".into(),
                 member: "task:task_1".into(),
-                hidden: true,
             },
             Write::DashboardSlots {
                 directory: directory.clone(),

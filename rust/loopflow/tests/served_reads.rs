@@ -47,7 +47,7 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
 fn configuration_edits_use_the_server_without_work_processes() {
     use loopflow::config::api::Request;
     use loopflow::config::files::Destination;
-    use loopflow::server::wire::{Operation, Reply};
+    use loopflow::server::wire::{Operation, Reply, ServerOperation};
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
@@ -73,7 +73,9 @@ fn configuration_edits_use_the_server_without_work_processes() {
             trace_id,
             value,
         } = connection
-            .request(Operation::Configuration { request })
+            .request(Operation::Server(ServerOperation::Configuration {
+                request,
+            }))
             .unwrap()
         else {
             panic!("configuration did not return a command result")
@@ -184,13 +186,12 @@ fn served_binding_returns_directory_diagnostics_and_selects_the_conversation() {
         ..
     } = loopflow::server::client::Connection::open()
         .unwrap()
-        .request(Operation::Command {
-            change: Write::SessionBind {
-                directory: repo.path().to_owned(),
-                id: session["id"].as_str().unwrap().into(),
-                task: task["id"].as_str().unwrap().into(),
-            },
-        })
+        .request(Operation::Write(Write::SessionBind {
+            directory: repo.path().to_owned(),
+            id: session["id"].as_str().unwrap().into(),
+            task: task["id"].as_str().unwrap().into(),
+            preview: false,
+        }))
         .unwrap()
     else {
         panic!("binding did not return a command result")
@@ -262,7 +263,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
                 ..
             } = loopflow::server::client::Connection::open()
                 .unwrap()
-                .request(Operation::Command { change })
+                .request(Operation::Write(change))
                 .unwrap()
             else {
                 panic!("adoption did not return a command receipt")
@@ -444,9 +445,11 @@ fn server_operations_match_their_lf_commands() {
         task: None,
         all: true,
     };
-    let sessions = |headless| Read::DesktopSessions {
+    let sessions = |headless| Read::SessionList {
         directory: repo.path().to_owned(),
         headless,
+        after: None,
+        limit: None,
     };
     let task_pane = || Read::DesktopTask {
         directory: repo.path().to_owned(),
@@ -459,7 +462,7 @@ fn server_operations_match_their_lf_commands() {
     let (reads, watches) = match task_diff(None, None) {
         Read::MonitorPs
         | Read::DesktopPlans { .. }
-        | Read::DesktopSessions { .. }
+        | Read::SessionList { .. }
         | Read::DesktopTask { .. }
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
@@ -485,11 +488,9 @@ fn server_operations_match_their_lf_commands() {
         | Read::WorkLink { .. }
         | Read::RepositoryPath { .. }
         | Read::WaveGraph { .. }
-        | Read::SessionPage { .. }
         | Read::Tokens { .. }
         | Read::Retention
-        | Read::Doctor
-        | Read::BindPreview { .. } => (
+        | Read::Doctor => (
             [
                 Read::MonitorPs,
                 plans(),
@@ -563,6 +564,7 @@ fn server_operations_match_their_lf_commands() {
                     directory: repo.path().to_owned(),
                     wave: "task-pr-tests".into(),
                     after: None,
+                    closed: true,
                 },
                 Read::Machines,
                 history(),
@@ -591,10 +593,11 @@ fn server_operations_match_their_lf_commands() {
                     directory: repo.path().to_owned(),
                     wave: None,
                 },
-                Read::SessionPage {
+                Read::SessionList {
                     directory: repo.path().to_owned(),
                     headless: true,
                     after: None,
+                    limit: Some(100),
                 },
                 Read::Tokens {
                     directory: repo.path().to_owned(),
@@ -606,10 +609,6 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::Retention,
                 Read::Doctor,
-                Read::BindPreview {
-                    session: session["id"].as_str().unwrap().into(),
-                    task: "INF-123".into(),
-                },
             ],
             [
                 history(),
@@ -735,7 +734,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
         | Write::TaskNotes { .. }
-        | Write::TaskOwnership { .. }
+        | Write::TaskClaim { .. }
+        | Write::TaskUnassign { .. }
         | Write::ShipStop { .. }
         | Write::TaskMove { .. }
         | Write::TaskSave { .. }
@@ -750,8 +750,10 @@ fn server_operations_match_their_lf_commands() {
         | Write::Portfolio { .. }
         | Write::DashboardQuery { .. }
         | Write::DashboardPin { .. }
+        | Write::DashboardUnpin { .. }
         | Write::DashboardRename { .. }
-        | Write::DashboardTile { .. }
+        | Write::DashboardHide { .. }
+        | Write::DashboardShow { .. }
         | Write::DashboardSlots { .. }
         | Write::TileMove { .. }
         | Write::PaneLayout { .. } => (
@@ -775,6 +777,7 @@ fn server_operations_match_their_lf_commands() {
                     directory: directory.clone(),
                     id: session.clone(),
                     task: "INF-123".into(),
+                    preview: false,
                 },
                 // The repository's conversation, one Session and its fresh
                 // thread: prepared, never started.
@@ -833,7 +836,6 @@ fn server_operations_match_their_lf_commands() {
                 Box::new(|| Write::DashboardPin {
                     directory: directory.clone(),
                     id: "served".into(),
-                    pinned: true,
                     revision: revision("query:served"),
                 }),
                 Box::new(|| Write::DashboardRename {
@@ -844,18 +846,20 @@ fn server_operations_match_their_lf_commands() {
                 }),
                 // A hidden tile is no longer one to hide: show it before each hide.
                 Box::new(|| {
-                    let tile = |hidden| Write::DashboardTile {
+                    let _ = loopflow::server::client::Connection::open().and_then(|mut c| {
+                        c.request(loopflow::server::wire::Operation::Write(
+                            Write::DashboardShow {
+                                directory: directory.clone(),
+                                id: "served".into(),
+                                member: format!("task:{task_id}"),
+                            },
+                        ))
+                    });
+                    Write::DashboardHide {
                         directory: directory.clone(),
                         id: "served".into(),
                         member: format!("task:{task_id}"),
-                        hidden,
-                    };
-                    let _ = loopflow::server::client::Connection::open().and_then(|mut c| {
-                        c.request(loopflow::server::wire::Operation::Command {
-                            change: tile(false),
-                        })
-                    });
-                    tile(true)
+                    }
                 }),
                 Box::new(|| Write::DashboardSlots {
                     directory: directory.clone(),
@@ -926,10 +930,11 @@ fn server_operations_match_their_lf_commands() {
     // store. Only the CLI records a Process. Every claim appends to the ownership
     // log, so the log itself differs.
     for claimed in [true, false] {
-        let ownership = Write::TaskOwnership {
-            directory: directory.clone(),
-            issue: "INF-123".into(),
-            claimed,
+        let (directory, issue) = (directory.clone(), "INF-123".to_owned());
+        let ownership = if claimed {
+            Write::TaskClaim { directory, issue }
+        } else {
+            Write::TaskUnassign { directory, issue }
         };
         let owner = |text: &str| serde_json::from_str::<Value>(text).unwrap()["owner"].clone();
         let before = processes(&database);
@@ -1020,6 +1025,19 @@ fn server_operations_match_their_lf_commands() {
         compare(preview.clone(), &|| preview.clone(), &|| effect("INF-123")),
         0
     );
+    // A bind preview names the Task a bind would assign and assigns nothing.
+    let bind_preview = Write::SessionBind {
+        directory: directory.clone(),
+        id: session.clone(),
+        task: "INF-123".into(),
+        preview: true,
+    };
+    assert_eq!(
+        compare(bind_preview.clone(), &|| bind_preview.clone(), &|| effect(
+            "INF-123"
+        )),
+        0
+    );
     // Arrangement persists without a Process, in the app as through `lf`.
     let create = Write::DashboardQuery {
         directory: directory.clone(),
@@ -1049,9 +1067,7 @@ fn server_operations_match_their_lf_commands() {
         value,
     } = loopflow::server::client::Connection::open()
         .unwrap()
-        .request(Operation::Command {
-            change: failure.clone(),
-        })
+        .request(Operation::Write(failure.clone()))
         .unwrap()
     else {
         panic!("expected failed command")
@@ -1109,7 +1125,7 @@ fn server_operations_match_their_lf_commands() {
                         value,
                     } = loopflow::server::client::Connection::open()
                         .unwrap()
-                        .request(Operation::Command { change })
+                        .request(Operation::Write(change))
                         .unwrap()
                     else {
                         panic!("expected command")
@@ -1193,13 +1209,11 @@ fn server_operations_match_their_lf_commands() {
     lock.execute_batch("BEGIN IMMEDIATE").unwrap();
     let mut connection = loopflow::server::client::Connection::open().unwrap();
     connection
-        .send(Operation::Command {
-            change: Write::SessionRename {
-                directory: directory.clone(),
-                id: other.clone(),
-                name: "After disconnect".into(),
-            },
-        })
+        .send(Operation::Write(Write::SessionRename {
+            directory: directory.clone(),
+            id: other.clone(),
+            name: "After disconnect".into(),
+        }))
         .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -1359,7 +1373,7 @@ impl Drop for Server {
 fn server_read(query: loopflow::lf::commands::read::Read) -> Value {
     match loopflow::server::client::Connection::open()
         .unwrap()
-        .request(loopflow::server::wire::Operation::Read { query })
+        .request(loopflow::server::wire::Operation::Read(query))
         .unwrap()
     {
         loopflow::server::wire::Reply::Read { value } => value,
@@ -1370,7 +1384,7 @@ fn server_read(query: loopflow::lf::commands::read::Read) -> Value {
 fn server_write(change: loopflow::lf::commands::write::Write) -> String {
     match loopflow::server::client::Connection::open()
         .unwrap()
-        .request(loopflow::server::wire::Operation::Command { change })
+        .request(loopflow::server::wire::Operation::Write(change))
         .unwrap()
     {
         loopflow::server::wire::Reply::Command {

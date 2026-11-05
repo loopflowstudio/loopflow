@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, Reply, ServerError,
-    ServerMessage, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ServerMessage, ServerOperation, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::id::LfProcessId;
 use crate::lf::commands::read::Read;
@@ -193,8 +193,12 @@ impl Connection {
     }
 
     /// Start a subscription and return its id once the server confirms it.
-    pub fn subscribe(&mut self, query: Read) -> Result<String> {
-        let id = self.send(Operation::Subscribe { query })?;
+    pub fn subscribe(&mut self, operation: Read) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.socket.send(&ClientMessage::Subscribe {
+            id: id.clone(),
+            operation,
+        })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response {
                 result: Reply::Subscribed,
@@ -297,9 +301,9 @@ pub fn attach(path: &Path, owner: &LfProcessId) -> Result<UnixStream> {
     let mut connection = Connection::start(connect(path)?, 1)?;
     connection.set_read_timeout(Some(HANDSHAKE))?;
     match connection
-        .request(Operation::Attach {
+        .request(Operation::Server(ServerOperation::Attach {
             owner: owner.clone(),
-        })
+        }))
         .map_err(|error| stalled(error, "open the owner bridge"))?
     {
         Reply::Bridged => {}

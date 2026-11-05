@@ -2615,13 +2615,17 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
             .set_read_timeout(Some(Duration::from_secs(20)))
             .unwrap();
         connection
-            .request(Operation::Command {
-                change: Mutation::TaskOwnership {
+            .request(Operation::Write(if claimed {
+                Mutation::TaskClaim {
                     directory: plan.local_path.clone(),
                     issue: task.to_string(),
-                    claimed,
-                },
-            })
+                }
+            } else {
+                Mutation::TaskUnassign {
+                    directory: plan.local_path.clone(),
+                    issue: task.to_string(),
+                }
+            }))
             .unwrap()
     };
     let local = plan.local.task_ownership(&task).unwrap();

@@ -55,6 +55,26 @@ claimed headless OpenCode receives `permission: allow`; lf sends permissions onl
 worktree scope and otherwise answers each `permission.asked` once (`harness/opencode.rs`), and
 only Claude warns when raising a floor. Pi `yolo` parity had no test; `yolo_sends_pi_nothing` adds it.
 
+## Concept review (2026-11-05)
+
+Reviewed the accepted direction against the branch. One concept carries the change:
+a Loopflow setting is a per-launch selector over a harness preference, never a
+default for it. Settled consequences, all already in the code:
+- Two setting shapes, on purpose. `chrome: Option<bool>` because Claude has an
+  explicit opposite (`--no-chrome`) worth selecting per launch; `yolo: bool` because
+  it is Loopflow's one-way bypass and `false` means "no opinion" (more-permissive
+  vendor config is never downgraded, so there is nothing to send for `false`).
+- "Attended" is one product axis with one signal per harness: Claude's `stream`
+  (`-p` is always lf-driven), Codex's `ApprovalPolicy::NativeClient`, OpenCode's
+  `interactive`. Each is the harness's own fact, not a second flag on `AgentConfig`;
+  no merge needed.
+- Reversing #976 (forced Codex `default` tier) follows from the direction, which names
+  service tier as a preference. #976 guarded copied account config switching Sessions
+  to Fast; that guard is gone by decision, not by accident (see `scratch/questions.md`).
+- No new mirror settings (effort, tier). The direction removes Loopflow opinions; adding
+  per-launch control of effort or tier is a separate Task if wanted.
+No open product choice; nothing left half-built.
+
 ## Delete — do not maintain
 - Done: `CODEX_DEFAULT_SERVICE_TIER` (one absence assertion remains as the parity guard),
   `--no-chrome` emission for an unset setting, the Codex harness's post-hoc

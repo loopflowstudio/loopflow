@@ -301,8 +301,6 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["--no-chrome"][..],
         &["--diff", "invalid"][..],
         &["--chrome", "invalid"][..],
-        &["task", "changes", "INF-123", "--json"][..],
-        &["task", "diff", "INF-123", "src.rs", "--files"],
         &["task", "diff", "INF-123", "--files", "--draft"],
         &["wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
@@ -641,7 +639,16 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
         cli.task.is_none(),
         "history filters must not launch Task work"
     );
-    let Some(Commands::History { feed, cmd: None }) = cli.command else {
+    let Some(Commands::Session {
+        cmd:
+            loopflow::lf::SessionCommand::History {
+                id: None,
+                feed,
+                cmd: None,
+                ..
+            },
+    }) = cli.command
+    else {
         panic!("expected the default history feed");
     };
     assert_eq!(feed.task.as_deref(), Some("LOO-123"));
@@ -655,13 +662,17 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
         }
         assert!(matches!(
             parse(&args).command,
-            Some(Commands::History { cmd: Some(_), .. })
+            Some(Commands::Session {
+                cmd: loopflow::lf::SessionCommand::History { cmd: Some(_), .. }
+            })
         ));
-        assert!(Cli::try_parse_from(["lf", "monitor", verb]).is_err());
     }
+    assert!(Cli::try_parse_from(["lf", "process", "replay", "exact-capture"]).is_err());
     assert!(matches!(
         parse(&["lf", "replay", "exact-capture"]).command,
-        Some(Commands::History { cmd: Some(_), .. })
+        Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::History { cmd: Some(_), .. }
+        })
     ));
     assert!(matches!(
         parse(&["lf", "usage"]).command,
@@ -672,11 +683,22 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
     for verb in ["ps", "top"] {
         assert!(matches!(
             parse(&["lf", verb]).command,
-            Some(Commands::Monitor { .. })
+            Some(Commands::Process { .. })
         ));
     }
-    assert!(Cli::try_parse_from(["lf", "monitor", "activity"]).is_err());
-    assert!(Cli::try_parse_from(["lf", "monitor", "active"]).is_err());
+    assert!(matches!(
+        parse(&["lf", "monitor", "ps"]).command,
+        Some(Commands::Process {
+            cmd: loopflow::lf::commands::process::ProcessCommand::List { .. }
+        })
+    ));
+    // `lf monitor <retired verb>` moves to `lf process list` and fails there
+    // instead of running a skill named `monitor`.
+    for verb in ["activity", "active"] {
+        let args = normalize_args(["lf", "monitor", verb].map(str::to_owned).to_vec()).unwrap();
+        assert_eq!(args, ["lf", "process", "list", verb]);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
     assert!(Cli::command().find_subcommand("replay").is_none());
 }
 
@@ -715,8 +737,12 @@ fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
     ] {
         let saved = serde_json::json!({"command": command, "args": args});
         let restored: loopflow::graph::Command = serde_json::from_value(saved).unwrap();
-        assert_eq!(restored.command, "history");
-        assert_eq!(restored.args, expected);
+        assert_eq!(restored.command, "session");
+        assert_eq!(
+            restored.args,
+            [vec!["history"], expected.clone()].concat(),
+            "{command} {args:?}"
+        );
     }
     let usage: loopflow::graph::Command =
         serde_json::from_value(serde_json::json!({"command": "usage", "args": ["--days", "0"]}))
@@ -797,11 +823,7 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
         (vec!["release", "run"], vec!["repository", "release", "run"]),
         (vec!["ci"], vec!["repository", "ci"]),
         (vec!["tokens"], vec!["repository", "tokens"]),
-        (
-            vec!["planning", "key"],
-            vec!["repository", "planning", "key"],
-        ),
-        (vec!["reteam"], vec!["wave", "reteam"]),
+        (vec!["reteam"], vec!["wave", "planning", "reteam"]),
     ] {
         assert!(tree.find_subcommand(short[0]).is_none(), "{short:?}");
         let help = success(run(
@@ -819,6 +841,37 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
             "{short:?}"
         );
         assert!(String::from_utf8_lossy(&help).contains(&format!("lf {}", path.join(" "))));
+    }
+    // `lf planning` is the plans namespace; its old repository spellings move.
+    for (old, path) in [
+        (
+            vec!["planning", "key"],
+            vec!["repository", "planning", "key"],
+        ),
+        (vec!["planning"], vec!["repository", "planning"]),
+        (vec!["monitor", "ps"], vec!["process", "list"]),
+        (vec!["ship", "--stop"], vec!["task", "hold"]),
+        (vec!["desktop", "task"], vec!["task", "show"]),
+        (vec!["wave", "status", "--sync"], vec!["wave", "sync"]),
+        (
+            vec!["desktop", "view", "--plan"],
+            vec!["desktop", "view", "show"],
+        ),
+    ] {
+        let help = success(run(
+            repo.path(),
+            home.path(),
+            &[path.clone(), vec!["--help"]].concat(),
+        ));
+        assert_eq!(
+            success(run(
+                repo.path(),
+                home.path(),
+                &[old.clone(), vec!["--help"]].concat()
+            )),
+            help,
+            "{old:?}"
+        );
     }
     assert!(!home.path().join(".lf").exists());
 }
@@ -1293,13 +1346,9 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         .filter(|command| {
             // Desktop's Work reads print its presentation types, which carry no schema.
             ![
-                "lf desktop rename",
+                "lf desktop dashboard rename",
                 "lf desktop wait",
-                "lf desktop plan",
-                "lf desktop done",
-                "lf desktop wave",
-                "lf desktop sessions",
-                "lf desktop task",
+                "lf desktop portfolio",
             ]
             .contains(&command["command"].as_str().unwrap())
         })
@@ -1353,7 +1402,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         command
     };
     let invoke = |args: &[&str]| command(args).output().unwrap();
-    let output = invoke(&["desktop", "view", "state:backlog", "--plan", "--json"]);
+    let output = invoke(&["desktop", "view", "show", "state:backlog", "--json"]);
     assert!(
         output.status.success(),
         "{}",
@@ -1365,14 +1414,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert!(plan.contents[0].primary_session.is_none());
     assert!(plan.contents[0].argv.is_none());
     assert_eq!(counts(), before);
-    let missing = invoke(&["desktop", "view", "query:missing", "--plan"]);
+    let missing = invoke(&["desktop", "view", "show", "query:missing"]);
     assert_eq!(
         missing.status.code(),
         Some(3),
         "{}",
         String::from_utf8_lossy(&missing.stderr)
     );
-    let invalid = invoke(&["desktop", "view", "repo:other", "--plan"]);
+    let invalid = invoke(&["desktop", "view", "show", "repo:other"]);
     assert_eq!(
         invalid.status.code(),
         Some(2),
@@ -1380,7 +1429,13 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         String::from_utf8_lossy(&invalid.stderr)
     );
     assert_eq!(counts(), before);
-    let saved = invoke(&["desktop", "query", "query:backlog", "state:backlog"]);
+    let saved = invoke(&[
+        "desktop",
+        "dashboard",
+        "query",
+        "query:backlog",
+        "state:backlog",
+    ]);
     assert!(
         saved.status.success(),
         "{}",
@@ -1390,6 +1445,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         serde_json::from_slice(&saved.stdout).unwrap();
     let after_save = counts();
     assert_eq!((after_save.0, after_save.1), (before.0, before.1));
+    // The old spelling still reads the plan.
     let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
     assert!(
         reopened.status.success(),
@@ -1411,6 +1467,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         .to_string();
     let renamed = invoke(&[
         "desktop",
+        "dashboard",
         "rename",
         "task:task_33333333333333333333333333333333",
         "Later task",
@@ -1432,6 +1489,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     );
     let stale_name = invoke(&[
         "desktop",
+        "dashboard",
         "rename",
         "task:task_33333333333333333333333333333333",
         "stale",
@@ -1447,7 +1505,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .title,
         "Later task"
     );
-    let pinned = invoke(&["desktop", "pin", "backlog", "--revision", "1"]);
+    let pinned = invoke(&["desktop", "dashboard", "pin", "backlog", "--revision", "1"]);
     assert!(
         pinned.status.success(),
         "{}",
@@ -1455,6 +1513,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     );
     let named = invoke(&[
         "desktop",
+        "dashboard",
         "rename",
         "query:backlog",
         "Later",
@@ -1469,13 +1528,13 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let removed = invoke(&["desktop", "bind", "repository", "backlog"]);
     assert_eq!(removed.status.code(), Some(2));
     let before_reads = counts();
-    let defaults = invoke(&["desktop", "view", "--plan"]);
+    let defaults = invoke(&["desktop", "view", "show"]);
     let defaults: loopflow::work::selection::ViewPlan =
         serde_json::from_slice(&defaults.stdout).unwrap();
     assert!(defaults.dashboard_id.is_none());
     // Both Waves and the two idle Tasks; the unstarted one isn't Working.
     assert_eq!(defaults.contents.len(), 4);
-    let plan = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let plan = invoke(&["desktop", "view", "show", "query:backlog"]);
     let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
     assert_eq!(plan.name.as_deref(), Some("Later"));
     assert!(plan.pinned);
@@ -1484,9 +1543,16 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert!(layout.status.success());
     assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
     assert_eq!(counts(), before_reads);
-    let stale = invoke(&["desktop", "unpin", "backlog", "--revision", "1"]);
+    let stale = invoke(&[
+        "desktop",
+        "dashboard",
+        "unpin",
+        "backlog",
+        "--revision",
+        "1",
+    ]);
     assert!(!stale.status.success());
-    let plan = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let plan = invoke(&["desktop", "view", "show", "query:backlog"]);
     let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
     assert!(plan.pinned);
     assert_eq!(plan.saved_revision, Some(3));
@@ -1506,9 +1572,9 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .unwrap();
         child.wait_with_output().unwrap()
     };
-    // Tile verbs aimed at a saved record's tile edit it without Desktop.
+    // Dashboard tile verbs edit a saved record's tile without Desktop.
     let tile = format!("query:backlog/task:{}", plan.arrangement.order[0].work.id);
-    let hidden = invoke(&["desktop", "hide", "-p", &tile]);
+    let hidden = invoke(&["desktop", "dashboard", "hide", &tile]);
     assert!(
         hidden.status.success(),
         "{}",
@@ -1521,14 +1587,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     // Hiding never changes whether the order is automatic.
     assert_eq!(arranged.arrangement.mode, plan.arrangement.mode);
     // A hidden tile is no longer shown, so hiding it again names nothing.
-    let again = invoke(&["desktop", "hide", "-p", &tile]);
+    let again = invoke(&["desktop", "dashboard", "hide", &tile]);
     assert_eq!(again.status.code(), Some(3));
     let order = defaults.resolution.task_ids();
     // Working Tasks keeps only the shared order: nothing to size.
     let sized = invoke(&[
         "desktop",
+        "dashboard",
         "resize",
-        "-p",
         &format!("working-tasks/task:{}", order[0]),
         "--toward",
         &format!("task:{}", order[1]),
@@ -1538,8 +1604,8 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(sized.status.code(), Some(1));
     let moved = invoke(&[
         "desktop",
+        "dashboard",
         "move",
-        "-p",
         &format!("working-tasks/task:{}", order[order.len() - 1]),
         "--destination",
         &format!("task:{}", order[0]),
@@ -1551,7 +1617,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     );
     let moved: Vec<String> = serde_json::from_slice(&moved.stdout).unwrap();
     assert_eq!(moved[0], order[order.len() - 1]);
-    let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let reopened = invoke(&["desktop", "view", "show", "query:backlog"]);
     let reopened: loopflow::work::selection::ViewPlan =
         serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened.arrangement, arranged.arrangement);
@@ -1560,9 +1626,9 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let slots = invoke_input(
         &[
             "desktop",
-            "layout",
+            "dashboard",
+            "slots",
             "query:backlog",
-            "--save",
             "--revision",
             &revision,
         ],

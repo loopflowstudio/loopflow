@@ -17,7 +17,7 @@ struct WorkCacheTests {
         model.confirmMachine("machine-a")
         await model.refreshSessions()
         #expect(model.sessions.value?.isEmpty == false)
-        await source.hold(["desktop", "sessions"])
+        await source.hold(["session", "list"])
         let pending = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.confirmMachine("machine-b")
@@ -181,7 +181,7 @@ struct WorkCacheTests {
         let source = try Source()
         let cache = WorkCache(directory: directory)
         let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        await source.hold(["desktop", "sessions"])
+        await source.hold(["session", "list"])
         let read = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.setRepoPath("/src/other")
@@ -202,7 +202,7 @@ struct WorkCacheTests {
         saving.flush()
 
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
-        await source.hold(["desktop", "plan"])
+        await source.hold(["planning", "list"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
 
@@ -231,7 +231,7 @@ struct WorkCacheTests {
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         #expect(returning.selection == nil)
-        await source.hold(["desktop", "plan"])
+        await source.hold(["planning", "list"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
         returning.select(.wave(id: "wave-1"))

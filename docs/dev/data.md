@@ -3,8 +3,8 @@
 ```bash
 lf session list --interactive false --json
 lf session history SESSION --json
-lf graph show GRAPH_PROCESS --processes --json
-lf ps --json
+lf process show GRAPH_PROCESS --json
+lf process list --json
 ```
 
 A conversation, a Graph and an operating-system process answer different

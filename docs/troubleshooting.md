@@ -15,7 +15,7 @@ lf resume                       # return to this scope’s conversation
 |---|---|---|
 | Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and comments | Beside your repository, on the code host | `lf task run <ID>` |
-| A stopped Graph | Its step Processes, as history | `lf graph list --processes --for-task <ID>` |
+| A stopped Graph | Its step Processes, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
@@ -28,9 +28,9 @@ Read before you relaunch anything.
 ```bash
 lf doctor                                    # installation, store and process health
 lf task status <ID>                          # the Task's execution and the reason for it
-lf graph show <GRAPH_ID> --processes         # each step, its Process and how it exited
+lf process show <GRAPH_ID>         # each step, its Process and how it exited
 lf history show <SESSION_ID> --final         # the agent's last word in that conversation
-lf ps                                        # what is running right now
+lf process list                                        # what is running right now
 ```
 
 `lf task status` reports execution separately from the Task's own status:
@@ -111,11 +111,11 @@ names the exact path and branch to restore before launching.
 
 Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
 …); whether anyone owns it is separate (`lf task claim`, `lf task unassign`). What it is waiting on (a child Task, review, CI, merge) is its
-`reason`; Desktop's condition, with the evidence behind it, is in `lf desktop task`:
+`reason`; Desktop's condition, with the evidence behind it, is in `lf task show`:
 
 ```bash
 lf task status <ID> --json
-lf desktop task <ID> --json
+lf task show <ID> --json
 ```
 
 Resolve the named fact: open the conversation, inspect the child, repair CI,
@@ -174,7 +174,7 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ```bash
 scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
 scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
-lf monitor prune                   # only lf's records: dead Process rows and receipts, then vacuum
+lf process prune                   # only lf's records: dead Process rows and receipts, then vacuum
 ```
 
 The script prunes every repository under `~/src`: finished worktrees, completed
@@ -224,8 +224,8 @@ lf sync                            # refresh main, keeping its unpublished commi
 ## Orphaned agent processes
 
 ```bash
-lf monitor prune --dry-run --json  # each candidate and why
-lf monitor prune --json            # recheck, then reap
+lf process prune --dry-run --json  # each candidate and why
+lf process prune --json            # recheck, then reap
 ```
 
 Pruning reports each agent process it settles or keeps, with the reason, then
@@ -234,12 +234,12 @@ references, and compacts the store; a dry run changes none of it. A
 missing PID, a completed Task or an old Session does not prove the agent
 exited: unresolved records keep protecting their checkouts.
 
-When `lf machine doctor` fails `lineage` and says `lf monitor prune` repairs the
+When `lf machine doctor` fails `lineage` and says `lf process prune` repairs the
 parents, an AgentProcess points at an lf process that was never recorded:
 
 ```bash
-lf monitor prune --dry-run         # lists the ancestry it would release
-lf monitor prune                   # releases it; the Session can resume
+lf process prune --dry-run         # lists the ancestry it would release
+lf process prune                   # releases it; the Session can resume
 ```
 
 The release is kept as a Session fact in `lf history show <session>`.

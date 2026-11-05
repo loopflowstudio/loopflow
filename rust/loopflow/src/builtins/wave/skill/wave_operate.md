@@ -80,7 +80,7 @@ already holds a disposition above.
 
 - **Look for a live Graph process first.** Read `lf task status <issue> --json` and
   check every Graph in `execution.work.graphs` and every unfinished Process in
-  `execution.work.processes` against `lf ps --json`. A live process makes the Task
+  `execution.work.processes` against `lf process list --json`. A live process makes the Task
   moving, whoever launched it. Unknown liveness is not idle.
 - **Recover before reporting a blocker.** Read the failed step's log and
   inspect its effects. Repair a supported cause, then launch only the remaining

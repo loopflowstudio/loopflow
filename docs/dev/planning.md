@@ -273,7 +273,7 @@ The documented unconditional-update race remains a protocol limit.
 ## Project creation and selection
 
 ```bash
-lf wave bind-project product <project-uuid> --json
+lf wave planning bind product <project-uuid> --json
 lf wave create product --json
 ```
 
@@ -385,10 +385,10 @@ failure there does not undo the selected Projects or their KRs.
 
 ```bash
 lf task status INF-124 --json      # the Task row, Sessions, Graph processes, comments
-lf desktop task INF-124 --json     # the planning evidence below
+lf task show INF-124 --json     # the planning evidence below
 ```
 
-`lf desktop task` returns canonical `task` and `project` records, `planning_state`,
+`lf task show` returns canonical `task` and `project` records, `planning_state`,
 `observed_at`, `planning_error`, `planning_stale`, delivery `sync` and optional
 `execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
 Project-less observation returns acquisition evidence without fabricating owned
@@ -497,7 +497,7 @@ or infer that its uncertain effects settled.
 
 ```bash
 lf graph build
-lf graph show GRAPH_PROCESS --processes --json
+lf process show GRAPH_PROCESS --json
 ```
 
 A Graph is one lf process and the step processes it starts; its ID is the Graph
@@ -617,7 +617,7 @@ or resumes a stopped Graph.
 
 ```bash
 lf task status INF-124
-lf graph show GRAPH_PROCESS --processes --json
+lf process show GRAPH_PROCESS --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```

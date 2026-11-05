@@ -1432,10 +1432,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold { directory, issue } => (
-            path(directory),
-            words(&["--task", issue, "ship", "--stop", "--json"]),
-        ),
+        Write::TaskHold { directory, issue } => {
+            (path(directory), words(&["task", "hold", issue, "--json"]))
+        }
         Write::TaskRun {
             directory,
             issue,
@@ -1581,16 +1580,15 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::PlanningRefresh { directory, wave } => (
-            path(directory),
-            words(&["wave", "status", wave, "--sync", "--json"]),
-        ),
+        Write::PlanningRefresh { directory, wave } => {
+            (path(directory), words(&["wave", "sync", wave, "--json"]))
+        }
         Write::GraphCustomize { directory, name } => (
             path(directory),
             words(&["graph", "customize", name, "--json"]),
         ),
         Write::Portfolio { change } => {
-            let mut spelled = vec!["portfolio".to_owned()];
+            let mut spelled = words(&["desktop", "portfolio"]);
             match change {
                 PortfolioCommand::Folder { path: folder } => {
                     spelled.push("folder".into());
@@ -1619,7 +1617,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             expression,
             revision,
         } => {
-            let mut spelled = words(&["desktop", "query"]);
+            let mut spelled = words(&["desktop", "dashboard", "query"]);
             spelled.extend(revision.map(|revision| format!("--revision={revision}")));
             spelled.extend(words(&["--", id, expression]));
             (path(directory), spelled)
@@ -1632,6 +1630,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "pin",
                 &format!("--revision={revision}"),
                 "--",
@@ -1646,6 +1645,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "unpin",
                 &format!("--revision={revision}"),
                 "--",
@@ -1661,6 +1661,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "rename",
                 &format!("--revision={revision}"),
                 "--",
@@ -1674,7 +1675,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             member,
         } => (
             path(directory),
-            words(&["desktop", "hide", "-p", &format!("query:{id}/{member}")]),
+            words(&[
+                "desktop",
+                "dashboard",
+                "hide",
+                &format!("query:{id}/{member}"),
+            ]),
         ),
         Write::DashboardShow {
             directory,
@@ -1682,7 +1688,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             member,
         } => (
             path(directory),
-            words(&["desktop", "show", "-p", &format!("query:{id}/{member}")]),
+            words(&[
+                "desktop",
+                "dashboard",
+                "show",
+                &format!("query:{id}/{member}"),
+            ]),
         ),
         Write::DashboardSlots {
             directory,
@@ -1693,9 +1704,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
-                "layout",
+                "dashboard",
+                "slots",
                 &format!("query:{id}"),
-                "--save",
                 &format!("--revision={revision}"),
             ]),
         ),
@@ -1708,8 +1719,8 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "move",
-                "-p",
                 &format!("{board}/{member}"),
                 "--destination",
                 destination,

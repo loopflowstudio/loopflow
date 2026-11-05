@@ -3,7 +3,7 @@
 ```bash
 lf help --all
 lf help pr land
-lf monitor --json
+lf process list --json
 ```
 
 The command sections below are generated from the released `lf` when the website
@@ -33,7 +33,7 @@ failure, and 130 interruption. A successful auto-merge request is not a merge.
 
 ```bash
 lf task run EXP-12 pursue
-lf graph show GRAPH_ID --processes --json
+lf process show GRAPH_ID --json
 lf task interrupt EXP-12
 ```
 

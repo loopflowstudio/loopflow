@@ -34,19 +34,13 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Abandon { .. }
                 | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
+                | TaskCommand::Hold { .. }
         ),
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
-            WaveCommand::Create { .. }
-                | WaveCommand::Status {
-                    sync: true,
-                    watch: false,
-                    json: true,
-                    ..
-                }
+            WaveCommand::Create { .. } | WaveCommand::Sync { json: true, .. }
         ),
         Some(Commands::Session { cmd }) => super::session::is_mutation(cmd),
-        Some(Commands::Ship { stop: true, .. } | Commands::Portfolio { .. }) => true,
         Some(Commands::Graph {
             cmd: crate::lf::GraphCommand::Customize { .. },
         }) => true,
@@ -71,11 +65,19 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
     if let Some(forward) = super::work_route::forward(cli, args, directory)? {
         return forward.run(cli, directory, io);
     }
-    // Session, shipping and arrangement select their own Work. Other commands
-    // retain the CLI's explicit Task placement without changing process cwd.
+    // Session, shipping, holding and arrangement select their own Work. Other
+    // commands retain the CLI's explicit Task placement without changing
+    // process cwd.
     let binding = if !matches!(
         cli.command,
-        Some(Commands::Session { .. } | Commands::Ship { .. } | Commands::Desktop { .. })
+        Some(
+            Commands::Session { .. }
+                | Commands::Ship { .. }
+                | Commands::Desktop { .. }
+                | Commands::Task {
+                    cmd: TaskCommand::Hold { .. }
+                }
+        )
     ) {
         cli.task
             .as_deref()
@@ -117,12 +119,32 @@ fn local(
     io: &mut CommandIo<'_>,
 ) -> Result<()> {
     match cli.command.as_ref().context("missing mutation")? {
+        Commands::Task {
+            cmd:
+                TaskCommand::Hold {
+                    issue,
+                    reason,
+                    json,
+                },
+        } => {
+            let issue = issue
+                .as_deref()
+                .or(cli.task.as_deref())
+                .context("No Task selected")?;
+            let held = crate::engine::task::hold(directory, issue, reason.as_deref())?;
+            if *json {
+                writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
+            } else {
+                writeln!(io.output, "{}", held.render())?;
+            }
+            Ok(())
+        }
         Commands::Task { cmd } => {
             let repo = selected_task_repository(cli, directory, cmd.selector())?;
             task(&repo, cmd, io)
         }
         Commands::Wave {
-            cmd: WaveCommand::Status { wave, .. },
+            cmd: WaveCommand::Sync { wave, .. },
         } => {
             let wave = wave.as_deref().or(selected_wave);
             let refreshed = super::ops::refresh_status(directory, wave)?;
@@ -143,24 +165,9 @@ fn local(
             io,
         ),
         Commands::Session { cmd } => super::session::mutate(cli, directory, cmd, io),
-        Commands::Ship {
-            stop: true,
-            reason,
-            json,
-            ..
-        } => {
-            let issue = cli.task.as_deref().context("No Task selected")?;
-            let held = crate::engine::task::hold(directory, issue, reason.as_deref())?;
-            if *json {
-                writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
-            } else {
-                writeln!(io.output, "{}", held.render())?;
-            }
-            Ok(())
-        }
-        Commands::Portfolio { cmd, json } => {
-            crate::portfolio::write(cmd.as_ref(), *json, directory, io)
-        }
+        Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Portfolio { cmd, json },
+        } => crate::portfolio::write(cmd.as_ref(), *json, directory, io),
         Commands::Graph {
             cmd: crate::lf::GraphCommand::Customize { name, json },
         } => {

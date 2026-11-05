@@ -71,6 +71,7 @@ impl HistoryWindow {
     /// The `lf history` flags that read this window.
     pub(crate) fn argv(&self) -> Vec<String> {
         let mut argv = vec![
+            "session".into(),
             "history".into(),
             "--since".into(),
             self.since.clone(),

@@ -379,7 +379,7 @@ Choose **Graph processes** in **⌘K** to open the Graph process log. It lists e
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Graph, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
-`lf graph show ID --processes --json`). A Graph whose process exited early reads
+`lf process show ID --json`). A Graph whose process exited early reads
 **stopped**. One whose process was killed has no exit record and keeps reading
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
@@ -601,11 +601,11 @@ read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf desktop wave <wave> --json`.
+from `lf wave planning <wave> --json`.
 
 Open a Task from the roadmap in its repository window, start its legal Graph,
 or open its PR. **Worktree** opens the recorded checkout in Warp.
-Rows show the shared condition and reason from `lf desktop plan`; unknown means
+Rows show the shared condition and reason from `lf planning list`; unknown means
 the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
@@ -619,12 +619,12 @@ codebase tree, and registry health.
 - **Tasks** own implementation worktrees and PR delivery and report directly
   to their Wave. The internal Project retains chapter planning and history;
   it has no separate operator.
-- **Task workspace presentation** reads `lf diff --files --json`,
+- **Task workspace presentation** reads `lf task changes --json`,
   `lf diff --json` and `lf file --json`.
   Lifecycle mutations remain `lf task run` and `lf interrupt`; review stages use
   the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf wave list/show/status`, `lf monitor`, and `lf history` JSON commands; the app does not
+  `lf wave list/show/status`, `lf process list`, and `lf history` JSON commands; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
   Activity history visible.
@@ -749,9 +749,9 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 ```bash
-lf desktop plan --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
-lf desktop task LOO-1 --json --watch       # the shown Task: work, Graphs, comments
-lf desktop sessions --json --watch         # the repository's Sessions as Desktop lists them
+lf planning list --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
+lf task show LOO-1 --json --watch       # the shown Task: work, Graphs, comments
+lf session list --json --watch         # the repository's Sessions as Desktop lists them
 lf repository planning --json --watch          # stored sync receipts
 ```
 
@@ -778,8 +778,8 @@ remote Machine streams retain their CLI transports. Desktop's UI automation
 remains app-owned.
 
 The parts: the plan, the repository's Dashboard plans
-(`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
-activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
+(`lf desktop view list`), Sessions (`lf session list`) and planning status, the shown Task's status, its
+activity (`lf history`) and live call trees (`lf process list`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
 shows restarts only the watches whose read changed; the rest answer from their last frame without reading again.
 

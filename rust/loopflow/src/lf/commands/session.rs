@@ -26,6 +26,16 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     if let SessionCommand::Retention { json } = command {
         return super::history_transcript::retention(*json);
     }
+    match command {
+        SessionCommand::History { cmd: Some(cmd), .. } => return super::history::run(cmd),
+        SessionCommand::History {
+            id: None,
+            feed,
+            cmd: None,
+            ..
+        } => return super::activity::run(feed),
+        _ => {}
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
         command,
@@ -129,18 +139,23 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
+        SessionCommand::History { id: None, .. } => {
+            unreachable!("the history feed and its commands return before any runtime")
+        }
         SessionCommand::History {
-            id,
-            json,
+            id: Some(id),
+            feed,
             after,
-            limit,
+            ..
         } => {
             let store = open_shared_store().await?;
             let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
                 bail!("Session {id} was not found");
             };
-            let events = store.sqlite.session_history(&session.id, *after, *limit)?;
-            if *json {
+            let events = store
+                .sqlite
+                .session_history(&session.id, *after, feed.limit)?;
+            if feed.json {
                 println!("{}", serde_json::to_string(&events)?);
             } else {
                 for event in events {

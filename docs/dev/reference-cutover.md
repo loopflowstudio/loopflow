@@ -55,7 +55,7 @@ A Graph whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
-observations until enumeration succeeds. `lf graph list/show --processes` reads
+observations until enumeration succeeds. `lf graph list --processes` and `lf process show` reads
 Graphs from their Graph process and step processes. Historical `lf history show` and `lf history replay` remain command spellings.
 History exposes Session event and provider evidence; `RunSnapshot` and Session
 `run_id` are removed across Rust, Swift and fixtures. Retaining these names in a command or

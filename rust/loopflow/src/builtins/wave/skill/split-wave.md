@@ -59,7 +59,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - `GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
    - `MEMORY.md` — the decisions and context this child inherits
    - `metrics/*.md` — contracts allocated to that child
-   - `lf wave connect <wave>/<child>` — link each child's Linear Initiative
+   - `lf wave planning connect <wave>/<child>` — link each child's Linear Initiative
    - Add starts the first Project. Inspect each child's plan after connecting;
      preserve existing Project identities and Planned/Completed history.
    - `lf update-plan --wave <wave>/<child> --plan <plan.json>` replaces the current

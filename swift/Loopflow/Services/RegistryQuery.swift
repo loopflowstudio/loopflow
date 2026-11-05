@@ -74,22 +74,22 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// Rows in one `sessionPage`.
     static let sessionPageLimit = 100
 
-    /// `lf desktop plan --all`: every repository's Waves and Tasks.
+    /// `lf planning list --all`: every repository's Waves and Tasks.
     public static let allPlans = ServedRead.roadmap(directory: "/", wave: nil, task: nil, all: true)
 
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
         case .monitorPs:
-            return ["monitor", "ps", "--json"]
+            return ["process", "list", "--json"]
         case .desktopPlans:
-            return ["desktop", "plans", "--json"]
+            return ["desktop", "view", "list", "--json"]
         case .desktopSessions(_, let headless):
-            return ["desktop", "sessions"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
+            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
         case .desktopTask(_, let issue):
-            return ["desktop", "task", issue, "--json"]
+            return ["task", "show", issue, "--json"]
         case .taskChanges(let issue, let base):
-            return ["task", "diff", issue, "--files", "--base", base, "--json"]
+            return ["task", "changes", issue, "--base", base, "--json"]
         case .taskDiff(let issue, let path, let base, let draft):
             return ["task", "diff", issue] + (path.map { [$0] } ?? []) + ["--base", base, "--json"]
                 + (draft == nil ? [] : ["--draft"])
@@ -100,7 +100,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .machineId:
             return ["machine", "self", "--json"]
         case .portfolio:
-            return ["portfolio", "--json"]
+            return ["desktop", "portfolio", "--json"]
         case .settings(_, let wave, let skill, let graph, let step):
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
@@ -112,26 +112,26 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .graphs:
             return ["graph", "list", "--json"]
         case .viewPlan(_, let expression):
-            return ["desktop", "view"] + (expression.map { [$0] } ?? []) + ["--plan", "--json"]
+            return ["desktop", "view", "show"] + (expression.map { [$0] } ?? []) + ["--json"]
         case .graphProcesses(_, let task, let after):
-            return ["graph", "list", "--processes", "--for-task", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
+            return ["task", "runs", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
         case .graphProcess(let id):
-            return ["graph", "show", id, "--processes", "--json"]
+            return ["process", "show", id, "--json"]
         case .usage(let days, let wave, let project, let task):
             return ["session", "usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
-            return ["session", "usage", "--days", "0", "--task", task, "--context", "--json"]
+            return ["task", "context", task, "--json"]
         case .waveDetail(_, let wave):
-            return ["desktop", "wave", wave, "--json"]
+            return ["wave", "planning", wave, "--json"]
         case .closedTasks(_, let wave, let after):
-            return ["desktop", "done", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
+            return ["task", "list", "--closed", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
         case .machines:
             return ["machine", "list", "--json"]
         case .history(let since, let limit, let wave, let project, let task):
-            return ["history", "--since", since, "--limit", String(limit)]
+            return ["session", "history", "--since", since, "--limit", String(limit)]
                 + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .roadmap(_, let wave, let task, let all):
-            return ["desktop", "plan"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
+            return ["planning", "list"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
                 + (all ? ["--all"] : []) + ["--json"]
         case .planningStatus:
             return ["repository", "planning", "--json"]
@@ -142,7 +142,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .waveGraph(_, let wave):
             return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
         case .sessionPage(_, let headless, let after):
-            return ["desktop", "sessions", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
+            return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
                 + ["--limit", String(Self.sessionPageLimit)] + (after.map { ["--after", $0] } ?? [])
         case .tokens(_, let days):
             return ["repository", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
@@ -197,7 +197,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
         case .graphProcesses(let directory, let task, let after):
             TaggedFields("task.runs", ["directory": directory, "task": task, "after": after])
-        case .graphProcess(let id): TaggedFields("graph.run", ["id": id])
+        case .graphProcess(let id): TaggedFields("process.get", ["id": id])
         case .usage(let days, let wave, let project, let task):
             TaggedFields("session.usage", ["days": days, "wave": wave, "project": project, "task": task])
         case .taskContext(let task): TaggedFields("task.context", ["task": task])
@@ -284,7 +284,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
                 + Self.option("--from", from) + ["--json"]
         case .taskShip(_, let issue): ["--task", issue, "ship", "--json"]
-        case .taskHold(_, let issue): ["--task", issue, "ship", "--stop", "--json"]
+        case .taskHold(_, let issue): ["task", "hold", issue, "--json"]
         case .taskSteer(_, let issue, let message): ["task", "comment", issue, "--steer", message, "--json"]
         case .taskComment(_, let issue, let message): ["task", "comment", issue, message, "--json"]
         case .taskInterrupt(_, let issue): ["task", "interrupt", issue, "--json"]
@@ -302,26 +302,26 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionNew(_, let id, let agent):
             Self.prepared(agent, ["session", "new", id], repo: nil)
         case .waveAdd(_, let wave, let objective): ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
-        case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
+        case .planningRefresh(_, let wave): ["wave", "sync", wave, "--json"]
         case .graphCustomize(_, let name): ["graph", "customize", name, "--json"]
-        case .portfolio(let change): ["portfolio"] + change + ["--json"]
+        case .portfolio(let change): ["desktop", "portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
-            ["desktop", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
+            ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
         case .dashboardPin(_, let id, let pinned, let revision):
-            ["desktop", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
+            ["desktop", "dashboard", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
         case .dashboardRename(_, let id, let name, let revision):
-            ["desktop", "rename", "--revision=\(revision)", "--", "query:" + id, name]
+            ["desktop", "dashboard", "rename", "--revision=\(revision)", "--", "query:" + id, name]
         case .dashboardTile(_, let id, let member, let hidden):
-            ["desktop", hidden ? "hide" : "show", "-p", "query:\(id)/\(member)"]
+            ["desktop", "dashboard", hidden ? "hide" : "show", "query:\(id)/\(member)"]
         case .dashboardSlots(_, let id, let revision, _):
-            ["desktop", "layout", "query:" + id, "--save", "--revision=\(revision)"]
+            ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
         case .tileMove(_, let board, let member, let destination):
-            ["desktop", "move", "-p", "\(board)/\(member)", "--destination", destination]
+            ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
         case .paneLayout(_, let work, _): ["desktop", "layout", work, "--save"]
         }
     }
 
-    /// `lf portfolio <change>`'s words as Rust's `PortfolioCommand`, tagged by
+    /// `lf desktop portfolio <change>`'s words as Rust's `PortfolioCommand`, tagged by
     /// `action`: `folder [path]`, `manual`, `add|import <paths…>`, `remove <path>`.
     private static func portfolioChange(_ words: [String]) -> JSONValue {
         let action = words.first ?? ""

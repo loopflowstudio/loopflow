@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::lf::PlanningCommand;
+use crate::lf::RepositoryPlanningCommand as PlanningCommand;
 use crate::store::Store;
 
 /// `lf repository planning [key|journal]`; bare, the planning status.
@@ -86,7 +86,7 @@ async fn run_async(repo: &Path, cmd: Option<&PlanningCommand>, status_json: bool
                 (None, Some(key), _) => key,
                 (None, None, true) => uuid::Uuid::new_v4().to_string(),
                 _ => return Err(anyhow!(
-                    "No planning user key. Use `lf config planning key --new` once, then recover that key on other machines with `--recover <UUID>`."
+                    "No planning user key. Use `lf repository planning key --new` once, then recover that key on other machines with `--recover <UUID>`."
                 )),
             };
             if *new || recover.is_some() {

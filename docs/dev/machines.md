@@ -67,7 +67,7 @@ need an explicit add before they can receive a login.
 
 ```bash
 lf history list                                # Processes recorded on this Machine
-lf ps --json                           # OS-live processes on this Machine
+lf process list --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
 lf --machine build-home history list   # run the same reader on build-home
@@ -93,7 +93,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf).
 lf task claim LOO-123               # you, on this Machine
 lf task move LOO-123 --machine mini # same person, mini's Machine
 lf task unassign LOO-123             # unowned, history intact
-lf desktop task LOO-123 --json      # ownership: {owner, superseded_by, log}
+lf task show LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
@@ -329,12 +329,12 @@ no signal authority.
 ## Observe processes
 
 ```bash
-lf ps --json
+lf process list --json
 lf top
 lf mon prune --dry-run
 ```
 
-The outer command journal records command receipts. `lf ps` and `lf top` join
+The outer command journal records command receipts. `lf process list` and `lf top` join
 those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
@@ -384,7 +384,7 @@ Machine selection and Session attribution stay intact. Installation quits and
 reopens a running Desktop. It does not restart other processes or wait for their
 exit; they may continue or fail naturally. A Session owner on a superseded lf
 keeps serving: `lf resume` moves one Session onto the installed lf, and `lf
-monitor rollover` moves every eligible owner at once. Clients and hooks launched before this
+process rollover` moves every eligible owner at once. Clients and hooks launched before this
 behavior may retain their old executable paths.
 
 Private-Home development and tests retain explicit `LF_BIN` selection. Store

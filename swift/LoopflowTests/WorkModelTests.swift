@@ -321,7 +321,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             #expect(cwd == "/src/loopflow")
             return #"{"entries":\#(json),"next":null}"#
         }
@@ -346,7 +346,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(json),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")
@@ -371,7 +371,7 @@ struct WorkModelTests {
         )
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(await deferred.response()),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")

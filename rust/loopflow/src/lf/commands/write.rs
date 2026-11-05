@@ -59,7 +59,7 @@ pub enum Write {
     /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
     #[serde(rename = "task.ship")]
     TaskShip { directory: PathBuf, issue: String },
-    /// `lf --task <issue> ship --stop --json`: withdraws the Task's Auto-Ship approval.
+    /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
     #[serde(rename = "task.hold")]
     TaskHold { directory: PathBuf, issue: String },
     /// `lf task comment <issue> --steer <message> --json`: direction for the
@@ -140,20 +140,20 @@ pub enum Write {
         wave: String,
         objective: Option<String>,
     },
-    /// `lf wave status <wave> --sync --json`: the planning refresh.
+    /// `lf wave sync <wave> --json`: the planning refresh.
     #[serde(rename = "wave.sync")]
     PlanningRefresh { directory: PathBuf, wave: String },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
     /// recording nothing.
     #[serde(rename = "graph.customize")]
     GraphCustomize { directory: PathBuf, name: String },
-    /// `lf portfolio <change> --json`, run from `/`: which repositories the
-    /// app shows.
+    /// `lf desktop portfolio <change> --json`, run from `/`: which
+    /// repositories the app shows.
     #[serde(rename = "desktop.portfolio.set")]
     Portfolio {
         change: crate::portfolio::PortfolioCommand,
     },
-    /// `lf desktop query [--revision <revision>] -- <id> <expression>`.
+    /// `lf desktop dashboard query [--revision <revision>] -- <id> <expression>`.
     #[serde(rename = "desktop.dashboard.query")]
     DashboardQuery {
         directory: PathBuf,
@@ -161,21 +161,21 @@ pub enum Write {
         expression: String,
         revision: Option<i64>,
     },
-    /// `lf desktop pin <id> --revision <revision>`.
+    /// `lf desktop dashboard pin <id> --revision <revision>`.
     #[serde(rename = "desktop.dashboard.pin")]
     DashboardPin {
         directory: PathBuf,
         id: String,
         revision: i64,
     },
-    /// `lf desktop unpin <id> --revision <revision>`.
+    /// `lf desktop dashboard unpin <id> --revision <revision>`.
     #[serde(rename = "desktop.dashboard.unpin")]
     DashboardUnpin {
         directory: PathBuf,
         id: String,
         revision: i64,
     },
-    /// `lf desktop rename --revision <revision> -- query:<id> <name>`.
+    /// `lf desktop dashboard rename --revision <revision> -- query:<id> <name>`.
     #[serde(rename = "desktop.dashboard.rename")]
     DashboardRename {
         directory: PathBuf,
@@ -183,21 +183,21 @@ pub enum Write {
         name: String,
         revision: i64,
     },
-    /// `lf desktop hide -p query:<id>/<member>`.
+    /// `lf desktop dashboard hide query:<id>/<member>`.
     #[serde(rename = "desktop.dashboard.hide")]
     DashboardHide {
         directory: PathBuf,
         id: String,
         member: String,
     },
-    /// `lf desktop show -p query:<id>/<member>`.
+    /// `lf desktop dashboard show query:<id>/<member>`.
     #[serde(rename = "desktop.dashboard.show")]
     DashboardShow {
         directory: PathBuf,
         id: String,
         member: String,
     },
-    /// `lf desktop layout query:<id> --save --revision <revision>`, with
+    /// `lf desktop dashboard slots query:<id> --revision <revision>`, with
     /// `slots` (JSON) on stdin.
     #[serde(rename = "desktop.dashboard.slots")]
     DashboardSlots {
@@ -206,8 +206,8 @@ pub enum Write {
         revision: i64,
         slots: String,
     },
-    /// `lf desktop move -p <board>/<member> --destination <destination>`: a
-    /// Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
+    /// `lf desktop dashboard move <board>/<member> --destination <destination>`:
+    /// a Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
     #[serde(rename = "desktop.dashboard.move")]
     TileMove {
         directory: PathBuf,
@@ -383,42 +383,45 @@ impl Write {
             | Self::DashboardRename { .. }
             | Self::DashboardSlots { .. }
             | Self::PaneLayout { .. } => {
-                use crate::lf::DesktopCommand;
+                use crate::lf::{DashboardCommand, DesktopCommand};
+                let dashboard = |cmd| DesktopCommand::Dashboard { cmd };
                 let command = match self {
                     Self::DashboardQuery {
                         id,
                         expression,
                         revision,
                         ..
-                    } => DesktopCommand::Query {
+                    } => dashboard(DashboardCommand::Query {
                         container: id.clone(),
                         expression: expression.clone(),
                         revision: *revision,
-                    },
-                    Self::DashboardPin { id, revision, .. } => DesktopCommand::Pin {
+                    }),
+                    Self::DashboardPin { id, revision, .. } => dashboard(DashboardCommand::Pin {
                         query: id.clone(),
                         revision: *revision,
-                    },
-                    Self::DashboardUnpin { id, revision, .. } => DesktopCommand::Unpin {
-                        query: id.clone(),
-                        revision: *revision,
-                    },
+                    }),
+                    Self::DashboardUnpin { id, revision, .. } => {
+                        dashboard(DashboardCommand::Unpin {
+                            query: id.clone(),
+                            revision: *revision,
+                        })
+                    }
                     Self::DashboardRename {
                         id, name, revision, ..
-                    } => DesktopCommand::Rename {
+                    } => dashboard(DashboardCommand::Rename {
                         target: format!("query:{id}"),
                         name: name.clone(),
                         revision: u64::try_from(*revision)?,
-                    },
-                    Self::DashboardSlots { id, revision, .. } => DesktopCommand::Layout {
-                        work: format!("query:{id}"),
-                        save: true,
-                        revision: Some(*revision),
-                    },
+                    }),
+                    Self::DashboardSlots { id, revision, .. } => {
+                        dashboard(DashboardCommand::Slots {
+                            query: format!("query:{id}"),
+                            revision: *revision,
+                        })
+                    }
                     Self::PaneLayout { work, .. } => DesktopCommand::Layout {
                         work: work.clone(),
                         save: true,
-                        revision: None,
                     },
                     _ => unreachable!("matched above"),
                 };

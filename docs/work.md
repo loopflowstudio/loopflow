@@ -88,7 +88,7 @@ claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.
 ```bash
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
 lf task status LOO-12              # state, graph step, PR, and every Session and Graph on it
-lf task diff LOO-12 --files        # what it changed so far
+lf task changes LOO-12        # what it changed so far
 lf task wait LOO-13                # block until its run ends, with no agent polling
 ```
 
@@ -96,7 +96,7 @@ lf task wait LOO-13                # block until its run ends, with no agent pol
 lf task list                                  # open Tasks in this repository
 lf task list loo-60                           # identifier or title contains "loo-60"
 lf task list --wave infra --state idle
-lf task list --done --wave infra --since 7d   # closed in the last week
+lf task list --closed --wave infra --since 7d   # closed in the last week
 lf task list --watch                          # a JSON line each time the list changes
 ```
 
@@ -104,7 +104,7 @@ lf task list --watch                          # a JSON line each time the list c
 it answers instantly and offline.
 
 `--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf history`, `lf repository planning`, `lf ps` and the
+`lf session list`, `lf history`, `lf repository planning`, `lf process list` and the
 `lf desktop` reads, always with `--json`. Each line is
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
@@ -162,7 +162,7 @@ value stays in `lf repository planning journal`, ready to copy back.
 
 ```bash
 lf account connect linear                  # or asana, or notion
-lf wave connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
+lf wave planning connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
 ```
 
 ```yaml
@@ -206,7 +206,7 @@ lf task create --wave billing --title "Meter usage events"
 ```
 
 A clone's committed `.lf/wave/` directories register when the repository joins
-the Desktop portfolio, and on `lf wave create` or `lf wave connect --all`; Desktop
+the Desktop portfolio, and on `lf wave create` or `lf wave planning connect --all`; Desktop
 and `lf wave list` read the same rows. A removed Wave's directory stays removed.
 
 ```markdown
@@ -387,7 +387,7 @@ position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 
 **Sync.** `lf task sync LOO-12 --retry-creation` retries an uncertain tracker
 creation with its saved ID; `--retry-updates` retries saved field changes after
-reading the tracker again. `lf wave status --sync` refreshes from Linear first.
+reading the tracker again. `lf wave sync` refreshes from Linear first.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

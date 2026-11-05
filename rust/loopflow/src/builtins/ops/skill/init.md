@@ -189,7 +189,7 @@ lf wave status <wave>
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf wave connect <wave>
+lf wave planning connect <wave>
 ```
 
 The first Wave establishes the repository Team and defaults its key from the

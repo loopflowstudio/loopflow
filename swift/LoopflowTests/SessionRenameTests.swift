@@ -177,10 +177,10 @@ private actor RenameSource {
     }
 
     func read(_ args: [String]) async throws -> String {
-        if args == ["desktop", "plan", "--all", "--json"] {
+        if args == ["planning", "list", "--all", "--json"] {
             return try roadmapJSON()
         }
-        let verb = args.prefix(2) == ["desktop", "sessions"] ? "list" : args.count >= 2 && args[0] == "session" ? args[1] : nil
+        let verb = args.prefix(2) == ["session", "list"] ? "list" : args.count >= 2 && args[0] == "session" ? args[1] : nil
         guard let verb else { return "[]" }
         let snapshot = records
         if holds.remove(verb) != nil {

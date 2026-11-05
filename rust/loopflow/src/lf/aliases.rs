@@ -33,8 +33,12 @@ pub const MOVED: &[Moved] = &[
     moved(&["task", "edit"], &[], &["task", "update"]),
     moved(&["wave", "add"], &[], &["wave", "create"]),
     moved(&["machine", "id"], &[], &["machine", "self"]),
-    moved(&["history", "usage"], &[], &["session", "usage"]),
-    moved(&["history", "retention"], &[], &["session", "retention"]),
+    moved(&["session", "history"], &["usage"], &["session", "usage"]),
+    moved(
+        &["session", "history"],
+        &["retention"],
+        &["session", "retention"],
+    ),
     moved(&["self", "doctor"], &[], &["machine", "doctor"]),
     moved(&["config", "planning"], &[], &["repository", "planning"]),
     moved(
@@ -47,6 +51,62 @@ pub const MOVED: &[Moved] = &[
         &["--path"],
         &["repository", "path"],
     ),
+    moved(&["desktop", "task"], &[], &["task", "show"]),
+    moved(&["desktop", "done"], &[], &["task", "list", "--closed"]),
+    moved(
+        &["task", "list"],
+        &["--done"],
+        &["task", "list", "--closed"],
+    ),
+    moved(&["task", "diff"], &["--files"], &["task", "changes"]),
+    moved(&["ship"], &["--stop"], &["task", "hold"]),
+    moved(&["desktop", "sessions"], &[], &["session", "list"]),
+    moved(&["desktop", "wave"], &[], &["wave", "planning"]),
+    moved(&["wave", "status"], &["--sync"], &["wave", "sync"]),
+    moved(
+        &["wave", "bind-project"],
+        &[],
+        &["wave", "planning", "bind"],
+    ),
+    moved(&["wave", "connect"], &[], &["wave", "planning", "connect"]),
+    moved(&["wave", "reteam"], &[], &["wave", "planning", "reteam"]),
+    moved(&["desktop", "plan"], &[], &["planning", "list"]),
+    moved(&["planning"], &[], &["repository", "planning"]),
+    moved(&["planning"], &["key"], &["repository", "planning", "key"]),
+    moved(
+        &["planning"],
+        &["journal"],
+        &["repository", "planning", "journal"],
+    ),
+    moved(&["desktop", "plans"], &[], &["desktop", "view", "list"]),
+    moved(
+        &["desktop", "view"],
+        &["--plan"],
+        &["desktop", "view", "show"],
+    ),
+    moved(
+        &["desktop", "query"],
+        &[],
+        &["desktop", "dashboard", "query"],
+    ),
+    moved(&["desktop", "pin"], &[], &["desktop", "dashboard", "pin"]),
+    moved(
+        &["desktop", "unpin"],
+        &[],
+        &["desktop", "dashboard", "unpin"],
+    ),
+    moved(
+        &["desktop", "rename"],
+        &[],
+        &["desktop", "dashboard", "rename"],
+    ),
+    moved(&["monitor"], &[], &["process", "list"]),
+    moved(&["monitor"], &["ps"], &["process", "list"]),
+    moved(&["monitor"], &["top"], &["process", "top"]),
+    moved(&["monitor"], &["rollover"], &["process", "rollover"]),
+    moved(&["monitor"], &["prune"], &["process", "prune"]),
+    moved(&["ps"], &[], &["process", "list"]),
+    moved(&["graph", "show"], &["--processes"], &["process", "show"]),
 ];
 
 /// The old spelling `path` (the command words resolved) and `rest` (every
@@ -63,31 +123,4 @@ pub fn find(path: &[String], rest: &[String]) -> Option<&'static Moved> {
                     .all(|word| rest.iter().any(|typed| typed == word))
         })
         .max_by_key(|entry| entry.words.len())
-}
-
-/// `path` (command words only, as `lf help` takes them) with its longest old
-/// prefix replaced by the canonical path.
-pub fn rewrite(path: &[String]) -> Vec<String> {
-    (1..=path.len())
-        .rev()
-        .find_map(|split| {
-            find(&path[..split], &path[split..]).map(|entry| {
-                let mut words: Vec<String> = entry
-                    .canonical
-                    .iter()
-                    .map(|word| word.to_string())
-                    .collect();
-                let mut dropped = entry.words.to_vec();
-                for word in &path[split..] {
-                    match dropped.iter().position(|old| old == word) {
-                        Some(at) => {
-                            dropped.remove(at);
-                        }
-                        None => words.push(word.clone()),
-                    }
-                }
-                words
-            })
-        })
-        .unwrap_or_else(|| path.to_vec())
 }

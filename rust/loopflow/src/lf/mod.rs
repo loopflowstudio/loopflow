@@ -241,10 +241,6 @@ impl Cli {
             | Some(Commands::Discord { .. }) => true,
             Some(Commands::Skill { cmd }) => matches!(cmd, SkillCommand::External(_)),
             Some(Commands::Graph { cmd }) => matches!(cmd, GraphCommand::External(_)),
-            Some(Commands::History {
-                cmd: Some(commands::history::HistoryCommand::Replay { .. }),
-                ..
-            }) => true,
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
@@ -253,6 +249,9 @@ impl Cli {
                     ..
                 } | SessionCommand::New {
                     connection: SessionConnectionArgs { prepare: false, .. },
+                    ..
+                } | SessionCommand::History {
+                    cmd: Some(commands::history::HistoryCommand::Replay { .. }),
                     ..
                 }
             ),
@@ -483,22 +482,15 @@ pub enum Commands {
     /// Returns once the Task is shipping and runs on to its end (`-b` waits for
     /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
     /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
-    /// `--stop` withdraws the approval and takes back its merge request; the
-    /// stop stands, so no run ships the Task again until `lf ship`.
+    /// `lf task hold` withdraws the approval and takes back its merge request.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
-        #[arg(long, conflicts_with = "stop")]
+        #[arg(long)]
         graph: Option<String>,
         /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
-        /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
-        #[arg(long)]
-        stop: bool,
-        /// With --stop, print the Task and whether it was shipping
-        #[arg(long, requires = "stop")]
-        json: bool,
     },
     /// Inspect and continue Sessions
     Session {
@@ -523,14 +515,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SkillCommand,
     },
-    /// Read what Sessions did, tagged with their Work: turns, commands and provider usage
-    #[command(args_conflicts_with_subcommands = true)]
-    History {
-        #[command(flatten)]
-        feed: commands::history::HistoryFeed,
-        #[command(subcommand)]
-        cmd: Option<commands::history::HistoryCommand>,
-    },
     /// Select Work and control Loopflow Desktop panes
     #[command(
         after_help = "Targets: root --task/--wave set the base view; -p names a part of it (shell:2, a tile 3 or LOO-519, LOO-519/shell:2); --window picks the window. Each part resolves by full ID, case-insensitive label, 1-based position, then ID suffix. Without them a command acts on the terminal it runs in. Scripts should pass the IDs receipts return; positions are for people.\n\nExit status: 0 success, 1 failure, 2 bad arguments, expression or verb arguments, 3 missing or ambiguous Task, window, pane or tab (nothing changed), 4 Desktop unreachable (not running, not macOS, or not answering its socket), 130 interrupted."
@@ -539,15 +523,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Show waiting, blocked, active, and finished work with next actions
-    #[command(args_conflicts_with_subcommands = true)]
-    Monitor {
-        #[arg(long)]
-        json: bool,
-        #[arg(long)]
-        all: bool,
+    /// Live Loopflow processes: call trees, Graphs that ran, rollover and pruning
+    Process {
         #[command(subcommand)]
-        cmd: Option<commands::monitor::MonitorCommand>,
+        cmd: commands::process::ProcessCommand,
+    },
+    /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
+    Planning {
+        #[command(subcommand)]
+        cmd: PlanningCommand,
     },
     #[command(flatten)]
     Ops(OpsCommand),
@@ -593,13 +577,6 @@ pub enum Commands {
         /// Inspect a Task's checkout and Wave context
         #[arg(long)]
         task: Option<String>,
-    },
-    /// Select repositories for the Machine-local portfolio
-    Portfolio {
-        #[command(subcommand)]
-        cmd: Option<crate::portfolio::PortfolioCommand>,
-        #[arg(long, global = true, id = "portfolio_json")]
-        json: bool,
     },
     /// Manage working notes
     Scratch {
@@ -706,7 +683,7 @@ pub enum RepositoryCommand {
     #[command(args_conflicts_with_subcommands = true)]
     Planning {
         #[command(subcommand)]
-        cmd: Option<PlanningCommand>,
+        cmd: Option<RepositoryPlanningCommand>,
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
@@ -753,124 +730,36 @@ pub enum RepositoryCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
-    /// Show a Work selection, or derive a passive plan for external hosts
+    /// Show a Work selection; `list` and `show` read what views show without opening Desktop
+    #[command(args_conflicts_with_subcommands = true)]
     View {
         /// wave/task/query/kind/state expression; omitted uses the repository default
         expression: Option<String>,
-        /// Print the derived plan as JSON without opening Desktop or starting a provider
-        #[arg(long)]
-        plan: bool,
         /// Print the opening receipt as JSON
         #[arg(long)]
         json: bool,
+        #[command(subcommand)]
+        cmd: Option<DesktopViewCommand>,
     },
-    /// Print the repository's default and saved Dashboard plans as JSON
-    Plans {
-        #[arg(long, required = true)]
-        json: bool,
-        /// Print a JSON line now and each time the plans change, until stdin closes
-        #[arg(long)]
-        watch: bool,
+    /// Saved Dashboards: their queries, pins, names, slots and tiles, with revision checking
+    Dashboard {
+        #[command(subcommand)]
+        cmd: DashboardCommand,
     },
-    /// Print the plan as Desktop shows it: each Task's section, condition and controls
-    Plan {
-        /// One Wave; omitted reads the repository's Waves
-        wave: Option<String>,
-        /// Only this Task, open or closed
-        #[arg(long)]
-        task: Option<String>,
-        /// Every repository's Waves
-        #[arg(long)]
-        all: bool,
-        #[arg(long, required = true)]
-        json: bool,
-        /// Print a JSON line now and each time the plan changes, until stdin closes
-        #[arg(long)]
-        watch: bool,
-    },
-    /// Print one page of closed Tasks as Desktop shows them, most recently closed first
-    Done {
-        #[arg(long)]
-        wave: Option<String>,
-        /// Only Tasks closed since then: 7d, 24h, 30m or RFC3339
-        #[arg(long)]
-        since: Option<String>,
-        /// Previous page's `next` Task; keep the same filters
-        #[arg(long)]
-        after: Option<String>,
-        /// Closed Tasks per page
-        #[arg(long, default_value_t = commands::waves::CLOSED_TASK_PAGE)]
-        limit: usize,
-        #[arg(long, required = true)]
+    /// Select repositories for the Machine-local portfolio
+    Portfolio {
+        #[command(subcommand)]
+        cmd: Option<crate::portfolio::PortfolioCommand>,
+        #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Print one Wave's Projects and Tasks as Desktop shows them
-    Wave {
-        wave: Option<String>,
-        #[arg(long, required = true)]
-        json: bool,
-    },
-    /// Print Sessions as Desktop's Session list shows them
-    Sessions {
-        #[command(flatten)]
-        list: SessionListArgs,
-    },
-    /// Print one Task as Desktop's Task pane shows it
-    Task {
-        issue: String,
-        #[arg(long, required = true)]
-        json: bool,
-        /// Print a JSON line now and each time the Task changes, until stdin closes
-        #[arg(long)]
-        watch: bool,
-    },
-    /// Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
-    Query {
-        /// Dashboard name or query:ID
-        container: String,
-        /// Selection expression, as for `lf desktop view`
-        expression: String,
-        /// Last observed revision; omit only when creating a new Dashboard
-        #[arg(long)]
-        revision: Option<i64>,
-    },
-
-    /// Pin a Dashboard in repository discovery; prints the Dashboard as JSON
-    Pin {
-        /// Dashboard name or query:ID
-        query: String,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long)]
-        revision: i64,
-    },
-    /// Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
-    Unpin {
-        /// Dashboard name or query:ID
-        query: String,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long)]
-        revision: i64,
-    },
-    /// Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
-    Rename {
-        /// query:ID or task:<durable-id>
-        target: String,
-        /// The new name, written to the shared owner so labels and crumbs follow
-        name: String,
-        /// The target's last read revision; a stale one writes nothing
-        #[arg(long)]
-        revision: u64,
-    },
-    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
+    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete pane record from stdin
     Layout {
         /// repository, wave:<durable-id>, task:<durable-id> or query:ID
         work: String,
-        /// Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default)
+        /// Replace the pane record from JSON on stdin instead of reading it
         #[arg(long)]
         save: bool,
-        /// A Dashboard's last read revision; a stale one writes nothing
-        #[arg(long, requires = "save")]
-        revision: Option<i64>,
     },
 
     /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
@@ -1096,14 +985,138 @@ impl DesktopCommand {
         matches!(
             self,
             Self::View { .. }
-                | Self::Plans { .. }
-                | Self::Plan { .. }
-                | Self::Done { .. }
-                | Self::Wave { .. }
-                | Self::Sessions { .. }
-                | Self::Task { .. }
+                | Self::Portfolio { cmd: None, .. }
                 | Self::Layout { save: false, .. }
         )
+    }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DesktopViewCommand {
+    /// Print the repository's default and saved Dashboard plans as JSON
+    List {
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the plans change, until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Print what a view shows as JSON, without opening Desktop or starting a provider
+    Show {
+        /// wave/task/query/kind/state expression; omitted uses the repository default
+        expression: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DashboardCommand {
+    /// Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
+    Query {
+        /// Dashboard name or query:ID
+        container: String,
+        /// Selection expression, as for `lf desktop view`
+        expression: String,
+        /// Last observed revision; omit only when creating a new Dashboard
+        #[arg(long)]
+        revision: Option<i64>,
+    },
+    /// Pin a Dashboard in repository discovery; prints the Dashboard as JSON
+    Pin {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
+    Unpin {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Rename a Dashboard, or a Task by task:<durable-id>, through its shared owner; prints the owner's record as JSON
+    Rename {
+        /// query:ID or task:<durable-id>
+        target: String,
+        /// The new name, written to the shared owner so labels and crumbs follow
+        name: String,
+        /// The target's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: u64,
+    },
+    /// Replace a Dashboard's slots from JSON on stdin (null for the default); prints the Dashboard as JSON
+    Slots {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Hide a tile from a saved board's record; prints the record
+    Hide {
+        /// query:ID/<tile> or working-tasks/<tile>
+        tile: String,
+    },
+    /// Show a hidden tile on a saved board's record; prints the record
+    Show {
+        /// query:ID/<tile> or working-tasks/<tile>
+        tile: String,
+    },
+    /// Move a tile into another's place on a saved board's record; prints the record
+    Move {
+        /// query:ID/<tile> or working-tasks/<tile>
+        tile: String,
+        /// Tile whose place it takes
+        #[arg(long)]
+        destination: String,
+    },
+    /// Resize the divider between two tiles on a saved Dashboard; ratio is the addressed one's share
+    Resize {
+        /// query:ID/<tile>
+        tile: String,
+        /// The other tile
+        #[arg(long)]
+        toward: String,
+        #[arg(long)]
+        ratio: f64,
+    },
+}
+
+impl DashboardCommand {
+    /// The verb a saved tile edit names, with its arguments, or none for a
+    /// Dashboard record edit.
+    pub fn tile_verb(&self) -> Option<(&str, &str, std::collections::BTreeMap<String, String>)> {
+        match self {
+            Self::Hide { tile } => Some(("hide", tile, Default::default())),
+            Self::Show { tile } => Some(("show", tile, Default::default())),
+            Self::Move { tile, destination } => Some((
+                "move",
+                tile,
+                [("destination".to_owned(), destination.clone())].into(),
+            )),
+            Self::Resize {
+                tile,
+                toward,
+                ratio,
+            } => Some((
+                "resize",
+                tile,
+                [
+                    ("toward".to_owned(), toward.clone()),
+                    ("ratio".to_owned(), ratio.to_string()),
+                ]
+                .into(),
+            )),
+            Self::Query { .. }
+            | Self::Pin { .. }
+            | Self::Unpin { .. }
+            | Self::Rename { .. }
+            | Self::Slots { .. } => None,
+        }
     }
 }
 
@@ -1122,14 +1135,13 @@ impl Commands {
             Self::Session { cmd } => cmd.changes_work(),
             Self::Graph { cmd } => cmd.changes_work(),
             Self::Skill { cmd } => cmd.changes_work(),
-            Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Desktop { cmd } => cmd.changes_work(),
-            Self::Monitor { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
+            Self::Process { cmd } => cmd.changes_work(),
+            Self::Planning { cmd } => cmd.changes_work(),
             Self::Ops(cmd) => cmd.changes_work(),
             Self::Repository { cmd } => cmd.changes_work(),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
-            Self::Portfolio { cmd, .. } => cmd.is_some(),
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } | Self::CodexObserve => {
                 false
             }
@@ -1148,10 +1160,14 @@ impl TaskCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::List { .. }
+            | Self::Show { .. }
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
             | Self::Diff { .. }
+            | Self::Changes { .. }
+            | Self::Context { .. }
+            | Self::Runs { .. }
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
@@ -1171,6 +1187,7 @@ impl TaskCommand {
             | Self::Delete { .. }
             | Self::Update { .. }
             | Self::Move { .. }
+            | Self::Hold { .. }
             | Self::Interrupt { .. } => true,
         }
     }
@@ -1179,16 +1196,24 @@ impl TaskCommand {
 impl WaveCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
-            Self::Status { sync, .. } => *sync,
+            Self::Show { .. } | Self::Graph { .. } | Self::List { .. } | Self::Status { .. } => {
+                false
+            }
+            Self::Planning { cmd, .. } => cmd.is_some(),
             Self::Remove { preview, .. } => !preview,
             Self::EditPlan { .. }
             | Self::Create { .. }
-            | Self::BindProject { .. }
+            | Self::Sync { .. }
             | Self::Rename { .. }
-            | Self::UpdatePlan { .. }
-            | Self::Connect { .. }
-            | Self::Reteam { .. } => true,
+            | Self::UpdatePlan { .. } => true,
+        }
+    }
+}
+
+impl PlanningCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::List { .. } => false,
         }
     }
 }
@@ -1197,10 +1222,10 @@ impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::ObserveStatus { .. }
-            | Self::History { .. }
             | Self::List { .. }
             | Self::Usage(_)
             | Self::Retention { .. } => false,
+            Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
@@ -1238,12 +1263,6 @@ impl DesktopCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::View { .. }
-            | Self::Plans { .. }
-            | Self::Plan { .. }
-            | Self::Done { .. }
-            | Self::Wave { .. }
-            | Self::Sessions { .. }
-            | Self::Task { .. }
             | Self::Ls { .. }
             | Self::State { .. }
             | Self::Actions { .. }
@@ -1253,9 +1272,6 @@ impl DesktopCommand {
             // Navigation, panes and Dashboard arrangement are not Work; their
             // saves still persist, without a Process.
             | Self::Layout { .. }
-            | Self::Query { .. }
-            | Self::Pin { .. }
-            | Self::Unpin { .. }
             | Self::Back { .. }
             | Self::Forward { .. }
             | Self::Goto { .. }
@@ -1277,7 +1293,11 @@ impl DesktopCommand {
             | Self::Reload { .. }
             | Self::Switch { .. } => false,
             // Renaming a Task changes Work; renaming a Dashboard is arrangement.
-            Self::Rename { target, .. } => target.starts_with("task:"),
+            Self::Dashboard {
+                cmd: DashboardCommand::Rename { target, .. },
+            } => target.starts_with("task:"),
+            Self::Dashboard { .. } => false,
+            Self::Portfolio { cmd, .. } => cmd.is_some(),
             // Input reaches a Session or shell, closing ends one, and an
             // action named at runtime may do either.
             Self::Do { .. }
@@ -1294,8 +1314,8 @@ impl RepositoryCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Planning { cmd, .. } => match cmd {
-                Some(PlanningCommand::Key { new, recover }) => *new || recover.is_some(),
-                Some(PlanningCommand::Journal { .. }) | None => false,
+                Some(RepositoryPlanningCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(RepositoryPlanningCommand::Journal { .. }) | None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
             Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
@@ -1541,13 +1561,11 @@ pub enum GraphCommand {
         #[command(flatten)]
         inventory: commands::graph_inventory::GraphProcessInventoryArgs,
     },
-    /// Inspect an authored graph, or one that ran
+    /// Inspect an authored graph
     Show {
         name: String,
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        processes: bool,
     },
     /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
@@ -1671,6 +1689,8 @@ pub struct SessionListArgs {
 }
 
 #[derive(Subcommand, Debug)]
+// History carries its feed filters and its own commands; Clap owns the layout.
+#[allow(clippy::large_enum_variant)]
 pub enum SessionCommand {
     /// Run the process a Session lives in while terminals come and go
     Serve {
@@ -1710,17 +1730,19 @@ pub enum SessionCommand {
         #[arg(long)]
         agent_process: Option<String>,
     },
-    /// Read this conversation's native start, usage and completion receipts
+    /// Read what Sessions did, tagged with their Work; with an ID, one
+    /// conversation's native start, usage and completion receipts
+    #[command(args_conflicts_with_subcommands = true)]
     History {
         /// Session ID or provider conversation ID
-        id: String,
-        #[arg(long)]
-        json: bool,
-        /// Continue after an observed event sequence
+        id: Option<String>,
+        #[command(flatten)]
+        feed: commands::history::HistoryFeed,
+        /// With an ID, continue after an observed event sequence
         #[arg(long, default_value_t = 0)]
         after: i64,
-        #[arg(long, default_value_t = 100)]
-        limit: usize,
+        #[command(subcommand)]
+        cmd: Option<commands::history::HistoryCommand>,
     },
     /// List Sessions
     List(SessionListArgs),
@@ -1874,10 +1896,21 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Bind an existing Project UUID as this Wave's shared current selection
-    BindProject {
-        wave: String,
-        project: String,
+    /// Print one Wave's Projects and Tasks as Desktop shows them; `bind`,
+    /// `connect` and `reteam` change where its planning lives
+    #[command(args_conflicts_with_subcommands = true)]
+    Planning {
+        wave: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[command(subcommand)]
+        cmd: Option<WavePlanningCommand>,
+    },
+    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status
+    Sync {
+        /// Wave name (default: the ambient wave)
+        wave: Option<String>,
+        /// Emit the status snapshot as JSON
         #[arg(long)]
         json: bool,
     },
@@ -1898,9 +1931,6 @@ pub enum WaveCommand {
         /// Emit the status snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Refresh planning from its provider (Git or Linear) before reading
-        #[arg(long, conflicts_with = "watch")]
-        sync: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
         #[arg(long, requires = "json")]
         watch: bool,
@@ -1927,6 +1957,17 @@ pub enum WaveCommand {
         /// The complete plan as JSON
         #[arg(long)]
         plan: std::path::PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WavePlanningCommand {
+    /// Bind an existing Project UUID as this Wave's shared current selection
+    Bind {
+        wave: String,
+        project: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix); a new name is added first
     Connect {
@@ -1975,32 +2016,41 @@ pub enum TaskCommand {
     /// List the open Tasks in the selected repository
     List {
         /// Only Tasks whose title or identifier contains this text
-        #[arg(conflicts_with = "done")]
+        #[arg(conflicts_with = "closed")]
         query: Option<String>,
         #[arg(long)]
         wave: Option<String>,
         /// Project ID, provider ID, slug or name
-        #[arg(long, conflicts_with = "done")]
+        #[arg(long, conflicts_with = "closed")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "done", value_parser = ["unstarted", "idle", "active", "moving", "shipping"])]
+        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving", "shipping"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
         /// Page closed (done or abandoned) Tasks instead, most recently closed first
         #[arg(long)]
-        done: bool,
+        closed: bool,
         /// Only Tasks closed since then: 7d, 24h, 30m or RFC3339
-        #[arg(long, requires = "done")]
+        #[arg(long, requires = "closed")]
         since: Option<String>,
         /// Previous page's `next` Task; keep the same filters
-        #[arg(long, requires = "done")]
+        #[arg(long, requires = "closed")]
         after: Option<String>,
         /// Closed Tasks per page
-        #[arg(long, requires = "done", default_value_t = 50)]
+        #[arg(long, requires = "closed", default_value_t = commands::waves::CLOSED_TASK_PAGE)]
         limit: usize,
         /// Print a JSON line now and each time the list changes, until stdin closes
-        #[arg(long, conflicts_with = "done")]
+        #[arg(long, conflicts_with = "closed")]
+        watch: bool,
+    },
+    /// Print one Task as Desktop's Task pane shows it, as JSON
+    Show {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+        /// Print a JSON line now and each time the Task changes, until stdin closes
+        #[arg(long)]
         watch: bool,
     },
 
@@ -2176,18 +2226,38 @@ until `lf ship`."
         #[arg(long)]
         watch: bool,
     },
-    /// Show this Task's patch or list its changed files
+    /// Show this Task's patch
     Diff {
         issue: String,
         path: Option<String>,
-        /// List changed paths and comparison revisions instead of a patch
-        #[arg(long, conflicts_with_all = ["path", "draft"])]
-        files: bool,
         #[arg(long, default_value = "parent")]
         base: String,
         /// Compare a UTF-8 draft read from stdin without writing the worktree
         #[arg(long, requires = "path")]
         draft: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List this Task's changed paths and comparison revisions
+    Changes {
+        issue: String,
+        #[arg(long, default_value = "parent")]
+        base: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What each of this Task's Session inputs was made of
+    Context {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Page the Graphs that ran for this Task
+    Runs {
+        issue: String,
+        /// Previous page's next identity
+        #[arg(long)]
+        after: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2292,6 +2362,19 @@ until `lf ship`."
         #[arg(long)]
         json: bool,
     },
+    /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
+    ///
+    /// The stop stands, so no run ships the Task again until `lf ship`. With
+    /// no ISSUE, holds the checkout's Task.
+    Hold {
+        issue: Option<String>,
+        /// Why, kept in the Task's history
+        #[arg(long)]
+        reason: Option<String>,
+        /// Print the Task and whether it was shipping
+        #[arg(long)]
+        json: bool,
+    },
     /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
         issue: String,
@@ -2317,8 +2400,10 @@ impl TaskCommand {
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
+            | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
             Self::Shell { issue, .. }
+            | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2328,6 +2413,9 @@ impl TaskCommand {
             | Self::Complete { issue, .. }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
+            | Self::Changes { issue, .. }
+            | Self::Context { issue, .. }
+            | Self::Runs { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
@@ -2345,8 +2433,10 @@ impl TaskCommand {
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
+            | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
             Self::Shell { issue, .. }
+            | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2356,6 +2446,9 @@ impl TaskCommand {
             | Self::Complete { issue, .. }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
+            | Self::Changes { issue, .. }
+            | Self::Context { issue, .. }
+            | Self::Runs { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
@@ -2561,6 +2654,26 @@ pub enum PrCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PlanningCommand {
+    /// Print each Wave's plan as Desktop shows it: every Task's section, condition and controls
+    List {
+        /// One Wave; omitted reads the repository's Waves
+        wave: Option<String>,
+        /// Only this Task, open or closed
+        #[arg(long)]
+        task: Option<String>,
+        /// Every repository's Waves
+        #[arg(long)]
+        all: bool,
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the plan changes, until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RepositoryPlanningCommand {
     /// Show, create, or recover the planning user key that names a `personal: true` ref
     Key {
         #[arg(long, conflicts_with = "recover")]
@@ -3165,6 +3278,7 @@ mod tests {
         assert!(!records(&["desktop", "focus"]));
         assert!(!records(&[
             "desktop",
+            "dashboard",
             "rename",
             "query:q",
             "Mine",
@@ -3173,6 +3287,7 @@ mod tests {
         ]));
         assert!(records(&[
             "desktop",
+            "dashboard",
             "rename",
             "task:t",
             "Mine",
@@ -3278,7 +3393,15 @@ mod tests {
             vec!["lf", "config", "unset", "account.claude", "--global"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "machine", "doctor", "--planning", "--json"],
-            vec!["lf", "wave", "status", "product", "--sync"],
+            vec!["lf", "wave", "sync", "product"],
+            vec![
+                "lf",
+                "task",
+                "hold",
+                "LOO-1",
+                "--reason",
+                "waiting on review",
+            ],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
@@ -3287,8 +3410,8 @@ mod tests {
             Some(Commands::Task { cmd: TaskCommand::Unassign { issue, .. } }) if issue == "LOO-1"
         ));
         for verb in [
-            "recover", "enable", "disable", "prepare", "advance", "defer", "resume", "hold",
-            "release", "unclaim",
+            "recover", "enable", "disable", "prepare", "advance", "defer", "resume", "release",
+            "unclaim",
         ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
@@ -3698,9 +3821,13 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "wave", "connect", "pm"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "wave", "planning", "connect", "pm"]).expect("parse");
         let Some(Commands::Wave {
-            cmd: WaveCommand::Connect { wave, all, .. },
+            cmd:
+                WaveCommand::Planning {
+                    cmd: Some(WavePlanningCommand::Connect { wave, all, .. }),
+                    ..
+                },
         }) = cli.command
         else {
             panic!("expected pm init command");
@@ -4081,14 +4208,19 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "wave", "connect", "--all"]).expect("parse");
+        let cli =
+            Cli::try_parse_from(["lf", "wave", "planning", "connect", "--all"]).expect("parse");
         let Some(Commands::Wave {
             cmd:
-                WaveCommand::Connect {
-                    wave,
-                    all,
-                    team_key,
-                    team_name,
+                WaveCommand::Planning {
+                    cmd:
+                        Some(WavePlanningCommand::Connect {
+                            wave,
+                            all,
+                            team_key,
+                            team_name,
+                        }),
+                    ..
                 },
         }) = cli.command
         else {
@@ -4106,6 +4238,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "lf",
             "wave",
+            "planning",
             "connect",
             "product",
             "--team-key",
@@ -4116,9 +4249,13 @@ mod tests {
         .expect("parse");
         let Some(Commands::Wave {
             cmd:
-                WaveCommand::Connect {
-                    team_key,
-                    team_name,
+                WaveCommand::Planning {
+                    cmd:
+                        Some(WavePlanningCommand::Connect {
+                            team_key,
+                            team_name,
+                            ..
+                        }),
                     ..
                 },
         }) = cli.command
@@ -4132,18 +4269,27 @@ mod tests {
 
     #[test]
     fn pm_reteam_defaults_to_dry_run() {
-        let cli = Cli::try_parse_from(["lf", "wave", "reteam"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "wave", "planning", "reteam"]).expect("parse");
         let Some(Commands::Wave {
-            cmd: WaveCommand::Reteam { apply },
+            cmd:
+                WaveCommand::Planning {
+                    cmd: Some(WavePlanningCommand::Reteam { apply }),
+                    ..
+                },
         }) = cli.command
         else {
             panic!("expected pm reteam command");
         };
         assert!(!apply);
 
-        let cli = Cli::try_parse_from(["lf", "wave", "reteam", "--apply"]).expect("parse apply");
+        let cli = Cli::try_parse_from(["lf", "wave", "planning", "reteam", "--apply"])
+            .expect("parse apply");
         let Some(Commands::Wave {
-            cmd: WaveCommand::Reteam { apply },
+            cmd:
+                WaveCommand::Planning {
+                    cmd: Some(WavePlanningCommand::Reteam { apply }),
+                    ..
+                },
         }) = cli.command
         else {
             panic!("expected pm reteam command");

@@ -178,11 +178,7 @@ pub fn ship(directory: &Path, issue: &str) -> Result<TaskShip> {
 /// `task.hold`: withdraw the Task's Auto-Ship approval, as `lf --task <issue>
 /// ship --stop` does, until the next `task.ship`.
 pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold> {
-    let spell = |task: &str| {
-        ["--task", task, "ship", "--stop", "--json"]
-            .map(str::to_owned)
-            .to_vec()
-    };
+    let spell = |task: &str| ["task", "hold", task, "--json"].map(str::to_owned).to_vec();
     if let Some(held) = remote(directory, issue, spell)? {
         return Ok(held);
     }

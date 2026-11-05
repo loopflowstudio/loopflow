@@ -431,7 +431,7 @@ A conversation attachment handoff grants no Graph authority.
 A Graph is `current` while its Graph process has no recorded exit, `completed` when the
 Graph process succeeded and `stopped` when it exited before the last step. A killed
 Graph process leaves dead Processes as history. Nothing restarts or resumes it. The caller,
-normally the Task conversation, inspects `lf graph show ID --processes --json` or
+normally the Task conversation, inspects `lf process show ID --json` or
 `lf task status`, then launches fresh work. Unknown liveness stays unknown.
 
 ### Attribution, binding and ownership

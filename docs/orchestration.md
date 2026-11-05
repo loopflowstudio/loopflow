@@ -70,7 +70,7 @@ lf graph ship-api --context --json       # what the first step would receive; la
 
 Without `-i` or `-b`, steps run headless except `interactive:` ones, which open
 here ([below](#where-a-person-takes-part)). A failed step stops the Graph. A
-stopped Graph is history: inspect it with `lf graph show ID --processes`, then
+stopped Graph is history: inspect it with `lf process show ID`, then
 start fresh work. Nothing resumes it.
 
 Mechanical steps ride along as commands:
@@ -175,7 +175,7 @@ Graph it was composed from; starting from an interactive step only puts the Task
 there. After the last step the Task reaches `end`, which requests completion.
 `lf ship` or any run into `end` hands the Task to Auto-Ship, which may land its
 PR. Other Graphs in the Task's worktree never move it. There is no approve command: give feedback in the
-Task's conversation, which knows its step and how to go on. `lf ship --stop`
+Task's conversation, which knows its step and how to go on. `lf task hold`
 withdraws Auto-Ship, and the stop stands: a later run into `end` no longer
 approves it, and a run that reaches a merging step (`lf land`, `lf pr arm`,
 `pr-land`) waits there instead. Only `lf ship` lifts the stop. A ship whose run

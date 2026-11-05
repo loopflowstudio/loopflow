@@ -98,7 +98,7 @@ struct RegistryQueryTests {
             == object(#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
         let sessions = ServedRead.desktopSessions(directory: "/r", headless: true)
         #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null}"#))
-        #expect(sessions.argv == ["desktop", "sessions", "--interactive", "all", "--json"])
+        #expect(sessions.argv == ["session", "list", "--interactive", "all", "--json"])
         #expect(try object(ServedRead.taskDiff(issue: "FIX-1", path: nil, base: "parent", draft: nil))
             == object(#"{"kind":"task.diff","issue":"FIX-1","path":null,"base":"parent","draft":null}"#))
         let view = ServedRead.viewPlan(directory: "/r", expression: "state:backlog")
@@ -122,7 +122,7 @@ struct RegistryQueryTests {
         #expect(move.cwd == "/r")
         let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
         #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#))
-        #expect(stop.argv == ["--task", "FIX-1", "ship", "--stop", "--json"])
+        #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
             #"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
@@ -130,14 +130,14 @@ struct RegistryQueryTests {
         let pin = ServedWrite.dashboardPin(directory: "/r", id: "picked", pinned: false, revision: 3)
         #expect(try object(pin) == object(
             #"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#))
-        #expect(pin.argv == ["desktop", "unpin", "--revision=3", "--", "picked"])
+        #expect(pin.argv == ["desktop", "dashboard", "unpin", "--revision=3", "--", "picked"])
         let query = ServedWrite.dashboardQuery(directory: "/r", id: "picked", expression: "-state:done", revision: nil)
         #expect(try object(query) == object(
             #"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#))
-        #expect(query.argv == ["desktop", "query", "--", "picked", "-state:done"])
+        #expect(query.argv == ["desktop", "dashboard", "query", "--", "picked", "-state:done"])
         let portfolio = ServedWrite.portfolio(change: ["remove", "/r"])
         #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
-        #expect(portfolio.argv == ["portfolio", "remove", "/r", "--json"])
+        #expect(portfolio.argv == ["desktop", "portfolio", "remove", "/r", "--json"])
         #expect(portfolio.cwd == "/")
         let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil)
         #expect(try object(primary) == object(
@@ -397,7 +397,7 @@ struct RegistryQueryTests {
 }
 """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "wave", "goals", "--json"])
+            #expect(args == ["wave", "planning", "goals", "--json"])
             return json
         }
 
@@ -421,7 +421,7 @@ struct RegistryQueryTests {
     @Test("lf wave show is one optionally scoped machine query")
     func roadmapUsesOneMachineQuery() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["desktop", "plan", "product", "--json"])
+            #expect(args == ["planning", "list", "product", "--json"])
             #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
@@ -434,7 +434,7 @@ struct RegistryQueryTests {
     @Test("lf wave show requests every repository when no Wave narrows it")
     func roadmapRequestsAllRepositories() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["desktop", "plan", "--all", "--json"])
+            #expect(args == ["planning", "list", "--all", "--json"])
             #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
@@ -519,7 +519,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == nil)
             switch args {
-            case ["task", "diff", "INF-123", "--files", "--base", "parent", "--json"]:
+            case ["task", "changes", "INF-123", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false}],"scratch":[],"scratch_truncated":false}"#
             case ["task", "diff", "INF-123", "src/parser.rs", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","base_commit":"abc","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
@@ -569,7 +569,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["desktop", "sessions", "--json", "--page", "--limit", "100"]:
+            case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
             case ["session", "resume", session.id, "--prepare", "--json"],
                  ["session", "resume", "--task", "INF-123", "--prepare", "--json"]:

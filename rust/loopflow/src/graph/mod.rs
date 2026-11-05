@@ -162,10 +162,23 @@ impl Command {
         } else if self.command == "activity" {
             self.command = "history".into();
         }
+        if self.command == "monitor" && self.args.first().is_some_and(|name| name == "ps") {
+            self.args[0] = "list".into();
+        }
+        if self.command == "monitor"
+            && self
+                .args
+                .first()
+                .is_some_and(|name| matches!(name.as_str(), "list" | "top"))
+        {
+            self.command = "process".into();
+        } else if self.command == "ps" {
+            self.command = "list".into();
+        }
         let owner = match self.command.as_str() {
             "doctor" => Some("machine"),
             "install" => Some("self"),
-            "ps" | "top" => Some("monitor"),
+            "list" | "top" => Some("process"),
             "usage" => Some("session"),
             "replay" => Some("history"),
             "release" | "ci" | "tokens" => Some("repository"),
@@ -174,6 +187,11 @@ impl Command {
         if let Some(owner) = owner {
             self.args.insert(0, self.command);
             self.command = owner.into();
+        }
+        // History reads Sessions, so `lf history` is `lf session history`.
+        if self.command == "history" {
+            self.args.insert(0, self.command);
+            self.command = "session".into();
         }
         self
     }

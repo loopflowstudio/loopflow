@@ -72,7 +72,7 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 
 ```bash
 lf desktop view 'state:available'                       # a Dashboard of every available conversation
-lf desktop query attention 'state:available or state:blocked'   # save it as "attention"
+lf desktop dashboard query attention 'state:available or state:blocked'   # save it as "attention"
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
@@ -131,9 +131,9 @@ lf task list --watch --json               # open Tasks, as your sidebar would li
 lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and comments
 lf session list --watch --json            # conversations, with which ones are available for you
 lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
-lf ps --watch --json                      # live lf call trees
+lf process list --watch --json                      # live lf call trees
 lf repository planning --watch --json         # planning sync; keeps it exchanged while it runs
-lf desktop plans --watch --json           # every plan a repository window shows
+lf desktop view list --watch --json           # every plan a repository window shows
 ```
 
 ```json
@@ -165,8 +165,8 @@ A Session row:
 opens it.
 
 Desktop's own presentation (sections, conditions, controls) is
-`lf desktop plan`, `lf desktop task`, `lf desktop wave`, `lf desktop done` and
-`lf desktop sessions`, with the same `--watch`.
+`lf planning list`, `lf task show`, `lf wave planning`, `lf task list --closed` and
+`lf session list`, with the same `--watch`.
 
 `body` is what the same command prints with `--json` alone. Write
 `{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the
@@ -177,13 +177,13 @@ A development build with unreleased migrations reads a preview copy; its
 One-shot reads for everything else:
 
 ```bash
-lf desktop view 'wave:product' --plan     # what a Dashboard would show, for your own host; opens nothing
+lf desktop view show 'wave:product'     # what a Dashboard would show, for your own host; opens nothing
 lf --task LOO-12 open --link --json       # the target, its fallback command and the route it would take
 lf desktop events --json                  # Desktop's window and pane changes, one line each
 lf help desktop --all --json              # every Desktop command's arguments and result schema
 ```
 
-`desktop view --plan`, `query`, `pin`, `rename` and `layout` work without macOS
+`desktop view show`, `desktop dashboard` and `desktop layout` work without macOS
 or a running Desktop; they read and write the same saved Dashboards Desktop
 uses. A program running in a Desktop shell can report its own state with
 Program Status (OSC 7501, Rex's protocol); a blocked report marks the pane available.

@@ -73,6 +73,8 @@ pub(super) fn run_with_io(
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
+                | crate::lf::TaskCommand::Changes { .. }
+                | crate::lf::TaskCommand::Show { .. }
                 | crate::lf::TaskCommand::Save { .. }
                 | crate::lf::TaskCommand::Create { run: false, .. }
         }) | Some(crate::lf::Commands::Wave {

@@ -119,7 +119,7 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf wave`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
 | `lf session` | Sessions and explicit resolution | Current Machine LfSession state |
 | `lf wt`, `commit`, `sync`, `pr`, `ci`; `lf scratch` | Worktree and delivery operations | Exact repository/Task/GitHub object |
-| `lf monitor`, `ps`, `top`, `prune`; `lf session usage`, `lf history linear`; `lf machine doctor` | Execution and process observation | Current Machine only |
+| `lf process list`, `top`, `prune`; `lf session usage`, `lf history linear`; `lf machine doctor` | Execution and process observation | Current Machine only |
 | `lf machine` | Machine identity | Current Machine unless routed explicitly |
 | `lf task claim`, `unassign` | Task ownership | The writer Machine, reached over `lf --machine` |
 | `lf --machine <machine-id> <args...>` | Run the target Machine's `lf` | Explicit remote Machine; no implicit fan-out |

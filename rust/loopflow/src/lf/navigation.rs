@@ -199,6 +199,8 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     let mut location = Vec::new();
     let mut index = 1;
     let mut boundary = false;
+    // Whether `path` ends in a word the tree does not know.
+    let mut unknown = false;
     let mut help = false;
     while index < args.len() {
         let value = &args[index];
@@ -257,6 +259,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                 path.push(value.clone());
                 output.push(value.clone());
                 boundary = true;
+                unknown = true;
             }
         } else {
             output.push(value.clone());
@@ -264,16 +267,28 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
         index += 1;
     }
     if let Some(start) = positions.first().copied() {
-        let rest: Vec<String> = (start..output.len())
-            .filter(|index| !positions.contains(index))
-            .map(|index| output[index].clone())
-            .collect();
-        if let Some(entry) = super::aliases::find(&path, &rest) {
+        // An old spelling is the resolved path, or that path less the unknown
+        // word after it: `desktop view <expression> --plan` names `--plan`
+        // after the expression the tree could not resolve.
+        let splits = if unknown {
+            vec![path.len(), path.len() - 1]
+        } else {
+            vec![path.len()]
+        };
+        for split in splits {
+            let kept = &positions[..split];
+            let rest: Vec<String> = (start..output.len())
+                .filter(|index| !kept.contains(index))
+                .map(|index| output[index].clone())
+                .collect();
+            let Some(entry) = super::aliases::find(&path[..split], &rest) else {
+                continue;
+            };
             let mut moved = output[..start].to_vec();
             moved.extend(entry.canonical.iter().map(|word| word.to_string()));
             let mut dropped = entry.words.to_vec();
             for (index, word) in output.iter().enumerate().skip(start) {
-                if positions.contains(&index) {
+                if kept.contains(&index) {
                     continue;
                 }
                 if let Some(at) = dropped.iter().position(|old| old == word) {
@@ -303,14 +318,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
     if matches!(command,
         Commands::Graph { cmd: GraphCommand::List { inventory, .. } } if inventory.processes
-    ) || matches!(
-        command,
-        Commands::Graph {
-            cmd: GraphCommand::Show {
-                processes: true,
-                ..
-            }
-        }
     ) {
         return None;
     }
@@ -354,7 +361,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 crate::lf::commands::graph::list(&repo, *json)?;
             }
             Commands::Graph {
-                cmd: GraphCommand::Show { name, json, .. },
+                cmd: GraphCommand::Show { name, json },
             } => {
                 if *json {
                     let entry = crate::graph::compiled::graph_catalog_entry(name, &repo)?;
@@ -387,13 +394,33 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
 }
 
 pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Command, Vec<String>)> {
-    // `lf help <old path>` explains the command it moved to.
-    let words = super::aliases::rewrite(path);
-    let path = words.as_slice();
     let mut current = tree;
-    let mut canonical = Vec::new();
-    for name in path {
+    let mut canonical: Vec<String> = Vec::new();
+    for (index, name) in path.iter().enumerate() {
         let Some(expansion) = resolve_child(current, name, &canonical)? else {
+            // `lf help <old path>` explains the command it moved to: the old
+            // spelling is the canonical path so far plus the words after it.
+            for split in index..=path.len() {
+                let old = [canonical.as_slice(), &path[index..split]].concat();
+                let Some(entry) = super::aliases::find(&old, &path[split..]) else {
+                    continue;
+                };
+                let mut words: Vec<String> = entry
+                    .canonical
+                    .iter()
+                    .map(|word| word.to_string())
+                    .collect();
+                let mut dropped = entry.words.to_vec();
+                for word in &path[split..] {
+                    match dropped.iter().position(|old| old == word) {
+                        Some(at) => {
+                            dropped.remove(at);
+                        }
+                        None => words.push(word.clone()),
+                    }
+                }
+                return resolve_path(tree, &words);
+            }
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidSubcommand,
                 format!(

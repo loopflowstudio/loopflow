@@ -245,7 +245,7 @@ attempt; the next attempt starts after a backoff, with the earlier summaries.
 ### Recovery
 
 There is no schedule. Any lf read of this Machine's Tasks or processes
-(`lf task status`, `lf task list`, `lf ps`, `lf wave status`, Desktop's planning
+(`lf task status`, `lf task list`, `lf process list`, `lf wave status`, Desktop's planning
 reads) first settles AgentProcesses whose lf died and starts the ship process of
 each shipping Task checked out here again when it has exited. A Machine nothing
 reads recovers on its next read.

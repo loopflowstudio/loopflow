@@ -309,3 +309,44 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   their own pass with the catalogue tests. `skills:`, `exclude:` (folded into
   `context.exclude` by `normalize_context`, Task 807ef7) and `release:` are
   left as they are; `release` and `skills` are already catalogue entries.
+
+### Step 3b — the remaining moves (this pass)
+
+- **Every pending row moved.** `task show|changes|context|runs|hold`,
+  `task list --closed`, `session list`, `session history` (the whole `lf
+  history` tree lives at `session history`; `lf history` resolves to it as a
+  unique descendant), `wave planning [bind|connect|reteam]`, `wave sync`,
+  `planning list`, `desktop view list|show`, `desktop dashboard
+  query|pin|unpin|rename|slots|hide|show|move|resize`, `desktop portfolio`,
+  `process list|top|show|rollover|prune`. Old spellings sit in
+  `lf/aliases.rs`; `navigation::normalize_args` now also matches an alias
+  whose dropped word follows an unresolved positional (`desktop view
+  <expression> --plan`).
+- **`lf monitor` overview deleted.** The bare `monitor` printed a stitched
+  Session/Graph/command overview nothing read; `lf monitor` now aliases to
+  `lf process list`. `process rollover` and `process prune` moved with it.
+- **`graph list --processes` stays.** The Task page is `task runs`; the
+  general Graph-process inventory (`--all`, `--state`, `--for-wave`,
+  `--taskless`) has no canonical home yet. `graph show --processes` is gone:
+  one Graph that ran is `process show <id>` (`process.get`).
+- **`desktop dashboard rename` accepts `task:<durable-id>`.** The flat
+  `desktop rename` renamed a Dashboard or a Task through its shared owner, and
+  Desktop's rename path depends on the Task branch; moving it under
+  `dashboard` keeps one handler. `task update --title` is the Task-named
+  spelling for people; Desktop can switch to it when it carries the revision.
+- **Flat tile verbs need Desktop again.** `desktop hide|show|move|resize -p
+  <board>/<tile>` on a saved record without Desktop became `desktop dashboard
+  hide|show|move|resize <board>/<tile>`; the alias table cannot condition on
+  `-p`, so the flat spelling on a saved board now exits 4 (Desktop
+  unreachable) instead of editing the record. The live verbs on a shown board
+  still edit the record through Desktop.
+- **`desktop layout query:<id> --save` has no alias.** Pane layouts keep
+  `desktop layout <work> --save`; a Dashboard's slots are `desktop dashboard
+  slots query:<id> --revision <n>`, and the old spelling names its
+  replacement.
+- **`lf planning` as a root noun.** `lf planning key|journal` and bare `lf
+  planning` resolved as unique shortcuts to `repository planning …`; they are
+  alias entries now because `planning` is the plans namespace (`planning
+  list`).
+- **`ship --json` went with `--stop`.** It only applied to the stop; `task
+  hold --json` has it.

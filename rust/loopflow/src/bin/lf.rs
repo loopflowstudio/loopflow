@@ -893,19 +893,43 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             })
         }
 
-        WaveCommand::Connect {
-            wave,
-            all,
-            team_key,
-            team_name,
-        } => loopflow::lf::commands::ops::connect_wave(
-            repo,
-            wave.as_deref(),
-            *all,
-            team_key.as_deref(),
-            team_name.as_deref(),
-        ),
-        WaveCommand::Reteam { apply } => loopflow::lf::commands::ops::reteam(repo, *apply),
+        WaveCommand::Planning { cmd: None, .. } => {
+            unreachable!("read commands dispatch separately")
+        }
+        WaveCommand::Planning { cmd: Some(cmd), .. } => {
+            use loopflow::lf::WavePlanningCommand;
+            match cmd {
+                WavePlanningCommand::Connect {
+                    wave,
+                    all,
+                    team_key,
+                    team_name,
+                } => loopflow::lf::commands::ops::connect_wave(
+                    repo,
+                    wave.as_deref(),
+                    *all,
+                    team_key.as_deref(),
+                    team_name.as_deref(),
+                ),
+                WavePlanningCommand::Reteam { apply } => {
+                    loopflow::lf::commands::ops::reteam(repo, *apply)
+                }
+                WavePlanningCommand::Bind {
+                    wave,
+                    project,
+                    json,
+                } => {
+                    let result = tokio::runtime::Runtime::new()?
+                        .block_on(project::bind_project(repo, wave, project))?;
+                    if *json {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    } else {
+                        println!("Wave {wave}: bound Project {} ({})", result.name, result.id);
+                    }
+                    Ok(())
+                }
+            }
+        }
         WaveCommand::Create { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
@@ -927,21 +951,10 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        WaveCommand::BindProject {
-            wave,
-            project,
-            json,
-        } => {
-            let result = tokio::runtime::Runtime::new()?
-                .block_on(project::bind_project(repo, wave, project))?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                println!("Wave {wave}: bound Project {} ({})", result.name, result.id);
-            }
-            Ok(())
-        }
-        WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
+        WaveCommand::List { .. }
+        | WaveCommand::Status { .. }
+        | WaveCommand::Sync { .. }
+        | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
         WaveCommand::Rename {
@@ -1021,7 +1034,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             project,
             state,
             json,
-            done,
+            closed,
             since,
             after,
             limit,
@@ -1038,7 +1051,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             };
             if *watch {
                 watch_tasks(repo, args)
-            } else if *done {
+            } else if *closed {
                 list_closed_tasks(
                     repo,
                     wave.as_deref(),
@@ -1053,6 +1066,22 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
+        TaskCommand::Hold { .. } => unreachable!("shared mutation dispatch precedes this command"),
+        TaskCommand::Show { issue, watch, .. } => {
+            loopflow::lf::commands::desktop::task_pane(issue, *watch)
+        }
+        TaskCommand::Context { issue, json } => {
+            loopflow::lf::commands::usage::run(true, *json, 0, None, None, Some(issue), None)
+        }
+        TaskCommand::Runs { issue, after, json } => loopflow::lf::commands::graph_inventory::list(
+            &loopflow::lf::commands::graph_inventory::GraphProcessInventoryArgs {
+                processes: true,
+                for_task: Some(issue.clone()),
+                after: after.clone(),
+                ..Default::default()
+            },
+            *json,
+        ),
         TaskCommand::Reopen { .. } | TaskCommand::Complete { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
@@ -1160,13 +1189,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Diff {
-            issue,
-            base,
-            json,
-            files: true,
-            ..
-        } => {
+        TaskCommand::Changes { issue, base, json } => {
             let snapshot = loopflow::ops::task::task_changes(issue, base)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
@@ -1198,7 +1221,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             base,
             draft,
             json,
-            files: false,
         } => {
             let content = draft.then(read_task_draft).transpose()?;
             let snapshot =
@@ -2224,9 +2246,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let mut process = None;
     match &cli.command {
         Some(Commands::Task { .. } | Commands::Inline { .. }) | None => {}
-        Some(Commands::History {
-            cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
-            ..
+        Some(Commands::Session {
+            cmd:
+                loopflow::lf::SessionCommand::History {
+                    cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
+                    ..
+                },
         }) => process = Some(id.as_str()),
         _ if invocation.is_some() => {}
         _ => anyhow::bail!(
@@ -2290,9 +2315,11 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             | Some(Commands::Task {
                 cmd: TaskCommand::Run { .. }
             })
-            | Some(Commands::History {
-                cmd: Some(loopflow::lf::commands::history::HistoryCommand::Replay { .. }),
-                ..
+            | Some(Commands::Session {
+                cmd: loopflow::lf::SessionCommand::History {
+                    cmd: Some(loopflow::lf::commands::history::HistoryCommand::Replay { .. }),
+                    ..
+                },
             })
     );
     if execution && loopflow::transport::delegate_current(cli.batch)? {
@@ -2304,7 +2331,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
-        }) | Some(Commands::Ship { stop: false, .. })
+        }) | Some(Commands::Ship { .. })
     ) {
         loopflow::engine::launch::expect();
     }
@@ -2313,7 +2340,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             Some(name) => loopflow::lf::commands::ops::resolve_worktree(name)?,
             None => std::env::current_dir()?,
         };
-        if matches!(&cli.command, Some(Commands::Ship { stop: true, .. })) && cli.task.is_none() {
+        if matches!(
+            &cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Hold { issue: None, .. }
+            })
+        ) && cli.task.is_none()
+        {
             let resolution = loopflow::lf::commands::context::explain_in(
                 &directory,
                 cli.wave.as_deref(),
@@ -2393,7 +2426,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             loopflow::ops::context::ContextFact::Unavailable { reason } => anyhow::bail!(reason),
             // Shipping a branch with no Task first gives it one.
             loopflow::ops::context::ContextFact::Unbound
-                if matches!(&cli.command, Some(Commands::Ship { stop: false, .. })) =>
+                if matches!(&cli.command, Some(Commands::Ship { .. })) =>
             {
                 let task = loopflow::ops::task::ship::ship_branch_task(
                     &loopflow::repo::working_directory()?,
@@ -2411,18 +2444,21 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if matches!(
         &cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Status { .. } | TaskCommand::List { .. }
+            cmd: TaskCommand::Status { .. } | TaskCommand::List { .. } | TaskCommand::Show { .. }
         }) | Some(Commands::Wave {
-            cmd: WaveCommand::Status { .. } | WaveCommand::List { .. } | WaveCommand::Show { .. }
-        }) | Some(Commands::Desktop {
-            cmd: loopflow::lf::DesktopCommand::Plan { .. }
-                | loopflow::lf::DesktopCommand::Done { .. }
-                | loopflow::lf::DesktopCommand::Wave { .. }
-                | loopflow::lf::DesktopCommand::Task { .. }
-        }) | Some(Commands::History {
-            cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
-            ..
-        }) | Some(Commands::Monitor { .. })
+            cmd: WaveCommand::Status { .. }
+                | WaveCommand::Sync { .. }
+                | WaveCommand::List { .. }
+                | WaveCommand::Show { .. }
+                | WaveCommand::Planning { cmd: None, .. }
+        }) | Some(Commands::Planning { .. })
+            | Some(Commands::Session {
+                cmd: loopflow::lf::SessionCommand::History {
+                    cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
+                    ..
+                },
+            })
+            | Some(Commands::Process { .. })
     ) {
         loopflow::ops::recovery::recover();
     }
@@ -2547,14 +2583,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             *json || cli.json,
         );
     }
-    if let Some(Commands::Ship {
-        graph,
-        reason,
-        stop: false,
-        json,
-        ..
-    }) = &cli.command
-    {
+    if let Some(Commands::Ship { graph, reason, .. }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
         let directory = loopflow::repo::working_directory()?;
@@ -2565,7 +2594,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             &issue,
             graph.as_deref(),
             reason.as_deref(),
-            *json,
         );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {
@@ -2713,9 +2741,6 @@ fn execute_command(
         Some(Commands::Desktop { .. } | Commands::Open(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }
-        Some(Commands::Portfolio { .. }) => {
-            unreachable!("shared mutation dispatch precedes this command")
-        }
         Some(Commands::Config { cmd }) => match cmd {
             loopflow::lf::ConfigCommand::Import {
                 path,
@@ -2836,23 +2861,64 @@ fn execute_command(
             loopflow::lf::commands::waves::Shape::Tasks,
         ),
         Some(Commands::Wave {
-            cmd: WaveCommand::Status {
-                wave, json, sync, ..
-            },
+            cmd: WaveCommand::Status { wave, json, .. },
+        }) => loopflow::lf::commands::waves::status(
+            wave.as_deref(),
+            *json,
+            loopflow::lf::commands::waves::Shape::Tasks,
+        ),
+        Some(Commands::Wave {
+            cmd: WaveCommand::Sync { wave, json },
         }) => {
-            let refreshed = if *sync {
-                loopflow::lf::commands::ops::refresh_status(
-                    &std::env::current_dir()?,
-                    wave.as_deref(),
-                )?
-            } else {
-                None
-            };
+            let refreshed = loopflow::lf::commands::ops::refresh_status(
+                &std::env::current_dir()?,
+                wave.as_deref(),
+            )?;
             loopflow::lf::commands::waves::status(
                 refreshed.as_deref().or(wave.as_deref()),
                 *json,
                 loopflow::lf::commands::waves::Shape::Tasks,
             )
+        }
+        Some(Commands::Wave {
+            cmd: WaveCommand::Planning {
+                wave, cmd: None, ..
+            },
+        }) => loopflow::lf::commands::waves::status(
+            wave.as_deref(),
+            true,
+            loopflow::lf::commands::waves::Shape::Desktop,
+        ),
+        Some(Commands::Planning {
+            cmd:
+                loopflow::lf::PlanningCommand::List {
+                    wave,
+                    task,
+                    all,
+                    watch,
+                    ..
+                },
+        }) => {
+            use loopflow::lf::commands::waves::Shape;
+            if *watch {
+                loopflow::lf::commands::waves::watch_show(
+                    std::env::current_dir()?,
+                    wave.clone(),
+                    task.clone(),
+                    *all,
+                    Shape::Desktop,
+                    loopflow::lf::commands::watch::Transport::Stdio,
+                )
+                .map(drop)
+            } else {
+                loopflow::lf::commands::waves::show(
+                    wave.as_deref(),
+                    task.as_deref(),
+                    true,
+                    *all,
+                    Shape::Desktop,
+                )
+            }
         }
 
         Some(Commands::Wave {
@@ -2916,6 +2982,10 @@ fn execute_command(
         Some(Commands::Task {
             cmd:
                 cmd @ (TaskCommand::Diff { .. }
+                | TaskCommand::Changes { .. }
+                | TaskCommand::Show { .. }
+                | TaskCommand::Context { .. }
+                | TaskCommand::Runs { .. }
                 | TaskCommand::File { .. }
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
@@ -2931,14 +3001,7 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Monitor { cmd, json, all }) => match cmd {
-            Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
-            None => loopflow::lf::commands::monitor::overview(*json, *all),
-        },
-        Some(Commands::History { feed, cmd }) => match cmd {
-            Some(cmd) => loopflow::lf::commands::history::run(cmd),
-            None => loopflow::lf::commands::activity::run(feed),
-        },
+        Some(Commands::Process { cmd }) => loopflow::lf::commands::process::run(cmd),
         Some(Commands::Discord {
             cmd: loopflow::lf::DiscordCommand::Serve { wave },
         }) => in_repo_runtime(args, |repo| {
@@ -2959,12 +3022,6 @@ fn execute_command(
             GraphCommand::List { json, inventory } if inventory.processes => {
                 loopflow::lf::commands::graph_inventory::list(inventory, *json)
             }
-            GraphCommand::Show {
-                name,
-                json,
-                processes: true,
-                ..
-            } => loopflow::lf::commands::graph_inventory::inspect(name, *json),
             _ => anyhow::bail!("not a Graph inspection command: {cmd:?}"),
         },
         Some(Commands::Skill { .. } | Commands::External(_)) => {
@@ -3382,7 +3439,9 @@ mod tests {
             assert!(!cli.json);
             assert!(matches!(
                 cli.command,
-                Some(Commands::Portfolio { json: true, .. })
+                Some(Commands::Desktop {
+                    cmd: loopflow::lf::DesktopCommand::Portfolio { json: true, .. }
+                })
             ));
         }
     }
@@ -3419,7 +3478,10 @@ mod tests {
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Wave {
-                cmd: loopflow::lf::WaveCommand::Connect { all: true, .. }
+                cmd: loopflow::lf::WaveCommand::Planning {
+                    cmd: Some(loopflow::lf::WavePlanningCommand::Connect { all: true, .. }),
+                    ..
+                }
             })
         ));
 

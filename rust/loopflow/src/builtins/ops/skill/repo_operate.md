@@ -181,7 +181,7 @@ The stopped Graph stays as history; Task, worktree and PR identity are unchanged
 ## Diagnose execution and auth
 
 When work seems stuck, run `lf top` before guessing; redirected output gives one
-frame. `lf ps --json` is the parseable snapshot. These show OS-live call trees,
+frame. `lf process list --json` is the parseable snapshot. These show OS-live call trees,
 normalized output rates, completed token usage, age, idle time, health and PIDs.
 Time alone never means dead. `lf mon prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never

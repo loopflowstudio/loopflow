@@ -77,12 +77,12 @@ lf replay <run-id>
 
 ```bash
 lf top                          # live call trees, refreshing; the first move when work feels slow
-lf ps --json                    # one parseable snapshot, for another tool or agent
-lf monitor prune --dry-run      # receipts, orphaned providers and Process rows safe to remove
+lf process list --json                    # one parseable snapshot, for another tool or agent
+lf process prune --dry-run      # receipts, orphaned providers and Process rows safe to remove
 ```
 
 Both show only processes the OS says are alive; finished calls drop out and move
-to `lf history`. `lf monitor prune` removes stale receipts and provider
+to `lf history`. `lf process prune` removes stale receipts and provider
 processes whose lf parent is provably dead, never an unclaimed provider, then
 forgets finished Process rows nothing references and compacts the store.
 
@@ -118,8 +118,8 @@ Each check reports ok, warn or fail with its detail. `--json` returns the same a
 | `lf history show ID` | One process or Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
 | `lf history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
-| `lf ps`, `lf top` | Live process trees |
-| `lf monitor prune` | Remove dead receipts, orphaned providers and finished Process rows |
+| `lf process list`, `lf top` | Live process trees |
+| `lf process prune` | Remove dead receipts, orphaned providers and finished Process rows |
 | `lf tokens [--days N]` | Codebase size in lines and tokens |
 | `lf doctor [--planning]` | Installation, storage and process integrity |
 

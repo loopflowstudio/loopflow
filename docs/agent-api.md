@@ -150,7 +150,7 @@ process to interrupt, resume, wait for, or attach to.
 
 Work survives its provider process. A Graph whose process died leaves its Processes
 as history; nothing resumes it. Inspect
-`lf task status ISSUE` and `lf graph show ID --processes --json`, then launch
+`lf task status ISSUE` and `lf process show ID --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
@@ -208,7 +208,7 @@ lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf usage --weekly --json   # context cost and turn time by week since 2026-09-30
 lf usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
-lf ps --json                # one OS-live process frame
+lf process list --json                # one OS-live process frame
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,

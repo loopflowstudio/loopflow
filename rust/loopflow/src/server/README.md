@@ -116,44 +116,45 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 
 | API kind | CLI | Engine |
 | --- | --- | --- |
-| `task.get` | `lf desktop task <issue>` (`lf task show` pending) | read |
-| `task.list` (`closed: true`) | `lf desktop done --wave <wave>` (`lf task list --closed` pending) | read |
-| `task.changes` | `lf task diff <issue> --files` (`lf task changes` pending) | read |
+| `task.get` | `lf task show <issue>` | read |
+| `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
+| `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
-| `task.context` | `lf session usage --days 0 --task <task> --context` (`lf task context` pending) | read |
-| `task.runs` | `lf graph list --processes --for-task <task>` (`lf task runs` pending) | read |
+| `task.context` | `lf task context <issue>` | read |
+| `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
 | `task.create` | `lf task create --session <id>` | write |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
-| `task.hold` | `lf ship --stop` (`lf task hold` pending) | `engine::task` |
+| `task.hold` | `lf task hold <issue>` | `engine::task` |
 | `task.steer` | `lf task comment <issue> <message> --steer` (`lf task steer` pending) | `engine::task`; proxy to `session.steer` pending |
 | `task.comment` | `lf task comment <issue> <message>` (`task.report`, `lf task report` pending) | `engine::task` |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
-| `session.list` | `lf desktop sessions` (fold into `lf session list` pending) | read |
+| `session.list` | `lf session list` | read |
 | `session.owner` | none | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
-| `session.history` | `lf history` (`lf session history` pending) | read |
+| `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf session steer` | CLI only, engine pending |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
-| `wave.planning` | `lf desktop wave <wave>` (`lf wave planning` pending) | read |
+| `wave.planning` | `lf wave planning <wave>` | read |
 | `wave.create` | `lf wave create` | write |
-| `wave.sync` | `lf wave status <wave> --sync` (`lf wave sync` pending) | write |
-| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave bind-project`, `lf wave connect`, `lf wave reteam` | CLI only, engine pending |
-| `planning.list` | `lf desktop plan` (`lf planning list` pending) | read |
+| `wave.sync` | `lf wave sync <wave>` | write |
+| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave planning bind`, `connect`, `reteam` | CLI only, engine pending |
+| `planning.list` | `lf planning list` | read |
 | `repository.planning` | `lf repository planning` | read |
 | `repository.people`, `.tokens`, `.path` | `lf repository people`, `lf repository tokens`, `lf repository path` | read |
 | `repository.release`, `.ci` | `lf repository release`, `lf repository ci` | CLI only, engine pending |
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
-| `graph.run` | `lf graph show <id> --processes` | read |
+| `graph.run` | none yet; `task.run` is its Task proxy | engine pending |
+| `process.get` | `lf process show <id>` | read |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
-| `process.list` | `lf monitor ps` (`lf process list` pending) | read |
+| `process.list` | `lf process list` | read |
 | `process.attach` | none; the CLI reaches an owner's socket directly | server |
-| `work.resolve` | `lf open <url> --link` | read |
+| `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
 | `config.theme` | none; Appearance's theme file | `engine::config` |
@@ -161,10 +162,10 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | CLI only, engine pending |
 | `account.*` | `lf account …` | CLI only, engine pending |
 | `skill.run`, `skill.list` | `lf <skill>`, `lf list` | CLI only, engine pending |
-| `desktop.portfolio`, `.portfolio.set` | `lf portfolio` | read, write |
+| `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
 | `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
-| `desktop.view.list`, `.view.get` | `lf desktop plans`, `lf desktop view --plan` | read |
-| `desktop.dashboard.*` | `lf desktop query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move -p <board>/<member>`, `layout query:<id> --save` | write |
+| `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
+| `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
 
 "Pending" names the canonical spelling the engine design assigns that this

@@ -79,13 +79,13 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
-    /// `lf monitor ps`: live Loopflow call trees.
+    /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     MonitorPs,
-    /// `lf --cwd <directory> desktop plans`: the plans a repository window shows.
+    /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
     DesktopPlans { directory: PathBuf },
-    /// `lf --cwd <directory> desktop sessions`, with `--interactive all`
+    /// `lf --cwd <directory> session list`, with `--interactive all`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
     /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
     /// list has a watch.
@@ -96,10 +96,10 @@ pub enum Read {
         after: Option<String>,
         limit: Option<u32>,
     },
-    /// `lf --cwd <directory> desktop task <issue>`: the Task pane.
+    /// `lf --cwd <directory> task show <issue>`: the Task pane.
     #[serde(rename = "task.get")]
     DesktopTask { directory: PathBuf, issue: String },
-    /// `lf task diff <issue> --files --base <base>`: a Task's changed files.
+    /// `lf task changes <issue> --base <base>`: a Task's changed files.
     #[serde(rename = "task.changes")]
     TaskChanges { issue: String, base: String },
     /// `lf task diff <issue> [path] --base <base>`, or with `--draft` and the
@@ -120,7 +120,7 @@ pub enum Read {
     /// `lf machine id`: this Machine's identity.
     #[serde(rename = "machine.self")]
     MachineId,
-    /// `lf portfolio`: the repositories this Machine's windows show.
+    /// `lf desktop portfolio`: the repositories this Machine's windows show.
     #[serde(rename = "desktop.portfolio")]
     Portfolio,
     /// `lf config catalog --json`: every typed setting and its policies.
@@ -152,29 +152,29 @@ pub enum Read {
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
     #[serde(rename = "desktop.layout")]
     PaneLayout { directory: PathBuf, work: String },
-    /// `lf --cwd <directory> ops people`: who owns the repository's Tasks.
+    /// `lf --cwd <directory> repository people`: who owns the repository's Tasks.
     #[serde(rename = "repository.people")]
     People { directory: PathBuf },
     /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
     #[serde(rename = "graph.list")]
     Graphs { directory: PathBuf },
-    /// `lf --cwd <directory> desktop view [expression] --plan`: what a view
+    /// `lf --cwd <directory> desktop view show [expression]`: what a view
     /// shows; no expression is the repository's own.
     #[serde(rename = "desktop.view.get")]
     ViewPlan {
         directory: PathBuf,
         expression: Option<String>,
     },
-    /// `lf --cwd <directory> graph list --processes --for-task <task>
-    /// [--after <after>]`: one page of the Graphs that ran for a Task.
+    /// `lf --cwd <directory> task runs <task> [--after <after>]`: one page of
+    /// the Graphs that ran for a Task.
     #[serde(rename = "task.runs")]
     GraphProcesses {
         directory: PathBuf,
         task: String,
         after: Option<String>,
     },
-    /// `lf graph show <id> --processes`: one Graph that ran, with its steps.
-    #[serde(rename = "graph.run")]
+    /// `lf process show <id>`: one Graph that ran, with its steps.
+    #[serde(rename = "process.get")]
     GraphProcess { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
@@ -185,17 +185,17 @@ pub enum Read {
         project: Option<String>,
         task: Option<String>,
     },
-    /// `lf usage --days 0 --task <task> --context`: what each of those
-    /// inputs was made of.
+    /// `lf task context <task>`: what each of that Task's Session inputs was
+    /// made of.
     #[serde(rename = "task.context")]
     TaskContext { task: String },
-    /// `lf --cwd <directory> desktop wave <wave>`: one Wave's Projects and
+    /// `lf --cwd <directory> wave planning <wave>`: one Wave's Projects and
     /// Tasks, after syncing its repository with the tracker.
     #[serde(rename = "wave.planning")]
     WaveDetail { directory: PathBuf, wave: String },
-    /// `lf --cwd <directory> desktop done --wave <wave> [--after <after>]`:
-    /// one page of a Wave's closed Tasks. Only `closed` lists exist; open
-    /// Tasks are `planning.list`'s.
+    /// `lf --cwd <directory> task list --closed --wave <wave> [--after
+    /// <after>]`: one page of a Wave's closed Tasks. Only `closed` lists
+    /// exist; open Tasks are `planning.list`'s.
     #[serde(rename = "task.list")]
     ClosedTasks {
         directory: PathBuf,
@@ -206,10 +206,10 @@ pub enum Read {
     /// `lf machine list`: your registered Machines.
     #[serde(rename = "machine.list")]
     Machines,
-    /// `lf history`: what Sessions did, by Work.
+    /// `lf session history`: what Sessions did, by Work.
     #[serde(rename = "session.history")]
     History(HistoryWindow),
-    /// `lf --cwd <directory> desktop plan [wave] [--task <task>] [--all]`:
+    /// `lf --cwd <directory> planning list [wave] [--task <task>] [--all]`:
     /// Waves and Tasks. Read once, it first asks the tracker about each
     /// repository read; its watch reads the store.
     #[serde(rename = "planning.list")]
@@ -219,14 +219,14 @@ pub enum Read {
         task: Option<String>,
         all: bool,
     },
-    /// `lf --cwd <directory> config planning status`: where the repository's
+    /// `lf --cwd <directory> repository planning`: where the repository's
     /// planning is exchanged. Its watch exchanges it while it runs.
     #[serde(rename = "repository.planning")]
     PlanningStatus { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
     #[serde(rename = "work.resolve")]
     WorkLink { directory: PathBuf, url: String },
-    /// `lf --repository <id> config repository --path`: a repository plan's
+    /// `lf --repository <id> repository path`: a repository plan's
     /// checkout on this Machine.
     #[serde(rename = "repository.path")]
     RepositoryPath { id: RepositoryId },
@@ -237,16 +237,16 @@ pub enum Read {
         directory: PathBuf,
         wave: Option<String>,
     },
-    /// `lf --cwd <directory> ops tokens [--days <days>]`: the codebase's size.
+    /// `lf --cwd <directory> repository tokens [--days <days>]`: the codebase's size.
     #[serde(rename = "repository.tokens")]
     Tokens {
         directory: PathBuf,
         days: Option<u32>,
     },
-    /// `lf history retention`: how much Session history providers keep.
+    /// `lf session retention`: how much Session history providers keep.
     #[serde(rename = "session.retention")]
     Retention,
-    /// `lf doctor`: the ledger's self-audit.
+    /// `lf machine doctor`: the ledger's self-audit.
     #[serde(rename = "machine.doctor")]
     Doctor,
     /// `lf task wait <issue> --until <until> --timeout 0s --json`: the Task now
@@ -264,15 +264,17 @@ impl Read {
     /// command takes it. Its watch is this argv with `--watch`.
     pub fn argv(&self) -> Vec<String> {
         match self {
-            Self::MonitorPs => words(&["monitor", "ps", "--json"]),
-            Self::DesktopPlans { directory } => at(directory, &["desktop", "plans", "--json"]),
+            Self::MonitorPs => words(&["process", "list", "--json"]),
+            Self::DesktopPlans { directory } => {
+                at(directory, &["desktop", "view", "list", "--json"])
+            }
             Self::SessionList {
                 directory,
                 headless,
                 after,
                 limit,
             } => {
-                let mut argv = at(directory, &["desktop", "sessions"]);
+                let mut argv = at(directory, &["session", "list"]);
                 argv.extend(words(session_flags(*headless)));
                 argv.push("--json".into());
                 if let Some(limit) = limit {
@@ -282,10 +284,10 @@ impl Read {
                 argv
             }
             Self::DesktopTask { directory, issue } => {
-                at(directory, &["desktop", "task", issue, "--json"])
+                at(directory, &["task", "show", issue, "--json"])
             }
             Self::TaskChanges { issue, base } => {
-                words(&["task", "diff", issue, "--files", "--base", base, "--json"])
+                words(&["task", "changes", issue, "--base", base, "--json"])
             }
             Self::TaskDiff {
                 issue,
@@ -304,7 +306,7 @@ impl Read {
             Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
             Self::Waves => words(&["wave", "list", "--all", "--json"]),
             Self::MachineId => words(&["machine", "self", "--json"]),
-            Self::Portfolio => words(&["portfolio", "--json"]),
+            Self::Portfolio => words(&["desktop", "portfolio", "--json"]),
             Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
             Self::ConfigGet { destination, key } => {
                 destination_argv(destination, &["config", "get", key, "--json"])
@@ -334,9 +336,9 @@ impl Read {
                 directory,
                 expression,
             } => {
-                let mut argv = at(directory, &["desktop", "view"]);
+                let mut argv = at(directory, &["desktop", "view", "show"]);
                 argv.extend(expression.clone());
-                argv.extend(words(&["--plan", "--json"]));
+                argv.push("--json".into());
                 argv
             }
             Self::GraphProcesses {
@@ -344,15 +346,12 @@ impl Read {
                 task,
                 after,
             } => {
-                let mut argv = at(
-                    directory,
-                    &["graph", "list", "--processes", "--for-task", task],
-                );
+                let mut argv = at(directory, &["task", "runs", task]);
                 argv.extend(optional("--after", after.as_ref()));
                 argv.push("--json".into());
                 argv
             }
-            Self::GraphProcess { id } => words(&["graph", "show", id, "--processes", "--json"]),
+            Self::GraphProcess { id } => words(&["process", "show", id, "--json"]),
             Self::Usage {
                 days,
                 wave,
@@ -366,18 +365,9 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::TaskContext { task } => words(&[
-                "session",
-                "usage",
-                "--days",
-                "0",
-                "--task",
-                task,
-                "--context",
-                "--json",
-            ]),
+            Self::TaskContext { task } => words(&["task", "context", task, "--json"]),
             Self::WaveDetail { directory, wave } => {
-                at(directory, &["desktop", "wave", wave, "--json"])
+                at(directory, &["wave", "planning", wave, "--json"])
             }
             Self::ClosedTasks {
                 directory,
@@ -385,7 +375,10 @@ impl Read {
                 after,
                 ..
             } => {
-                let mut argv = at(directory, &["desktop", "done", "--wave", wave, "--json"]);
+                let mut argv = at(
+                    directory,
+                    &["task", "list", "--closed", "--wave", wave, "--json"],
+                );
                 argv.extend(optional("--after", after.as_ref()));
                 argv
             }
@@ -401,7 +394,7 @@ impl Read {
                 task,
                 all,
             } => {
-                let mut argv = at(directory, &["desktop", "plan"]);
+                let mut argv = at(directory, &["planning", "list"]);
                 argv.extend(wave.clone());
                 argv.extend(optional("--task", task.as_ref()));
                 if *all {
@@ -699,10 +692,10 @@ impl Read {
         matches!(self, Self::TaskWait { .. }) && body["reached"] == serde_json::Value::Bool(true)
     }
 
-    /// The Sessions a `desktop sessions` read lists, its argv's flags parsed
+    /// The Sessions a `session list` read lists, its argv's flags parsed
     /// as the command parses them, defaults included.
     fn session_filter(&self, directory: &Path) -> anyhow::Result<SessionFilter> {
-        // Past `--cwd <directory> desktop sessions`.
+        // Past `--cwd <directory> session list`.
         let flags = std::iter::once("sessions".to_owned()).chain(self.argv().into_iter().skip(4));
         let command = SessionListArgs::augment_args(clap::Command::new("sessions"));
         let args = SessionListArgs::from_arg_matches(&command.try_get_matches_from(flags)?)?;
@@ -749,6 +742,7 @@ mod tests {
                 r#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#
             ),
             [
+                "session",
                 "history",
                 "--since",
                 "7d",
@@ -766,8 +760,8 @@ mod tests {
             [
                 "--cwd",
                 "/r",
-                "desktop",
-                "sessions",
+                "session",
+                "list",
                 "--interactive",
                 "all",
                 "--json"
@@ -786,8 +780,8 @@ mod tests {
                 "/r",
                 "desktop",
                 "view",
+                "show",
                 "state:backlog",
-                "--plan",
                 "--json"
             ]
         );

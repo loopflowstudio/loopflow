@@ -28,7 +28,7 @@ conflicts, verify and push, then reread status.
    with `lf task status <issue> --json`. Read its current brief, design, and
    relevant scratch history in its existing checkout. Separate accepted decisions
    from drafts and superseded plans. Inspect `lf session list --json` and the
-   Task's Graphs with `lf graph show <id> --processes`: each one's steps, how each
+   Task's Graphs with `lf process show <id>`: each one's steps, how each
    ended, whether its Graph process is alive, and its effects. Every
    conversation and Graph in the checkout is the Task's work; none is privileged.
    If Task identity is missing or ambiguous, ask when interactive; headless, report
@@ -43,7 +43,7 @@ conflicts, verify and push, then reread status.
 2. **Choose the Graph.** A Task runs one graph, reported as `work.graph` in
    status: its interactive steps, where a person takes part, and the step the
    Task stands at. A run alone does not prove a live Graph process: check every
-   associated Graph and unfinished Process against `lf ps --json`. Leave observed
+   associated Graph and unfinished Process against `lf process list --json`. Leave observed
    live work alone; unknown liveness never authorizes a second Graph process.
    Before running further, recover verified merged delivery as described below.
    At an interactive step, the Task waits on a person in its conversation; say

@@ -959,10 +959,11 @@ concept, `store::RecordingGap`, logs a failure once per change and once on
 recovery; hooks keep it in a `.store-gap` marker and, per Jack's steer, write one
 `store-gap` observation into the Session's history at the next boundary that
 succeeds, so a missed Stop reads as unknown, never as a live turn. Pi and
-OpenCode match Claude: an lf they cannot run goes to their plugin log, never a
-toast or a line per prompt. Hooks wait 1 s for a locked store. Fixtures prove the
-surviving relay, unrecorded input and the provider's own exit, not a live
-install; Sessions already on old builds need `lf resume`.
+OpenCode log a failed lf to their plugin log, never a toast or a line per prompt.
+Hooks and typed input wait at most 1 s for a locked store, then deliver
+unrecorded, so an install's exclusive migration holds no keystroke. Fixtures
+prove the surviving relay, unrecorded input and the provider's own exit, not a
+live install; old builds need `lf resume`.
 Fixtures and interim main repair prove no corrected-build rollout. Both Machines
 need identity/store/scheduled checks and existing Sessions completing turns with
 continued interaction. Landing is insufficient.

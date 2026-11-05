@@ -959,8 +959,7 @@ Retired Ask/Ready/Complete and LOO-491 evidence: `a32c385044`, this heading.
 Jack Heart's November 4 LOO-672 approval: warm unfinished Tasks, bottom-on-return,
 explicit **Take back** over the last screen; no Fork button or shared input, CLI
 fork remains. Selected-first admission honors Close;
-saved display grants no retention. Eight warm/two preparations stay provisional. Visible/protected work survives; completed departure releases
-through 717.
+saved display grants no retention. Eight warm/two preparations stay provisional; visible/protected work survives.
 
 Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
 of this task”), ruled out any normal “unopened” state on November 5, then extended
@@ -969,7 +968,8 @@ Tasks, owned or not (opening claims nothing), and the repository and Wave primar
 create their Session and start or resume the provider during load, before
 selection; primaries stay warm beside the Task bound. An unstarted Task has no
 checkout: its pane offers Start, since placing one starts the Task. One placeholder
-and one opener serve every Work, pane or Dashboard tile; a finished Task shows its
+and one opener serve every Work, pane or any presented board's tile, the repository
+page and Wave views included; a finished Task shows its
 record until a reveal presents its conversation, whoever owns it. Any primary's first turn without a request reads
 and reports, launching no Graph or operator; each start spends one provider turn. Start keeps non-replacing intent through argv, execution and claim; only Take back
 replaces input; Close fences late results. A consumed first launch with no history
@@ -1012,8 +1012,8 @@ LOO-293's unproved native scope and retired Watch/FlowPosition history:
 - LOO-416's October 16 local foundation retains repository registries across
   window close, not app death; composed native proof remains. Earlier window-owned
   lifetime and global-surface failure: `463c5803a2:.lf/wave/product/MEMORY.md`,
-  this heading. Never share an NSView between windows. LOO-672 now permits hidden
-  Session-view eviction through the bounded warm set and shared host release.
+  this heading. Never share an NSView between windows. LOO-672 evicts hidden
+  Session views through the bounded warm set.
 - Session identity, provider process, local opening/error state, terminal view,
   and pane placement have different lifetimes. `.prepared` bridges opening and
   surface creation; failures stay visible until retried or superseded. Task-owned

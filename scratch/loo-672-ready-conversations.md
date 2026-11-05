@@ -49,10 +49,12 @@ history opens the repository and each Wave conversation unselected, selection
 reveals the already started Session, returning to an existing Task conversation
 keeps it, and no operator pass or Graph launched (`loo-672-demo.md`, required
 demonstration). `prepare-redemo.py` needs a Wave in the loaded repository for that
-case. `demo.html` and PR #1816's body still describe the Task-only scope, and the
-PR head (`eae0d31694`) predates the primaries change, the sixth-review
-implications, the seventh-review residue and the eighth-review tile direction;
-publication carries every commit since.
+case. PR #1816's head (`7deedb0306`, `lf pr open`) carries the primaries change
+through the in-place tile route, and its body describes the expanded scope; the
+two commits after it (the inlined intent action and these plan records) are
+unpublished. `demo.html` still describes the November 4 candidate (`7b23c50c20`,
+“Prefetch still needs repair”), and the November 5 native candidates predate the
+primaries change.
 
 ## Accepted outcome and constraints
 
@@ -210,7 +212,7 @@ Warm slots are not filtered by person: a teammate's owned Task on an unreachable
 Machine fails quietly and occupies one. Desktop has no local person identity to
 compare. Acceptable while Jack is the only owner; revisit before shared repositories.
 
-Sync, November 5 (re-checked at both realigns against `27dbe31b69`, unmoved since;
+Sync, November 5 (re-checked at every realign against `27dbe31b69`, unmoved since;
 the one commit after `384505b120`, #1827, touches migration CI and `lf install` only): the stack parent's
 tip is already contained and origin/main is not merged; the parent (#1811)
 integrates first. A trial merge of origin/main conflicts in three parent files (`transport.rs`, `transport/lifetime.rs`,
@@ -224,9 +226,10 @@ history refuses rather than counting as a first thread. `answering` turns privat
 on main; only this module calls it after the merge. `c59cfcc631` (#1807) adopted
 checkouts stay unmarked, matching the trust assumption.
 
-Publication, November 5: PR #1816's body now carries the store-launch proof,
-launching from the store before a pane mounts, the pending main sync and the
-current acceptance; it no longer says automatic opening was never observed natively.
+Publication, November 5: PR #1816's body, refreshed at `lf pr open`, carries the
+expanded scope (primaries on load, the bounded warm set, one placeholder and one
+opener), the store-launch proof and the native cases still open; its tile sentence
+names Dashboard tiles only, so the next publication says any presented board.
 
 Concept review, November 5 (fifth pass, against the store-launch change): the
 experience and its four concepts are unchanged; launching from the store is the
@@ -372,4 +375,8 @@ Retry joins the registry opener and `openPrimaryConversation` is deleted;
 absent under `swift/`, PR head and origin/main unmoved); that result reused.
 Compress, November 5 (ninth pass): the in-place tile route and its repository-page
 test were already in the tree; `SessionOpenIntent.action` inlined at its one use; the
-same filter 182 passed in 8 suites; Rust unchanged, no rerun.
+same filter 182 passed in 8 suites; Rust unchanged, no rerun. Realign after it:
+inspection only (`inTile` keys on `selectedViewPlan` or `navigation.waveView`,
+`waveView` is nil for an entered Task so its pane still navigates, the
+repository-page test asserts the board and selection unchanged, PR head and
+origin/main as recorded); that 182 result reused.

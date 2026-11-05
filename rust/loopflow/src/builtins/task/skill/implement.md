@@ -1,164 +1,127 @@
 ---
 requires: intended change and an implementation plan
-produces: working implementation, focused check, and an updated plan
+produces: working code, a focused check, and an updated plan
 action_style: procedural
 ---
 Turn the design doc into working code.
 
-## Orientation
+Working code with rough edges beats perfect code that took too long. A first
+draft doesn't satisfy acceptance it hasn't met.
 
-Before starting, orient yourself in this branch:
+Read `scratch/` (`scratch/<branch>.md` is this PR's design;
+`scratch/questions.md` holds open questions) and `AGENTS.md`. Read Wave or PM
+context only when the seed names the exact wave, Task or Project; never guess
+it or repair access first. A small change may have its plan in the
+conversation.
 
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
-- Read the repo's agent doc (`AGENTS.md`) for conventions.
+## Keep context within budget
 
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
-
-## Goal
-
-Working code with rough edges beats perfect code that took too long.
-
-Produce a working change, resolve reversible ambiguity, and verify it. Preserve the intended outcome across internal slices; a first draft does not satisfy unfinished acceptance.
-
-## Keep authored context within budget
-
-Run `lf context` to read memory and scratch size targets, their configuration
-sources, and current usage. Read complete sources before curating them.
-Bring over-budget scratch under both token and byte limits as part of this step.
-Curate `.lf/wave/` only when the selected Loopflow Graph calls for it; otherwise
-record proposed memory changes in scratch.
-Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
-stacked parent, and keep historical detail in git rather than ambient context.
-Preserve live decisions, attribution, unresolved work, and contrary evidence;
-keep a precise git reference when older detail still matters. Preserve uncommitted
-evidence before removing it. Edit existing notes instead of accumulating reports.
-Re-run the query after writing. Do not raise limits to conceal overflow. If the
-live decisions alone cannot fit, record the concrete conflict and remaining overage.
+Run `lf context` and bring over-budget scratch under both token and byte limits:
+merge duplicates, summarize, drop notes inherited from a stacked parent, and
+leave history in git with a reference. Keep live decisions, open work and
+contrary findings. Re-run `lf context` after writing. Never raise a limit to
+hide overflow. Propose memory changes in scratch; edit `.lf/wave/` only when the
+Graph calls for it.
 
 ## Workflow
 
-Use the supplied design and repository conventions. A small change may have its
-plan in the conversation; do not require a document template or a prior skill.
+1. **Understand the design.** Find the intended outcome, accepted constraints,
+   approach and acceptance checks. Read the affected user docs, including edits
+   made since the last pass: they describe the experience to build, so keep
+   their corrections rather than regenerating from an older plan. Map the
+   concepts, persistence and call paths before choosing where behavior goes.
+   Read or add the plan's **Delete — do not maintain** list (files, symbols and
+   their exclusive tests and fixtures, plus the behavior and data that must
+   survive) and keep it current. Add predecessors you discover.
 
-1. **Understand the design**
-   Recover the intended outcome, accepted constraints, approach, and acceptance checks.
-   Read the affected user documentation, including saved edits since the
-   previous pass. It describes the experience to build; preserve corrections
-   rather than regenerating it from an older plan. Reconcile consequential
-   conflicts with accepted direction in the conversation or working design.
-   Read the current plan wherever it lives. Reconstruct the affected concepts,
-   owners, persistence, and call paths before choosing where behavior belongs.
-   Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
-   and their exclusive tests/fixtures slated for removal, with required behavior,
-   data, and tests to preserve. Keep it current across passes.
-   Remove what this change replaces in the same diff; leave no parallel path.
-   Add newly discovered predecessors to the delete list as you find them,
-   preserving required behavior and data on the surviving path.
-
-2. **Implement**
-   - Make the deepest planned deletions first: remove obsolete concepts,
-     authorities, and paths, then build data structures on what remains.
-   - Never repair, refactor, or extend a deletion target or its exclusive
-     tests/fixtures. When one fails, carry out the planned removal instead.
-     Preserve coverage of required behavior on the surviving path.
-   - Move real consumers end to end and include any required data migration in
-     the deletion cut. Temporary compile/test breakage within the cut is no
-     reason to repair the predecessor; finish the cut before checking the result.
-     New capabilities need no invented predecessor or deletion quota.
+2. **Implement.**
+   - Make the deepest planned deletions first, then build on what remains.
+     Remove what this change replaces in the same diff; leave no parallel path.
+   - Never repair, refactor or extend a deletion target or its tests. When one
+     fails, delete it as planned and keep coverage of the required behavior on
+     the surviving path.
+   - Move real consumers end to end and include any data migration in the
+     deletion cut. Breakage mid-cut is no reason to fix the old path; finish the
+     cut, then check. New capabilities need no deletion.
    - Keep one unreleased schema migration per Task and edit it in place. When
-     the schema changes again, rewrite that migration to the final shape; never
-     stack a second one that alters or drops what the first created. Test the
-     upgrade from the last released schema to the finished migration, not the
-     steps between.
-   - Functions one at a time, following the signatures
-   - Match existing patterns in the codebase
-   - Reshape the existing owner instead of adding a parallel representation
-   - Follow the design's delivery boundary. An indivisible architectural change
-     proceeds in coherent internal slices but ships as one PR. Keep the complete
-     target and update the remaining work as implementation teaches us more.
-     Do not stage the landing with flags, v2s, or setups nothing uses yet.
+     the schema changes again, rewrite it to the final shape; never stack a
+     second that alters or drops what the first created. Test the upgrade from
+     the last released schema to the finished migration.
+   - Functions one at a time, following the signatures. Reshape the existing
+     code instead of adding a parallel representation.
+   - An indivisible change proceeds in internal slices but ships as one PR.
+     Update remaining work as you learn. No flags, v2s, or setup nothing uses
+     yet.
 
-3. **Sanity check**
-   - Reread the affected user docs before finishing to pick up edits made during
-     implementation. Verify their examples against the behavior built; keep
-     missing behavior explicit rather than weakening the docs to match it.
-     Maintain those files in place and preserve edits made since the last read.
-   - Build the changed code and run the focused test for the behavior changed:
-     the narrowest filter that names it, never a whole package or workspace
-     suite. Skip builds for prose-only edits. Reuse a still-applicable passing
-     result; do not repeat a command without a change or failure that warrants it.
+3. **Sanity check.**
+   - Reread the affected user docs to pick up edits made meanwhile. Check their
+     examples against what you built; if behavior is missing, say so rather
+     than weakening the docs. Edit them in place.
+   - Build the changed code and run the focused test for the changed behavior:
+     the narrowest filter that names it, never a whole package or workspace.
+     Skip builds for prose-only edits. Don't rerun a passing command without a
+     change.
    - One build at a time: never run two compilers, test runners or linters
-     against the same build directory concurrently, in the background or in
+     against the same build directory at once, in the background or in
      parallel tool calls.
-   - Gate owns affected suites and the design's automated acceptance checks,
-     once. Do not run them early because they appear in Done when.
-   - If a check cannot run headless here, use a headless equivalent or leave it
-     to gate/CI rather than stopping implementation. Ask the person for a
-     judgment you need when one is in the conversation; headless, leave it for
-     demo/review instead of blocking the Graph. An actual build or test failure
-     still needs a fix.
-   - Update remaining work in place. Keep one command/result line with any
-     deferred owner; no pass ledger or repeated caveats.
+   - Gate runs affected suites and the design's acceptance checks, once. Don't
+     run them early because they appear in "Done when".
+   - If a check can't run headless here, use a headless equivalent or leave it
+     to gate/CI. Ask for a judgment when someone is in the conversation;
+     headless, leave it for demo or review. A real build or test failure still
+     needs a fix.
+   - Update remaining work in place, with one command/result line.
 
 ## Rules
 
-**Match existing patterns.** Find similar code nearby and match its style. If the codebase uses `@dataclass`, use `@dataclass`. If it uses type hints, use type hints.
+**Match existing patterns.** If the codebase uses `@dataclass`, use
+`@dataclass`.
 
-**Stay in scope.** Implement exactly what the design describes. Scope creep goes in `scratch/questions.md`, not the code.
+**Stay in scope.** Build what the design describes. Scope creep goes in
+`scratch/questions.md`, not the code.
 
-**One concept, one authority.** A new type must represent a new real-world
-concept. Legacy/New enums, v2 types, adapters, fallbacks, dual writes,
-compatibility shims, and parallel stores are blocking by default. Use one only
-when the reviewed design explicitly calls for it and names its deletion point.
+**One concept, one representation.** A new type means a new real-world concept.
+Legacy/New enums, v2 types, adapters, fallbacks, dual writes, compatibility
+shims and parallel stores block by default; use one only when the reviewed
+design calls for it and names when it is deleted.
 
-**Test behavior.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
+**Test behavior.** Test what people see, not implementation details. Assert on
+results, not mock calls.
 
 ## Task context
 
-When a Task is supplied, use its directive, accepted design and included Steers.
-Stay in its supplied worktree and preserve the active writer, selected Graph,
-and review boundaries. Do not select backlog work, create a second Task or
-launch a competing implementation. A failed planning read is a named gap;
-continue independent work from the supplied evidence without repairing auth.
-Publication, landing and navigation belong to the caller's explicit steps.
+With a Task, follow its directive, accepted design and Steers. Stay in its
+worktree; leave the selected Graph and review steps alone. Don't pick up backlog
+work, create a second Task or launch a competing implementation. If a planning
+read fails, name it and keep working from what you have; don't repair auth.
+Publication, landing and navigation belong to the caller's steps.
 
-When a Wave is supplied, notice signals that could help it steer.
-Name the outcome, candidate measure, decision value and cheapest credible
-producer. Add a useful instrument when it fits the coherent change;
-otherwise leave the proposal for Wave sponsorship.
-Metric proposals are discoveries, not a completion quota.
+With a Wave, notice signals that could help it steer: the outcome, a candidate
+measure, what decision it informs, and the cheapest way to produce it. Add the
+instrument when it fits this change; otherwise propose it to the Wave. Metrics
+are discoveries, not a quota.
 
-## Wave context
-
-If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
-
-- Follow the wave's intent and principles during implementation
-- Respect decisions and constraints recorded in `MEMORY.md`
-- Edit GOAL.md and MEMORY.md only when the selected Loopflow Graph calls for
-  maintaining them. Association alone leaves `.lf/wave/` read-only.
-- Note drift from wave constraints in `scratch/questions.md`
+If `<lf:wave>` is present, read `.lf/wave/<wave>/GOAL.md` and `MEMORY.md`.
+Follow the Wave's intent and recorded decisions. They stay read-only unless the
+Graph calls for maintaining them; note drift in `scratch/questions.md`.
 
 ## When the design is wrong
 
-Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Machine
-facts; the plan must not direct its next reader. Keep transcripts separate and
-historical skill names unprefixed.
+If the design is unclear, make the simplest reversible choice and record it in
+`scratch/questions.md`.
 
-If the design doc is unclear, make the simplest reversible choice and record it
-in `scratch/questions.md`.
+If implementation turns up a counterexample that breaks the slice, the data
+model, the deletion path or the overall design, stop dependent work and revise
+the design or send it back to review. Never note a contradiction and keep
+building on it.
 
-If implementation reveals a counterexample that invalidates the slice,
-authority model, deletion path, or full-design trajectory, stop dependent work
-and revise the design or return to review. Never note an architectural
-contradiction and keep building on it.
+Keep the plan readable by any later step: what will be built, remaining work,
+quotes of what people said about it, one check-result line. Skip what the code or git
+already shows. No session instructions or Machine facts; past skill names
+without `$`.
 
 ## Adaptation
 
-If you had to discover a convention that wasn't documented — error handling pattern, test structure, naming style, import conventions — add it to the repo's style guide (AGENTS.md) so the next session doesn't have to rediscover it.
+If you had to discover an undocumented convention (error handling, test
+structure, naming, imports), add it to `AGENTS.md` so the next Session doesn't
+rediscover it.

@@ -3,34 +3,36 @@ requires: LF_RELEASE_NOTES_CONTEXT env var pointing to JSON release context
 produces: RELEASE_NOTES.md
 diff_files: false
 ---
-Write release notes that fuse release intent with shipped behavior.
+Write release notes that tie why the release changed to what actually shipped.
 
 ## Workflow
 
-1. Read `LF_RELEASE_NOTES_CONTEXT` and parse the JSON. `source_limits` states
-   the hard context/output bounds; `omissions` records source material that did
-   not fit. Never infer behavior from omitted source.
-2. Treat `decisions` as the intent ledger: what changed in product direction, release policy, operations, and user experience during this cycle.
-3. Treat `commits` as the bounded behavior ledger for the exact first-parent
-   git range in the target area. Use `merged_prs` to recover intent and
-   discussion. Do not expand the source with git or GitHub queries; the bounded
-   JSON is the complete notes input.
-4. Fuse them. The release notes should explain what users, operators, and contributors can do differently now. Use commits/PRs to ground every claim.
-5. Each `breaking` line is a compatibility break the release cut proved, such as
+1. Read the JSON at `LF_RELEASE_NOTES_CONTEXT`. `source_limits` gives the
+   context and output limits; `omissions` counts source that didn't fit. Never
+   guess at behavior from omitted source.
+2. `decisions` says what changed this cycle in product direction, release
+   policy, operations and user experience.
+3. `commits` is what shipped: the exact first-parent range for the target
+   area. `merged_prs` explains why. The JSON is the whole input; don't query
+   git or GitHub for more.
+4. Combine them: what users, operators and contributors can do differently
+   now. Ground every claim in a commit or PR.
+5. Each `breaking` line is a compatibility break the release cut found, such as
    `lf < 0.15.0 can no longer open the store (raised by: drop_waves)`. Quote it
    verbatim in the opening story and explain the upgrade in operational notes.
-   Loopflow adds any line the notes omit. An empty list means older versions
-   keep working; never invent a break.
-6. Keep the previous release-note voice if `previous_release_notes` exists, but improve structure when the previous notes were too raw.
+   Loopflow adds any line the notes leave out. An empty list means older
+   versions keep working; never make up a break.
+6. Keep the voice of `previous_release_notes` if present, but fix structure
+   when they were too raw.
 7. Write to `LF_RELEASE_NOTES_OUTPUT` when set, otherwise `RELEASE_NOTES.md`.
-   A preview supplies a temporary output path; do not edit the repository's
-   release files or publish anything.
+   A preview passes a temporary path; don't edit the repository's release
+   files or publish anything.
 
 ## Output
 
-Raw markdown only. No JSON. No code fence wrapping the output. Keep the
-complete file below `source_limits.release_notes_bytes`; Loopflow rejects
-oversized notes because this file also becomes release-queue metadata.
+Raw markdown only. No JSON, no code fence around it. Stay under
+`source_limits.release_notes_bytes`; Loopflow rejects bigger notes because the
+file also becomes release-queue metadata.
 
 First line must be exactly:
 
@@ -40,38 +42,37 @@ First line must be exactly:
 
 Structure:
 
-1. **Opening story** — 2-4 sentences. Answer “why upgrade?” and name the through-line of the release. This is narrative, not a list.
-2. **Thematic sections** — sections named after user/operator outcomes, not implementation buckets. Each section starts with a short paragraph connecting the decisions to the shipped behavior, followed by concise bullets for scanners.
-3. **Operational notes** — include only when relevant: release process, deployment, migration, billing, TestFlight, compatibility, or known manual steps.
-4. **Small changes** — minor fixes and polish that do not deserve a full theme.
+1. **Opening story**: 2-4 sentences of narrative, not a list. Why upgrade, and
+   what ties the release together.
+2. **Thematic sections**: named after outcomes, not implementation buckets.
+   Each opens with a short paragraph linking the decisions to what shipped,
+   then concise bullets.
+3. **Operational notes**: only when needed: release process, deployment,
+   migration, billing, TestFlight, compatibility, manual steps.
+4. **Small changes**: minor fixes and polish.
 
-## Source handling
+## Sources
 
-- Decisions are source material, not release notes. Do not paste the ledger wholesale.
-- PR titles are source material, not release notes. Do not dump them chronologically.
-- If decisions and commits disagree, trust the commits for what shipped and use decisions to explain why.
-- If decisions mention future work that did not ship, either omit it or mark it clearly as “not included.”
-- If `omissions` contains non-zero counts, synthesize only from the included
-  evidence. Mention the bounded sample only when it materially limits a claim;
-  do not dump the omission ledger into the notes.
-- If there are no decisions, build the narrative from commits, merged PRs, and
-  diffs.
-- Minor notes summarize the whole cycle since the preceding `.0` tag. Features
-  in that range may already have shipped in patches; describe progress across
-  the cycle without claiming every feature first appears in this release.
-  Reconcile later changes with earlier ones and describe the final behavior.
-- If there are decisions but no matching shipped behavior, keep the note cautious: describe the policy/intent change, not an implementation that is absent.
+- Decisions and PR titles are inputs, not notes. Don't paste the ledger or
+  list PRs in order.
+- When decisions and commits disagree, commits say what shipped; decisions
+  say why.
+- Future work that didn't ship: leave it out or mark it "not included."
+- With non-zero `omissions`, write only from what's included. Mention the
+  sample limit only when it weakens a specific claim.
+- With no decisions, build the story from commits, merged PRs and diffs.
+- Minor notes cover the whole cycle since the preceding `.0` tag. Some
+  features already shipped in patches; describe progress across the cycle,
+  reconcile later changes with earlier ones, and describe the final behavior.
+- Decisions with no shipped behavior: describe the policy or intent change,
+  not an implementation that isn't there.
 
 ## Style
 
-- Lead with outcomes, not mechanisms.
-- Be specific and factual. No marketing filler.
-- Prefer a few strong themes over many headings.
-- Write for the person deciding whether to upgrade and the operator debugging the release six weeks later.
-- Synthesize from the merged PRs and their intent; `RELEASE_NOTES.md` is the interpreted story, not a changelog.
-
-## Quality bar
-
-A good release note could not be generated from PR titles alone. It reads the
-intent from decisions and merged PR descriptions, proves it against the exact
-commits being tagged, and leaves a concise operational record.
+- Outcomes first, mechanisms second.
+- Specific and factual. No marketing filler.
+- A few strong themes beat many headings.
+- Write for someone deciding whether to upgrade, and for the operator
+  debugging the release six weeks later.
+- `RELEASE_NOTES.md` is the interpreted story, not a changelog. Good notes
+  could not be written from PR titles alone.

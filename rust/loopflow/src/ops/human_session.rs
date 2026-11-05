@@ -343,10 +343,8 @@ fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     }
 }
 
-/// Available exactly when `session.asks` lists the Session: one reading for
-/// Desktop's Waiting state and the asks a phone answers.
 fn session_availability(session: &crate::session::SessionSummary) -> Option<SessionAvailability> {
-    crate::engine::session::ask_of(session).map(|_| SessionAvailability::Available)
+    session.available.then_some(SessionAvailability::Available)
 }
 
 /// Whether a Session's conversation is an occurrence of a Graph. Membership

@@ -47,7 +47,6 @@ server read/subscribe ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
 CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
 server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph owners
-server session.answer ─ engine::session ─ exact existing Session owner (free input claim) ─ provider / PTY
 server attach ─ exact existing Session owner ─ provider / PTY
 
 Desktop execution launch ─ ordinary CLI ─ existing Session / Graph owners
@@ -82,12 +81,7 @@ deliberate edit, and never automatically replay the request.
 Session-to-Task adoption (`task.create`) shares its creation function with the CLI and launches no work.
 `task.run` and `task.ship` start the same command a terminal would, detached
 under its own execution owner, and answer the typed value that process reports
-(`engine/launch.rs`); the request never carries the run. `session.asks` reads
-Rust's one Available judgment and Tasks at interactive steps; Desktop's
-Available state is the same reading (`engine::session::ask_of`).
-`session.answer` types into the Session's owner as a viewer would, taking a
-free input claim for the write and leaving; it never replaces another viewer's
-claim and never resends uncertain input. Create-and-run and
+(`engine/launch.rs`); the request never carries the run. Create-and-run and
 Session launches retain their ordinary CLI path and existing Session/Graph owners. Ghostty rendering and app-owned automation retain
 their boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.

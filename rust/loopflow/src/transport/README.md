@@ -235,11 +235,6 @@ provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
 
-The server's `session.answer` is a short-lived viewer: it attaches with
-`control: true, replace: false` and no `own`, so a held claim answers `busy`;
-sends its text, then Enter, each followed by `controlled` to confirm the owner
-took it; and leaves. It never sends `end_input`.
-
 Desktop Session panes set `LF_SERVER=1` for their terminal relay. The
 relay obtains an `attach` bridge from the local client API server before speaking
 this same owner protocol. No owner or provider is created on bridge failure.

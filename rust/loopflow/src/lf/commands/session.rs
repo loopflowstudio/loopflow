@@ -20,46 +20,6 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     if let SessionCommand::List(args) = command {
         return list_sessions(args, Shape::Tasks);
     }
-    if let SessionCommand::Asks { json, watch } = command {
-        if *watch {
-            return crate::engine::session::watch_asks(super::watch::Transport::Stdio).map(drop);
-        }
-        let asks = crate::engine::session::asks()?;
-        if *json || cli.json {
-            println!("{}", serde_json::to_string_pretty(&asks)?);
-        } else if asks.is_empty() {
-            println!("Nothing waits on you.");
-        } else {
-            for ask in &asks {
-                println!("{}", ask.render());
-            }
-        }
-        return Ok(());
-    }
-    if let SessionCommand::Answer {
-        id,
-        text,
-        submit,
-        json,
-    } = command
-    {
-        let answered = crate::engine::session::answer(id, text, *submit)?;
-        if *json || cli.json {
-            println!("{}", serde_json::to_string_pretty(&answered)?);
-        } else {
-            println!(
-                "Typed {} bytes into {}{}",
-                answered.bytes,
-                answered.session,
-                if answered.submitted {
-                    " and pressed Enter"
-                } else {
-                    ""
-                }
-            );
-        }
-        return Ok(());
-    }
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
         command,
@@ -189,9 +149,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List(_) | SessionCommand::Asks { .. } | SessionCommand::Answer { .. } => {
-            unreachable!("lists, asks and answers return before any runtime")
-        }
+        SessionCommand::List(_) => unreachable!("lists return before any runtime"),
         SessionCommand::Resume {
             id,
             connection,

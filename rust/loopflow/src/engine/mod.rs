@@ -10,7 +10,6 @@
 //! a client names (`task.run`), one module per namespace.
 
 pub mod launch;
-pub mod session;
 pub mod task;
 
 use serde::{Deserialize, Serialize};

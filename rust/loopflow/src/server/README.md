@@ -102,7 +102,7 @@ on `code`; only `outcome_unknown` means the request may have taken effect:
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
 | `invalid` | Malformed message or refused arguments, such as subscribing to a read with no watch | null |
 | `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner}`, `{id}`, `{repository}`, `{expression}` |
-| `conflict` | The request contradicts current state: a still-unanswered request ID, or another viewer holding a Session's input | `{id}`, `{session}` |
+| `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
 | `unavailable` | A dependency is missing or failed: the Machine registry, a watch, a read | `{resource}` when one is named |
 | `outcome_unknown` | The operation may have run; inspect state before retrying | null |
 | `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
@@ -117,7 +117,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | Resource | Reads | Writes |
 | --- | --- | --- |
 | `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs`, `task.wait` | `task.create`, `task.run`, `task.ship`, `task.hold`, `task.steer`, `task.comment`, `task.interrupt`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
-| `session` | `session.list` (`limit` pages it), `session.owner`, `session.asks` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new`, `session.answer` |
+| `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new` |
 | `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
 | `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repository.path` | |
 | `graph` | `graph.list`, `graph.run` | `graph.customize` |
@@ -144,8 +144,8 @@ part of what a phone or bot client is offered.
   cannot select one. A missing primary stays absent. Resolve its owner with
   `session.owner` before attachment.
 - `subscribe {id, operation}` takes a read with a watch: `view.list`,
-  `session.list` without `limit`, `session.asks`, `task.get`, `task.wait`,
-  `history.list`, `plan.get`, `repository.planning` and `process.list`. It answers
+  `session.list` without `limit`, `task.get`, `task.wait`, `history.list`,
+  `plan.get`, `repository.planning` and `process.list`. It answers
   `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
@@ -190,28 +190,6 @@ part of what a phone or bot client is offered.
   response means outcome unknown; inspect state before retrying. IDs correlate
   diagnostics and are **not** durable deduplication receipts. No automatic
   resubmission.
-- `session.asks {}` is what agents on this Machine wait on a person for, a
-  complete list every reading, longest waiting first: `[{session, name, task,
-  agent, since, question, kind, source}]`. A Session asks when Rust's
-  Available judgment says it waits (`source: report` from the terminal's
-  validated Program Status, `provider` from the provider's stream); its
-  `question` is a blocked report's message, else the provider's last turn,
-  else null, never a guess. A Task standing at an interactive step with no run
-  carrying it asks too (`source: step`, `question` the step's name, `session`
-  its primary conversation or null). `since` is Unix seconds, null when nothing
-  recorded it. `lf session asks --json` prints the same list; Desktop's
-  Available state for a Session is the same reading.
-- `session.answer {session, text, submit}` types `text` into the Session's
-  terminal through its owner, then Enter with `submit` (`\r` on a PTY, `\n`
-  on pipes), and answers `{session, bytes, submitted}`. It attaches as a
-  viewer asking for input control without replacing anyone, confirms each
-  write with the owner before the next, and leaves. Another viewer holding
-  input is `conflict` and nothing is sent; an unknown or ended Session or an
-  owner that no longer answers is `not_found`; a running provider with no
-  Loopflow owner is `unavailable`. A failure after the claim is
-  `outcome_unknown`; nothing is resent. `text` is omitted from request
-  telemetry. `lf session answer <session> <text> [--submit] --json` prints
-  the same value.
 - `session.owner {session}` resolves a Session ID to `{owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.

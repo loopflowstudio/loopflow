@@ -1195,17 +1195,13 @@ impl WaveCommand {
 impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::ObserveStatus { .. }
-            | Self::History { .. }
-            | Self::List { .. }
-            | Self::Asks { .. } => false,
+            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
             | Self::Resume { .. }
             | Self::New { .. }
             | Self::Steer { .. }
-            | Self::Answer { .. }
             | Self::Rename { .. }
             | Self::Send { .. }
             | Self::Receive { .. } => true,
@@ -1716,33 +1712,6 @@ pub enum SessionCommand {
     },
     /// List Sessions
     List(SessionListArgs),
-    /// What agents wait on a person for: each waiting Session and each Task
-    /// at an interactive step, longest waiting first
-    #[command(
-        after_help = "The question is a blocked terminal report's message, else the provider's last turn, else the step's name; none when Loopflow has no text.\n  lf session answer <session> \"yes\" --submit    answer one without its terminal"
-    )]
-    Asks {
-        #[arg(long)]
-        json: bool,
-        /// Print a JSON line now and each time the asks change, until stdin closes
-        #[arg(long, requires = "json")]
-        watch: bool,
-    },
-    /// Type an answer into a Session's terminal without opening it
-    #[command(
-        after_help = "Takes the Session's input only while no viewer holds it, and releases it after; a viewer holding input refuses the answer and nothing is sent. Uncertain delivery is reported, never retried."
-    )]
-    Answer {
-        /// Session ID or provider conversation ID
-        id: String,
-        /// The text typed, as is
-        text: String,
-        /// Press Enter after the text
-        #[arg(long)]
-        submit: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
         after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"

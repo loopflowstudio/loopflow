@@ -277,8 +277,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         p.started_at,
         COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),
-        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
-        (SELECT act.observed_at FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id AND act.observed_at>0)
+        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -359,7 +358,6 @@ fn read_summary(
             primary_scope: row.get(26)?,
             agent_process_evidence,
             available: live && row.get(27)?,
-            activity_observed_at: row.get::<_, Option<i64>>(40)?.filter(|_| live),
             program_status: row
                 .get::<_, Option<String>>(30)?
                 .map(|json| serde_json::from_str(&json))

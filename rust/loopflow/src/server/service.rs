@@ -503,15 +503,7 @@ async fn operate(
         Operation::Write(change) => {
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
-                for field in [
-                    "content",
-                    "notes",
-                    "plan",
-                    "layout",
-                    "slots",
-                    "expression",
-                    "text",
-                ] {
+                for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
                     fields.remove(field);
                 }
             }

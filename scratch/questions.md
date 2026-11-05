@@ -5,9 +5,8 @@
   843f5c's branch, unlanded; if this lands first, nothing in CI stops a direct
   `DROP COLUMN` until it does. Assumption: land in either order and rebase the second;
   the gap is days of CI measurement, not a store risk. 843f5c was only read, not steered.
-- **`reader_floor` writes stop.** A NULL row reads as "names itself" in shipped builds
-  (`applied_floor`), identical to writing the migration's own name, so NULL is harmless
-  to them and this build reads nothing. Consequence either way: builds already installed
-  keep their floor check, so the first migration after this lands refuses them once,
-  with the old message. Writing the previous row's floor instead would admit them, at
-  the cost of a dated compat write. Assumption: follow the brief (no write).
+- **`reader_floor` writes carry forward (resolved by concept review, 2026-11-05).** The
+  earlier assumption, no write, reversed: NULL refuses every installed build at the next
+  additive migration, which main does not do, so it fails the brief's "harmless" test.
+  Evidence and direction: "Next implement" in the working design. Jack Heart can overrule
+  this by accepting one lockout in exchange for no dated write; the write comes out cleanly.

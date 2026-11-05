@@ -1984,23 +1984,17 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             ));
         };
         if task.linear_id.is_none() {
-            if let Some(project) = &task.project_id {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Project(project.clone()),
-                )
-                .await?;
-            }
-            if retry_creation {
-                super::planning_export::retry_task_export(&store, repo, &task.id).await?;
-            } else {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Task(task.id.clone()),
-                )
-                .await?;
+            let project = task
+                .project_id
+                .clone()
+                .map(crate::durable::WorkRef::Project);
+            let work = crate::durable::WorkRef::Task(task.id.clone());
+            for work in project.iter().chain([&work]) {
+                if retry_creation {
+                    super::planning_export::retry_export(&store, repo, work).await?;
+                } else {
+                    super::planning_export::sync_export(&store, repo, work).await?;
+                }
             }
         }
         let task = store

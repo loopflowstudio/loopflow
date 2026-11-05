@@ -3,6 +3,7 @@
 #[cfg(test)]
 use crate::test_linear_input::SeedLinearSqlite;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -63,8 +64,10 @@ async fn serve(
 #[derive(Default)]
 pub(crate) struct PlanningState {
     pub(crate) requests: usize,
-    /// TeamChanges deltas among `requests`.
-    pub(crate) team_changes: usize,
+    /// Requests by GraphQL operation name.
+    pub(crate) operations: BTreeMap<String, usize>,
+    /// Added to every answer: a provider taking its time.
+    response_delay: Option<std::time::Duration>,
     rate_limit_query: Option<&'static str>,
     wave_summary: String,
     reject_wave_update: bool,
@@ -145,13 +148,10 @@ async fn planning_graphql(
     {
         let mut provider = state.lock().await;
         provider.requests += 1;
-        if request["query"]
-            .as_str()
-            .unwrap()
-            .contains("query TeamChanges")
-        {
-            provider.team_changes += 1;
-        }
+        *provider
+            .operations
+            .entry(operation_name(request["query"].as_str().unwrap()))
+            .or_default() += 1;
         if provider
             .rate_limit_query
             .is_some_and(|query| request["query"].as_str().unwrap().contains(query))
@@ -178,9 +178,23 @@ async fn planning_graphql(
     if slow_export || slow_team_check {
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
     }
+    let delay = state.lock().await.response_delay;
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
     planning_response(axum::extract::State(state), axum::Json(request))
         .await
         .into_response()
+}
+
+/// The operation name a request log records, such as `FindExportIssue`.
+fn operation_name(query: &str) -> String {
+    query
+        .split(|c: char| c.is_whitespace() || c == '(' || c == '{')
+        .filter(|word| !word.is_empty())
+        .nth(1)
+        .unwrap_or("anonymous")
+        .to_owned()
 }
 
 async fn planning_response(
@@ -346,9 +360,21 @@ async fn planning_response(
     } else if query.contains("mutation DeliverProjectCreation")
         || query.contains("mutation DeliverTaskCreation")
     {
-        state.creation_writes += 1;
         let input = &vars["input"];
         let is_project = query.contains("DeliverProjectCreation");
+        // Linear keeps client-supplied ids unique: a re-sent creation whose first
+        // send did land is refused, never duplicated.
+        let exists = if is_project {
+            state.extra_projects.iter().any(|p| p["id"] == input["id"])
+        } else {
+            state.issues.iter().any(|i| i["id"] == input["id"])
+        };
+        if exists {
+            return axum::Json(
+                json!({"errors":[{"message":"an entity with this id already exists"}]}),
+            );
+        }
+        state.creation_writes += 1;
         if is_project {
             let mut project = planning_project(input["id"].as_str().unwrap(), "project-1");
             project["name"] = input["name"].clone();
@@ -374,12 +400,13 @@ async fn planning_response(
         } else {
             let mut issue = state.issues.last().unwrap().clone();
             if !issue["project"].is_null() {
+                let id = issue["project"]["id"].as_str().unwrap().to_owned();
                 issue["project"] = state
                     .extra_projects
                     .iter()
-                    .find(|p| p["id"] == issue["project"]["id"])
-                    .unwrap()
-                    .clone();
+                    .find(|p| p["id"] == id)
+                    .cloned()
+                    .unwrap_or_else(|| planning_project(&id, "project-1"));
             }
             issue
         };
@@ -3803,6 +3830,18 @@ fn exports_later_tasks_after_timeout(after_save: bool) {
                 .unwrap()
                 .linear_id
                 .is_some());
+            let error: String = rusqlite::Connection::open(&fixture.database)
+                .unwrap()
+                .query_row(
+                    "SELECT export_error FROM task_creation_intents WHERE task_id=?1",
+                    [first.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                error.contains("timed out while looking for the saved creation"),
+                "{error}"
+            );
         });
     });
 }
@@ -3959,7 +3998,7 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
 }
 
 #[test]
-fn task_sync_does_not_claim_success_for_uncertain_publication() {
+fn uncertain_creation_is_resent_once_per_window_and_on_explicit_retry() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             crate::ops::planning_export::sync_export(
@@ -3979,9 +4018,47 @@ fn task_sync_does_not_claim_success_for_uncertain_publication() {
             .is_err());
             state.lock().await.hide_exports = true;
         });
+        let sent = |operation: &str| {
+            runtime
+                .block_on(state.lock())
+                .operations
+                .get(operation)
+                .copied()
+                .unwrap_or_default()
+        };
+        // The lost reply earns one look on the next sync, which re-sends the
+        // saved id; Linear refuses the duplicate, so nothing is created twice.
         let error = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap_err();
-        assert!(error.to_string().contains("uncertain"), "{error}");
-        assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
+        assert!(error.to_string().contains("already exists"), "{error}");
+        assert_eq!(sent("DeliverTaskCreation"), 2);
+        assert_eq!(sent("FindExportIssue"), 2);
+        // Inside the window a plain sync asks Linear nothing and says when it will.
+        let error = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap_err();
+        assert!(error.to_string().contains("next look"), "{error}");
+        assert_eq!(sent("DeliverTaskCreation"), 2);
+        assert_eq!(sent("FindExportIssue"), 2);
+        // `--retry-creation` looks now.
+        runtime.block_on(async { state.lock().await.hide_exports = false });
+        crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
+        assert_eq!(sent("FindExportIssue"), 3);
+        assert_eq!(sent("DeliverTaskCreation"), 2);
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .prepare_planning_export(
+                crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                "team-1",
+                Some("initiative-1"),
+            )
+            .unwrap();
+        assert_eq!(saved.linear_id.unwrap().as_str(), receipt.id);
+        let provider = runtime.block_on(state.lock());
+        assert_eq!(provider.creation_writes, 2);
+        assert_eq!(provider.issues.len(), 1);
     });
 }
 
@@ -4004,16 +4081,14 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
             )
             .await
             .is_err());
-            // Simulate the absent issue that an explicit retry is allowed to recreate.
-            state
-                .lock()
-                .await
-                .issues
-                .retain(|issue| issue["title"] != task.title);
+            // The creation never landed: the saved id is free to send again.
+            let mut provider = state.lock().await;
+            provider.issues.retain(|issue| issue["title"] != task.title);
+            provider.rate_limit_query = Some("mutation DeliverTaskCreation");
         });
+        // The next sync looks once and re-sends; a rate-limited retry cannot
+        // disprove the earlier uncertain attempt.
         assert!(crate::ops::task::task_sync(task.id.as_str(), false, false).is_err());
-        runtime.block_on(state.lock()).rate_limit_query = Some("mutation DeliverTaskCreation");
-        assert!(crate::ops::task::task_sync(task.id.as_str(), true, false).is_err());
         assert!(
             fixture
                 .store
@@ -4027,6 +4102,9 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
         runtime.block_on(async {
             tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
         });
+        // That look spent the window; a plain sync waits, an explicit retry does not.
+        let error = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap_err();
+        assert!(error.to_string().contains("next look"), "{error}");
         crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
@@ -4045,6 +4123,252 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
         assert_eq!(saved.id, task.id);
         crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 3);
+    });
+}
+
+/// `count` Tasks whose creation was attempted and never confirmed, last looked
+/// for at `observed_at`.
+fn seed_uncertain_exports(
+    fixture: &Fixture,
+    template: &Task,
+    count: usize,
+    observed_at: Option<i64>,
+) -> Vec<crate::durable::TaskId> {
+    (0..count)
+        .map(|index| {
+            let task = fixture
+                .store
+                .sqlite
+                .create_task(&crate::work::task::NewTask {
+                    repository_id: template.repository_id.clone(),
+                    due_date: None,
+                    id: crate::durable::TaskId::new(),
+                    project_id: template.project_id.clone(),
+                    title: format!("Uncertain creation {index}"),
+                    description: String::new(),
+                })
+                .unwrap();
+            let owner = crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id);
+            let export = fixture
+                .store
+                .sqlite
+                .prepare_planning_export(owner, "team-1", Some("initiative-1"))
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .attempt_planning_export(owner, &export.input, false, false)
+                .unwrap());
+            if let Some(at) = observed_at {
+                fixture
+                    .store
+                    .sqlite
+                    .observe_planning_export(owner, at)
+                    .unwrap();
+            }
+            task.id
+        })
+        .collect()
+}
+
+#[test]
+fn uncertain_exports_inside_their_window_cost_a_pass_no_requests() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            for work in [
+                crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+                crate::durable::WorkRef::Task(task.id.clone()),
+            ] {
+                crate::ops::planning_export::sync_export(&fixture.store, repo, &work)
+                    .await
+                    .unwrap();
+            }
+            let uncertain = seed_uncertain_exports(fixture, task, 20, Some(now()));
+            let repository = repo.to_str().unwrap();
+            state.lock().await.operations.clear();
+            crate::ops::linear_observe::sync_repository(&fixture.store, repository).await;
+            let operations = state.lock().await.operations.clone();
+            assert_eq!(operations.get("FindExportIssue"), None, "{operations:?}");
+            assert_eq!(
+                operations.get("DeliverTaskCreation"),
+                None,
+                "{operations:?}"
+            );
+            assert!(
+                operations.get("ListTeams").copied().unwrap_or_default() <= 1,
+                "{operations:?}"
+            );
+            // Once the window passes, one pass looks once per export and re-sends
+            // each absent creation with its saved id.
+            for id in &uncertain {
+                fixture
+                    .store
+                    .sqlite
+                    .observe_planning_export(
+                        crate::store::sqlite::planning_changes::PlanningChanges::Task(id),
+                        now() - 3600,
+                    )
+                    .unwrap();
+            }
+            state.lock().await.operations.clear();
+            crate::ops::planning_export::sync_repository_exports(&fixture.store, repository)
+                .await
+                .unwrap();
+            let operations = state.lock().await.operations.clone();
+            assert_eq!(
+                operations.get("FindExportIssue"),
+                Some(&20),
+                "{operations:?}"
+            );
+            assert_eq!(
+                operations.get("DeliverTaskCreation"),
+                Some(&20),
+                "{operations:?}"
+            );
+            assert!(
+                operations.get("ListTeams").copied().unwrap_or_default() <= 1,
+                "{operations:?}"
+            );
+            for id in &uncertain {
+                let saved = fixture.store.get_task(id).await.unwrap().unwrap();
+                let receipt = fixture
+                    .store
+                    .sqlite
+                    .prepare_planning_export(
+                        crate::store::sqlite::planning_changes::PlanningChanges::Task(id),
+                        "team-1",
+                        Some("initiative-1"),
+                    )
+                    .unwrap();
+                assert_eq!(saved.linear_id.unwrap().as_str(), receipt.id);
+            }
+            assert!(fixture
+                .store
+                .sqlite
+                .planning_export_owners(repository)
+                .unwrap()
+                .is_empty());
+        });
+    });
+}
+
+/// `count` Tasks already bound to issues with nothing pending: a store the size
+/// of a real one, without its traffic. One statement, not `count` transactions.
+fn seed_mapped_tasks(fixture: &Fixture, template: &Task, count: usize) {
+    rusqlite::Connection::open(&fixture.database)
+        .unwrap()
+        .execute(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?1)
+             INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,created_at,issue_title,planning_state)
+             SELECT 'task_'||lower(hex(randomblob(16))),?2,?3,'mapped-'||i,'FIX-M'||i,?4,'Mapped '||i,'unstarted' FROM n",
+            rusqlite::params![
+                count as i64,
+                template.repository_id.as_str(),
+                template.project_id.as_ref().map(|id| id.as_str()),
+                now()
+            ],
+        )
+        .unwrap();
+}
+
+// On main this fails twice over: the pass looks at every uncertain export first
+// (a ListTeams and a FindExportIssue each) and the creation's own deadline is
+// spent on a nested Team check before the create is sent.
+#[test]
+fn task_create_reaches_linear_past_pending_exports_and_a_slow_provider() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        seed_mapped_tasks(fixture, task, 1000);
+        runtime.block_on(async {
+            seed_uncertain_exports(fixture, task, 20, Some(now()));
+            // The Team delta is stale, as it is whenever a person creates a Task.
+            rusqlite::Connection::open(&fixture.database)
+                .unwrap()
+                .execute("DELETE FROM linear_team_checks", [])
+                .unwrap();
+            let mut provider = state.lock().await;
+            provider.response_delay = Some(std::time::Duration::from_secs(1));
+            provider.operations.clear();
+        });
+        let saved = crate::ops::task::task_create(
+            repo,
+            Some("product"),
+            Some("Reach Linear".into()),
+            Some("Within the creation's own deadline".into()),
+            crate::ops::task::TaskAdoptionOptions::default(),
+        )
+        .unwrap();
+        let operations = runtime.block_on(state.lock()).operations.clone();
+        assert!(saved.linear_id.is_some(), "{operations:?}");
+        assert_eq!(
+            operations.get("DeliverTaskCreation"),
+            Some(&1),
+            "{operations:?}"
+        );
+        assert_eq!(
+            operations.get("FindExportIssue"),
+            Some(&1),
+            "{operations:?}"
+        );
+        assert!(
+            operations.get("ListTeams").copied().unwrap_or_default() <= 1,
+            "{operations:?}"
+        );
+    });
+}
+
+#[test]
+fn timed_out_creation_names_its_step_and_the_next_pass_resolves_it() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Project(task.project_id.clone().unwrap()),
+            )
+            .await
+            .unwrap();
+            state.lock().await.response_delay = Some(std::time::Duration::from_secs(2));
+            let error = crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Task(task.id.clone()),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("timed out while sending the creation"),
+                "{error}"
+            );
+            let owner = crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id);
+            assert!(
+                fixture
+                    .store
+                    .sqlite
+                    .planning_export_attempts(owner)
+                    .unwrap()
+                    .0
+            );
+            state.lock().await.response_delay = None;
+            // A late answer may still land the creation; either way the next pass
+            // binds the saved id without anyone re-running sync.
+            tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+            crate::ops::planning_export::sync_repository_exports(
+                &fixture.store,
+                repo.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let saved = fixture.store.get_task(&task.id).await.unwrap().unwrap();
+            let receipt = fixture
+                .store
+                .sqlite
+                .prepare_planning_export(owner, "team-1", Some("initiative-1"))
+                .unwrap();
+            assert_eq!(saved.linear_id.unwrap().as_str(), receipt.id);
+            assert_eq!(state.lock().await.issues.len(), 1);
+        });
     });
 }
 
@@ -4083,8 +4407,9 @@ fn standalone_export_recovers_and_moves_without_duplicate_issues() {
                 &crate::store::StorageConfig::sqlite(fixture.database.clone()),
             ))
             .unwrap();
+        // The hidden look spent this window; an explicit retry looks now.
         runtime
-            .block_on(crate::ops::planning_export::sync_export(
+            .block_on(crate::ops::planning_export::retry_export(
                 &reopened, repo, &work,
             ))
             .unwrap();
@@ -4171,21 +4496,22 @@ fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effect
                     &crate::store::StorageConfig::sqlite(fixture.database.clone()),
                 ))
                 .unwrap();
+            // The hidden look spent this window; explicit retries look now.
             if owner == &project {
                 state.blocking_lock().lose_attachment_reply = true;
                 assert!(runtime
-                    .block_on(crate::ops::planning_export::sync_export(
+                    .block_on(crate::ops::planning_export::retry_export(
                         &reopened, repo, owner
                     ))
                     .is_err());
             }
             runtime
-                .block_on(crate::ops::planning_export::sync_export(
+                .block_on(crate::ops::planning_export::retry_export(
                     &reopened, repo, owner,
                 ))
                 .unwrap();
             runtime
-                .block_on(crate::ops::planning_export::sync_export(
+                .block_on(crate::ops::planning_export::retry_export(
                     &reopened, repo, owner,
                 ))
                 .unwrap();

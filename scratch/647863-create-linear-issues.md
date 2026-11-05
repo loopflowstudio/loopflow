@@ -1,0 +1,90 @@
+# Create Linear issues reliably; stop draining pending exports every pass
+
+Task 647863. Jack Heart asked on 2026-11-05 why no Task created since ~02:31Z
+reached Linear and why Loopflow spends most of its hourly Linear allowance
+re-probing stuck exports. The Task description holds the evidence; this is the
+plan.
+
+## Cause
+
+`LinearClient::graphql` ran `linear_observe::check_before_write` before every
+mutation. For a creation that check sat between `attempt_planning_export`
+(attempted=1) and `DeliverTaskCreation`, inside the export's five-second
+deadline: it opened a second Store, listed every Wave and all ~990 Tasks,
+derived each Task's state, took the Team lock and possibly read a `TeamChanges`
+delta. The deadline fired before the create was sent, so every creation ended
+"timed out; uncertainty retained", and `lf task sync` refused to repeat an
+uncertain create without `--retry-creation`, whose own attempt hit the same wall.
+
+Independently, every pass over pending exports built a fresh repository client
+(`ListTeams` to validate the Team claim) and observed each uncertain export
+(`FindExportIssue`) before deciding not to retry it: O(N) requests per pass,
+times ~11 concurrent lf processes.
+
+## Change
+
+1. **No hidden check inside writes.** `graphql` sends the mutation. Freshness
+   runs at work boundaries (`sync_scope`, `team_current`) and explicitly in
+   `deliver_task_state`, which already called it. Deleted: the `check_before_write`
+   call in `linear/mod.rs`.
+2. **Team claim validated once per process.** `resolve_repository_context`
+   remembers (team, checkout path) after one successful `ListTeams`; fixtures
+   get a fresh key from their temp dir. A long-lived process learns a `lf reteam`
+   on restart.
+3. **Uncertain creations are observed once per window, then retried with the
+   saved id.** New column `export_observed_at` on `task_creation_intents` and
+   `project_transitions` (migration `export_observed_at.sql`). Only a look at an
+   uncertain (attempted) creation is stamped, so a creation whose first send
+   timed out gets one look on the very next pass. The window rule lives in one
+   place, `planning_export::export`: a pass refuses an attempted export observed
+   within the window before building a client; a look that finds the issue
+   absent re-sends the create with its saved id (idempotent) and logs it.
+   Window = max(10 min, `delta_fresh_secs()`): longer as the budget tightens,
+   until reset inside the reserve. `lf task sync` reports "looked Ns ago, next
+   look in Ms" inside the window; `--retry-creation` looks now and re-sends.
+4. **Timeouts name the step.** "Export timed out while sending the creation;
+   creation identity and uncertainty retained."
+
+Pass cost over N pending exports when nothing changed: 0 requests. Documented in
+`rust/loopflow/src/ops/README.md`.
+
+## Delete — do not maintain (done)
+
+- `check_before_write` call inside `LinearClient::graphql`. Its one remaining
+  caller is `deliver_task_state`.
+- `retry_task_export` → `retry_export(store, repo, work)` (Projects too).
+- `task_sync_does_not_claim_success_for_uncertain_publication` → replaced by
+  `uncertain_creation_is_resent_once_per_window_and_on_explicit_retry`.
+- The fake Linear server now refuses a creation whose client id already exists,
+  as Linear does; hidden-lookup recoveries in two tests use `retry_export`.
+- Compress (2026-11-05): the SQL `observed_since` filter on
+  `planning_export_owners` (the Rust check is the one window rule), the
+  `CASE` clearing the stamp on first attempt, `LinearClient::endpoint()` and the
+  `#[cfg(test)]` claim-key suffix, the fixture's dead `team_changes` counter and
+  `seed_finished_tasks`'s unused `count`.
+
+## Acceptance (from the Task)
+
+- Fixture server answering after a realistic delay, ~1,000 Tasks and 20 uncertain
+  exports: `task_create` sends `DeliverTaskCreation` and binds; fails on today's code.
+- A pass with 20 uncertain exports inside the window: ≤1 `ListTeams`, 0 `FindExportIssue`.
+- `--retry-creation` sends the create or names the blocked step.
+- After `lf install`: the 19 listed Tasks get identifiers (demo step; record in PR).
+
+## Checks
+
+`cargo test -p loopflow --lib -- <19 planning export, store planning_export and
+linear_team_checks tests>` 19 passed (96 s, after compress); `cargo clippy --all-targets -D warnings`
+clean; `scripts/check_migrations.py` ok (export_observed_at unmerged). Gate filter:
+`test(ops::linear::task_planning_tests::) | test(store::sqlite::planning_export::) |
+test(store::sqlite::linear_team_checks::) | binary(lf)` minus the two long
+`ops::linear` fixtures named in scripts/testing.md; website suite for docs/work.md.
+
+## Remaining (demo step)
+
+- `lf install` the branch, then `lf task sync <id> --retry-creation` for the 19
+  listed Tasks (12 loopflow, 6 etude-studio, 1 manabot) or let the drain run;
+  record each identifier in the PR. The live budget sat in the reserve (≈210 of
+  5,000 left) on 2026-11-05 05:37Z; the drain stops spending once installed.
+- Jack decides whether ten minutes is the right healthy-budget window
+  (`scratch/questions.md`).

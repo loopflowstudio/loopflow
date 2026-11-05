@@ -31,6 +31,7 @@ impl PlanningChanges<'_> {
 }
 
 impl SqliteStore {
+    /// Unmapped Projects, then Tasks, whose export a pass may advance.
     pub(crate) fn planning_export_owners(&self, repo: &str) -> StoreResult<Vec<WorkRef>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
@@ -68,6 +69,37 @@ impl SqliteStore {
             &format!("SELECT export_attempted,{link} FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
             [owner.owner().1], |row| Ok((row.get(0)?,row.get(1)?)),
         ).optional()?.ok_or_else(|| StoreError::InvalidData("creation receipt is missing".into()))
+    }
+
+    pub(crate) fn planning_export_observed_at(
+        &self,
+        owner: PlanningChanges<'_>,
+    ) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (table, key) = owner.receipt();
+        Ok(conn
+            .query_row(
+                &format!("SELECT export_observed_at FROM {table} WHERE {key}=?1"),
+                [owner.owner().1],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// Record that a pass looked for this uncertain creation in the provider.
+    pub(crate) fn observe_planning_export(
+        &self,
+        owner: PlanningChanges<'_>,
+        now: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (table, key) = owner.receipt();
+        conn.execute(
+            &format!("UPDATE {table} SET export_observed_at=?2 WHERE {key}=?1 AND export_json IS NOT NULL"),
+            params![owner.owner().1, now],
+        )?;
+        Ok(())
     }
 
     // Capture before provider discovery; a concurrent local save cannot alter this effect.

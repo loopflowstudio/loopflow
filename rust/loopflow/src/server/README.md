@@ -140,6 +140,11 @@ backoff (100 ms doubling to 3.2 s). Its watches share that connection; losing it
 fails every pending request as outcome unknown and every watch, which the
 window reopens for a complete reading.
 
+Every client gives the server ten seconds to answer `status`, `hello` or
+`attach`; a server that accepts and stalls fails the open with that diagnosis
+and the caller's backoff retries. A welcomed session's waits and the bridged
+stream are unbounded unless the caller sets its own limit.
+
 Request diagnostics correlate the response trace with its target, duration,
 result, service incarnation and request ID. The existing log formatter adds the
 real server PID and executable identity. Request spans and nested effect events

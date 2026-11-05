@@ -114,10 +114,13 @@ impl Connection {
     }
 
     pub fn open_at(path: &Path) -> Result<Self> {
-        Self::start(connect(path)?, 64 * 1024)
+        let connection = Self::start(connect(path)?, 64 * 1024)?;
+        connection.set_read_timeout(None)?;
+        Ok(connection)
     }
 
-    /// Hello and welcome within [`HANDSHAKE`]; the session's reads are then unbounded.
+    /// Hello and welcome within [`HANDSHAKE`], which stays set until the caller
+    /// has what it opened the connection for.
     fn start(stream: UnixStream, capacity: usize) -> Result<Self> {
         stream.set_read_timeout(Some(HANDSHAKE))?;
         let mut socket = Socket::new(stream, capacity)?;
@@ -134,7 +137,6 @@ impl Connection {
         let answer = socket
             .receive()
             .map_err(|error| stalled(error, "welcome the connection"))?;
-        socket.writer.set_read_timeout(None)?;
         match answer {
             Some(ServerMessage::Welcome(welcome)) => Ok(Self {
                 socket,
@@ -260,7 +262,6 @@ pub(crate) fn bridge_existing(owner: &LfProcessId) -> Result<UnixStream> {
 /// then it reads one byte at a time, so no owner byte is left in a buffer.
 pub fn attach(path: &Path, owner: &LfProcessId) -> Result<UnixStream> {
     let mut connection = Connection::start(connect(path)?, 1)?;
-    connection.set_read_timeout(Some(HANDSHAKE))?;
     match connection
         .request(Operation::Attach {
             owner: owner.clone(),
@@ -348,8 +349,8 @@ impl Socket {
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::{UnixListener, UnixStream};
-    use std::time::{Duration, Instant};
+    use std::os::unix::net::UnixListener;
+    use std::time::Instant;
 
     use super::{attach, Connection, HANDSHAKE};
     use crate::id::LfProcessId;
@@ -427,14 +428,6 @@ mod tests {
     fn a_welcomed_session_reads_without_a_bound() {
         let (_home, path) = silent_server(true);
         let connection = Connection::open_at(&path).unwrap();
-        let stream: &UnixStream = &connection.socket.writer;
-        assert_eq!(stream.read_timeout().unwrap(), None);
-        connection
-            .set_read_timeout(Some(Duration::from_millis(50)))
-            .unwrap();
-        assert_eq!(
-            stream.read_timeout().unwrap(),
-            Some(Duration::from_millis(50))
-        );
+        assert_eq!(connection.socket.writer.read_timeout().unwrap(), None);
     }
 }

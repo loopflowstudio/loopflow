@@ -191,7 +191,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         ))
         .unwrap();
         let id = session["id"].as_str().unwrap();
-        let change = Write::TaskFromSession {
+        let change = Write::TaskCreate {
             directory: repo.path().to_owned(),
             id: id.into(),
             title: "Keep the conversation".into(),
@@ -261,7 +261,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
             .unwrap();
         // A failed request has its own trace, changes no Task and launches nothing.
-        let refused = served(Write::TaskFromSession {
+        let refused = served(Write::TaskCreate {
             directory: repo.path().to_owned(),
             id: id.into(),
             title: " ".into(),
@@ -687,8 +687,8 @@ fn server_operations_match_their_lf_commands() {
     }) {
         // Creation has its own two-order comparison in served_session_adoption_matches_cli_without_new_execution;
         // task.start and session.start run as their own lf process (task_create_tests).
-        Write::TaskFromSession { .. }
-        | Write::TaskCreate { .. }
+        Write::TaskCreate { .. }
+        | Write::TaskStart { .. }
         | Write::SessionStart { .. }
         | Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
@@ -1324,12 +1324,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
     use loopflow::portfolio::PortfolioCommand;
     let path = |path: &Path| path.display().to_string();
     let (directory, words): (String, Vec<String>) = match write {
-        Write::TaskCreate { .. } | Write::SessionStart { .. } => {
+        Write::TaskStart { .. } | Write::SessionStart { .. } => {
             return write
                 .delegated()
                 .expect("delegated writes spell their lf child");
         }
-        Write::TaskFromSession {
+        Write::TaskCreate {
             directory,
             id,
             title,

@@ -17,7 +17,7 @@ pub enum Write {
     /// Task from a request and start it. Runs as its own `lf` process, so the
     /// Graph launch keeps its owner; admission survives a lost carrier reply.
     #[serde(rename = "task.start")]
-    TaskCreate {
+    TaskStart {
         directory: PathBuf,
         request_id: crate::id::TaskCreateRequestId,
         request: String,
@@ -27,7 +27,7 @@ pub enum Write {
     },
     /// `lf task create --session <id> --title <title> --json`, without launching.
     #[serde(rename = "task.create")]
-    TaskFromSession {
+    TaskCreate {
         directory: PathBuf,
         id: String,
         title: String,
@@ -141,7 +141,7 @@ pub enum Write {
     GraphCustomize { directory: PathBuf, name: String },
     /// `lf portfolio <change> --json`, run from `/`: which repositories the
     /// app shows.
-    #[serde(rename = "desktop.portfolio.set")]
+    #[serde(rename = "portfolio.set")]
     Portfolio {
         change: crate::portfolio::PortfolioCommand,
     },
@@ -227,13 +227,13 @@ impl Write {
         let directory = self.directory();
         let task_repo = |issue: &str| crate::ops::task::task_repository(directory, Some(issue));
         match self {
-            Self::TaskCreate { .. } | Self::SessionStart { .. } => {
+            Self::TaskStart { .. } | Self::SessionStart { .. } => {
                 anyhow::bail!(
                     "`lf {}` runs as its own process",
                     self.delegated().expect("delegated").join(" ")
                 )
             }
-            Self::TaskFromSession { id, title, .. } => value(&crate::ops::task::task_create(
+            Self::TaskCreate { id, title, .. } => value(&crate::ops::task::task_create(
                 &crate::ops::task::task_repository(directory, None)?,
                 None,
                 Some(title.clone()),
@@ -508,7 +508,7 @@ impl Write {
     pub fn delegated(&self) -> Option<Vec<String>> {
         let mut argv = vec!["--cwd".to_owned(), self.directory().display().to_string()];
         match self {
-            Self::TaskCreate {
+            Self::TaskStart {
                 request_id,
                 request,
                 wave,
@@ -565,8 +565,8 @@ impl Write {
 
     pub(crate) fn directory(&self) -> &Path {
         match self {
-            Self::TaskCreate { directory, .. }
-            | Self::TaskFromSession { directory, .. }
+            Self::TaskStart { directory, .. }
+            | Self::TaskCreate { directory, .. }
             | Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
@@ -614,7 +614,7 @@ mod tests {
             r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
             r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
-            r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
+            r#"{"kind":"portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"chapter.start","directory":"/r","name":"October","plan":"{}","preview":true}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#,

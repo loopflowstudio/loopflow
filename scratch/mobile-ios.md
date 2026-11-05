@@ -117,16 +117,22 @@ generation. Decisions taken in this slice:
   `mobile.status`/`mobile.configure` encoders, which no client sends (Desktop
   reads mobile setup through `lf server mobile`).
 
-Checks (November 5, after the merge): `cargo test -p loopflow --lib server::`
-20 pass; `--test served_reads` 5 pass; `--test transport_tests server_` 17 pass
-(one run saw `server_subscriptions_refresh_work_and_resolve_primary_session`
-fail at its `view.get` request under the parallel suite; it passed alone and on
-rerun, unresolved); `--test integration task_create_survives` pass;
-`scripts/test_desktop.sh --filter 'ServerClientTests|ServerProtocolTests|RegistryQueryTests'`
-37 pass; iOS `xcodebuild test -only-testing:LoopflowiOSTests` 81 pass, 2 skipped.
-The opt-in host-Tailscale acceptance (`transport_tests mobile_native_acceptance`)
-has not been rerun on revision 2; it needs the private host certificate and
-belongs to demo.
+Checks (November 5, concept-review fixes): `cargo test -p loopflow --lib server::`
+20 pass; `--test transport_tests server_` 17 pass (includes the portfolio-scoped
+`view.select` watch); `--test served_reads` 4 pass, 1 fail
+(`server_operations_match_their_lf_commands`: served `task.hold` names
+"Jack Heart", the CLI "Jack"; fails identically on unmodified `c866a09fbb`,
+unresolved, owner gate); Desktop `--filter 'ServerClient|ServerProtocol|Registry'`
+42 pass; iOS `LoopflowiOSTests` 81 pass, 2 skipped; clippy clean.
+The host-Tailscale acceptance (`transport_tests mobile_native_acceptance`) and
+physical-device proofs belong to demo.
+
+The November 5 concept review's four items are in code: `view.select` and its
+watch read only portfolio repositories (`lf desktop plans --all`); the portfolio
+is `portfolio.get`/`portfolio.set`; `Write::TaskStart` is `task.start` and
+`Write::TaskCreate` is `task.create` (Swift `.taskStart`); the operation table
+lists every kind. The merge's `transport_tests` compile break (moving
+`Terminal.child` out of a `Drop` type) is fixed with `wait_exit`.
 
 ## Remaining work and acceptance
 
@@ -141,8 +147,11 @@ Still open, in priority order:
 2. Physical phone over installed Tailscale: identity, network and account
    transitions, camera scanning, share sheet, cellular. Everything so far is
    Simulator evidence.
-3. Installed Desktop lifecycle: update survival of owners and bridges; Desktop
-   reconnects after server replacement.
+3. Installed Desktop lifecycle: Desktop and the phone reconnect after server
+   replacement. Since #1833 (merged here at `c866a09fbb`) a reinstalled or
+   superseded lf ends no idle owner and owners announce no successor; the phone's
+   owner-changed disconnect path went with it. Still unproven: an attached phone
+   bridge across `lf install`.
 4. Phone ergonomics the Simulator cannot judge: CJK conversion, dictation,
    physical keys, VoiceOver, sustained-output energy, rapid submission timing
    (Codex's paste-burst detector is a candidate explanation for one timeout).

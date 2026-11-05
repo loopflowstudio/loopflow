@@ -775,7 +775,7 @@ pub enum DesktopCommand {
     },
     /// Print the repository's default and saved Dashboard plans as JSON
     Plans {
-        /// Apply one selection across every repository on this Machine
+        /// Apply one selection across every portfolio repository
         #[arg(long)]
         all: bool,
         /// Selection to apply with --all; omitted uses each repository's default

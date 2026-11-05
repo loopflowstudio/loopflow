@@ -2727,8 +2727,8 @@ while True:
         // moves the idle conversation onto the installed lf.
         assert!(fixture.running(&owner), "a superseded owner ended itself");
         terminal.input(b"\x1d");
-        let output = wait_for_viewer(terminal.child, Duration::from_secs(10));
-        assert!(output.status.success(), "{output:?}");
+        let status = terminal.wait_exit();
+        assert!(status.success(), "{status:?}");
         terminal = resume();
         fixture.wait_file("ready-2");
         fixture.ends(&owner);
@@ -4423,6 +4423,19 @@ impl<'a> ServerProof<'a> {
 #[test]
 fn server_task_watch_replaces_readings_across_repositories() {
     let fixture = Fixture::new();
+    let portfolio = |args: &[&str]| {
+        let output = fixture
+            .command(&[&["portfolio"], args].concat())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    portfolio(&["manual"]);
+    portfolio(&["add", fixture.repo.path().to_str().unwrap()]);
     let task = support::register_task_without_pr(
         fixture.home.path(),
         &fixture.repo.path().canonicalize().unwrap(),
@@ -4455,6 +4468,7 @@ fn server_task_watch_replaces_readings_across_repositories() {
     let updated = watch.reading(&tasks).unwrap();
     assert_eq!(contents(&updated)[0]["title"], "Renamed on Desktop");
 
+    // A Task outside the portfolio is absent, as from Desktop's sidebar.
     let second = TestRepo::new();
     support::register_task_without_pr(
         fixture.home.path(),
@@ -4462,6 +4476,15 @@ fn server_task_watch_replaces_readings_across_repositories() {
         "other-repository",
         &second.head_sha(),
     );
+    watch.checkpoint(&tasks, 11).unwrap();
+    loop {
+        let reading = watch.reading(&tasks).unwrap();
+        if reading["answers"] == 11 {
+            assert_eq!(contents(&reading).len(), 1);
+            break;
+        }
+    }
+    portfolio(&["add", second.path().to_str().unwrap()]);
     loop {
         if contents(&watch.reading(&tasks).unwrap()).len() == 2 {
             break;

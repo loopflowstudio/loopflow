@@ -72,7 +72,7 @@ fn task_create_survives_a_dropped_carrier_and_server_restart() {
     let task = CreationFixture::new();
     task.repo.push();
     let id = loopflow::id::TaskCreateRequestId::new();
-    let change = Change::TaskCreate {
+    let change = Change::TaskStart {
         directory: task.repo.path().into(),
         request_id: id.clone(),
         request: "Create from the phone".into(),

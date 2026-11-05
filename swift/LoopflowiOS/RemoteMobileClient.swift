@@ -81,7 +81,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
         try verifySubmission(submission)
-        let outcome = try await request(.command(.taskCreate(directory: submission.directory,
+        let outcome = try await request(.command(.taskStart(directory: submission.directory,
             requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)))
         return try decode(TaskCreateOutcome.self, outcome)
     }

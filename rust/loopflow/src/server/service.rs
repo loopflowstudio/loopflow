@@ -896,7 +896,7 @@ async fn mobile_control(
 }
 
 fn change_recovery(change: &Write) -> &'static str {
-    if matches!(change, Write::TaskCreate { .. }) {
+    if matches!(change, Write::TaskStart { .. }) {
         "retry with the same creation request ID to recover its result"
     } else {
         "inspect Session state before retrying"

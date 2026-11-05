@@ -186,7 +186,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.file", ["issue": issue, "path": path])
         case .waves: TaggedFields("wave.list")
         case .machineId: TaggedFields("machine.self")
-        case .portfolio: TaggedFields("desktop.portfolio")
+        case .portfolio: TaggedFields("portfolio.get")
         case .settings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .paneLayout(let directory, let work):
@@ -235,7 +235,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 /// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
 /// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
-    case taskCreate(directory: String, requestID: UUID, request: String, wave: String?, graph: String?, terminal: Bool)
+    case taskStart(directory: String, requestID: UUID, request: String, wave: String?, graph: String?, terminal: Bool)
     case taskFromSession(directory: String, id: String, title: String)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
@@ -270,7 +270,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
         switch self {
-        case .taskCreate(_, let id, let request, let wave, let graph, let terminal):
+        case .taskStart(_, let id, let request, let wave, let graph, let terminal):
             ["task", "create", "--run", "--json", "--request-id", id.uuidString.lowercased()]
                 + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
                 + Self.option("--graph", graph) + (terminal ? ["--terminal"] : []) + ["--", request]
@@ -358,7 +358,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
-        case .taskCreate(let directory, let id, let request, let wave, let graph, let terminal):
+        case .taskStart(let directory, let id, let request, let wave, let graph, let terminal):
             TaggedFields("task.start", ["directory": directory, "request_id": id.uuidString.lowercased(),
                                         "request": request, "wave": wave, "graph": graph, "terminal": terminal])
         case .taskFromSession(let directory, let id, let title):
@@ -400,7 +400,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .graphCustomize(let directory, let name):
             TaggedFields("graph.customize", ["directory": directory, "name": name])
         case .portfolio(let change):
-            TaggedFields("desktop.portfolio.set", ["change": Self.portfolioChange(change)])
+            TaggedFields("portfolio.set", ["change": Self.portfolioChange(change)])
         case .dashboardQuery(let directory, let id, let expression, let revision):
             TaggedFields("desktop.dashboard.query", ["directory": directory, "id": id, "expression": expression,
                                              "revision": revision])

@@ -59,7 +59,7 @@ pub enum Read {
     #[serde(rename = "view.list")]
     DesktopPlans { directory: PathBuf },
     /// `lf desktop plans --all [--expression <expression>]`: one selection
-    /// across the Machine's repositories, as the phone lists open Tasks.
+    /// across the portfolio repositories, as the phone lists open Tasks.
     #[serde(rename = "view.select")]
     AllViewPlans { expression: Option<String> },
     /// `lf --cwd <directory> desktop sessions`, with `--interactive all`
@@ -100,7 +100,7 @@ pub enum Read {
     #[serde(rename = "machine.self")]
     MachineId,
     /// `lf portfolio`: the repositories this Machine's windows show.
-    #[serde(rename = "desktop.portfolio")]
+    #[serde(rename = "portfolio.get")]
     Portfolio,
     #[serde(rename = "config.settings")]
     Settings {

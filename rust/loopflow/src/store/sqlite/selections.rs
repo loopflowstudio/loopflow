@@ -410,10 +410,12 @@ impl SqliteStore {
         plan_selection_in(&snapshot, repository, selection)
     }
 
-    /// One consistent reading of the same selection across this Machine's repositories.
+    /// One consistent reading of the same selection across `repos` (canonical
+    /// repository paths); a repository with no recorded Work identity has no plan.
     pub fn all_view_plans(
         &self,
         source: Option<&str>,
+        repos: &[String],
     ) -> StoreResult<Vec<crate::work::selection::ViewPlan>> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
@@ -421,17 +423,17 @@ impl SqliteStore {
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let mut statement = snapshot.prepare("SELECT id FROM repository_plans ORDER BY id")?;
-        let repositories = statement
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        repositories
-            .iter()
-            .map(|repository| {
-                let repository = RepositoryId::parse(repository).map_err(invalid)?;
-                plan_selection_in(&snapshot, &repository, selection.clone())
-            })
-            .collect()
+        let mut plans = Vec::new();
+        for repo in repos {
+            if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
+                plans.push(plan_selection_in(
+                    &snapshot,
+                    &repository,
+                    selection.clone(),
+                )?);
+            }
+        }
+        Ok(plans)
     }
 
     /// The observer and one-shot plans expose the same repository/default and saved views.

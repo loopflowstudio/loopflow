@@ -118,20 +118,22 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 
 | Resource | Reads | Writes |
 | --- | --- | --- |
-| `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs` | `task.create`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.hold`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
-| `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new` |
+| `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs` | `task.start`, `task.create`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.hold`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
+| `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new`, `session.start` |
 | `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
 | `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repository.path` | |
 | `graph` | `graph.list`, `graph.run` | `graph.customize` |
 | `machine`, `process` | `machine.self`, `machine.list`, `machine.doctor`, `process.list` | |
 | `usage`, `history` | `usage.get`, `history.list`, `history.retention` | |
-| `work`, `view`, `config` | `work.resolve`, `view.list`, `view.get`, `config.settings` | `config.file` |
-| `terminal` | | `terminal.attach` |
-| `desktop` | `desktop.portfolio`, `desktop.layout` | `desktop.portfolio.set`, `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
+| `work`, `view`, `config` | `work.resolve`, `view.list`, `view.select`, `view.get`, `config.settings` | `config.file` |
+| `portfolio` | `portfolio.get` | `portfolio.set` |
+| `mobile` | `mobile.status` | `mobile.configure` |
+| `terminal`, `request` | | `terminal.attach`, `request.upload` |
+| `desktop` | `desktop.layout` | `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
 
-`desktop.*` is Desktop's own arrangement state: which repositories its windows
-show, saved pane layouts and Dashboards. It is served for Desktop and is not
-part of what a phone or bot client is offered.
+`desktop.*` is Desktop's own arrangement state: saved pane layouts and
+Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
+the phone's `view.select` Task list and its creation destinations all read it.
 
 - `config.file {request}` uses `config::api::Request` for catalogue, declaration,
   explanation and theme access. CLI and Desktop share the same Rust validation
@@ -145,7 +147,7 @@ part of what a phone or bot client is offered.
   WorkViewPlan, including the recorded primary Session; roadmap membership alone
   cannot select one. A missing primary stays absent. Resolve its owner with
   `session.owner` before attachment.
-- `subscribe {id, operation}` takes a read with a watch: `view.list`,
+- `subscribe {id, operation}` takes a read with a watch: `view.list`, `view.select`,
   `session.list` without `limit`, `task.get`, `history.list`, `plan.get`,
   `repository.planning` and `process.list`. It answers
   `subscribed`, then `reading {id,frame}` messages wrapping

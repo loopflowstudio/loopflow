@@ -61,7 +61,7 @@ pub struct ClientIdentity {
 
 /// What a request asks for, named by its `kind`: a dotted resource and verb
 /// (`task.complete`, `plan.get`). `desktop.*` kinds are Desktop's own
-/// arrangement state, not part of what other clients are offered.
+/// arrangement state.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Operation {

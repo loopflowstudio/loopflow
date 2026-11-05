@@ -136,7 +136,7 @@ struct RegistryQueryTests {
             #"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#))
         #expect(query.argv == ["desktop", "query", "--", "picked", "-state:done"])
         let portfolio = ServedWrite.portfolio(change: ["remove", "/r"])
-        #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
+        #expect(try object(portfolio) == object(#"{"kind":"portfolio.set","change":{"action":"remove","path":"/r"}}"#))
         #expect(portfolio.argv == ["portfolio", "remove", "/r", "--json"])
         #expect(portfolio.cwd == "/")
         let chapter = ServedWrite.newChapter(directory: "/r", name: "October", plan: "{}", preview: true)

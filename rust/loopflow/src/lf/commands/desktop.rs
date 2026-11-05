@@ -715,13 +715,32 @@ pub(crate) fn watch_plans(
     )
 }
 
+/// The portfolio's repositories as canonical paths: the set Desktop's sidebar
+/// lists and the phone creates Tasks in. Unreadable members have no Work.
+fn portfolio_repos() -> Result<Vec<String>> {
+    let mut repos = Vec::new();
+    for member in crate::portfolio::read()?.repos {
+        if member.error.is_some() {
+            continue;
+        }
+        if let Some(repo) =
+            crate::repository::CanonicalRepo::containing(std::path::Path::new(&member.path))?
+        {
+            repos.push(repo.to_string());
+        }
+    }
+    Ok(repos)
+}
+
 pub(crate) fn read_all_view_plans(
     expression: Option<&str>,
 ) -> Result<Vec<crate::work::selection::ViewPlan>> {
     let store = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
-    Ok(store.sqlite.all_view_plans(expression)?)
+    Ok(store
+        .sqlite
+        .all_view_plans(expression, &portfolio_repos()?)?)
 }
 
 pub(crate) fn watch_all_view_plans(
@@ -741,7 +760,9 @@ pub(crate) fn watch_all_view_plans(
         watched,
         |store, args| async move {
             let store = super::watch::require_store(store)?;
-            Ok(store.sqlite.all_view_plans(args.expression.as_deref())?)
+            Ok(store
+                .sqlite
+                .all_view_plans(args.expression.as_deref(), &portfolio_repos()?)?)
         },
         transport,
     )

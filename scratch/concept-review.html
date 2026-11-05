@@ -1,101 +1,55 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>LOO-718 · Session recovery contract</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-718 · concept review · one repository set</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292724;--muted:#68625b;--line:#d7d0c5;--panel:#f1ede6;--accent:#76513a}
-@media(prefers-color-scheme:dark){:root{--bg:#201e1c;--fg:#eee7dd;--muted:#bdb3a6;--line:#514940;--panel:#2c2824;--accent:#e2b797}}
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292724;--muted:#68625b;--line:#d7d0c5;--panel:#f1ede6;--accent:#76513a;--new:#3f6b4a}
+@media(prefers-color-scheme:dark){:root{--bg:#201e1c;--fg:#eee7dd;--muted:#bdb3a6;--line:#514940;--panel:#2c2824;--accent:#e2b797;--new:#9ccaa6}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 system-ui,sans-serif}
 main{max-width:760px;margin:auto;padding:48px 24px 80px}header{font-size:13px;color:var(--muted)}
-h1,h2{font-family:Georgia,serif;line-height:1.15;font-weight:normal}h1{font-size:clamp(32px,7vw,46px);margin:28px 0 20px}h2{font-size:29px;margin-top:48px}
-p{margin:16px 0}a{color:var(--accent)}code,pre{font:13px/1.6 ui-monospace,monospace}code{overflow-wrap:anywhere}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}section{margin-top:30px}.example{background:var(--panel);border-left:3px solid var(--line);padding:20px;margin:20px 0}.example strong{display:block;margin-bottom:12px}.decision{border-left:3px solid var(--accent);padding-left:20px}
-.muted,small{color:var(--muted)}dl{margin:24px 0}dt{font-weight:650;margin-top:24px}dd{margin:6px 0}li{margin-bottom:18px}footer{border-top:1px solid var(--line);margin-top:44px;padding-top:12px}details{margin-top:10px}summary{cursor:pointer}
+h1,h2{font-family:Georgia,serif;line-height:1.15;font-weight:normal}h1{font-size:clamp(30px,7vw,44px);margin:28px 0 20px}h2{font-size:28px;margin-top:48px}
+code,pre{font:13px/1.6 ui-monospace,monospace}code{overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.example{background:var(--panel);border-left:3px solid var(--line);padding:20px;margin:20px 0}.example.proposed{border-left-color:var(--new)}
+.example strong{display:block;margin-bottom:10px}.tag{font-style:italic;color:var(--muted)}.proposed .tag{color:var(--new)}
+li{margin-bottom:14px}.muted{color:var(--muted)}footer{border-top:1px solid var(--line);margin-top:44px;padding-top:12px;font-size:14px;color:var(--muted)}
 @media(max-width:420px){main{padding:28px 18px 60px}.example{padding:16px}}
-</style>
-</head>
-<body><main>
-<header>
-LOO-718 · concept-review · November 3, 2026<br>
-Headless review of Jack Heart’s accepted native iOS experience.
-<details><summary>Source files</summary>
-<p><code>scratch/mobile-ios.md</code><br>
-<code>scratch/mobile-task-brief.md</code><br>
-<code>scratch/mobile-task-plan.md</code><br>
-<code>scratch/mobile-prototypes.md</code><br>
-<code>swift/LoopflowiOS/MobileClient.swift</code><br>
-<code>swift/LoopflowiOS/LoopflowiOSApp.swift</code><br>
-<code>swift/LoopflowiOS/SessionTerminalView.swift</code><br>
-<code>swift/LoopflowiOS/FixtureClient.swift</code><br>
-<code>swift/LoopflowiOS/README.md</code><br>
-<code>swift/Loopflow/Services/MachineProtocol.swift</code><br>
-<code>swift/LoopflowiOSTests/MobileTerminalTests.swift</code></p>
-</details>
-</header>
-<h1>The recovery contract needs no further redesign.</h1>
-<p class="decision">Review outcome: nothing further to change and no open product choice within the accepted native fixture slice. Recovery correction <code>81f3a30854</code> keeps Reconnect on the selected Session and restores viewing. No new implementation is proposed. Device judgment and live integration remain outstanding.</p>
-<p>Jack Heart selected open Tasks → existing Session terminal, Desktop styling, and Paste / New line / keyboard visibility. The current native build is an explicit offline fixture. This review adds no screen, provider conversation, or remote takeover policy.</p>
+</style></head><body><main>
+<header>LOO-718 · concept-review (headless) · November 5, 2026<br>
+Built from <code>scratch/mobile-ios.md</code>, <code>scratch/questions.md</code>, <code>swift/LoopflowiOS/RemoteMobileClient.swift</code>, <code>swift/Loopflow/Services/RegistryQuery.swift</code>, <code>rust/loopflow/src/portfolio.rs</code>, <code>rust/loopflow/src/lf/commands/{read,write,desktop}.rs</code>, <code>rust/loopflow/src/server/README.md</code></header>
 
-<h2>One failure, two experiences</h2>
-<div class="example">
-<strong>Original defect · corrected</strong>
-<pre>Tasks → selected Session → connection drops
+<h1>The phone should see the same repositories Desktop does.</h1>
+<p>Outcome: <strong>the design changed</strong>; it iterates to implement. No open product choice. Each change follows from accepted decisions: Jack Heart's “existing open Tasks, like Desktop's working-task sidebar” and one shared server for Desktop and phone.</p>
 
-Disconnected                     [Reconnect]
-                           tap Reconnect ↓
-Attachment attempt fails
-Error text                       [no retry action]
+<h2>The mismatch</h2>
+<div class="example"><strong>Today <span class="tag">existing behavior</span></strong>
+<pre>Desktop sidebar   view.list {directory}  for each portfolio repository
+Phone Task list   view.select "kind:task state:open"   every repository in the store
+Phone New Task    desktop.portfolio   portfolio repositories as destinations
 
-Back to Tasks → open the same row → try again</pre>
-</div>
-<p>The original mismatch: <code>open</code> mapped an attachment exception to <code>unavailable</code>, but the screen only offered Reconnect for <code>disconnected</code>. The selected Session survived while its recovery action disappeared.</p>
-<div class="example">
-<strong>Implemented recovery</strong>
-<pre>Tasks → selected Session → connection drops
-
-Disconnected                     [Reconnect]
-                           tap Reconnect ↓
-Couldn’t connect                  [Reconnect]
-                           tap Reconnect ↓
-Viewing                          [Use keyboard]
-
-Same Session. Fresh snapshot. No input replay.</pre>
-</div>
-<p><strong>Current usage:</strong> If opening or reconnecting fails, choose Reconnect on the Session screen. Reconnect restores viewing. In the offline fixture, choose Use keyboard again before typing; inspect the prompt before resubmitting anything whose delivery was uncertain.</p>
+Task in a repository outside the portfolio:
+  Desktop   hidden
+  Phone     listed, but its repository is not a destination</pre></div>
+<div class="example proposed"><strong>Next <span class="tag">proposed</span></strong>
+<pre>Portfolio (Machine-local repository membership)
+  ├─ Desktop sidebar     Tasks in portfolio repositories
+  ├─ Phone Task list     view.select scoped to the portfolio, server-side
+  └─ Phone New Task      portfolio.get   destinations</pre></div>
 
 <h2>Actions → concepts → APIs</h2>
-<dl>
-<dt>Open a Task</dt>
-<dd>Existing Task → selected Session ID → <code>open(task)</code> → <code>attach(sessionID:)</code>. Opening observes; it does not grant input or geometry.</dd>
-<dt>Reconnect here</dt>
-<dd>Selected Session survives; attachment is replaced → <code>reconnect()</code>. Failed connection attempts stay retryable in the same screen. No automatic retry loop, launch operation, or second owner resolver.</dd>
-<dt>Type after recovery</dt>
-<dd>Program owns the draft; attachment owns revocable permissions → fresh snapshot → viewing → explicit fixture <code>requestControl()</code> → <code>send(bytes)</code>. Resize remains separately gated.</dd>
-<dt>Encounter a missing or ended Session</dt>
-<dd>Retain work identity → explicit unavailable/ended explanation → Tasks navigation. Do not manufacture a replacement Session. Reject a mismatched Session ID before rendering it.</dd>
-</dl>
-<p>The correction reuses existing UI states. It needs no persisted recovery record, client-side draft, domain DTO, or wire schema. LOO-593 remains the owner of Machine errors, Session lookup, and terminal transport. A future adapter must distinguish authoritative permanent failures from connection failures.</p>
-<p>The consumed Swift codec matches LOO-593’s published <code>5b44a394cff</code> byte for byte. Its local contract resolves Session → owner, then bridges to the existing binary protocol. This supplies neither a live WorkViewPlan reading nor remote admission; it creates no reason for the phone to own another Session lifecycle.</p>
+<ul>
+<li><strong>See my open Tasks.</strong> Open Tasks with primary Sessions, in the portfolio → <code>view.select</code> subscription over portfolio repositories. <span class="muted">Scope changes; reading stays one subscription.</span></li>
+<li><strong>Choose where a new Task goes.</strong> Portfolio repository → <code>portfolio.get</code>, renamed from <code>desktop.portfolio</code>. The README's claim that <code>desktop.*</code> is never offered to a phone is false today. The rename makes it accurate.</li>
+<li><strong>Create &amp; start.</strong> <code>task.start</code>. The Rust variant is renamed <code>TaskCreate</code> → <code>TaskStart</code>, so it no longer collides with the wire's <code>task.create</code> (promote a Session).</li>
+<li><strong>Open, observe, Use keyboard, Reconnect.</strong> Unchanged. The Task acceptance says “distinguish viewing from control”.</li>
+</ul>
+<p>The server README's operation table also gains this Task's operations: <code>task.start</code>, <code>session.start</code>, <code>view.select</code>, <code>mobile.status</code>, <code>mobile.configure</code>, <code>request.upload</code>.</p>
 
-<h2>Challenge the recovery contract</h2>
-<p><strong>Normal path:</strong> open → observe → fixture control → type → Return. The reduced key bar and direct Task navigation stay intact.</p>
-<p><strong>Failure and recovery:</strong> first attach fails, a retry also fails, then attachment succeeds. Reconnect stays visible through both failures, and success restores the identical Session as an observer.</p>
-<p><strong>Uncertain input:</strong> the peer accepts bytes, then the send operation reports an error. Recovery shows those bytes once from the peer’s snapshot; it sends neither the text nor Return again. The added regression covers errors after accepted text and after accepted submission.</p>
-<p><strong>Counterexample:</strong> the returned attachment names another Session, or the owner reports an ended Session. Treating every failure as a retryable disconnection would erase useful evidence. Keep those outcomes explicit and never attach a replacement behind the selected Task.</p>
+<h2>Challenge</h2>
+<p><strong>Normal path:</strong> scan the QR code, see the same open Tasks as Desktop's sidebar, then tap one to observe its Session. <strong>Failure:</strong> you remove a repository from the portfolio while the phone watches. The watch re-reads, and that repository's Tasks leave both clients together. <strong>Counterexample that would invalidate it:</strong> you want the phone to reach Tasks Desktop deliberately hides. Nothing on record asks for that. If you do, it becomes a product choice.</p>
 
-<h2>Scope and next proof</h2>
-<p>The passing suite covers the visible retry action through repeated failure, observer-only recovery, wrong-Session rejection, uncertain sends, and preserved missing/ended states. <a href="mobile-ios.md">The implementation plan</a> records the disposition and remaining proof. This review inspected the saved 21:06:45 xcresult: 14 passed, zero failed. Code is unchanged; tests were not rerun. This page has not been visually inspected.</p>
-<p>Carrier/pairing, remote takeover gesture, and hosting tier remain open for follow-up C. They do not block this fixture correction. Physical keyboard, IME/dictation, VoiceOver, and live Tailscale proof remain outstanding. Contextual approval/Stop controls still require trustworthy provider state and action bindings.</p>
-<footer>
-<h2>Review questions and disposition</h2>
+<h2>Questions</h2>
 <ol>
-<li><strong>Does this fixture need another concept change before its native demo?</strong><br>No. Normal input, failed attachment and uncertain delivery preserve the accepted interaction. Physical input quality still needs demonstration.</li>
-<li><strong>Should a failed attachment require returning to Tasks?</strong><br>No. The accepted recovery contract now has an in-place retry.</li>
-<li><strong>Does Reconnect restore keyboard control or resend input?</strong><br>No. It restores viewing of the same Session; existing control and no-replay rules remain.</li>
-<li><strong>Does this review select a remote takeover gesture or hosting tier?</strong><br>No. Those remain unresolved follow-up choices, outside this fixture correction.</li>
+<li>Phone Task list scope: (a) portfolio repositories, matching Desktop (recorded direction) · (b) every repository in the store.</li>
+<li>Repository membership read: (a) <code>portfolio.get</code>/<code>portfolio.set</code> (recorded) · (b) a new <code>repository.list</code> while Desktop keeps <code>desktop.portfolio</code>.</li>
 </ol>
-</footer>
+<footer>Code unchanged in this step; no tests run. Page not visually inspected.</footer>
 </main></body></html>

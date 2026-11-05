@@ -91,6 +91,9 @@ Third compress (2026-11-05, `admits_older_rows(added)` counts the default row
 through the index's `WHERE`; `report_after_promote` returns the clone reason
 from its match): pytest 21 passed, the lib filter 48 passed, clippy and fmt clean,
 `lf context` memory 16000/16000 tokens and scratch under budget.
+Realign after the second review (2026-11-05): all three items confirmed at HEAD;
+`uv run pytest python/tests/test_check_migrations.py` 21 passed, `cargo fmt --check`
+clean; one `questions.md` sentence corrected, no code change.
 
 ## Concept review (2026-11-05, headless)
 

@@ -32,5 +32,6 @@ Reversible choices made headless on 2026-11-05; each is one edit to change.
   defaults.** The CTE binds every new column of the table, not only the indexed
   ones, so a predicate over another new column is evaluated rather than failed;
   a predicate that names an old column, or an expression index, is the break.
-  SQLite's own truth decides (`CASE WHEN`), so NULL counts as outside the index,
-  as it does for the real partial index.
+  SQLite's own truth decides (the one-row CTE is counted through the index's
+  `WHERE`), so NULL counts as outside the index, as it does for the real partial
+  index.

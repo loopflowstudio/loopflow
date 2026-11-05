@@ -27,7 +27,7 @@ Parent (LOO-593) decisions and retry history: `67a968bf84:scratch/questions.md`.
 
 Parent scratch notes were removed from this checkout (see
 [loo-593-parent.md](loo-593-parent.md)). If LOO-593 lands before this Task,
-`server-protocol-2.md` and `server-performance/` disappear from main; re-add
+`server-performance/` and the Rex comparison disappear from main; re-add
 `results.md` and the revision-2 samples from this branch's history.
 
 ## Decided during implementation — November 5, 2026 (headless)
@@ -108,7 +108,7 @@ Parent scratch notes were removed from this checkout (see
   restores the ten-second handshake bound on both sides and clears it for the
   session and the bridged stream. Not a product choice; no wire change.
 
-## Decided during implement (handshake bound) — November 5, 2026 (headless)
+## Decided during implement and compress (handshake bound) — November 5, 2026 (headless)
 
 - **The bound is one constant per side**, `HANDSHAKE` in `client.rs` (shared by
   `status()`, `start` and `attach`) and `ServerLink.handshakeSeconds`; the
@@ -117,20 +117,34 @@ Parent scratch notes were removed from this checkout (see
 - **A stalled wait names what it waited for** ("did not welcome the connection
   / open the owner bridge / answer the readiness request within 10s") and points
   at `lf server status`; other read errors keep their own text.
-- **Check line:** `cargo test -p loopflow --lib server::` 11/11 (10 s);
-  `swift test --filter ServerClientTests` 6/6 (20 s); `cargo test -p loopflow
-  --test transport_tests server_` 15/15; `cargo fmt --check` and `cargo clippy
-  --all-targets -- -D warnings` clean.
+- **`Connection::start` leaves the handshake bound set** (compress). `open_at`
+  clears it once welcomed; `attach` keeps it through the `bridged` answer and
+  clears it on the raw stream, instead of clearing and re-arming between the
+  two. Desktop's three copies of "Server disconnected; refresh state before
+  retrying a command" are one `ServerLink.disconnected`. No wire or behavior
+  change.
+- **Check line:** after compress, `cargo test -p loopflow --lib server::` 11/11
+  (10 s); `swift test --skip-build --filter ServerClientTests` 6/6 (20 s); `cargo
+  fmt --check` and `cargo clippy --all-targets -- -D warnings` clean. Implement's
+  run also passed `cargo test -p loopflow --test transport_tests server_` 15/15;
+  served_reads and the measurement were not rerun after compress (the handshake
+  path they exercise did not change behavior); gate reruns them once.
 
-## Decided during compress (handshake bound) — November 5, 2026 (headless)
+## Decided during realign (handshake bound) — November 5, 2026 (headless)
 
-- **`Connection::start` leaves the handshake bound set.** `open_at` clears it
-  once welcomed; `attach` keeps it through the `bridged` answer and clears it on
-  the raw stream, instead of clearing and re-arming between the two. Desktop's
-  three copies of "Server disconnected; refresh state before retrying a command"
-  are one `ServerLink.disconnected`. No wire or behavior change.
-- **Check line:** `cargo test -p loopflow --lib server::` 11/11 (10 s);
-  `swift test --skip-build --filter ServerClientTests` 6/6 (20 s); `cargo fmt
-  --check` and `cargo clippy --all-targets -- -D warnings` clean. served_reads,
-  transport_tests and the measurement were not rerun: the handshake path they
-  exercise did not change behavior, and gate reruns them once.
+- **The revision-2 tree is in PR #1813.** Jack Heart's `7883f6b402` on the
+  parent branch (November 5, 09:04) carries everything this Task built through
+  implement, the handshake bound and its tests included; this checkout's base
+  moved to `81cf2ee219`. This branch differs from the parent by the compress
+  refinements only (the plan's Status). Assumed: the fold was deliberate, and
+  #1813 is meant to carry revision 2.
+- **Open for Jack: where the remaining 38 lines land.** The declared step
+  publishes them as a PR stacked on #1813; folding them into #1813 and
+  completing this Task against the parent's delivery is smaller. Headless
+  default: the declared step.
+- **`server-protocol-2.md` retired from this checkout** for the scratch budget
+  (`lf context` read 14533/12000 tokens); it is identical at
+  `81cf2ee219:scratch/server-protocol-2.md`, and the server README documents the
+  protocol as built.
+- **Check line:** no code changed since compress ran on this tree (`git status`
+  clean at `63a1ab7967`), so its results stand; gate reruns the table once.

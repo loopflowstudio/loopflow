@@ -1,13 +1,13 @@
 # Hold one server connection per client and negotiate its protocol revision
 
 Task 4877de · implementation plan · November 5, 2026 · stacked on LOO-593 (PR #1813)
-· reconciled November 5 after the concept review's handshake-bound pass
+· reconciled November 5 after the handshake-bound compress
 
 Jack Heart set the direction on November 5: improve the server's protocol for
 performance, reliability and elegance with mobile, Desktop and headless agent
 hosts in mind. The parent's accepted design is
-[server-protocol-2.md](server-protocol-2.md); this Task delivers its
-"Revision 2 core" slice. Discovery (`lf server describe`), Desktop reaching a
+`81cf2ee219:scratch/server-protocol-2.md` (retired from this checkout for
+context budget); this Task delivers its "Revision 2 core" slice. Discovery (`lf server describe`), Desktop reaching a
 Machine over the client carrier, and LOO-718's adoption are separate Tasks.
 Parent notes: [loo-593-parent.md](loo-593-parent.md). Decisions and
 assumptions: [questions.md](questions.md).
@@ -29,23 +29,36 @@ owner protocol.
 
 ## Status
 
-**Built and passing on this branch** (checks in "Done when"): wire types and
-fixtures, the per-connection server session, the Rust client, the Swift mirror
-and one-connection `ServerClient`, README and `docs/dev/server.md`, the
-revision-2 measurement column in [results.md](server-performance/results.md)
-with one admitted connection for the whole workload, and both contract repairs
-from the concept review below (null-id errors close the connection, with a unit
-test; `ErrorCode::Unsupported` deleted), and the handshake bound: both
-clients give `hello`/`attach` ten seconds and read the session without a bound,
-with a stalled-server test on each side and `Display` for `ErrorCode`. The
-compress pass after it left the bound set through `Connection::start` so
-`attach` no longer clears and re-arms it, and gave Desktop one disconnect message.
+**In PR #1813 (the parent), not this branch's diff.** Jack Heart folded this
+Task's tree into LOO-593's branch at 09:04 on November 5 (`7883f6b402`, "Speak
+server protocol revision 2"): wire types and fixtures, the per-connection server
+session, the Rust client, the Swift mirror and one-connection `ServerClient`,
+README and `docs/dev/server.md`, the revision-2 measurement column in
+[results.md](server-performance/results.md) with one admitted connection for the
+whole workload, both concept-review contract repairs (null-id errors close the
+connection, with a unit test; `ErrorCode::Unsupported` deleted; `Display` for
+`ErrorCode`) and the handshake bound with a stalled-server test on each side.
+This checkout's base moved to that branch head (`81cf2ee219`).
+
+**On this branch beyond the parent** (`git diff origin/jack/loo-593-… HEAD --
+rust swift`, 38 lines): the compress refinements. `Connection::start` leaves the
+handshake bound set, `open_at` clears it once welcomed and `attach` clears it on
+the raw stream, instead of clearing and re-arming between `welcome` and
+`bridged`; Desktop's three copies of the disconnect message are one
+`ServerLink.disconnected`; the README paragraph stating the ten-second bound.
+No wire or behavior change. The "Done when" results below were measured on this
+tree.
 
 **Remaining:**
 
 1. Demo/review: the Desktop run below, including recovery after `lf server run`
-   restarts. Headless steps cannot drive the app.
-2. Publish the PR; no merge or Auto-Ship. LOO-593 lands first.
+   restarts. Headless steps cannot drive the app. The parent carries the
+   behavior; either branch's build demonstrates it.
+2. Publish. The declared step publishes this branch as a PR stacked on #1813,
+   carrying only the refinements above. Folding them into #1813 as Jack did
+   with the rest, and completing this Task against the parent's delivery, is
+   the smaller alternative and Jack's call ([questions.md](questions.md)). No
+   merge or Auto-Ship either way; LOO-593 lands first.
 
 Owned elsewhere: retiring the revision-1 sniff (`refuse_revision_one` and its
 test) belongs to the Task that retires revision 1; `lf session resume
@@ -171,7 +184,8 @@ per connection and sets the same 32 MiB message cap. This Task does not edit
 
 ## Concept review — November 5, 2026 (headless)
 
-Reviewed the built change against [server-protocol-2.md](server-protocol-2.md).
+Reviewed the built change against the parent's design
+(`81cf2ee219:scratch/server-protocol-2.md`).
 The promised experience holds: one connection, hello/welcome, requests by id,
 complete readings on reconnect, terminal bytes on their own socket. Three
 contract gaps were found and repaired the same day (decisions and check lines in
@@ -197,5 +211,6 @@ design's affordance for a phone or shed. No open product choice.
   riskiest code; `ServerClientTests` cover cancel with a late answer, disconnect
   failing all pending work and reopening, and a server-ended subscription
   failing its watch alone.
-- **Stack hygiene**: LOO-593's land removes its scratch notes from main; this
-  checkout keeps `server-protocol-2.md` and `server-performance/` until then.
+- **Stack hygiene**: the parent's design and earlier notes are read at the
+  parent commit ([loo-593-parent.md](loo-593-parent.md)); `server-performance/`
+  and the Rex comparison stay here. LOO-593's land removes all of them from main.

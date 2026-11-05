@@ -923,16 +923,17 @@ non-launching adoption through the shared `task_from_session` write; parity cove
 prepared Session identity, repository-person claims and no fabricated Process/Graph,
 not provider continuity. Earlier passes do not establish merged-build acceptance.
 
-Protocol revision 2 (Task 4877de, November 5, after Jack asked to learn from Rex):
-one connection per client, `hello`/`welcome` negotiating
-the newest common revision, requests multiplexed by id; `attach` keeps its own
-connection so terminal bytes never share the control path's queue or fate; the
-one-byte revision-1 sniff is the whole compatibility layer and leaves with revision 1.
-Lessons: the shared watch `Reader` owns a blocking runtime, so a served subscription
-leaves through `spawn_blocking` however its task ends (its drop panic is swallowed);
-a client EOF means "older protocol" only before `welcome`; `session resume --prepare`
-resolves a harness it never starts, so fixtures name one. No local latency change was
-measured; the Desktop run awaits demo.
+Protocol revision 2 (Task 4877de, folded into #1813 at `7883f6b402`, November 5;
+Jack asked to learn from Rex): one connection per client, `hello`/`welcome`
+negotiating the newest common revision, requests multiplexed by id; `attach` keeps
+its own connection so terminal bytes never share the control path's queue or fate;
+the one-byte revision-1 sniff is the only compatibility layer. Lessons: the shared
+watch `Reader` owns a blocking runtime, so a served subscription leaves through
+`spawn_blocking` however its task ends; a client EOF means "older protocol" only
+before `welcome`; bound handshakes, never sessions: Desktop opens links
+behind one task, so one stalled `hello` held every read; `session resume --prepare`
+resolves a harness it never starts, so fixtures name one. No local latency change
+measured.
 
 Registration migrates OS labels while retaining socket/lock identity and disabled
 choices. Readiness is consumed once even on failure; recovery only observes status;
@@ -940,7 +941,7 @@ exact-owner recovery is in `server/README.md`. Native proof: `0e597c17a1:scratch
 or speed/memory claim. LOO-718 owns remote
 admission/iOS; preserve wire identity/credentials; local trust cannot authenticate
 proxies; unattended hosting and phone takeover remain open. #1822 and LOO-724's contention repair prove no continuity, incident
-cause or configured recovery. Full text: `67a968bf84:.lf/wave/product/MEMORY.md`.
+cause or configured recovery.
 
 LOO-500 removed the placeholder scan (surviving files revived retired Waves): writes
 register directories, reads list store rows, unknown status stays explicit.

@@ -5,6 +5,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::{viewer_argv, Presentation, SqliteStore, ViewContent};
+use crate::transport::local_directory_report;
 use crate::work::selection::{BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis};
 
 // Render each host directly. Neither host's wire format is shared layout state.
@@ -29,7 +30,29 @@ impl Host<'_> {
         Ok(block)
     }
 
-    pub(super) fn block(self, label: &str, cwd: &Path, mut argv: Vec<String>) -> Value {
+    /// A tool pane. Rex's login wrapper stays in the foreground of a program
+    /// without job control and hides its cwd, so the program's report is the
+    /// only directory a native split can inherit.
+    pub(super) fn block(self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
+        let argv = match (self, local_directory_report(cwd)) {
+            (Self::Rex(_), Some(report)) => [
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"printf %s "$1"; shift; exec "$@""#.into(),
+                "lf-directory".into(),
+                report,
+            ]
+            .into_iter()
+            .chain(argv)
+            .collect(),
+            _ => argv,
+        };
+        self.terminal(label, cwd, argv)
+    }
+
+    /// The pane with no report. A shell uses this directly: a host reads its
+    /// process cwd, and a report made at launch would outlive its first `cd`.
+    fn terminal(self, label: &str, cwd: &Path, mut argv: Vec<String>) -> Value {
         match self {
             Self::Rex(server) => {
                 // Rex omits its endpoint from native child environments. Carry it
@@ -182,9 +205,12 @@ impl Tools<'_> {
                 args.extend(["--head", head]);
             }
         }
-        Ok(self
-            .host
-            .block(name, self.cwd, viewer_argv(self.cwd, &args)?))
+        let argv = viewer_argv(self.cwd, &args)?;
+        Ok(if name == "shell" {
+            self.host.terminal(name, self.cwd, argv)
+        } else {
+            self.host.block(name, self.cwd, argv)
+        })
     }
 
     fn render_tree(
@@ -346,6 +372,12 @@ mod tests {
                         (&native["first"], second, files)
                     }
                 };
+                let reports = |pane: &serde_json::Value| {
+                    pane["command"].as_array().unwrap().iter().any(|word| {
+                        let word = word.as_str().unwrap();
+                        word.starts_with("\x1b]7;file://") && word.ends_with("/repo/task/\x1b\\")
+                    })
+                };
                 for pane in [conversation, files] {
                     assert_eq!(pane["cwd"], "/repo/task");
                     let command = pane["command"].as_array().unwrap();
@@ -353,6 +385,12 @@ mod tests {
                         command[0] == "env" && command[1] == "REX_SERVER=unix:///task.sock",
                         matches!(host, Host::Rex(_))
                     );
+                    assert_eq!(reports(pane), matches!(host, Host::Rex(_)));
+                }
+                if let (Host::Rex(_), 1) = (host, shells) {
+                    let shell = &secondary["split"]["before"]["block"]["options"];
+                    assert!(shell.to_string().contains("\"shell\""));
+                    assert!(!reports(shell), "a shell's own cwd must follow cd");
                 }
                 let viewing = conversation["command"].as_array().unwrap();
                 if matches!(host, Host::Rex(_)) {

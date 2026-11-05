@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,7 @@ use crate::id::LfProcessId;
 
 const SESSION: &str = "session_5e55105e000040008000000000000001";
 const MODES: &[u8] = b"\x1b[?2004h\x1b[?1h\x1b[>5u";
+const CLEAR_DIRECTORY: &[u8] = b"\x1b]7;\x1b\\";
 
 #[test]
 fn snapshot_preview_fixture() {
@@ -38,7 +40,7 @@ fn snapshot_preview_fixture() {
     }
     let lost_transfer = case == "observe_lost_transfer";
     let taking_input = case == "observe_take" || lost_transfer;
-    let observing = case == "observe" || taking_input;
+    let observing = case.starts_with("observe");
     let preview = if observing {
         None
     } else {
@@ -54,6 +56,10 @@ fn snapshot_preview_fixture() {
     }
     let owner = LfProcessId::new();
     let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
+    let execution = home.join("execution");
+    std::fs::create_dir(&execution).unwrap();
+    let reports_directory = case.ends_with("directory");
+    let viewer_cwd = home.join("viewer-cwd");
     let peer = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
         let mut decoder = Decoder::default();
@@ -117,6 +123,14 @@ fn snapshot_preview_fixture() {
         socket
             .write_all(&wire::frame(Tag::Snapshot, &bytes))
             .unwrap();
+        if reports_directory {
+            socket
+                .write_all(&wire::frame(
+                    Tag::Out,
+                    &wire::event("nonce", 1, Event::Directory { cwd: execution }),
+                ))
+                .unwrap();
+        }
         // A marker outside the screen lets the parent inspect the blank handoff.
         socket
             .write_all(&wire::frame(Tag::Out, b"\x1b]777;live-ready\x07"))
@@ -200,6 +214,14 @@ fn snapshot_preview_fixture() {
         result.unwrap();
     }
     peer.join().unwrap();
+    std::fs::write(
+        viewer_cwd,
+        std::env::current_dir()
+            .unwrap()
+            .as_os_str()
+            .as_encoded_bytes(),
+    )
+    .unwrap();
 }
 
 fn resume_fixture(case: &str) {
@@ -306,7 +328,7 @@ impl Drop for ViewerProcess {
     }
 }
 
-fn preview_case(case: &str) {
+fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     // Prepare the source CLI before the isolated fixture, outside any Cargo run.
     let binary = if case == "resume" || case == "provider_failure" {
         loopflow_test_support::lf_binary()
@@ -472,6 +494,7 @@ fn preview_case(case: &str) {
         !case.starts_with("observe")
     );
     assert!(case == "startup_failure" || case == "provider_failure" || cancelled || inspected);
+    (home, output)
 }
 
 #[test]
@@ -504,6 +527,30 @@ fn passive_viewer_takes_input_only_after_explicit_request_and_acknowledgement() 
 #[test]
 fn passive_viewer_never_replays_an_uncertain_transfer_or_its_input() {
     preview_case("observe_lost_transfer");
+}
+
+/// Returns whether the viewer retired its report, after proving it entered the
+/// execution directory: hosts read both, and they must not disagree.
+fn directory_case(case: &str) -> bool {
+    let (home, output) = preview_case(case);
+    let entered = std::fs::read_to_string(home.path().join("viewer-cwd")).unwrap();
+    assert_eq!(
+        Path::new(&entered),
+        home.path().join("execution").canonicalize().unwrap()
+    );
+    output
+        .windows(CLEAR_DIRECTORY.len())
+        .any(|w| w == CLEAR_DIRECTORY)
+}
+
+#[test]
+fn viewer_taking_a_terminal_enters_the_execution_and_retires_its_report() {
+    assert!(directory_case("directory"));
+}
+
+#[test]
+fn retained_observer_keeps_the_report_of_a_pane_with_no_shell() {
+    assert!(!directory_case("observe_directory"));
 }
 
 #[test]

@@ -20,7 +20,7 @@ use crate::durable::{RepositoryId, TaskId};
 use crate::id::WaveId;
 use crate::journal::OsProcess;
 use crate::store::sqlite::{
-    host_workspaces::{HostOccurrence, HostWorkspace},
+    host_workspaces::{HostCreation, HostOccurrence, HostWorkspace},
     SqliteStore,
 };
 use crate::work::selection::{
@@ -819,7 +819,7 @@ fn materialize(
         workspace_id: workspace.id.clone(),
         task_id: TaskId::parse(&content.work.id)?,
         destination_id: None,
-        creation: "complete".into(),
+        creation: HostCreation::Complete,
     });
     let inventory = rex.windows(container)?;
     let retained = occurrence
@@ -849,10 +849,13 @@ fn materialize(
             store.save_host_occurrence(&occurrence)?;
         }
         anyhow::ensure!(
-            occurrence.creation != "tools_pending",
+            occurrence.creation != HostCreation::ToolsPending,
             "Tool activation outcome is unknown; no duplicate was attempted"
         );
-        if presentation.passive || occurrence.creation != "passive" || content.location.is_none() {
+        if presentation.passive
+            || occurrence.creation != HostCreation::Passive
+            || content.location.is_none()
+        {
             return Ok((
                 occurrence
                     .destination_id
@@ -863,7 +866,7 @@ fn materialize(
         }
     } else {
         anyhow::ensure!(
-            occurrence.creation != "pending" || occurrence.destination_id.is_some(),
+            occurrence.creation != HostCreation::Pending || occurrence.destination_id.is_some(),
             "Task window creation outcome is unknown; no duplicate was attempted"
         );
     }
@@ -875,13 +878,13 @@ fn materialize(
             .destination_id
             .as_deref()
             .expect("retained window has an identity");
-        occurrence.creation = "tools_pending".into();
+        occurrence.creation = HostCreation::ToolsPending;
         store.save_host_occurrence(&occurrence)?;
         rex.call("session.new_split", json!({"session_id":container,"window_id":id,"direction":"horizontal","side":"after","focus":false,"layout":layout}))?;
         id.to_owned()
     } else {
         occurrence.destination_id = None;
-        occurrence.creation = "pending".into();
+        occurrence.creation = HostCreation::Pending;
         store.save_host_occurrence(&occurrence)?;
         let label: String = content
             .title
@@ -897,11 +900,10 @@ fn materialize(
     };
     occurrence.destination_id = Some(id.clone());
     occurrence.creation = if presentation.passive || content.location.is_none() {
-        "passive"
+        HostCreation::Passive
     } else {
-        "complete"
-    }
-    .into();
+        HostCreation::Complete
+    };
     store.save_host_occurrence(&occurrence)?;
     Ok((id, true, shells))
 }

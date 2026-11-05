@@ -8,13 +8,21 @@ Build/review publication through the authored demo is authorized; Auto-Ship and
 merge are not. [rex-workspace.md](rex-workspace.md) holds the plan and remaining work;
 [docs/workspaces.md](../docs/workspaces.md) is the documentation-first user contract.
 
-- **Native split defaults:** the installed revision-8 raw split API starts shells
-  in HOME for two source Task directories when cwd is omitted; no scoped default
-  setter was found. The app Split action remains unverified. Accepted scope still
-  requires native shortcut/menu/API splits in the source Task worktree/Machine.
-  Supported host capability is an engineering dependency; any narrower contract
-  needs Jack's decision. Account-wide Lua and an LF-only split substitute are not
-  accepted solutions.
+**November 5:** Jack Heart requested fixing directory tracking and native splits
+for automatic and manual entry. LF's side is implemented; see Native split defaults
+in [rex-workspace.md](rex-workspace.md). No scope reduction, global configuration
+change, Auto-Ship or merge is authorized.
+
+- **Native split verification:** Rex's app Split was not driven. It needs a focused
+  app window, and Jack was using the Machine. Open: which source the app prefers
+  when both exist (LF makes them agree), and whether it accepts LF's OSC 7 host.
+- **Assumption, reversible:** a conversation bound after launch reports its selected
+  directory on later attachments, though its running provider keeps the original
+  cwd. Jack's requirement is that splits follow the Task; `lf session bind` already
+  documents that later connections use the selected directory. Reporting the
+  provider's own cwd instead is a one-line change.
+- **Assumption, reversible:** a viewer already attached when a bind happens does
+  not move until it reattaches.
 - **Named copies and handoff:** dropping durable named-copy reuse and coordinated
   destination preparation remains an optional, unaccepted simplification. Existing
   behavior and the unfinished handoff requirement remain in scope.

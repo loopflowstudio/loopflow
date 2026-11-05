@@ -1618,14 +1618,11 @@ fn rex_remote_follower_reconnects_without_work_changes_and_reuses_a_lost_reply()
     .unwrap();
     let remote_db = rusqlite::Connection::open(remote.path().join("loopflow.db")).unwrap();
     remote_db
-        .execute(
-            "UPDATE machines SET route='source.invalid' WHERE route='local'",
-            [],
-        )
+        .execute("UPDATE machines SET is_local=0 WHERE is_local=1", [])
         .unwrap();
     remote_db
         .execute(
-            "UPDATE machines SET route='local' WHERE id=?1",
+            "UPDATE machines SET is_local=1 WHERE id=?1",
             [peer.as_str()],
         )
         .unwrap();
@@ -2253,6 +2250,42 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         "session.set_window_label",
         serde_json::json!({"session_id":container,"window_id":window,"label":"My retained arrangement"}),
     );
+    // Rex's wrapper hides a tool's cwd, so its report is all a split can inherit;
+    // a shell has no report to outlive `cd`, and the host reads its process.
+    let block_method = |block: &str, method: &str| -> Value {
+        json(
+            &Command::new(&rex)
+                .args(["--autostart=false", "-S", &endpoint, "block", "call"])
+                .args(["-s", container, "-b", block, method])
+                .output()
+                .unwrap(),
+        )
+    };
+    let blocks = call(
+        "session.list_blocks",
+        serde_json::json!({"session_id":container}),
+    );
+    let checkout = repo.path().canonicalize().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for block in blocks["blocks"].as_array().unwrap() {
+        let id = block["block_id"].as_str().unwrap();
+        let is_shell = block["label"] == "shell";
+        loop {
+            let reported = block_method(id, "pwd")["pwd"].as_str().map(str::to_owned);
+            let process = block_method(id, "process");
+            let cwd = process["foreground"]["cwd"].as_str().map(Path::new);
+            let settled = if is_shell {
+                reported.is_none() && cwd == Some(checkout.as_path())
+            } else {
+                reported.is_some_and(|url| url.ends_with(&format!("{}/", repo.path().display())))
+            };
+            if settled {
+                break;
+            }
+            assert!(Instant::now() < deadline, "{block}: {process}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
     let before = call("session.view", serde_json::json!({"session_id":container}));
     let second = json(&lf(&home, repo.path(), None, &args));
     assert_eq!(second["receipts"][0]["destination"], window);

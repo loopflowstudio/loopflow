@@ -1,4 +1,5 @@
 //! Native locators and creation receipts, never host liveness or layout authority.
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
@@ -19,13 +20,47 @@ pub struct HostWorkspace {
     pub updated_at: i64,
 }
 
+/// How far native creation got. A pending state whose reply was lost fences retries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostCreation {
+    Pending,
+    /// A first-start arrival showing only its Task view.
+    Passive,
+    ToolsPending,
+    Complete,
+}
+
+impl ToSql for HostCreation {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(match self {
+            Self::Pending => "pending",
+            Self::Passive => "passive",
+            Self::ToolsPending => "tools_pending",
+            Self::Complete => "complete",
+        }
+        .into())
+    }
+}
+
+impl FromSql for HostCreation {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_str()? {
+            "pending" => Ok(Self::Pending),
+            "passive" => Ok(Self::Passive),
+            "tools_pending" => Ok(Self::ToolsPending),
+            "complete" => Ok(Self::Complete),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct HostOccurrence {
     pub id: String,
     pub workspace_id: String,
     pub task_id: TaskId,
     pub destination_id: Option<String>,
-    pub creation: String,
+    pub creation: HostCreation,
 }
 
 impl SqliteStore {

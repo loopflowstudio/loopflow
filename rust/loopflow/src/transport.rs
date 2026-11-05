@@ -7,6 +7,7 @@ mod lifetime;
 mod lifetime_tests;
 mod native;
 mod output;
+pub(crate) use output::local_directory_report;
 mod snapshot;
 mod terminal;
 #[cfg(test)]
@@ -943,6 +944,20 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             attaching.push(viewer.id.clone());
                             owner_change |= ownership.claim(own, viewer);
                             viewer.reply(answers, viewer.attached_reply(ownership.id(), terminal));
+                            // Binding selects a directory for later connections;
+                            // the running provider keeps its own.
+                            if let Some(cwd) = exit_record
+                                .as_deref()
+                                .filter(|_| execution_directory_reported)
+                                .and_then(selected_directory)
+                            {
+                                output.directory(&cwd);
+                            }
+                            if let Some(cwd) = output.current_directory() {
+                                viewer.event(Event::Directory {
+                                    cwd: cwd.to_path_buf(),
+                                });
+                            }
                             if let Some(snapshot) = output.snapshot()? {
                                 viewer.stream(Tag::Snapshot, &snapshot)?;
                             }
@@ -1131,15 +1146,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if detached {
             control = None;
         }
-        if let Some(reports) = output.take_reports() {
-            viewers.retain_mut(|viewer| {
-                !viewer.attached || {
-                    let written = viewer.stream(Tag::Out, &reports);
-                    keep(viewer, written)
-                }
-            });
-        }
-        place_events(&output, &mut viewers, announced);
         if let Some(input) = input.as_mut() {
             pending_input.forward(input, &id, terminal);
         }
@@ -1201,6 +1207,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         readers.retain(|(stream, _)| !drained.contains(stream));
+        // After the reads: a provider that prints once and waits wakes nothing further.
+        publish_reports(&mut output, &mut viewers);
+        place_events(&output, &mut viewers, announced);
         // Output written before the execution detached reaches its viewers first.
         if detach {
             control = None;
@@ -1469,6 +1478,23 @@ fn end_viewers(viewers: &mut [Viewer], event: Event) {
     }
 }
 
+/// Send reports the stream can carry now, and any directory they changed.
+fn publish_reports(output: &mut output::Output, viewers: &mut Vec<Viewer>) {
+    if let Some(reports) = output.take_reports() {
+        viewers.retain_mut(|viewer| {
+            !viewer.attached || {
+                let written = viewer.stream(Tag::Out, &reports);
+                keep(viewer, written)
+            }
+        });
+    }
+    if let Some(cwd) = output.take_changed_directory() {
+        for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+            viewer.event(Event::Directory { cwd: cwd.clone() });
+        }
+    }
+}
+
 /// Events enter a stream only between complete terminal sequences, so a viewer
 /// feeding the raw stream to a terminal never sees one split. After the
 /// execution has ended nothing more completes, so they go at once.
@@ -1535,6 +1561,8 @@ struct ViewerState {
     original: Option<libc::termios>,
     alternate: terminal::AlternateScreen,
     restored: bool,
+    /// This viewer took over a caller's terminal and reported a directory.
+    retire_directory: bool,
 }
 
 impl ViewerState {
@@ -1559,6 +1587,11 @@ impl ViewerState {
         self.restored = true;
         if self.output.stdout.is_terminal() {
             let _ = self.reset_display();
+            if self.retire_directory {
+                // The caller's shell owns this terminal again. An empty report
+                // retires ours, so an unreported `cd` is not hidden behind it.
+                let _ = self.output.stdout.write_all(b"\x1b]7;\x1b\\");
+            }
         }
         if let Some(original) = self.original {
             // Discard input the viewer never forwarded, including terminal reports.
@@ -1588,6 +1621,7 @@ impl ViewerTerminal {
             original,
             alternate: Default::default(),
             restored: false,
+            retire_directory: false,
         }));
         let cleanup = Arc::downgrade(&state);
         crate::agent::register_interrupt_cleanup(move || {
@@ -1637,6 +1671,13 @@ impl ViewerTerminal {
             }
         }
         Ok(())
+    }
+
+    fn retire_directory_on_restore(&self) {
+        self.state
+            .lock()
+            .expect("viewer terminal lock poisoned")
+            .retire_directory = true;
     }
 
     fn handoff(&mut self) -> io::Result<()> {
@@ -1928,6 +1969,15 @@ fn attach_with_terminal(
                     };
                     match event {
                         Event::Resize { .. } | Event::Theme { .. } => {}
+                        Event::Directory { cwd } => {
+                            if let Err(error) = std::env::set_current_dir(&cwd) {
+                                tracing::debug!(%error, "viewer cannot enter execution directory");
+                            }
+                            // A retained observer has no shell to report after it.
+                            if let Some(terminal) = terminal.as_ref().filter(|_| take_control) {
+                                terminal.retire_directory_on_restore();
+                            }
+                        }
                         Event::Owner { name, viewer, held } => {
                             if owned && !held {
                                 let who =
@@ -2154,6 +2204,15 @@ pub(crate) fn detach_viewers() -> Result<()> {
             key: handoff.key.clone(),
         },
     )
+}
+
+/// The Session's selected directory, which `lf session bind` can move after launch.
+fn selected_directory(record: &NativeExit) -> Option<PathBuf> {
+    crate::journal::process_ledger()
+        .and_then(|store| store.session(&record.session))
+        .ok()
+        .flatten()
+        .map(|session| session.cwd)
 }
 
 /// The native client has connected in this directory. The owner serializes

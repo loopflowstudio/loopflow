@@ -285,6 +285,12 @@ pub(super) enum Event {
     Return {
         detach: String,
     },
+    /// The execution's directory. Hosts read a terminal's foreground process as
+    /// well as its reports, so the viewer enters it: owner and viewer share a
+    /// Machine, and the two sources must not disagree.
+    Directory {
+        cwd: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

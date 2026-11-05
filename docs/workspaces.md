@@ -157,12 +157,27 @@ If a Wave contains Tasks A and B, splitting in A must enter A's checkout;
 splitting in B must enter B's. There is no single Wave-wide working directory.
 Explicit directory choices remain yours.
 
-**This requirement is not implemented yet.** In the installed Rex version, the
-isolated native split test starts both new shells in home when no cwd is supplied.
-Correct directories on LF's initial panes do not solve subsequent native splits.
-The inspected public API has no scoped Task/window default. The app's normal
-Split action may supply its own directory; that path still needs verification
-before concluding that a host change or different interaction is required.
+The same holds when LF opens the workspace and when you start or resume a Task
+yourself in an existing terminal, from any directory. While LF is attached to
+that terminal, it runs in the Task's directory and reports that directory, so
+Rex has one answer. A conversation bound to another Task checkout after it
+started reports the selected checkout the next time it is opened.
+
+Leave with Ctrl+] and your shell has the terminal back: LF withdraws its report,
+so a split follows your shell's real directory, including any `cd` you make
+afterward. A Shell pane never reports a fixed directory, for the same reason.
+
+Rex's Split uses the source terminal's directory when it has one, and otherwise
+the server's default directory. Check what a pane offers:
+
+```bash
+rex block call -b <block> pwd       # what the terminal reported
+rex block call -b <block> process   # where its foreground process runs
+```
+
+A displayed Task path proves neither. **Confirming this with Rex's Split control
+is still owed;** isolated checks cover both directory sources, not the app's choice
+between them. Herdr and Desktop splits have not been checked.
 
 ## Use your editor and diff tools
 
@@ -212,6 +227,11 @@ Rex keeps Task and Wave Conversation terminals visible when their observers exit
 including saved history and preparation errors. Reopening reuses them without
 replaying their commands; use an explicit resume to continue an ended conversation.
 
+The opening report currently describes native creation or reuse. It does not yet
+report whether each Conversation observer connected successfully; preparation
+errors appear in that terminal. Reopening a retained tab does not restart an
+exited observer. Coordinated readiness reporting and retry remain unfinished.
+
 If reconnection fails while a turn, draft or pending request keeps the provider
 active, `lf resume` reports the failure and preserves that work. Saved history
 cannot reconstruct unfinished input or answer a pending request.
@@ -252,7 +272,8 @@ yet delivered. Automatic reconstruction of a deleted checkout is outside scope.
 The current branch has isolated native evidence for Rex opening/reuse, passive
 arrival/activation, follower recovery, and Herdr Task creation/reuse. It still owes:
 
-- Native new-split worktree defaults, described above.
+- Confirming native Split from each pane in the Rex app, and Herdr/Desktop split
+  behavior. LF's directory reporting is implemented, as described above.
 - Clear template relaunch and native reuse behavior after a server restart,
   without claiming to restore Rex edits or replaying commands into existing work.
 - Bare-open discovery covers explicit listeners on the native Rex server ancestry.

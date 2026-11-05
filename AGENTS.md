@@ -197,6 +197,11 @@ When editing Rust tests:
   pane IDs do not prove that the same processes survived a host restart.
   Verify cwd with launcher-written evidence when host process telemetry still
   reports a login wrapper; a displayed Task path does not prove the process cwd.
+  That wrapper is also what Rex itself sees: a `shell:"none"` program without job
+  control has no readable foreground cwd, so OSC 7 is the only directory a split
+  can inherit. Interactive shells stay unreported, or a launch report outlives `cd`.
+  Isolate a Rex server, never a second Rex app: a separate HOME does not isolate
+  `com.superlogical.rex` defaults, and the app overwrites the person's cached route.
 - `unwrap()` is fine in tests
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory

@@ -92,3 +92,19 @@ reopen, and the agent-tool path in the configured Rex app. Test two Task tabs an
 actual `pwd -P` after splitting. The raw API probe starts in HOME without cwd;
 it does not establish whether the app's shortcut/menu supplies a directory.
 No narrower split contract or deleted-checkout restoration requirement was accepted.
+
+## November 5 — Split review (owed)
+
+Use the normal Split shortcut or menu in Rex, then run `pwd -P` in the new shell.
+Run this on a build of this branch, with a real Task.
+
+1. `lf open --task <ID>`. Split from Task & workflow, Files, Changes, Conversation
+   and Shell; each new shell should be in the Task checkout.
+2. In the Shell pane, `cd /tmp`, then Split; the new shell should be in `/tmp`.
+3. From a plain terminal in another directory, `lf resume <session-id>`, then Split;
+   the new shell should be in the Task checkout.
+4. Press Ctrl+], `cd` elsewhere, then Split; the new shell should follow the shell.
+
+If a result is wrong, compare `rex block call -b <block> pwd` and `process` on
+the source pane. Both agreeing with a wrong split means the app's report handling
+is the next thing to inspect, starting with the OSC 7 host.

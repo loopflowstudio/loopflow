@@ -4,6 +4,14 @@
 
 ## Accepted direction
 
+### November 5 — directory behavior for automatic and manual entry
+
+Jack Heart requested fixing directory tracking and native splitting for automatic
+opening and Tasks started manually in existing terminals, without a new Rex scoped
+default, global configuration or a Task-root lock. The trace and repair are under
+[Native split defaults](#native-split-defaults). This continues LOO-498 and
+authorizes neither shipping nor merge.
+
 Jack Heart's November 3 outcome is familiar Loopflow Work in Rex, with existing
 Task Sessions and provider history. Rex is primary; Herdr is a bounded secondary
 adapter. The LF Task/workflow terminal view is included. cmux parity, Mobile, a
@@ -89,7 +97,7 @@ conversation readiness.
 `open/workspace.rs` consumes shared selection/execution routing and serializes
 native creation. `HostWorkspace` stores destination/selection/copy identity and a
 pending-create receipt; `HostOccurrence` stores Task identity, destination and
-`pending`/`passive`/`tools_pending`/`complete` creation state. Neither owns native
+`HostCreation` state. Neither owns native
 liveness, layout or retention. Herdr keeps its workspace locator and pending layout
 receipt. The one draft migration is `rex_workspaces.sql`; only Wave-template writes
 advance shared Work revisions.
@@ -126,6 +134,16 @@ after exit through Rex's native `exit.on_completion=false`; ordinary shells reta
 their normal native behavior.
 Review found and repaired both disappearing preparation errors and stale routing
 after transfer. Configured provider and workspace-level readiness proof remain owed.
+
+The `c0a5add7e7` checkpoint implements this transport boundary, not the complete
+workspace handoff. `OpenReport` still returns native creation/reuse receipts with
+status `Opening`; it does not receive the observer's attachment acknowledgement.
+The transport fixture preserves a source line across a lost preparation reply and
+then transfers on the same prepared connection, retaining the provider attachment
+token and updating placement. Separate native fixtures prove destination reuse.
+They do not yet prove the composed failed-preparation → repeat open → explicit
+transfer path. Retained failed observers stay visible and are not relaunched by
+opening again; coordinated retry must preserve that no-replay boundary.
 
 ### Shared tools
 
@@ -220,27 +238,38 @@ the server listener cannot be read.
 
 Jack's November 3 comment `691eb6f2-0bcc-4054-8625-536f1de23feb` requires native
 shortcut/menu/API splits to start at the source Task's worktree root on its recorded
-Machine, beside Conversation, Shell, Files, Changes and Task/workflow. Two Tasks in
-one Wave must produce their own directories, including after reopening; explicit
-host directory choices remain explicit. This covers supported Desktop/Herdr paths
-too. Initial-pane cwd alone is insufficient.
+Machine. Two Tasks in one Wave produce their own directories, including after
+reopening; explicit host directory choices remain explicit.
 
-`scratch/rex-host-probe.py` anchors native `session.new_split` calls to two different
-Task directories with cwd omitted. Both real shells wrote `pwd -P` in the isolated
-HOME. Inspected public creation schemas offer per-block cwd but no per-window/Task
-split-default setter. Account-wide Lua changes are outside the accepted design.
-This disproves the raw API case. It does **not** prove that the app's normal Split
-action omits cwd: that path remains unverified. A supported scoped host capability
-or an explicit product revision is needed for the failing API case. No alternative
-LF-only split command or narrower acceptance has been approved.
+**November 5 trace.** Rex's settings text: new tabs and splits "use the source
+terminal's working directory when available. Otherwise, they use the server's
+default directory." `rex split` and raw `session.new_split` with cwd omitted do not
+inherit; only the app action can, which is why the omitted-cwd result was no verdict.
+LF-issued creation already passes cwd. The app's `TerminalMetadata` carries both
+`workingDirectory` and `reportedWorkingDirectory`; which it prefers is unobserved.
+Rex exposes those sources as block `pwd` (last OSC 7) and `process.foreground.cwd`.
 
-November 4 renewed capability inspection: installed `block_creator.list` specifies
-that empty terminal `cwd` starts in home; its shell schema and `api list` expose
-no scoped default setter. The published [CLI reference](https://www.superlogical.com/rex/docs/reference/cli)
-and [Lua reference](https://www.superlogical.com/rex/docs/reference/lua) expose
-per-creation `cwd`, not a Task/window default. Client scripts can change actions,
-but do not intercept the raw server API requirement. No supported scoped solution
-was found; the existing failed probe remains authoritative for that path.
+| Pane | Foreground cwd | Report before | Now |
+| --- | --- | --- | --- |
+| Manual launch/resume from another directory | stale caller directory | Task (or none until more output) | both Task |
+| Task view, Files, Changes, history-only Conversation | unreadable (`login` wrapper) | none | reports Task |
+| Live Conversation pane | unreadable | Task | unchanged; selected directory on later attach |
+| Shell | correct, follows `cd` | none | unchanged, deliberately |
+| Shell after a viewer leaves | correct | stale Task | report withdrawn |
+
+Jack's live server showed the mismatch directly: viewers in `loopflow.codex-resume`
+reporting Task worktrees. His zsh reports nothing, so ordinary splits must use
+process cwd; this is the terminal disagreement he observed, and LF was causing it
+for manual launches.
+
+Repairs: the owner publishes its directory to viewers (`Event::Directory`); viewers
+enter it; controlling viewers retire their report with an empty OSC 7 on leaving
+(Rex clears `pwd`), while retained observers keep it. Later attachments use the
+Session's selected directory, so a conversation bound after launch reports its
+Task. Reports queued by a read now flush after it: a provider that printed once
+and waited left `pwd` empty indefinitely. Rex tool panes announce their directory
+at launch; shells do not, since a launch report would outlive `cd`. Machine identity
+is unchanged: viewer and owner share a Machine, and reports name the executing host.
 
 ### Herdr
 
@@ -282,9 +311,17 @@ saved arrangement intent, not provider preferences. The earlier branch-catalog
 failure remains dated evidence, and a compatible current build/store still needs
 configured demonstration after this sync.
 
+The latest sync, `c6fa1074c0`, includes #1807 (`c59cfcc631`): promotion/binding
+preserves the conversation and immediately updates its selected Task directory,
+while an already-running provider may keep its original cwd. Transport now replays
+provider launch-directory reports to newly attached viewers. Those reports describe
+execution. November 5 work extends those reports to bound conversations through
+the existing owner; no second binding or cwd owner was added to the adapter. Gate
+owns checks of the combined transport and migration changes after this sync.
+
 ## Shared lifetime dependency
 
-November 4 status rechecked during implement confirms LOO-717 remains open at PR
+November 4 status and source rechecked during realign confirm LOO-717 remains open at PR
 #1811, at demo. Its clean checkout at `b81df60579` still requires `--native-settled`
 on every `task presence` write and native closure
 before retirement. It also offers exact retaining-process exit observation through
@@ -310,30 +347,15 @@ authority to settle or delete those resources.
 
 ## Remaining work and decisions
 
-### Delete — do not maintain
-
-- Rex away detection, native closure/settlement, layout mirroring and the Herdr
-  keystroke-resume path are already removed. Preserve native locator reuse and
-  pending-create receipts; do not restore these predecessors for lifetime integration.
-- The observer's exit-and-resume-only interaction is replaced by explicit input
-  transfer on its acknowledged connection. Ordinary `lf resume`, attachment fencing,
-  passive opening and source-provider identity remain.
-- `open/workspace.rs::activate` is removed: creation and passive activation share
-  layout preparation and receipt completion in `materialize`. Already materialized
-  windows return before tool rendering; pending creation/activation still fences
-  uncertain replies. Task and Wave launches share `Host::conversation` so observer
-  exit cannot erase either destination's history/errors. No exclusive fixtures
-  remain to remove; native activation and lost-reply coverage exercise this path.
-
 ### Outstanding acceptance
 
 1. **Retention integration:** shared lifetime owner plus Rex observation must
    enforce the revised hold/release contract, including unfocused terminals,
    unavailable inventory and restart identity. No LF closure of Rex shells.
-2. **Native split capability:** raw API cwd inheritance fails; scoped host support
-   remains unresolved. App-menu/shortcut, Desktop, Herdr and remote proof are still
-   owed. A requirement change needs Jack Heart's decision, not an inference from
-   loose layout fidelity.
+2. **Native split verification:** LF's directory path is implemented. Pressing
+   Split in the Rex app from each pane remains owed; automated checks prove both
+   sources agree, not which the app reads, or that it accepts LF's report host.
+   Herdr, Desktop and remote split proof also remain owed.
 3. **Bare-open and remote routing:** native ancestor-based custom-server discovery
    passes the isolated host fixture; moved-viewer CLI routing passes with a
    simulated provider. Actual agent-tool invocation after viewer resume/move still
@@ -350,8 +372,11 @@ authority to settle or delete those resources.
    request input with Ctrl+R on their acknowledged destination connection. The
    existing attachment owner acknowledges that separate request; no provider
    launch, Session replacement or automatic retry occurs. Workspace-level readiness
-   reporting and configured preparation/handoff proof remain unfinished: failed or
+   reporting and composed preparation/handoff proof remain unfinished: failed or
    uncertain preparation must preserve source input and retries reuse the destination.
+   Transport failure coverage and native reuse coverage currently test these
+   separately. The integrated proof must include a retained failed observer,
+   repeated named-copy opening, and explicit transfer after acknowledged preparation.
    Native create/display receipts are not conversation readiness; initial layouts
    must never run resume before a create reply is known. Preserve uncertain replies
    in workspace reporting. Native reorder/source-state preservation still needs
@@ -374,4 +399,6 @@ Earlier complete plans/results: `cc607dc3e1:scratch/rex-workspace.md` and
 `7b886d04cc:scratch/rex-workspace.md`; dated demo evidence is in
 [workspace-demo.md](workspace-demo.md).
 
-Checks (November 4): `cargo test -p loopflow --lib lf::commands::open::` — 9 passed; `cargo nextest run -p loopflow --test integration` filtered to `rex_activates_`, `rex_recovers_`, `rex_lost_recreation_`, `rex_reopens_`, and `rex_remote_arrival_is_passive_` — 5 passed (83–89s each). Prior `passive_viewer`, `prepared_destination_preserves_source_input_until_explicit_transfer`, and native-renderer checks — 5 passed after correcting fixture spawn-state — and the isolated Rex failed-observer retention probe remain applicable. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and `lf context` passed; both context budgets fit. Gate owns broader transport/lifetime/workspace suites and earlier host deadlines; authored demo owns configured interaction. Retention still depends on LOO-717's revised shared contract, and native API split defaults lack supported scoped host capability; neither gap is delivered or reduced.
+Checks (November 5): `work_open_tests::` 27 passed with real Rex, including one stale `machines.route` fixture repaired after #1805; `transport_tests` 59 passed; lib `transport::` and `open::workspace` passed; fmt and clippy passed. Isolated Rex end-to-end covered manual start, manual resume from another directory, `cd`, observer and rebound attachment. Earlier results: `c0a5add7e7:scratch/rex-workspace.md`. Gate owns the combined run; authored demo owns the app's Split.
+
+Compress (November 5), load average about 100, `LF_*`/`REX_*` unset unless noted: lib `transport::` and `open::workspace` passed, `transport_tests` 3 clean runs, clippy passed. `work_open_tests::` failed 8 Rex tests in one full run, panic text not captured, then passed in later full runs and one of the eight alone; cause unestablished. Inside Rex, inherited `REX_*` fails `first_native_launch_keeps_only_valid_desktop_terminal_placement`; one run with them set also failed `successor_handoff_restores_the_terminal_and_preserves_command_results` and `resumed_session_completes_turns_after_build_replacement_and_viewer_return`, and an earlier run failed the cmux `reopening_a_live_conversation_focuses_its_cmux_workspace`, which passed alone. Gate owns the combined run.

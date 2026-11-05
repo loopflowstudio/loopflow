@@ -538,6 +538,41 @@ fn events<'a>(items: &'a [Item], kind: &str) -> Vec<&'a Value> {
 }
 
 #[test]
+fn viewers_enter_the_execution_directory_and_later_ones_the_selected_directory() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "directory"));
+    let mut launching = fixture.viewer(&owner, true);
+    let items = launching.until_event("directory");
+    assert_eq!(
+        Path::new(events(&items, "directory")[0]["cwd"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        fixture.repo.path().canonicalize().unwrap()
+    );
+
+    let selected = fixture.home.path().join("selected");
+    std::fs::create_dir(&selected).unwrap();
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET cwd=?1 WHERE id=?2",
+            rusqlite::params![selected.to_str().unwrap(), fixture.session_of_owner(&owner)],
+        )
+        .unwrap();
+    let mut later = fixture.viewer(&owner, false);
+    let items = later.until_event("directory");
+    assert_eq!(
+        Path::new(events(&items, "directory")[0]["cwd"].as_str().unwrap()),
+        selected
+    );
+    let replay = String::from_utf8_lossy(&out(&items)).into_owned();
+    assert!(replay.contains("selected/"), "{replay:?}");
+    fixture.stop(&owner);
+}
+
+#[test]
 fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     let fixture = Fixture::new();
     let owner = fixture.start(&[

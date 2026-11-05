@@ -2043,10 +2043,19 @@ pub(crate) fn retarget_open_pr(
     let Some(pr) = find_open_pr(repo)? else {
         return Ok(());
     };
+    retarget_pr(repo, pr.number, base, inherit_pr)
+}
+
+pub(crate) fn retarget_pr(
+    repo: &Path,
+    number: u64,
+    base: &str,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
         .arg("edit")
-        .arg(pr.number.to_string())
+        .arg(number.to_string())
         .arg("--base")
         .arg(base)
         .current_dir(repo);

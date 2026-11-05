@@ -75,6 +75,10 @@ Loopflow ships reasonable Graphs for software engineering, and they are
 templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
 
+`pursue` starts by editing the actual user docs. An attached Loopflow Desktop
+shows them in Files; elsewhere, the conversation lists their paths. Edit or
+discuss what's being built while work continues.
+
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal,
 memory and plan, and its own setup for every Task in it: the Graph, the agent,
 the machine and the login that pays. Your repository is the Wave for Tasks

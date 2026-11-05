@@ -1270,15 +1270,19 @@ pub fn merge(
     }
     let target_sha = rev_parse(worktree, target)?;
     let target = target_sha.as_str();
-    if is_ancestor(worktree, target, "HEAD")? {
+    let comparison_base = match fork_base {
+        Some(base) if !is_ancestor(worktree, base, target)? => Some(base),
+        _ => None,
+    };
+    if comparison_base.is_none() && is_ancestor(worktree, target, "HEAD")? {
         return Ok(MergeResult {
             success: true,
             conflicts: None,
             new_head: Some(rev_parse(worktree, "HEAD")?),
         });
     }
-    let comparison = match fork_base {
-        Some(base) if !is_ancestor(worktree, base, target)? => {
+    let comparison = match comparison_base {
+        Some(base) => {
             let tree = rev_parse(worktree, &format!("{target}^{{tree}}"))?;
             Some(
                 git_stdout(

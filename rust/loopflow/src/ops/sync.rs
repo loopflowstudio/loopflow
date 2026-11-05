@@ -126,8 +126,12 @@ pub fn plan_sync(
     };
     // Stacked children retain their history when integrating the parent.
     let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
+    let replay_stack = match &fork_base {
+        Some(base) => !crate::git::is_ancestor(repo, base, &base_ref)?,
+        None => false,
+    };
     let strategy = if fork_base.is_some() || persistent {
-        if crate::git::is_ancestor(repo, &base_ref, "HEAD")? {
+        if !replay_stack && crate::git::is_ancestor(repo, &base_ref, "HEAD")? {
             SyncStrategy::Noop
         } else if fork_base.is_none() && landed(repo, &base_ref)? {
             // A persistent branch outlives its squash-merged PRs. Once the base
@@ -362,13 +366,7 @@ fn finish_sync(
             &verification.head,
         )?;
     }
-    if !expected.stacked {
-        crate::ops::task::record_task_pr_range_after_integration(
-            repo,
-            &operation.owner().target_ref,
-            &verification.target_sha,
-        )?;
-    }
+    record_control_task_state(repo, operation.owner())?;
     operation.complete()?;
     Ok(verification)
 }
@@ -454,7 +452,15 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
         return Ok(());
     };
     if let Some(stacked) = crate::ops::task::task_stack(repo)? {
-        let clear_parent = stacked.parent_branch.is_none();
+        let default = get_default_branch(repo)?;
+        let clear_parent = stacked.parent_branch.is_none()
+            || owner.target_ref == default
+            || owner.target_ref == format!("origin/{default}");
+        if clear_parent {
+            let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+            crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, &|_| {})?;
+            return crate::ops::task::record_stack_sync(&stacked, target_sha, true);
+        }
         return crate::ops::task::record_stack_sync(&stacked, target_sha, clear_parent);
     }
     crate::ops::task::validate_task_pr_range_for_integration(repo, &owner.target_ref, target_sha)?;

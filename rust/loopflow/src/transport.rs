@@ -1415,8 +1415,7 @@ fn wait_for_activity(
         fds.push(pollfd(input.as_raw_fd(), libc::POLLOUT));
     }
     let timeout = timeout.map_or(-1, |timeout| {
-        // poll takes whole milliseconds: rounding down spins at the end of
-        // every retry deadline instead of sleeping until it is due.
+        // Round up so the last fraction of a millisecond does not spin.
         let millis = timeout.as_nanos().div_ceil(1_000_000);
         libc::c_int::try_from(millis).unwrap_or(libc::c_int::MAX)
     });

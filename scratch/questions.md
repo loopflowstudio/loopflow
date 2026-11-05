@@ -44,10 +44,12 @@ Its logic matches main's; the cause is unknown, and four diagnostic runs did not
 Gate or CI should show whether it recurs; a viewer leaving during takeover would be a
 product bug, not only a test race.
 
-Wave memory stayed read-only in the November 4 realign: no step of `auto`, `pursue`, `refresh`
-or `deliver` calls for its upkeep. Earlier passes on this branch did edit it, including
-condensing unrelated sections. Those edits stay and [the PR body](loo-725.md#delivery-text)
-names them, because reverting would drop the LOO-725 section and is as easy later.
+No step of `auto`, `pursue`, `refresh` or `deliver` calls for Wave memory upkeep, yet earlier
+passes on this branch edited it, including condensing unrelated sections. The November 4 sixth
+concept review reverses the earlier choice to keep those edits: disclosure is not authorization,
+and Auto-Ship could land them unread. `ebb9dc8b7d` restored main's text, and the LOO-725 section
+rides in [the PR body](loo-725.md#delivery-text) as a proposal. See
+[the direction](loo-725.md#concept-review-pass-6--2026-11-04).
 
 The November 4 fifth concept review treats abandoned-review age, durable-history expiry and
 edited drafts outside demos as open but not this Graph's stopping condition: none changes this

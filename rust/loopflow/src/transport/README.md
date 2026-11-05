@@ -77,7 +77,8 @@ lifetime policy moves; an older owner without the policy needs another resume.
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
 ends idle owners directly; existing viewers may close and need `lf resume` again.
 Rollover names the same retention reasons. Resume, rollover and lifetime policy
-share this judgment; work holds independent of reachability. Only resume asks whether the owner answers, and only for no open Session.
+share this judgment; work holds independent of reachability. Only resume asks
+whether the owner answers, and only for no open Session.
 Graph runners keep running and launch each next step through the entry.
 Owners and runners whose store has advanced beyond their reader floor cannot
 recover themselves through this policy.

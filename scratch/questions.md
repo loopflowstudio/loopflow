@@ -1,4 +1,38 @@
-# LOO-498 — remaining design judgments
+# LOO-498 — current design and remaining judgments
+
+**November 5 interactive concept review supersedes the older account below.**
+Jack Heart selected config-owned Wave templates, existing DB-owned sticky Desktop
+Task layouts, no LF persistence of hosts/workspaces/occurrences anywhere, and a
+fresh native workspace on every `lf open`. Returning and restoration belong to Rex.
+Repeated-open and named-copy reuse are no longer requirements. No replacement
+sidecar registry or durable creation receipt is allowed. See the current opening
+section of [rex-workspace.md](rex-workspace.md).
+
+Jack also clarified native hierarchy: repository **or** Wave → Rex session;
+Task → tab; workspace → that tab's splits. Fresh opening does not require another
+native session when the current/explicit target is available. Jack clarified that “loop” was voice-to-text noise; there is no extra concept.
+Jack also requested known-host detection and checking the same model in Herdr and
+cmux. Installed APIs support the mapping documented in rex-workspace.md; full LF
+rendering and configured proof remain. The stated working interpretation is that automatic arrivals use normal configured
+Task splits instead of special previews; retain this as an interpretation until
+reviewed, not as a verbatim option selection. No further choice about repeated
+opening is pending. Configuration uses existing
+shared/private scopes; exact layout syntax is an implementation proposal. The
+outstanding engineering question is how retained native Task terminals and live
+arrivals meet their accepted contracts through host/Session evidence without LF
+host records. Unavailable inventory cannot authorize cleanup. Other execution,
+input, Machine and directory guarantees remain. The concept review itself changed no implementation or execution. Jack Heart then
+requested “ok, pursue”; implementation and review publication now continue through
+the pursue skill, without Auto-Ship or merge. Full configured layouts on arrival
+are the stated reversible implementation choice for that pass.
+
+---
+
+## Earlier judgments and implementation choices
+
+The prior persistence and reuse assumptions below are historical and superseded;
+keep their independent evidence and accepted protections.
+
 
 **Reconciled November 5, 2026.** Jack Heart approved the revised build: LF templates
 flow one way into Rex; Rex owns native edits, shells and restoration. A retained Rex

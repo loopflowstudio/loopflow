@@ -1,8 +1,247 @@
 # Open and restore a Loopflow workspace in Rex
 
-**LOO-498 · revised build authorized · reconciled November 5, 2026.**
+**LOO-498 · concept review revised November 5, 2026. Current direction is below; implementation still uses the superseded host registry.**
 
-## Accepted direction
+## November 5 interactive concept review — current accepted design
+
+**Execution authorization:** after this review Jack Heart said “ok, pursue.” Follow
+the pursue skill in the ongoing conversation: implement, compress, sync, realign,
+review/iterate, concept-review, review/iterate, then PR publication. This supersedes
+the review-only boundary of the preceding turn. Preserve Task/checkout/PR identity;
+no Auto-Ship, merge or shared-store migration is authorized. No live Graph was
+observed before launch.
+
+**Reversible implementation choice:** new Tasks arriving in a live repo/Wave
+container receive their normal configured split layout without focus theft or new
+providers. This follows the clarified normal Task-tab hierarchy and the requested
+pursuit; the earlier preview-only implementation is removed. Ordinary selected
+tools may start. Keep this choice visible for the authored demo.
+
+
+Jack Heart explicitly rejected LF persistence of hosts, host workspaces and host
+work occurrences anywhere. Moving those records to sidecar files, config, or
+another LF store does not satisfy the decision. Rex owns its native workspaces.
+Jack selected **fresh launch on every `lf open`**; returning to existing work is a
+Rex interaction. He then clarified the vocabulary: a Wave **or repository**, depending
+on the entry context, maps to a Rex session; a Task maps to a tab; a workspace is
+its set of splits. Jack clarified that “loop” was voice-to-text noise: only Task → tab is intended.
+There is no additional loop, Graph-tab or conversation-tab concept. This supersedes the earlier reopening/named-copy-reuse and durable
+creation-recovery contracts below. It does not authorize implementation in this
+concept-review turn, publication, installation or merge.
+
+### The experience and its three owners
+
+1. Declare a default Task layout in configuration, including Wave-scoped shared or
+   local preferences. These describe how new work should start.
+2. Arrange a Task in Loopflow Desktop. Its current sticky layout stays in LF's
+   existing `work_pane_layouts` database storage.
+3. Run `lf open --host rex --task LOO-498`. Read that Task's current Desktop
+   layout, otherwise its resolved config template, otherwise the builtin. Create
+   a fresh Task tab with those splits in the current/explicitly selected native
+   session, as faithfully as possible, using the Task's actual Machine, checkout
+   and existing conversation identities. Without a selected container, create one
+   for the requested repository/Wave scope (proposed targeting default). Fresh
+   workspace means fresh Task tab/splits, not necessarily a new Rex session.
+4. Rearrange, rename, return to or restore that workspace in Rex. LF keeps no
+   host workspace identity, copy record, native arrangement or creation journal.
+5. Run the command again to deliberately launch another workspace from the current
+   LF source. It neither finds nor modifies the previous one.
+
+**Accepted:** config templates; Desktop live layouts in the DB; external-host
+ownership; each open launches fresh. **Implementation proposal:** use the existing
+configuration resolver and shared semantic pane intent, with whole-layout replacement
+at the winning config scope rather than merging branches of split trees. Shared
+Wave config lives in `.lf/wave/<name>/config.yaml`; private overrides use the existing
+Wave scope in `lf.config.local.yaml`. Repository/global defaults use normal config
+scopes. Exact setting key and serialization are not selected or implemented here.
+Do not invent another configuration file or a host-specific layout language.
+
+### Actions → concepts → APIs
+
+| Action | Concept / owner | Operation |
+| --- | --- | --- |
+| Set new Task defaults | Authored template / config | Existing config read/write path, extended with layout setting (not implemented) |
+| Arrange this Task in Desktop | Current Task layout / LF DB | Existing Task `desktop layout` read/save path |
+| Open it in Rex | One launch / native host | `lf open`; read source, compile in memory, native create, report result |
+| Return, resize, rename or restore | Native workspace / Rex | Rex's own UI/APIs; no LF writeback |
+| Open again | Another explicit launch | Same `lf open`; creates another Task tab and split set, potentially in the same native session |
+
+### Consequences for the next implementation pass
+
+- Remove `HostWorkspace`, `HostOccurrence`, `HostCreation`, their SQL readers/writers,
+  and LF-side host/copy indexes. Do not move them elsewhere. Replace durable
+  host-addressed observer/retry records with operation-scoped acknowledgements or
+  existing LF Session transport where needed; readiness must not reconstruct a
+  host registry. Live execution transport still needs its actual endpoint and
+  attachment identity; that is LF execution state, not a saved native workspace.
+- Move Wave templates from `wave_task_layouts` into normal configuration. Keep
+  current Desktop Task layouts in `work_pane_layouts`, including sticky selections
+  and drafts. Templates contain tools/arrangement, not concrete Sessions, live
+  process IDs, locations or drafts. Resolve those from the Task at launch.
+- Remove the unmerged `rex_workspaces.sql` draft after its consumers are replaced:
+  all three added tables and their triggers are unnecessary under this model.
+  No production DB rollback or shared-store migration is authorized. Preserve the
+  existing private demo snapshot/history; it may contain the superseded draft.
+- `--copy <name>` no longer names reusable LF state. The extra launch is already
+  the copy. Simplify that API and `--new-shells` accordingly; ordinary Shell tools
+  in the selected layout create fresh shells. No copied shell process state.
+- No automatic retries after uncertain native creation, and no durable pending
+  creation record. Report that a workspace may have appeared; inspect/return in Rex.
+  A subsequent explicit open means another fresh launch, even if the prior one
+  succeeded. Creating views never restarts/replays an existing provider.
+- Started, unfinished Tasks and passive automatic arrivals remain accepted.
+  A live follower may keep only its current invocation's native target and seen
+  Tasks in memory. It may append new Task tabs to that session while alive; no
+  persisted host registry or restart reconstruction. Closed tabs stay closed within
+  that live follower. Opening a repository/Wave again launches its current working
+  set; explicit current-session targeting can keep the container.
+  Native restart and any follower command restoration belong to the host; LF
+  does not repair/replay tools into restored tabs.
+- Retention remains required: actual retained Rex Task Session terminals protect
+  checkout cleanup, unavailable evidence never releases, and LF closes only
+  Desktop-owned shells. The current occurrence-table-based `hold::task_hold`
+  cannot be retained. Establish evidence through the host and LF Session lifetime
+  owner without storing a parallel host inventory. If retained stopped terminals
+  cannot be associated reliably through those sources, expose the capability gap;
+  do not silently weaken protection or retain the rejected records. LOO-717 owns
+  cleanup; this review does not select a replacement presence API.
+- Preserve explicit input transfer through the existing LF Session owner, remote
+  routing, agent-tool caller inference, native split cwd, five shared tools,
+  Herdr's bounded adapter and Desktop behavior. New views stay passive.
+
+### Normal path, failure and recovery
+
+**Normal:** open → use/rearrange in Rex → return through Rex. Second open creates
+another workspace; first workspace and its programs are untouched. Template edits
+apply to later launches when no saved Task layout takes precedence; saved Desktop
+Task state does not mutate merely because it was read for Rex.
+
+**Failure:** native create succeeds but its reply is lost. LF reports uncertainty
+and performs no blind retry. Rex is the place to find whatever appeared. Another
+explicit launch may create another view, never another provider or replayed turn.
+
+**Restart:** Rex restores what it supports, potentially with new ordinary shells.
+LF stores no restoration recipe or native IDs and does not infer process continuity
+from restored geometry. A fresh open reads LF's current source again.
+
+**Counterexamples to test:** renamed or edited native workspace must remain
+untouched by a later open; closed arrival tabs must not immediately reappear;
+a stopped retained Task terminal must not lose cleanup protection just because
+there is no LF host row; source layout drafts must not leak into executable argv.
+A saved Desktop layout overriding a newly edited default is intentional current
+precedence, not a host synchronization bug.
+
+### Native hierarchy and automatic arrivals
+
+Jack Heart clarified: “a wave equates to a session in Rex, and a loop and a task
+equate to a tab”; “what I'm calling a workspace is basically a set of splits.”
+He then clarified the session container can be **a Wave or a repository**, depending
+on context, and that “loop” was voice-to-text noise. This supersedes treating
+“workspace” as an LF-owned host container.
+
+| LF selection | Rex presentation |
+| --- | --- |
+| Repository or Wave, chosen by entry context | Native session |
+| Task | Native tab |
+| Task workspace | Set of splits in that tab |
+
+Working interpretation stated in the conversation: newly started Tasks arrive as
+ordinary Task tabs with their configured splits, without taking focus or starting
+another provider. This removes the preview/expand distinction. It can start ordinary
+Shell/Files/Task tool programs selected by the template; earlier preview-only policy
+is superseded **if this interpretation is accepted**. Jack's hierarchy statement
+is explicit; full tool materialization is the interpretation, not a verbatim choice
+of the earlier option. Keep this distinction visible until reviewed.
+
+Container targeting is a native action resolved from caller context or explicit
+selection, not a durable LF record. Normal Task opening appends a fresh tab to that
+container. Opening a whole repository/Wave can create the container for that scope.
+Exact targeting defaults remain a proposed implementation detail; no host discovery
+or stored mapping may silently turn a fresh Task launch into reuse of its old tab.
+
+### Known hosts — November 5 follow-up
+
+Jack Heart requested checking Herdr/cmux against the same concepts and automatically
+using recognized hosts. Extend the fresh-layout design to known workspace-capable
+hosts; earlier cmux-workspace exclusion below is superseded for this direction.
+Do not claim equal remote/lifecycle support from a grouping match.
+
+| LF meaning | Rex | Herdr | cmux macOS |
+| --- | --- | --- | --- |
+| Repo/Wave container | Session | Workspace | Workspace group (or native window when explicitly targeted) |
+| Task | Tab/window | Tab | Workspace/sidebar item |
+| Task's set of splits | Block split tree | Tab pane layout | Workspace pane layout and terminal surfaces |
+
+Evidence read November 5: installed Herdr **0.9.3**, bundled protocol **22** schema
+has `workspace.create`, `tab.create`, `layout.apply`, `pane.current`. Installed
+`/Applications/cmux.app/Contents/MacOS/cmux` is **0.65.0 (108), dda24fbd2**;
+`workspace-group --help` confirms groups, and `new-workspace --help` confirms
+`--group`, `--layout`, `--cwd`, caller-window selection and `--focus false`.
+The cmux CLI is bundled but not on PATH. Discover supported installed entry points
+without requiring a PATH change. No native resources were created for this review.
+
+Sources: [Herdr concepts](https://herdr.dev/tui/docs/concepts/),
+[Herdr CLI](https://herdr.dev/tui/docs/cli-reference/),
+[cmux concepts](https://cmux.com/docs/concepts),
+[cmux groups](https://cmux.com/docs/workspace-groups),
+[cmux API](https://cmux.com/docs/api), and
+[cmux CLI contract](https://github.com/manaflow-ai/cmux/blob/main/docs/cli-contract.md).
+These establish documented/installed capabilities, not composed LF acceptance.
+The cmux “surface tab” is inside a split region and is not the Task-level match.
+
+**Detection contract:** explicit host selection wins; otherwise use the current
+attached viewer for an agent caller, then the actual calling terminal. Recognize
+Rex, Herdr, cmux and Desktop through their native context and APIs, and prefer the
+innermost host when multiplexers are nested. Native pane lookup resolves moves;
+stale launch environment and whichever app is focused cannot choose a different
+Task destination. If no host context exists, use the configured/default route;
+installed/running alone does not mean the caller is inside it. Endpoint or capability
+failure stays attached to the selected host, rather than silently opening elsewhere.
+
+The existing `open.rs::route` already recognizes Rex/Herdr/cmux/tmux/Desktop and
+uses LF Session viewer placement for agent callers. It treats Rex failure as final
+but still builds a fallback chain for other hosts. Revise the shared resolver,
+not an additional discovery service or database host catalog. Retain existing
+conversation-only routes for hosts without a workspace renderer; report that limit
+when a full layout was requested. Implement fresh renderers against the host's
+real grouping/split API, not literal Rex vocabulary. Native session/group handles
+live only in the operation or active follower. Config can express a default host
+preference; that is not a persisted inventory of host instances.
+
+Next proof must include current-host opening in all three hosts, nested-host
+selection, an agent caller after viewer movement, explicit override, and unavailable
+host behavior. Reuse shared source-layout selection and execution routing. Do not
+claim layout parity, native cwd inheritance or remote command safety merely from
+successful detection or CLI help.
+
+### Review result and next proof
+
+Design changed. No unresolved choice about fresh launch remains: Jack selected it
+explicitly in this conversation. “Loop” is resolved as transcription noise; the
+normal-Task arrival interpretation above remains visibly identified. Docs are drafted in `docs/workspaces.md`, and the
+page is `scratch/concept-review.html` (local-file browser opening was blocked by the
+browser protocol policy earlier in this conversation; provide the file link, without
+a workaround). No builtin skill currently teaches workspace
+tracking; keep generic Work/operator skills unchanged. Proposed guidance for any
+future workspace-opening instruction: "`lf open` launches a new native workspace;
+return through the host. Read LF layouts/config as input, and keep no host registry."
+
+The next implementation pass must remove the rejected persistence, implement config
+templates and prove two successive launches leave independent native arrangements
+without creating or replaying providers. Verify automatic and manual native Split
+cwd, live arrivals without focus theft, failure reporting and shared retention.
+The failed configured demo remains evidence in `workspace-demo.md`; this concept
+review neither fixes nor accepts it. No new execution was launched here.
+
+## Earlier design and implementation evidence
+
+The sections below preserve prior rationale and verification. Wherever they depend
+on LF host records, Wave templates in SQLite, named-copy reuse, repeat-open reuse,
+or durable uncertain-create recovery, they are superseded by the accepted review
+above. They are not next implementation instructions. Other accepted requirements
+and evidence limits remain in force.
+
+## Earlier accepted direction
 
 ### November 5 — directory behavior for automatic and manual entry
 
@@ -353,7 +592,7 @@ existing protections. Eligible cleanup may discard uncommitted files; moved/unme
 committed refs retain the shared owner's safeguards. The Rex adapter has no separate
 authority to settle or delete those resources.
 
-## Remaining work and decisions
+## Previous remaining-work account (superseded where noted above)
 
 ### Concept review (November 5) — next implement direction
 

@@ -1,90 +1,46 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-498 concept review — who reads the Rex hold</title>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-498 · Layout ownership and host mapping</title>
 <style>
-  :root { color-scheme: light dark; --fg:#1d1d1f; --muted:#6b6b70; --bg:#fbfbf8; --rule:#ddd9cf; --new:#2f6f4f; --old:#9a3b2e; --code:#f1efe8; }
-  @media (prefers-color-scheme: dark) { :root { --fg:#e9e7e1; --muted:#9a988f; --bg:#17171a; --rule:#34332f; --new:#7fc8a0; --old:#e58a7c; --code:#222226; } }
-  body { margin:0; background:var(--bg); color:var(--fg); font:17px/1.6 Charter, Georgia, serif; }
-  main { max-width: 42rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
-  header { color:var(--muted); font:14px/1.5 -apple-system, system-ui, sans-serif; margin-bottom:2.5rem; }
-  h1 { font-size:1.9rem; line-height:1.2; margin:.2rem 0 1rem; }
-  h2 { font-size:1.2rem; margin:2.8rem 0 .6rem; }
-  code { font:14px ui-monospace, Menlo, monospace; background:var(--code); padding:.05em .3em; border-radius:3px; }
-  table { border-collapse:collapse; width:100%; font:15px/1.45 -apple-system, system-ui, sans-serif; margin:1rem 0; }
-  th, td { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--rule); }
-  th { font-weight:600; }
-  .proposed { border-left:3px solid var(--new); padding-left:1rem; }
-  .existing { border-left:3px solid var(--rule); padding-left:1rem; }
-  .was { color:var(--old); text-decoration: line-through; }
-  .tag { font:600 13px -apple-system, system-ui, sans-serif; color:var(--new); }
-  .tag.ex { color:var(--muted); }
-  ol li { margin:.5rem 0; }
-  .wrap { overflow-x:auto; }
-  pre { overflow-x:auto; background:var(--code); padding:.6rem .8rem; border-radius:4px; }
-  pre code { background:none; padding:0; }
+:root{color-scheme:light dark;--bg:#faf9f5;--fg:#252b28;--muted:#636e67;--line:#d3d9d1;--fill:#edf0e8;--accent:#3e6753}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 system-ui,sans-serif}main{max-width:790px;padding:0 25px 70px;margin:48px auto}header{font-size:13px;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:20px}h1{font-size:34px;line-height:1.15;letter-spacing:-.8px;margin:30px 0 18px}h2{font-size:22px;line-height:1.3;margin:35px 0 10px}p{margin:10px 0}a{color:inherit;text-underline-offset:3px}table{width:100%;border-collapse:collapse;margin:18px 0;font-size:15px}th,td{text-align:left;vertical-align:top;padding:11px 10px 11px 0;border-bottom:1px solid var(--line)}th{font-weight:600}pre{padding:18px;background:var(--fill);white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.7 ui-monospace,monospace}code{font-size:.85em;overflow-wrap:anywhere}.decision{border-left:3px solid var(--accent);padding-left:18px}.small{font-size:14px;color:var(--muted)}li{margin:10px 0}.table{overflow-x:auto}blockquote{margin:15px 0;padding:2px 0 2px 18px;border-left:2px solid var(--line)}@media(prefers-color-scheme:dark){:root{--bg:#1b211e;--fg:#e1e8df;--muted:#a6b2a8;--line:#414d44;--fill:#263028;--accent:#9bc5a8}}@media(max-width:600px){main{margin-top:24px}h1{font-size:29px}table{font-size:13px}}
 </style>
-</head>
-<body>
-<main>
-<header>
-  LOO-498 · concept-review step (headless, second pass) · November 5, 2026<br>
-  Built from <code>scratch/rex-workspace.md</code>, <code>docs/workspaces.md</code>,
-  <code>open.rs</code> (<code>OpenReceipt</code>), <code>open/workspace.rs</code>,
-  <code>open/workspace/hold.rs</code>
-</header>
+<main><header>LOO-498 · interactive concept review · November 5, 2026<br>
+Sources: <a href="rex-workspace.md">working design</a>, <a href="../docs/workspaces.md">workspace guide</a>, <a href="../docs/config.md">configuration</a>, <code>rex_workspaces.sql</code>, <code>open.rs</code>; installed Herdr/cmux help and official host documentation.</header>
+<h1>LF supplies a layout.<br>The host owns what opens.</h1>
+<div class="decision"><p><strong>Decided with you:</strong> templates belong in config; Desktop’s sticky Task layouts stay in the database. LF stores no external-host workspace records, including in sidecar files.</p>
+<p>Each <code>lf open</code> launches fresh. Returning to an existing workspace is a host action.</p></div>
+<h2>One concrete interaction</h2>
+<pre>lf open --task LOO-498
+  → current Desktop Task layout, else config template, else builtin
+  → detect the current host
+  → create a new Task tab and its splits
 
-<h1>The hold is right. The place it's shown is wrong.</h1>
-
-<p>You don't need to decide anything for work to continue. The first pass settled
-the evidence for a hold, a Task occurrence present in a Rex inventory, and the branch
-implemented it. This pass checks <em>who reads it</em>.</p>
-
-<h2>What you do</h2>
-<p class="existing"><span class="tag ex">existing</span><br>
-<code>lf open</code> → Rex Task tabs appear → you work, leave, return, close a tab
-when you're finished with it. Cleanup of a Task happens later, while you're away.</p>
-
-<h2>The mismatch</h2>
-<p class="existing"><span class="tag ex">existing</span><br>
-Every receipt from <code>lf open</code> prints:</p>
-<pre><code>  Rex views: held (a retained view keeps this Task)</code></pre>
-<ul>
-  <li>It almost always reads <code>held</code>, because opening just made or reused the view.</li>
-  <li>It claims a protection nothing enforces yet. No cleanup reads it, and
-      <code>docs/workspaces.md</code> says retention integration is not delivered.</li>
-  <li>A receipt covers one destination, but the hold covers the whole Task, across
-      copies and servers. Each opened Task also adds a Rex inventory read.</li>
-</ul>
-<p>The reader that matters is the shared lifetime owner (LOO-717), when the person
-is away. Accepted contract: the Rex adapter reports and LOO-717 decides.</p>
-
-<h2>Next implement pass</h2>
-<ol class="proposed">
-  <li><span class="tag">proposed</span> Text output reports the inventory:
-      <code>present</code> · <code>confirmed closed</code> · <code>unreadable</code>.
-      It makes no keep or cleanup claim.</li>
-  <li>JSON <code>rex_hold</code> keeps <code>held · released · unknown</code> for the
-      shared owner and the demo. Its doc comment says it is Task-wide.</li>
-  <li><code>hold::task_hold</code> stays the one adapter read. No <code>task status</code>
-      field or new command yet: that would pick LOO-717's API for it.</li>
-</ol>
-
-<h2>Counterexample still open</h2>
-<p>A restored, forgotten tab keeps a completed Task's checkout until you close it.
-That follows from &ldquo;retaining a view is the reason to keep.&rdquo; If the demo
-shows you don't want it, that is a product choice for you, not something to solve
-with away detection.</p>
-
-<h2>For the demo</h2>
-<ol>
-  <li>Should a restored, unfocused Rex tab keep a completed Task's checkout?
-      (a) yes, until you close it, which is the current reading; (b) no, a host restart releases it.</li>
-  <li>Where should you read why a Task wasn't cleaned up? (a) <code>lf task status</code>;
-      (b) wherever LOO-717 reports cleanup decisions; (c) <code>lf open --json</code> is enough.</li>
-</ol>
-</main>
-</body>
-</html>
+Rearrange / rename / return → use the host
+lf open --task LOO-498     → another fresh Task tab</pre>
+<p>The existing conversation is viewed, not restarted. A selected Shell tool gets a fresh shell. The Task’s Machine and checkout stay the same. A new Task tab can use the current native container; it need not create another Rex session.</p>
+<h2>Actions → owners → APIs</h2>
+<div class="table"><table><thead><tr><th>Action</th><th>Owner</th><th>API consequence</th></tr></thead><tbody>
+<tr><td>Set new Task defaults</td><td>LF config, shared or private; Wave scope supported</td><td>Extend existing config reads/writes. Exact syntax proposed, not implemented.</td></tr>
+<tr><td>Arrange this Task in Desktop</td><td>Current LF Task layout in DB</td><td>Keep the existing layout reader/writer; use it as launch input.</td></tr>
+<tr><td>Launch in a host</td><td>Native Task view and splits</td><td>Native create/layout APIs. No LF destination or creation journal.</td></tr>
+<tr><td>Return or restore</td><td>The host</td><td>Native controls; no LF restore/reconcile operation.</td></tr>
+</tbody></table></div>
+<p class="small"><strong>Before:</strong> Wave templates plus host/container/Task-occurrence records in SQLite. <strong>Accepted next design:</strong> templates move to config; both host tables disappear; existing Desktop layout storage stays. All three tables in the unmerged migration become unnecessary. Code still implements the old design.</p>
+<h2>Same LF concepts, native host names</h2>
+<div class="table"><table><thead><tr><th>LF</th><th>Rex</th><th>Herdr</th><th>cmux</th></tr></thead><tbody>
+<tr><td>Repo or Wave</td><td>Session</td><td>Workspace</td><td>Workspace group</td></tr>
+<tr><td>Task</td><td>Tab</td><td>Tab</td><td>Workspace/sidebar item</td></tr>
+<tr><td>Workspace = splits</td><td>Blocks in tab</td><td>Panes in tab</td><td>Panes in workspace</td></tr>
+</tbody></table></div>
+<p>There is no additional “loop” concept; that was voice-to-text noise. In cmux, a tab <em>inside a split pane</em> is below the Task level.</p>
+<p class="small">Verified capability descriptions: <a href="https://herdr.dev/tui/docs/concepts/">Herdr</a>, <a href="https://cmux.com/docs/concepts">cmux</a>, <a href="https://cmux.com/docs/workspace-groups">cmux groups</a>. Installed Herdr 0.9.3/protocol 22 exposes tab creation and layout application. Installed cmux 0.65.0 exposes groups, layouts, cwd and no-focus creation. These are capability checks, not a successful LF end-to-end demo.</p>
+<h2>Detect where the caller is</h2>
+<p><code>--host</code> wins. Otherwise use an agent’s current attached viewer or the direct caller’s native terminal context. Nested hosts select the inner host. Native APIs resolve the actual container after moves; stale environment and app focus cannot choose another destination.</p>
+<p>LF already recognizes Rex, Herdr, cmux and Desktop. The implementation needs shared routing plus fresh layout renderers, including cmux. A selected host’s failure stays visible; it must not silently launch somewhere else. Outside a known host, use the configured/default route.</p>
+<h2>A lost reply does not create a lifecycle</h2>
+<p>If the host creates the tab but the reply is lost, LF reports uncertainty and does not retry automatically. Inspect the host. Running <code>lf open</code> again explicitly requests another view. No provider turn is replayed.</p>
+<p>Retained Task terminals still need to protect checkout cleanup. That evidence must come from the host and LF’s Session lifetime owner; the rejected host registry cannot return under another filename. This integration and actual native Split behavior remain unverified.</p>
+<h2>One interpretation to review</h2>
+<ol><li>When a Task starts in an open repo/Wave container, should its new tab contain the normal configured splits immediately?<br><strong>1a — Proposed:</strong> yes, normal Task layout, no focus theft or new agent; selected ordinary tools may start.<br><strong>1b:</strong> Task/workflow preview only; launch the full workspace separately.</li></ol>
+<p class="small">Your hierarchy is recorded as accepted. Full tool creation on arrival is explicitly a working interpretation. The docs and design changed; no implementation or Graph was launched. Reply here in the ongoing conversation.</p>
+</main></html>

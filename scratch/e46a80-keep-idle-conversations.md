@@ -40,8 +40,14 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   connection's own `thread_id`.
 - Owner input: a store *error* delivers the bytes unrecorded and holds the
   owner in memory until the native client ends; a *busy* store (`Ok(false)`)
-  still waits 100 ms. LOO-709's "record before deliver" keeps its purpose (no
-  idle ending while a draft exists) through the in-memory hold.
+  waits 100 ms and tries again, for at most the hook's one-second budget
+  (`HOOK_BUSY_TIMEOUT`). A store still locked after that is the same recording
+  gap as a failed one: the bytes go to the provider, the owner holds the Session
+  in memory, and the gap is noted once. LOO-709's "record before deliver" keeps
+  its purpose (no idle ending while a draft exists) through the in-memory hold.
+  (Second concept review, 2026-11-05: the first implement left the busy wait
+  unbounded, so an install's exclusive migration transaction held every
+  keystroke for as long as it ran; see below.)
 - Exit: `settle` and the launcher's return record best-effort. The exit code is
   the provider's own; the resume hint is already printed by the owner.
   `SessionCapture::finish` writes `terminal.json` and treats its store
@@ -94,15 +100,32 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   are trimmed to their pointers (`a5000ef889`, `3b07e13404`) to stay under the
   16000-token budget.
 
-## Concept review (2026-11-05, headless)
+## Concept review (2026-11-05, headless; second pass after compress and realign)
 
 The person's experience is one sentence: whatever lf's store does, your
 conversation keeps accepting input, answering and quitting. Traced through the
-change, the contract holds at each layer:
+change, the contract holds at each layer but one:
 
 - Typed bytes: `try_record_owner_input` runs with a zero busy timeout, so a
   locked store answers `Ok(false)` at once and never stalls the serve loop; a
   failed store delivers unrecorded and the in-memory hold keeps the owner.
+  **The seam the second pass found:** `Retained::Busy` retries every 100 ms
+  with no bound (`transport/input.rs forward`). A locked store is lf's own
+  state being unavailable, the case the principle names, and the one the 11-04
+  install produced: `BEGIN EXCLUSIVE` for the whole migration. Under it every
+  owner holds every keystroke until the transaction ends, while the hooks give
+  the same lock one second and go on. Jack's steer settles it ("keystrokes must
+  reach the provider regardless of the store"); no product choice is open.
+  Next implement: `PendingInput` keeps the instant its first busy answer
+  arrived and, once `HOOK_BUSY_TIMEOUT` has passed with the store still busy,
+  treats the answer as `Failed`: deliver, set `unrecorded`, note the gap with
+  the lock as its reason. A later successful record closes it. Pin it with a
+  sibling of `failed_input_store_delivers_the_queued_bytes_unrecorded` whose
+  fixture holds `BEGIN EXCLUSIVE` on a second connection instead of a
+  rejecting trigger, and asserts the bytes reach the provider within about two
+  seconds while the lock is still held. Update the transport README's "Input
+  waits in the owner only while its retention record is busy" to say for how
+  long.
 - A person's Codex turn: the dispatch fence is a file lock plus one read (WAL
   readers do not wait on an install's exclusive write), then an unfenced send if
   the fence cannot be read. Only the saved launch prompt waits for its receipt,
@@ -130,7 +153,9 @@ store loss); exit records open the store with the full 15 s budget because the
 terminal no longer waits on them.
 
 No open product choice. Nothing here changes what the product is; each item
-follows from Jack's steers and the written principle.
+follows from Jack's steers and the written principle. The `store-gap`
+observation is stored and not yet rendered by `lf session` or Desktop
+(questions.md); showing it is a later Task, not a question for this one.
 
 ## Delete — do not maintain
 

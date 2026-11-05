@@ -764,10 +764,18 @@ library; GhosttyKit remains its native renderer.
 
 The [server boundary](../docs/dev/server.md) puts registration and updates under
 installation. First connection obtains the selected helper; later connections
-only reconnect. Commands run through the complete CLI with their stdin, routing,
-defaults and Process attribution. A lost command response is an unknown outcome;
-Desktop never automatically resubmits it. Execution launches and remote Machine
-streams retain their CLI transports. Desktop's UI automation remains app-owned.
+only reconnect. CLI commands and served writes use the same Rust mutation
+dispatcher for routing, defaults, effects and formatting, with an explicit
+directory and input/output/error streams. Each served write runs in a
+request-scoped worker, starts no ordinary CLI child and creates no Process row.
+Its response trace correlates diagnostics and effects in `logs/lf.log`; it grants
+no execution ownership or permission to retry. Canceling releases the client's
+wait, but an admitted mutation may still complete. A lost response is an unknown
+outcome: refresh authoritative state before another deliberate edit. Desktop
+never automatically resubmits it. Task creation/start and other execution
+launches retain their ordinary CLI path and existing Session/Graph owners;
+remote Machine streams retain their CLI transports. Desktop's UI automation
+remains app-owned.
 
 The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
@@ -795,9 +803,11 @@ Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never
 automatically repeated.
 
-Each watch's pipes drain off the main actor. A watch speaks only on change, so
-silence is not a stall; cancellation closes stdin, then terminates and reaps only
-the owned process if necessary.
+Local subscriptions use server sockets off the main actor. Cancellation closes
+the connection; reconnect opens a fresh subscription without replaying revisions.
+Remote Task file watches retain their CLI pipes, drained off the main actor;
+cancellation closes stdin, then terminates and reaps only the owned reader if
+necessary. A watch that speaks only on change is not stalled merely by silence.
 
 ## Headless checks
 
@@ -967,20 +977,17 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 ## Testing
 
-All shared Work reads, writes and watches use the installed client API server; Session
-terminals bridge their existing owner through it. A lost server bridge leaves the
-relay and native surface alive. A native status row shows automatic exact-owner
-recovery, with input paused and local copy, Find and scrolling available. Exhausted
-retries show an unavailable explanation and Retry; only authoritative exit means
-ended. Recovery never prepares or resumes a provider, and a newer viewer retains
-control until **Move here** in the read-only pane's connection row. That action
-keeps input paused until acknowledgement and retains the draft and running
-provider. A lost reply recovers passively; it never repeats the takeover.
-Closing the pane cancels its pending action. Desktop links no Loopflow library:
-the server uses shared Rust reads/subscriptions and delegates complete commands
-to `lf`, preserving defaults, stdin, output and attribution. Ghostty renders the
-terminal; UI automation remains app-owned. See the
-[local protocol](../rust/loopflow/src/server/README.md).
+Test shared Work through the [server protocol](../rust/loopflow/src/server/README.md).
+Rust's `served_reads` verifies CLI/server mutation parity, input/output/errors,
+concurrent request traces in `logs/lf.log`, and no request Process rows or global
+context changes. Native cancellation releases the client's wait; a lost reply
+remains unknown without replay.
+
+Terminal recovery must preserve the exact owner, draft and newer control claims.
+Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
+one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
+ended. Installed-helper replacement must preserve the Session and Graph owners
+and prove continued input and Graph progress; a socket restart alone is insufficient.
 `scripts/test_desktop.sh --filter ServerProtocolTests` builds the consumer and
 checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
 source experiments select a separate `LF_HOME`.

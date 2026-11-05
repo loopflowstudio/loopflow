@@ -23,13 +23,7 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
         command,
-        SessionCommand::Resume {
-            connection: SessionConnectionArgs { prepare: false, .. },
-            ..
-        } | SessionCommand::New {
-            connection: SessionConnectionArgs { prepare: false, .. },
-            ..
-        }
+        SessionCommand::Resume { .. } | SessionCommand::New { .. }
     ) {
         let cwd = crate::repo::working_directory()?;
         let argv = std::env::args().collect::<Vec<_>>();
@@ -559,23 +553,18 @@ async fn resume(
     target: crate::ops::human_session::SessionTarget<'_>,
     fork: bool,
 ) -> anyhow::Result<()> {
-    let SessionConnectionArgs {
-        message, prepare, ..
-    } = connection;
-    anyhow::ensure!(
-        !*prepare || message.is_none(),
-        "--prepare cannot be used with --message"
-    );
+    // Prepared connections have already returned through shared mutation dispatch.
+    let message = &connection.message;
     anyhow::ensure!(
         message.is_none() || cli.batch,
         "a next-turn message requires -b"
     );
     anyhow::ensure!(
-        !cli.batch || *prepare || message.is_some(),
+        !cli.batch || message.is_some(),
         "a headless connection requires --message TEXT"
     );
     anyhow::ensure!(
-        *prepare || cli.batch || cli.output_schema.is_none(),
+        cli.batch || cli.output_schema.is_none(),
         "response schemas require a headless Run (-b)"
     );
     let progress = crate::startup::Startup::new("Finding conversation");
@@ -596,11 +585,11 @@ async fn resume(
         &cwd,
         target,
         fork,
-        !*prepare,
+        true,
         connection.json || cli.json,
     )
     .await?;
-    print_opened(cli, connection, &session)
+    print_opened(connection.json || cli.json, &session)
 }
 
 /// The conversation `lf resume` run from `directory` selects.
@@ -635,7 +624,7 @@ async fn reopen(
 /// What `lf session resume|new --prepare` run from `directory` records and
 /// prints: the conversation and the command that opens it, with no provider
 /// started.
-pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<SessionRecord> {
+fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<SessionRecord> {
     let Some(crate::lf::Commands::Session { cmd }) = &cli.command else {
         bail!("not a Session command");
     };
@@ -660,8 +649,7 @@ pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<Sessio
 }
 
 /// `lf session new`: the scope's conversation continues on a fresh provider
-/// thread, seeded with what the last thread knew. `--prepare` records the new
-/// thread and returns the command that launches it.
+/// thread, seeded with what the last thread knew.
 async fn new_thread(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
@@ -676,11 +664,11 @@ async fn new_thread(
         &store,
         &std::env::current_dir()?,
         target,
-        !connection.prepare,
+        true,
         connection.json || cli.json,
     )
     .await?;
-    print_opened(cli, connection, &record)
+    print_opened(connection.json || cli.json, &record)
 }
 
 /// The conversation `lf session new` run from `directory` selects, on a fresh
@@ -737,18 +725,9 @@ pub fn print_returned(id: &str) -> anyhow::Result<()> {
     })
 }
 
-fn print_opened(
-    cli: &crate::lf::Cli,
-    connection: &SessionConnectionArgs,
-    session: &SessionRecord,
-) -> anyhow::Result<()> {
-    if connection.json || cli.json {
+fn print_opened(json: bool, session: &SessionRecord) -> anyhow::Result<()> {
+    if json {
         println!("{}", serde_json::to_string_pretty(session)?);
-    } else if connection.prepare {
-        println!(
-            "{}",
-            shlex::try_join(session.open_argv.iter().map(String::as_str))?
-        );
     }
     Ok(())
 }

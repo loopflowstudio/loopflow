@@ -907,21 +907,21 @@ Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafab
 
 ## Swift data path — RegistryQuery is the single reader
 
-Jack Heart selected LOO-593's Machine/server/installation split November 4, 2026,
-through publication and interactive demo, without Auto-Ship. Machine owns execution
-destinations; server owns client access; installation owns registration/update;
-Desktop automation stays app-owned. All shared native reads/writes/watches now
-use the socket; the Rust Work FFI, Swift bridge and exclusive build wiring are
-removed. Ghostty, ordinary execution launches and remote streams remain separate.
+Jack Heart selected LOO-593's split November 4, 2026, through publication and
+interactive demo, without Auto-Ship. Machine owns execution destinations; server
+client access; installation registration/update; Desktop automation. Shared native
+reads/writes/watches use the socket. Work FFI, Swift bridge and exclusive build
+wiring are deleted; Ghostty, execution launches and remote streams stay separate.
 
 Jack's later November 4 decision replaces served-write CLI subprocesses with one
-complete shared Rust mutation path. Direct execution remains pending.
-Defaults, routing, outputs and errors belong in the shared operation; lfd history
-shows shared engine functions alone did not prevent orchestration drift. Request
-traces must correlate outcomes and durable effects without inventing OS Processes
-or borrowing the server launcher's Session/Task. Concurrent requests require
-explicit context/I/O, never process-global cwd/env/stdio mutation. Arrangement
-creates no Process; a lost reply stays unknown and is never replayed.
+complete shared Rust mutation path, implemented at `2d9c295d8a`. Defaults, routing,
+output and errors share dispatch; engine reuse alone previously allowed lfd drift.
+Request spans/effects use normal `logs/lf.log`, masking launcher attribution and
+carrying diagnostics/agent selection into nested blocking work. Explicit directory
+and I/O replace process-global mutation. Requests create no Process; execution
+keeps its owners. An admitted write may finish after cancellation: a lost reply
+stays unknown and is never replayed. Pre-merge parity/isolation passed;
+combined-build acceptance remains.
 
 Registration migrates OS labels but keeps revision-1 socket/lock and disabled
 choices. The old plist only inspects/removes registration. Readiness is consumed
@@ -931,26 +931,27 @@ claims. Unavailable is not ended; local Copy/Find/scroll remain available. Move
 here consumes its generation before takeover; lost acknowledgements recover
 passively, never replaying takeover/input. Closure cancels recovery.
 
-The subprocess-era native demo retained a draft and configured Codex identity
-across server restart, then submitted once and renamed. It predates the final
-pane-close repair and direct writes. Earlier signed same-build replacement also
-proved owner/draft/Graph continuity; neither proves final-build upgrade behavior.
-LaunchServices-owned updates model App Management; external bundle writes do not.
-Full Desktop rerun, Xcode, Linux replacement, usage and combined mobile acceptance
-remain distinct. Warm read/rename medians increased 21.06/50.68 → 26.79/87.60 ms;
-new direct-write measurements and create/open/rename/save demo remain owed. No
-matched embedded RSS baseline supports memory savings.
+Native direct-write proof covers Task creation/conversation/rename/save, not
+final repairs or Jack's acceptance. Matched rename median improved eightfold;
+read tail and single restart worsened. Uncontrolled
+host work and no embedded RSS baseline preclude general speed/memory claims.
+Earlier draft/owner/Graph continuity through signed same-build replacement proves
+no final-build upgrade. LaunchServices-owned updates model App Management;
+external bundle writes do not. Full Desktop, Xcode, Linux replacement, usage and
+combined mobile acceptance remain separate. Dated evidence:
+`0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`.
 
 LOO-718 owns remote admission/iOS. Preserve wire
 identity and credentials while moving verbs. ViewPlan selects primary Sessions;
 lookup starts nothing; local peer trust cannot authenticate proxies. Unattended
 hosting and phone takeover remain open. #1815/LOO-723 installation coherence is
-integrated at `59287ba3ed`; reported upgrade input/crash failures (LOO-724) mean
-live processes alone prove no usable recovery or combined-release success.
+integrated at `59287ba3ed`; #1818 reattachment and #1820 cleanup at `ee4eee8dd8`.
+LOO-724's contention repair proves no incident cause or configured recovery:
+continued input and turns with retained drafts are required beyond liveness.
 
-LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
-files resurfaced retired Waves. Writes register directories; reads list store
-rows only. Unknown wire status stays explicit. Earlier transport/vocabulary:
+LOO-500 (November 2) removed the placeholder scan: surviving files revived retired Waves.
+Writes register directories; reads list store rows. Unknown status stays explicit.
+Earlier transport/vocabulary:
 `324a0f6dc45f43b608408b2b4a0f9403c236da20:.lf/wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)

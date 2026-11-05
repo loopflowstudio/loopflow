@@ -10,7 +10,7 @@ for CLI and server, request-scoped telemetry, and deletion of the embedded Work
 library. Publication of PR #1813 and interactive demo are authorized; merge,
 Auto-Ship and Task completion are not. The existing feature Graph owns delivery.
 
-### Implemented at `59287ba3ed`
+### Implemented through `0e597c17a1`
 
 Every shared native `Read`, `Write` and `Subscription` uses the local server.
 `rust/loopflow-ffi/`, its C ABI/Cargo entries, `LoopflowLibrary.swift`, the Swift
@@ -19,8 +19,8 @@ module map and FFI-only tests/linking/packaging are removed. `serve_in_app`,
 are also gone. Ghostty rendering, app-owned automation, ordinary execution
 launches, remote streams and existing Session/Graph owners retain their roles.
 
-At that commit, served writes spawned the full CLI. The working direct-write
-cut replaces that adapter with shared mutation dispatch.
+The FFI deletion was present at `59287ba3ed`; `2d9c295d8a` checkpoints the
+shared direct-write implementation and removes the full-CLI adapter.
 
 Desktop Task creation still uses `RegistryQuery.createTask` → ordinary
 `task create --run --json`; it is an execution launch, not a `Write` variant.
@@ -28,12 +28,17 @@ The required native create/open/rename/save demo spans both that launch path and
 served mutations. Removing ordinary served-write subprocesses does not move
 provider or Graph lifetime into the server.
 
-Main's #1815 (`dfd454cfc7`) is integrated by merge `59287ba3ed`, after checkpoint
-`ced68911ee`. The earlier base conflict is resolved locally; publication remains.
-Its coherent app/helper selection and custom-location update behavior must survive
-further changes. Infrastructure's November 4 memory also records reported lost
-input/crashes after upgrades (LOO-724); liveness alone is not continuity evidence.
-No cause or combined-release success follows from the merge.
+Main's #1815 installation coherence entered at `59287ba3ed`. Merge `ee4eee8dd8`
+then integrated `6f0d98e016`, including #1818 Session reattachment and #1820
+opt-in output cleanup. `0e597c17a1` retains terminal fixture cleanup while waiting
+for upgraded owners. Base conflicts are resolved locally; publication remains.
+The shared dispatcher and complete FFI deletion survived the merge.
+
+Infrastructure's November 4 memory now identifies SQLite contention blocking
+owner control, with nonblocking input/retry regression coverage. It does not
+attribute the reported LOO-582/718 failures or prove configured recovery. Existing
+Sessions must still complete turns and sustain input with history and drafts
+intact; liveness and integrating #1818 alone do not establish that outcome.
 
 ### Shared direct-write implementation
 
@@ -54,34 +59,65 @@ historical authorship from later Machine settings; older unknown names stay unkn
 
 ### Delete — do not maintain
 
-- `server/service.rs`'s CLI spawn and `read_command_output`: removed; preserve
-  framing limits, output/error/exit status, no replay and unknown outcomes.
+- `server/service.rs`'s CLI spawn and `read_command_output`: removed; framing
+  limits, output/error/exit status, no replay and unknown outcomes remain.
 - Task/Wave mutation branches in `bin/lf.rs`, Session rename/bind orchestration,
-  and Desktop saved-write branches: moved to shared command handling. Preserve
+  and Desktop saved-write branches: moved to shared command handling, retaining
   CLI flags/defaults and app-owned automation.
 - Process-count equivalence in `served_reads`: replaced with effect equivalence
-  and proof that requests create no Process rows; preserve every wire variant,
+  and proof that requests create no Process rows, including every wire variant,
   large saves, and arrangement's no-Process behavior.
 - Redundant Session/Desktop mutation re-entry and `portfolio::run`: removed;
   CLI dispatch already selects the shared executor before reaching those handlers.
   Request entry and nested workers use the same unwind-safe scope restoration.
-- Already removed Desktop FFI crate/adapter/module-map/linking/packaging stay
-  deleted. Provider launches and remote streams retain their existing owners.
+- Desktop FFI crate/adapter/module-map/linking/packaging are deleted. Provider
+  launches and remote streams retain their existing owners.
 
 Focused parity covers every wire variant, >64 KiB saves, failed writes, normal
 request logs, concurrent traces, no fabricated Processes and admitted lost replies.
 Remote ownership verifies no local fallback. The final audit also carries the
 request directory into native-conversation adoption and remote source resolution,
 keeps pending-sync diagnostics in the request, and avoids waiting for terminal
-EOF when a remote CLI mutation takes no body. Both final focused reruns passed;
-no product judgment is missing.
+EOF when a remote CLI mutation takes no body. Saved pre-sync checks passed:
+`journal::request::` (2), `served_reads` (1), and the served-ownership routing
+regression (1), in `/tmp/loo593-compress-{request,parity}.log` and
+`/tmp/loo593-direct-routing-final.log`. The provider-cwd assertion's macOS
+path-spelling failure was repaired by canonical comparison and passed in
+`/tmp/loo593-direct-parity-final.log`. These are not post-merge suite results.
+No product decision is missing for the accepted local implementation.
+
+### Documentation and surviving-path reductions
+
+`docs/dev/server.md` and `swift/README.md` now describe shared dispatch,
+request-scoped telemetry and local socket cancellation. The November 4
+[concept review](concept-review.html) retains the experience and counterexamples:
+a lost rename reply never authorizes overwriting a later edit, and a lost takeover
+reply never authorizes reclaiming a newer viewer's control. No rollback or
+exactly-once promise is added. Documentation changes introduce no wire change.
+
+The ordinary Session launcher no longer contains unreachable `--prepare`
+branches; shared mutation dispatch owns preparation and its output. Transport
+subscription coverage no longer asserts the retired CLI child's Process journal
+or duplicates concurrent write parity: `served_reads` owns those effects and
+request-log assertions. The transport test retains live watch invalidation and
+primary-Session resolution. No remaining FFI or subprocess executor is retained.
+The availability fixture holds its fake provider until cleanup instead of letting
+a 60-second sleep expire during concurrent tests.
 
 ### Remaining proof and delivery
 
-Gate owns affected correctness/packaging checks on the completed implementation,
-including full Desktop and bounded Xcode builds. The existing Graph owns sync,
-checkpoint and publication of PR #1813, stopping at interactive demo. No merge,
-Auto-Ship or Task completion is authorized.
+Gate owns affected correctness/packaging checks on the merged implementation,
+including clippy, full Desktop and bounded Xcode builds. The #1818 overlap changes
+Session admission and owner input/lifetime, so the merged transport/recovery path
+needs applicable coverage beyond the saved pre-sync direct-write checks. Final
+installed-helper replacement proof still requires an owner and unfinished Graph
+launched through the replaced installed executable, recovery acknowledgement,
+editing/submitting the same retained draft, and subsequent Graph progress.
+Earlier same-build evidence does not close that obligation. Rendered checks
+belong to interactive demo/review; Linux supervisor and combined mobile proof
+remain explicitly unestablished. The existing Graph owns publication of PR #1813
+and the interactive demo boundary. Merge, Auto-Ship and Task completion remain
+unauthorized.
 
 The [direct-write demo](direct-write-demo.md) proves native Task creation,
 conversation, rename, file save and description save with persisted-state receipts.
@@ -97,7 +133,7 @@ and the single restart observation worsened. Host/Graph work was uncontrolled;
 there is no general read, startup or memory-savings claim. The earlier embedded
 baseline is historical. `scratch/demo.html` holds the prepared review artifact.
 
-The [handoff](server-cutover-handoff.md) preserves earlier failures: the full
+The historical [handoff](server-cutover-handoff.md) preserves earlier failures: the full
 Desktop run failed Portfolio setup and stalled during Work observation shutdown;
 focused repairs passed, but no full-suite pass follows. Earlier server library
 checks emitted an Apple compact-unwind linker warning. Namespace-only signed
@@ -170,9 +206,9 @@ select a primary. Owner resolution never starts a provider. Attach names the
 exact existing owner and bridges its unchanged binary protocol.
 
 Reads/subscriptions reuse shared Rust operations and fresh complete readings.
-Closing cancels; reconnect does not replay store revisions. Commands use shared mutation dispatch with explicit directory/I/O and scoped
-request traces. Request IDs correlate;
-they do not deduplicate. A lost command reply means outcome unknown and cannot
+Closing cancels; reconnect does not replay store revisions. Commands use shared
+mutation dispatch with explicit directory/I/O and scoped request traces. Request
+IDs correlate; they do not deduplicate. A lost command reply means outcome unknown and cannot
 be automatically resubmitted. Recoverable create/start belongs in shared command
 admission, not a gateway response cache; preserve the original Task on launch
 failure and never duplicate creation after a lost reply.
@@ -271,4 +307,4 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Check (November 4): `cargo test -p loopflow --lib journal::request::` (2 passed) and `cargo test -p loopflow --test served_reads` (1 passed) verify the dispatcher/scope simplification (`/tmp/loo593-compress-{request,parity}.log`); `cargo fmt` and `git diff --check` passed. Gate retains lint and full consumer checks. Earlier verification: `cargo test -p loopflow --test served_reads` and `cargo test -p loopflow --test integration machine_commands::served_ownership_routes_to_its_writer_and_never_falls_back_locally` passed (`/tmp/loo593-direct-{parity,routing}-final.log`); `scripts/check_migrations.py`, `cargo fmt` and `git diff --check` passed. Earlier request-scope/stop tests remain applicable (`/tmp/loo593-{request,stop}.log`). The new cwd test first failed only on macOS path spelling; canonical-path comparison passed. Gate owns clippy, full affected suites, Desktop and Xcode; publication remains the Graph's later step.
+Check (November 4 reduction): `cargo fmt --check`, `git diff --check`, focused `transport_tests::server_subscriptions_refresh_work_and_resolve_primary_session` (1), `integration session_cli_tests::` (21), and `served_reads` (1) passed with inherited `LF_*` unset and stdin closed for tests; the Session group initially exposed the expired fake-provider lifetime, then passed after repair. Logs: `/tmp/loo593-compress-{subscription,session-fixed,served}.log`. Gate owns remaining merged-build checks; demo/review owns installed replacement and rendered acceptance.

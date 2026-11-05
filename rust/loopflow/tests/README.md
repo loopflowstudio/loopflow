@@ -845,9 +845,10 @@ composed test must continue to prove both with existing execution owners live.
 
 ```bash
 cargo test -p loopflow --lib server::
+cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
-cargo test -p loopflow --test transport_tests server_reads_commands_and_subscriptions_share_cli_semantics
+cargo test -p loopflow --test transport_tests server_subscriptions_refresh_work_and_resolve_primary_session
 cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
 cargo test -p loopflow --test transport_tests server_reconnect_
 cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
@@ -862,8 +863,9 @@ address/lock remain stable so old relays can reconnect while an obsolete server
 executable cannot open a competing listener.
 The bundled registrar harness separately proves SMAppService label migration.
 
-The socket contract proof covers Task subscription changes, CLI/command parity,
-authoritative primary-Session selection and concurrent trace isolation once.
+`served_reads` covers CLI/server effect parity and concurrent request traces
+without request Process rows. The transport subscription proof covers live Task
+changes and authoritative primary-Session selection.
 Separate lifecycle proofs keep the real relay connected through server restart,
 installed replacement and explicit takeover with an editable draft and live Graph.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer

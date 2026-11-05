@@ -753,7 +753,12 @@ fn available_lists_only_conversations_ready_for_input() {
             let _ = self.0.wait();
         }
     }
-    let provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
+    let provider = Child(
+        Command::new("/bin/cat")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let home = tempfile::tempdir().unwrap();
     let cwd = home.path().join("work");

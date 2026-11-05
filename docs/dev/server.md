@@ -40,11 +40,15 @@ owners. An API connection introduces no new retention authority.
 ## Boundaries through the implementation
 
 ```text
-Desktop ── private Unix socket ──┐
-                              ├─ server ─ shared Rust reads/subscriptions
-phone ─ authenticated HTTPS ──┘         ├ complete CLI commands
-       / WSS (LOO-718)                  └ existing Session owner ─ provider / PTY
+Desktop ── private Unix socket ── server
+phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 
+server read/subscribe ─ shared Rust readers
+server command ─ request worker ─┐
+CLI mutation ───────────────────┴─ shared Rust mutation dispatcher
+server attach ─ exact existing Session owner ─ provider / PTY
+
+Desktop execution launch ─ ordinary CLI ─ existing Session / Graph owners
 lf --machine host … ─ SSH ─ destination's ordinary lf command
 lf install ─ selected artifacts + OS registration of server
 lf desktop ─ app-owned automation socket ─ windows / panes
@@ -57,10 +61,24 @@ terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
 Every shared native Work read, write and subscription uses this server. Desktop
-links no Loopflow Rust library or C bridge. The server runs each complete write
-through `lf`, forwarding stdin and returning stdout, stderr and exit status;
-it has no duplicate mutation executor. Ghostty rendering and app-owned automation
-keep their existing boundaries. A shared Rust function alone does not prevent duplicated orchestration.
+links no Loopflow Rust library or C bridge. CLI commands and served writes use
+`lf/commands/mutation.rs` for routing, selection, defaults, effects and formatting.
+Each caller supplies a directory and input/output/error streams. The server runs
+that dispatcher in a request-scoped worker, returning output, errors and exit
+status without starting an ordinary per-write CLI child or changing process-global
+cwd, environment or standard streams.
+
+Served writes create no Process rows and inherit no launcher Session or Task
+attribution. `journal::request` carries tracing and diagnostics into nested
+blocking work; the response trace correlates diagnostics and effects in
+`logs/lf.log`. It is neither an execution owner nor a durable retry receipt.
+Canceling releases the client's wait, but an admitted mutation may still complete.
+A lost reply means outcome unknown: refresh authoritative state before another
+deliberate edit, and never automatically replay the request.
+
+Task creation/start and other execution launches keep their ordinary CLI path
+and existing Session/Graph owners. Ghostty rendering and app-owned automation
+keep their existing boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
 
 Local peer credentials apply only to the private Unix socket. Remote access needs
@@ -82,9 +100,10 @@ Linux uses a user systemd service. Development data directories have separate
 supervisor identities. Registration lives under `installation/`, outside Machine routing.
 
 Server replacement must leave detached Session and Graph owners alive under the
-actual OS supervisor. `setsid()` alone proves no such isolation. The signed macOS
-same-build replacement proof covers a held draft and running Graph; Linux
-replacement and rendered Desktop continuity remain separate acceptance work.
+actual OS supervisor. `setsid()` alone proves no such isolation. Validate owners
+launched through the replaced executable, recovery acknowledgement, submission
+of the retained draft and subsequent Graph progress. Final macOS replacement,
+Linux supervision and rendered Desktop continuity remain acceptance work.
 Sleep makes the host unavailable; logout and reboot do not preserve live
 processes. Before-login hosting and a GUI-less distribution remain separate
 product choices. Removal must preserve Work and credentials.

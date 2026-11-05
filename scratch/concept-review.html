@@ -3,65 +3,79 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-593 · Server concepts reviewed</title>
+<title>LOO-593 · Direct writes and execution owners</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf9f5;--ink:#202824;--muted:#5b665f;--line:#ccd2c9;--accent:#1b6151;--panel:#eef2eb}
+:root{color-scheme:light dark;--bg:#faf9f5;--ink:#202824;--muted:#58635c;--line:#c9d0c8;--accent:#195e4d;--panel:#edf1eb}
 @media(prefers-color-scheme:dark){:root{--bg:#17201c;--ink:#eef2e9;--muted:#b4c0b7;--line:#42534a;--accent:#93d9bd;--panel:#24342b}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.6 system-ui,sans-serif}main{max-width:850px;margin:auto;padding:48px 24px 72px}header{margin-bottom:36px}.meta,.note{color:var(--muted);font-size:14px}h1{font:clamp(34px,7vw,54px)/1.12 Georgia,serif;letter-spacing:-.025em}h2{font:28px/1.25 Georgia,serif;margin-top:36px}p{margin:14px 0}a{color:var(--accent);text-underline-offset:3px}code{font:0.85em ui-monospace,monospace;overflow-wrap:anywhere}pre{padding:18px;background:var(--panel);white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px}table{border-collapse:collapse;width:100%;font-size:15px}td,th{padding:12px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500}.decision{border-left:3px solid var(--accent);padding-left:18px}li{margin:12px 0}ol{padding-left:24px}@media(max-width:560px){main{padding:28px 16px 48px}table{font-size:13px}td,th{padding:10px 4px}pre{padding:12px;font-size:13px}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.6 system-ui,sans-serif}main{max-width:840px;margin:auto;padding:44px 24px 72px}header{margin-bottom:30px}.meta,.note{color:var(--muted);font-size:14px}h1{font:clamp(32px,6vw,48px)/1.15 Georgia,serif;letter-spacing:-.02em}h2{font:27px/1.3 Georgia,serif;margin-top:36px}p{margin:14px 0}a{color:var(--accent);text-underline-offset:3px}code{font:.86em ui-monospace,monospace;overflow-wrap:anywhere}pre{padding:18px;background:var(--panel);white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px}table{border-collapse:collapse;width:100%;font-size:15px}td,th{padding:12px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500}.decision{border-left:3px solid var(--accent);padding-left:18px}li{margin:12px 0}ol{padding-left:24px}blockquote{margin:18px 0;padding:4px 20px;background:var(--panel)}@media(max-width:560px){main{padding:24px 16px 48px}table{font-size:13px}td,th{padding:10px 4px}pre{padding:12px;font-size:13px}}
 </style>
 </head>
 <body><main>
 <header>
-<p class="meta">LOO-593 · Deletion pursuit · November 4, 2026<br>
-Built from <a href="mobile-backend.md">mobile-backend.md</a>, <a href="questions.md">questions.md</a>, <a href="../docs/dev/server.md">server architecture</a>, <a href="../rust/loopflow/src/installation/server.rs">installation/server.rs</a>, <a href="../rust/loopflow/src/server/service.rs">server/service.rs</a>, <a href="../rust/loopflow/src/transport/connection.rs">transport/connection.rs</a>, <a href="../swift/LoopflowMac/Services/ServerClient.swift">ServerClient.swift</a> and <a href="../swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift">GhosttyTerminalView.swift</a>.</p>
-<h1>Finish the replacement. Publish the deletion.</h1>
-<p class="decision"><strong>Implementation selected:</strong> Jack Heart requested relaunching pursue. The full Desktop Work FFI deletion is present locally and must be verified, reconciled and published to PR #1813. The working design's current pursuit supersedes the earlier partial-cutover review below.</p>
-<p>Remove the Rust FFI crate, Swift library adapter, module map and exclusive static-link/test machinery. Shared native Work reads, writes and watches use the server. Preserve Ghostty rendering, app automation and existing execution owners.</p>
-<p>Carry forward the <a href="server-cutover-demo.md">configured native demo</a> and <a href="server-performance/results.md">measured performance</a>, with their stated limits. Writes are measurably slower through complete CLI delegation; no duplicate executor is retained to hide that cost. The published PR currently conflicts with its base and must be reconciled.</p>
-<p>Execution returns to interactive demo. No merge or Auto-Ship approval.</p>
+<p class="meta">LOO-593 · Concept review · November 4, 2026 · Source at <code>0e597c17a1</code><br>
+Built from <a href="mobile-backend.md">working design</a>, <a href="server-write-direction.md">Jack Heart’s direct-write direction</a>,
+<a href="../docs/dev/server.md">server architecture</a>, <a href="../swift/README.md">Swift guide</a>,
+<a href="../rust/loopflow/src/server/service.rs">server dispatcher</a>,
+<a href="../rust/loopflow/src/lf/commands/mutation.rs">shared mutations</a>,
+<a href="../rust/loopflow/src/journal/request.rs">request tracing</a>,
+<a href="../swift/LoopflowMac/Services/ServerClient.swift">native client</a> and
+<a href="../rust/loopflow/src/transport/connection.rs">connection recovery</a>.</p>
+<h1>A write request does not own execution.</h1>
+<p class="decision"><strong>Review outcome: update the design’s documentation direction.</strong>
+Jack Heart already selected shared direct writes with request-scoped telemetry. The implementation follows that model. The architecture and Swift guides still describe a CLI subprocess and Process attribution for each write. Reconcile those descriptions; no new product choice is needed.</p>
+<p><strong>Proposed documentation correction:</strong> a request runs the shared mutation path; actual execution keeps its existing owners. This changes no user action, wire shape or persistence model.</p>
 </header>
 
 <h2>Actions → concepts → APIs</h2>
 <table>
-<thead><tr><th>Action</th><th>Concept</th><th>Current authority</th></tr></thead>
+<thead><tr><th>Action</th><th>Concept</th><th>Accepted authority</th></tr></thead>
 <tbody>
-<tr><td>Run on another computer</td><td>Machine destination</td><td><code>lf machine</code>, <code>lf --machine …</code></td></tr>
-<tr><td>Read Work or continue a Session</td><td>Client access</td><td><code>lf server</code>; shared reads, complete commands, exact-owner bridge</td></tr>
-<tr><td>Install or update</td><td>Installation</td><td><code>lf install</code>; selected executable and registration</td></tr>
-<tr><td>Arrange windows and panes</td><td>Desktop presentation</td><td><code>lf desktop</code>; app-owned automation</td></tr>
+<tr><td>Rename or save in Desktop</td><td>Work mutation</td><td><code>command {change}</code> → shared Rust dispatcher → existing Work store</td></tr>
+<tr><td>Start a Task and open its conversation</td><td>Execution</td><td><code>task create --run --json</code> → existing Session / Graph owners</td></tr>
+<tr><td>Reconnect a terminal</td><td>Client access</td><td><code>attach {owner}</code> → the exact recorded owner; passive recovery preserves newer claims</td></tr>
+<tr><td>Run on another computer</td><td>Machine destination</td><td><code>lf --machine …</code> → existing routing</td></tr>
+<tr><td>Update Loopflow</td><td>Installation</td><td><code>lf install</code> → selected artifacts and server registration</td></tr>
+<tr><td>Arrange windows or panes</td><td>Desktop presentation</td><td><code>lf desktop</code> → app-owned automation</td></tr>
 </tbody>
 </table>
-<p>Machine identity and Work records survive replacement. The server adds no scheduler, provider owner or durable viewer registry. LOO-718 owns authenticated remote access and the phone client; combined integration remains unverified.</p>
 
-<h2>Earlier recovery correction to preserve</h2>
-<p><strong>Before — superseded:</strong> failed first setup let Retry or a Work refresh attempt registration again. Recovery could cross the installation boundary.</p>
-<pre><code>Before: open → setup fails → Retry / refresh → setup again
-Current: open → one readiness attempt → connect or report failure
-         installation / OS enablement repairs availability
-         Retry / refresh → observe endpoint → same owner / fresh Work</code></pre>
-<p><strong>Implemented locally:</strong> native setup is consumed even on failure. The shared Work client retains the initial diagnosis and uses observational <code>server status</code> for later discovery. Failed initial attachment enters passive recovery. No second path resolver or persistent retry record is needed.</p>
-<p><strong>Usage remains:</strong> install Loopflow and open Desktop; local setup is automatic. Repair a reported installation or Background Items failure, then Retry. Retry reconnects. Move here deliberately requests control.</p>
+<h2>The consequential mismatch</h2>
+<p><strong>Before — superseded guidance still in the guides:</strong></p>
+<pre><code>Desktop write → server → CLI child → mutation
+                         └ Process attributed to each write</code></pre>
+<p><strong>After — accepted and implemented; documentation correction pending:</strong></p>
+<pre><code>Desktop Write → server request ─┐
+CLI command ───────────────────┴→ shared mutation dispatcher → Work
 
-<h2>One interaction, through failure</h2>
+server request → trace + diagnostics + effects in logs/lf.log
+CLI execution → actual Process + existing Session / Graph owners
+terminal connection → bridge to the exact existing owner</code></pre>
+<p>The dispatcher owns routing, selection, defaults, effects and formatting. Each caller supplies a directory and input/output/error streams. A served request uses a scoped worker without changing global cwd, environment or standard streams. It creates no Process row and inherits no launcher Session or Task attribution. The server adds no scheduler or second Work store.</p>
+<p><code>Write</code> remains the existing wire carrier. Reusing its CLI spelling to parse shared options starts no CLI child. A response trace correlates diagnostics; neither that trace nor the request ID is a durable receipt authorizing replay.</p>
+
+<h2>What the guides should say</h2>
+<blockquote><p><strong>Draft for the architecture and Swift guides:</strong> Desktop sends shared Work changes to the local server. CLI commands and server requests run the same Rust mutation dispatcher, preserving routing, defaults, input, output and errors. A served write runs in a request-scoped worker and creates no Process row. Task creation/start and other execution launches keep their ordinary CLI path and existing Session/Graph owners.</p></blockquote>
+<p>Keep <a href="../docs/server.md">Connect clients</a> and the agent command guidance unchanged: open Desktop, edit Work, use <code>lf server status</code> to inspect access and <code>lf install</code> to update. No new setup or recovery skill is needed. The <a href="../rust/loopflow/src/server/README.md">protocol README</a> already describes direct dispatch.</p>
+
+<h2>Rename, lose the connection, continue editing</h2>
 <ol>
-<li><strong>Open and edit.</strong> Installation prepares access. The server bridges the existing Session owner while a Graph runs independently.</li>
-<li><strong>Replace the installed helper.</strong> The connection drops. The draft, provider and Graph must survive. Native status says “Reconnecting…”; input pauses while the last screen remains readable.</li>
-<li><strong>Reconnect to that owner.</strong> Fresh terminal state restores the screen. Uncertain typing is discarded. Newer input and geometry claims remain intact.</li>
-<li><strong>Move here explicitly.</strong> A connected read-only pane offers control transfer. Its generation-bound action is consumed before sending; typing waits for acknowledgement.</li>
+<li><strong>Normal path.</strong> Save a Session name. The server runs the shared mutation and returns output, errors, exit status and trace. The native pane reflects the saved name; no provider restarts.</li>
+<li><strong>Lost reply.</strong> The write may have committed before the connection disappeared. Cancel releases the client’s wait; it does not roll back an admitted mutation. Refresh authoritative state before another deliberate edit. Never automatically resend.</li>
+<li><strong>Server replacement.</strong> The draft, provider history and unfinished Graph must survive actual supervisor cleanup. Native status shows “Reconnecting…” outside terminal bytes. Input pauses; selection, copy, Find and scrolling stay available.</li>
+<li><strong>Recovery.</strong> Reconnect the exact owner and wait for acknowledgement. Refresh Work subscriptions. Discard uncertain input. Retry changes connectivity; Move here deliberately requests control. Recovery neither repeats setup nor overrides disabled background items.</li>
 </ol>
-<p class="decision"><strong>Decisive counterexample:</strong> takeover succeeds, its reply is lost, then another viewer claims control. Recovery must preserve that newer claim. Repeating takeover or uncertain typing would invalidate the design.</p>
-<p>A connection failure means unavailable, not ended. Only execution evidence establishes exit. Copy, Find, selection and scrolling remain local reading actions; their handlers are reachable, while rendered behavior still needs demonstration.</p>
+<p class="decision"><strong>Counterexamples to preserve:</strong> a rename commits, its reply is lost, and replay overwrites a later edit; or takeover succeeds, its acknowledgement is lost, and recovery steals control from a newer viewer. Both violate the accepted contract. Unknown outcomes and one-shot control transfer are necessary distinctions.</p>
 
-<h2>Proof remains distinct from the design</h2>
-<p>Saved focused checks cover failed setup and recovery. The earlier namespace review ran no runtime tests; the current deletion demo and measurements are linked above. The renamed signed installed replacement, broader gate checks and rendered Desktop continuity remain owed. Linux supervisor replacement needs Linux-host evidence. The working design retains the complete acceptance list.</p>
-<p>The stable revision-1 socket keeps live older relays reachable while OS job labels migrate. The old bundled plist only supports inspecting and retiring registration. Work, credentials and execution identity do not move.</p>
-<p><strong>These earlier boundaries remain.</strong> GUI-less distribution, before-login hosting, removal during active work and the phone takeover gesture remain separate product questions outside this local cutover.</p>
+<h2>Source review is not final acceptance</h2>
+<p>The <a href="direct-write-demo.md">native demo</a> and <a href="server-performance/results.md">matched measurements</a> retain their build-specific limits. Rename latency improved in that workload; read tail and the single restart observation worsened. No general speed or memory claim follows.</p>
+<p>This review ran no runtime tests or rendered demo. Final merged-build checks and the composed installed-helper replacement proof remain: acknowledge recovery, edit and submit the same retained draft, and observe subsequent Graph progress. A live PID alone is insufficient. Linux supervisor replacement, full packaging and combined LOO-718 mobile acceptance retain their separate evidence requirements.</p>
+<p>GUI-less distribution, before-login hosting, removal during active work and phone takeover remain outside this local correction. Publication and interactive demo are authorized; merge, Auto-Ship and Task completion are not. This review does not change Graph navigation.</p>
 
-<h2>Questions for acceptance evidence</h2>
+<h2>Questions for the next proof</h2>
+<p class="note">Verification questions, not pending requests for approval or new product decisions.</p>
 <ol>
-<li>Does the renamed installed replacement preserve the exact owner, editable draft and running Graph under the real supervisor?</li>
-<li>Does rendered Desktop preserve reading, copy, Find and scrolling during recovery, with Retry and Move here visibly performing their distinct actions?</li>
-<li>Does the combined phone integration preserve credentials, local access and existing execution when remote access fails or is revoked?</li>
+<li>Do the architecture diagram and both Swift guide sections describe shared dispatch and request tracing, while preserving ordinary execution launches?</li>
+<li>On the final merged build, do lost replies remain unknown without replay, and do simultaneous requests keep distinct diagnostics without fabricated Processes?</li>
+<li>After replacement of the installed helper under the real supervisor, does the same owner accept the retained draft and continue its turn while the unfinished Graph progresses?</li>
 </ol>
-<p class="note">These are verification questions for gate, demo and integration, not requests for new product approval.</p>
 </main></body></html>

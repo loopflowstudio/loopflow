@@ -86,8 +86,9 @@ The matched rename benchmark measured 87.38 → 10.77 ms median and
 105.30 → 20.63 ms p95. Read medians were close, with worse read tail and a slower
 single restart observation. The report preserves those limits. Final parity
 and remote-owner/no-local-fallback checks passed. The existing Task Graph
-resumed after capacity became available and owns remaining validation, sync
-and publication to PR #1813; no merge is authorized. The earlier usage-limit
+resumed after capacity became available; sync completed at `ee4eee8dd8` and
+`0e597c17a1`. Remaining validation and publication to PR #1813 belong to that
+Graph; no merge is authorized. The earlier usage-limit
 failures remain recorded in Task history.
 
 The native bundle predates the final error-formatting, stop-person migration
@@ -95,13 +96,10 @@ and provider-admission cwd refinements. The exercised successful rename/save
 path is unchanged; focused automated coverage owns those later changes. No
 claim is made that screenshots exercise every line of the final branch.
 
-Recommended next action: finish the Graph's applicable checks and publication,
-then review this evidence in the ongoing conversation. There is no new product
-choice or request for permission to run the remaining checks.
-
-Latest follow-on validation: the Graph's expanded provider-cwd parity case
+Follow-on validation: the Graph's expanded provider-cwd parity case initially
 failed comparing macOS `/private/var/...` with `/var/...` in
 `/tmp/loo593-direct-parity.log`. This is a path-spelling assertion in the new
-case, not a failed native save. It was handed to the live Graph for repair and
-rerun. The earlier measured-code parity pass remains scoped to that code;
-the final branch is not claimed green or republished.
+case, not a failed native save. Canonical-path comparison repaired it;
+`/tmp/loo593-direct-parity-final.log` and the later dispatcher simplification
+check `/tmp/loo593-compress-parity.log` both passed. These results precede the
+#1818/#1820 merge and do not establish final-build native or upgrade acceptance.

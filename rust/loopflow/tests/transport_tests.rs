@@ -4454,13 +4454,12 @@ fn server_invalid_checkpoints_use_shared_watch_errors() {
 }
 
 #[test]
-fn server_reads_commands_and_subscriptions_share_cli_semantics() {
+fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
-    let instance = service.ready();
     let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
     let (mut watch, initial) = service.request(
         "tasks",
@@ -4472,62 +4471,8 @@ fn server_reads_commands_and_subscriptions_share_cli_semantics() {
     let confirmed = server_receive(&mut watch);
     assert_eq!(confirmed["result"]["frame"]["answers"], 17);
 
-    // Compare the shared CLI write with the socket write, including its real
-    // returned Session. Request identities never become a service parent Task.
-    let (_, renamed) = service.request("rename", json!({"kind":"command","change":{"write":"session_rename","directory":fixture.repo.path(),"id":session,"name":"Kept draft"}}));
-    assert_eq!(renamed["result"]["code"], 0, "{renamed}");
-    let cli = service
-        .command(&["session", "rename", "--json", "--", &session, "Kept draft"])
-        .output()
-        .unwrap();
-    assert!(
-        cli.status.success(),
-        "{}",
-        String::from_utf8_lossy(&cli.stderr)
-    );
-    let socket_record: Value =
-        serde_json::from_str(renamed["result"]["output"].as_str().unwrap()).unwrap();
-    let cli_record: Value = serde_json::from_slice(&cli.stdout).unwrap();
-    assert_eq!(socket_record, cli_record);
-    let changes = std::thread::scope(|scope| {
-        let send = |id: &str| {
-            service.request(id, json!({"kind":"command","change":{"write":"session_rename","directory":fixture.repo.path(),"id":session,"name":id}})).1
-        };
-        let first = scope.spawn(move || send("parallel-a"));
-        let second = scope.spawn(move || send("parallel-b"));
-        [first.join().unwrap(), second.join().unwrap()]
-    });
-    for change in &changes {
-        assert_eq!(change["result"]["code"], 0, "{change}");
-        let trace = change["result"]["trace_id"].as_str().unwrap();
-        let events = loopflow::journal::read_events(
-            &loopflow::journal::traces_root(fixture.repo.path()).join(trace),
-        )
-        .unwrap();
-        assert!(
-            events
-                .iter()
-                .any(|event| event.command.as_ref().is_some_and(|command| command
-                    .iter()
-                    .any(|arg| arg == change["id"].as_str().unwrap()))),
-            "{events:?}"
-        );
-        assert!(events.iter().all(|event| event.trace_id.as_str() == trace));
-        let diagnostics = std::fs::read_to_string(fixture.home.path().join("logs/lf.log")).unwrap();
-        assert!(
-            diagnostics
-                .lines()
-                .any(|line| line.contains("Server command exited")
-                    && line.contains(trace)
-                    && line.contains(change["id"].as_str().unwrap())
-                    && line.contains(&instance)),
-            "{diagnostics}"
-        );
-    }
-    assert_ne!(
-        changes[0]["result"]["trace_id"],
-        changes[1]["result"]["trace_id"]
-    );
+    // Write parity, concurrent traces and no request Process rows are covered
+    // by served_reads. This proof owns live subscription invalidation.
     // A changed Task reading uses the shared invalidation path, with no polling
     // projection or shadow Task store in the service.
     let registered = support::register_task_with_pr(

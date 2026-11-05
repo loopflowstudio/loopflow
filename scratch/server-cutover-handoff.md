@@ -3,14 +3,16 @@
 The LOO-582 conversation contributed the full FFI deletion to LOO-593 at Jack
 Heart's request. At 21:50 UTC the Task's primary conversation launched Graph
 `5547bd41-270d-4796-af61-46f3aa546384` to finish and publish that existing diff.
-Fresh status, graph show and ps confirmed live Graph PID 29444 and implement
-Process PID 29986. The contributing conversation leaves that Graph in control:
-no concurrent commit, sync, new Graph, or publication.
+Those observations are historical: that Graph later stopped on a usage-limit
+failure. Jack Heart authorized continuation, and the same Task's feature Graph
+subsequently checkpointed direct writes and merged main. The current plan is
+[mobile-backend.md](mobile-backend.md); this handoff retains subprocess-era
+verification and failures, not current execution status.
 
 ## Verification already completed on the deletion
 
 - `cargo test -p loopflow --test served_reads`: passed; includes all shared
-  operations, Process/effect parity and a 72 KiB Task-save stdin payload.
+  operations, subprocess-era Process/effect parity and a 72 KiB Task-save stdin payload.
   Log `/tmp/loo593-rust-cutover.log`.
 - Journal library tests: 30 passed. Server library tests: 3 passed. Write
   mapping tests: 2 passed. `cargo clippy --all-targets -- -D warnings` passed.
@@ -47,10 +49,10 @@ failure remains history, not a current-build result.
 
 Main's #1815 (`dfd454cfc783b5ff3014d5a398ccf1627b427d11`) is integrated by
 merge `59287ba3ed` after checkpoint `ced68911ee`; the previously observed base
-conflict is resolved locally. This preserves upstream updater behavior without
-restoring FFI. Publication and final affected verification remain. The PR body
-needs the complete deletion and accepted direct-write scope with honest
-latency/verification limits. No merge or Auto-Ship approval.
+conflict is resolved locally. The subsequent `ee4eee8dd8` merge integrates main
+through `6f0d98e016`, including #1818/#1820, without restoring FFI. Publication
+and final affected verification remain, covering complete deletion and accepted
+direct writes with their latency/verification limits. No merge or Auto-Ship approval.
 
 ## Full-run termination
 

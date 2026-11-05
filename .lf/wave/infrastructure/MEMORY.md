@@ -1004,6 +1004,15 @@ The parent's signed `ac8e088f5f` Desktop repair pairs CLI/helper and retains old
 runtimes; it predates LOO-724's repairs and proves no resumed turn. LOO-723 owns
 policy/mini rollout; affected-Session recovery stays coordinated with the parent.
 
+Upgrade docs audit (998c9b, 2026-11-05): Jack Heart chose words over code. Docs
+and `lf help monitor rollover` now say rollover ignores viewers and keeps unsent
+drafts, every install registers `com.loopflow.refresh`, and the published
+fallback is the active build with no rollback after a floor raise. Undecided
+product choices the audit exposed: a disabled refresh job fails `lf schedule`
+and `lf install --dev` while release installs only warn; Linux installs restore
+the cron line; no install compares versions, so a Machine ahead of its stream
+can move back on a scheduled run.
+
 ## Shipped history
 
 Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading.
@@ -1150,21 +1159,10 @@ test removal, cache relaxation or retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart requested landing #1505 October 8, superseding review-only feedback.
-The Task stays open for cold-cache verification; Git retains measurements and
-rejected patches. Provider-probe removal, absent-Wave resolution and directory reuse
-matched evidence; capture-store reuse and ancestor-probe deferral did not and were
-removed.
-Claude reconnect's native median worsens; the later handoff gain cannot repair it.
-
+Jack Heart requested landing #1505 October 8; the Task stays open for cold-cache
+verification on dedicated macOS with exclusive cache control and native login.
 Readiness requires raw-mode echo of unsubmitted text; Codex reconnect needs an
-untimed seed turn. Fresh Homes are not cold OS caches.
-LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache control
-and native login, reporting the limitation and reset method. SVG readability awaits review. Neither gap is waived.
-
-Copied databases keep absolute provider-home paths: strip routes before launch and
-connect only benchmark-created Sessions. Early excluded probes reached those
-paths without a write audit; isolation remains unproved. Fixtures prove no
-installed gain or managed-account continuity. The network-isolated CI smoke
-bounds launch work and preserves identity, context and history; nested-directory
-launch retains the repository root. Hosted success remains unproved.
+untimed seed turn; fresh Homes are not cold OS caches. Copied databases keep
+absolute provider-home paths: strip routes before launch and connect only
+benchmark-created Sessions. Measurements, rejected patches and limits:
+`3b07e13404:.lf/wave/infrastructure/MEMORY.md`, this heading.

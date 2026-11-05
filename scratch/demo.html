@@ -1,49 +1,15 @@
-<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-498 · Rex workspace demo</title>
-<style>
-:root{color-scheme:light dark;--bg:#f8f7f3;--fg:#252724;--muted:#62685f;--line:#d8dbd1;--accent:#96502c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.65 system-ui,sans-serif}main{max-width:760px;margin:70px auto;padding:0 26px 80px}header{font-size:14px;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:24px}h1{font-size:36px;line-height:1.15;letter-spacing:-1px;margin:36px 0 20px}h2{font-size:23px;line-height:1.3;margin:48px 0 12px}h3{font-size:19px;margin:28px 0 8px}p{margin:12px 0}a{color:inherit;text-underline-offset:3px}pre{overflow:auto;padding:18px;background:color-mix(in srgb,var(--fg) 5%,var(--bg));font-size:14px;line-height:1.55;border:1px solid var(--line)}code{font-size:.86em;overflow-wrap:anywhere}.failure{border-left:3px solid var(--accent);padding-left:20px}.meta{font-size:14px;color:var(--muted)}label{display:block;font-size:15px;margin-top:16px}textarea{width:100%;min-height:80px;background:transparent;color:inherit;border:1px solid var(--line);padding:12px;font:inherit;resize:vertical}li{margin:16px 0}strong{font-weight:650}@media(prefers-color-scheme:dark){:root{--bg:#1b201e;--fg:#e3e7df;--muted:#a7b0a3;--line:#414a42;--accent:#e4a479}}@media(max-width:600px){main{margin-top:24px}h1{font-size:30px}}
-</style>
-<main><header>LOO-498 · feature / demo · November 5, 2026<br>
-Built from <a href="workspace-demo.md">workspace-demo.md</a>, <a href="rex-workspace.md">rex-workspace.md</a>, and <a href="../docs/workspaces.md">docs/workspaces.md</a>.<br>
-Branch product code: <code>5c0d6419c</code> · <a href="https://github.com/loopflowstudio/loopflow/pull/1814">PR #1814</a> is published, not merged.</header>
-<h1>The real workspace demo is still blocked.</h1>
-<p>The next implementation pass needs to make your real Work and live conversation available together. This run does not establish that opening, returning, or splitting works in your configured setup.</p>
-<p>The useful observation now is what you saw before the new Rex session disappeared. Nothing here asks you to accept an unshown result.</p>
-<section class="failure"><h2>What happened</h2>
-<p><strong>Live database:</strong> the branch refuses its unmerged <code>rex_workspaces</code> migration. Your shared database was not migrated for this review.</p>
-<p><strong>Private copy of your real Work:</strong> opening created one Conversation pane, matching the selected layout. It created zero ordinary shells. That pane could not attach because the private copy has no live execution-owner socket.</p>
-<pre>Native destination: opening
-Conversation: failed
-Execution owner is unavailable;
-no provider was restarted and no input was replayed.</pre>
-<p><strong>Rex interaction:</strong> the demo appeared in the sidebar. Selection was interrupted by an app change. A fresh API inventory then showed the demo session absent. Its removal cause is unknown; it was not recreated.</p>
-<p class="meta">Before/after screenshots are unavailable: selection did not complete. No screenshot of an unrelated conversation substitutes for the missing evidence.</p></section>
-<h2>The interaction still to prove</h2>
-<p>These are expected results, not results obtained today. Use a supported build with both real Work and its live owner available before treating this sequence as acceptance.</p>
-<h3>1. Open your Task</h3><pre>lf open --task LOO-498</pre>
-<p><strong>Expect:</strong> the selected template opens in the intended Rex server; the existing conversation is visible without starting another provider.</p>
-<p><strong>Observed today:</strong> native creation succeeded only against the snapshot; the Conversation failed to attach.</p>
-<label for="open-note">What you saw<textarea id="open-note" placeholder="Reply in the conversation to make this part of the review record."></textarea></label>
-<h3>2. Split beside the Task</h3>
-<p>Use Rex’s <strong>Split Right</strong> control beside a Conversation or Task view. In the new shell, run:</p>
-<pre>pwd -P</pre>
-<p><strong>Expect:</strong> <code>/Users/jack/src/loopflow.loo-498-open-and-restore</code>. Then <code>cd /tmp</code> in that shell and split from it: the new split should follow your explicit directory choice.</p>
-<p><strong>Observed today:</strong> no Split action completed. Isolated cwd checks passed previously; the app’s action remains unverified.</p>
-<label for="split-note">Directory in the new split<textarea id="split-note"></textarea></label>
-<h3>3. Return without replacing your workspace</h3>
-<p>Rearrange panes in Rex, then repeat <code>lf open --task LOO-498</code>.</p>
-<p><strong>Expect:</strong> the same tab and programs, with your native arrangement preserved. LF’s template is the starting arrangement; Rex owns later edits.</p>
-<p><strong>Observed today:</strong> the session disappeared before a repeat-open check. November 4’s snapshot reuse result is historical supporting evidence only.</p>
-<h3>4. Start manually</h3>
-<p>From another directory, resume the existing Task conversation, then split beside it. Leave the viewer with <strong>Ctrl+]</strong>, change the parent shell’s directory, and split again.</p>
-<p><strong>Expect:</strong> Task directory while attached; the shell’s directory after leaving. This configured interaction remains unverified.</p>
-<h2>What is preserved</h2>
-<p>The private snapshot and copied runtime stay at <code>~/.local/share/loopflow/demos/loo498-20261105/</code>, in separate <code>data/</code> and <code>runtime/</code> directories. No provider was launched. Database history is preserved; a copied database cannot recreate a live owner or unfinished provider input.</p>
-<p>Rex cleanup protection is also unfinished: this branch reports retained native views, but LOO-717’s shared cleanup owner does not consume that evidence yet.</p>
-<p class="meta">Automatic opening of this local page was blocked by browser URL policy. The page is available through its file link in the conversation.</p>
-<h2>Your observations</h2>
-<ol><li>Before the new <strong>LOO-498 November 5 demo</strong> entry disappeared, did you see its Conversation error, or something else?</li>
-<li>Did you enter anything into that demo pane?<br><strong>2a.</strong> No input there.<br><strong>2b.</strong> Input remains to preserve.<br><strong>2c.</strong> Any input there is settled.</li></ol>
-<p class="meta">Answer here in the ongoing conversation. Text typed on this local page is only a scratchpad and is not submitted or saved. Closing a view does not accept the demo or settle input.</p>
-</main></html>
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-498 · Connected in Rex</title>
+<style>:root{color-scheme:light dark;font:17px/1.6 system-ui,sans-serif}body{max-width:760px;margin:5vh auto;padding:24px}h1{font-size:2rem;line-height:1.2}h2{margin-top:2.5rem;font-size:1.25rem}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:light-dark(#f4f2ed,#242424);padding:20px}code{overflow-wrap:anywhere}textarea{box-sizing:border-box;width:100%;min-height:90px;font:inherit;padding:12px}small{opacity:.7}li{margin-block:12px}a{color:light-dark(#245b8c,#91c7fa)}</style>
+<header><small>LOO-498 · feature → demo · November 5, 2026<br>Sources: workspace-demo.md, rex-workspace.md, open.json, split-process.json</small><h1>The branch now opens its conversation in Rex.</h1>
+<p>Review the selected <strong>Open and restore a Loopflow workspace in Rex</strong> tab. It shows the existing conversation on the left and a native split shell on the right.</p></header>
+<h2>The actual opening</h2><pre>lf open --task LOO-498 --host rex --json</pre><p>This ran inside a terminal opened by Rex CLI, with a freshly built branch executable and the real Machine. The opening now launches its own build's viewer instead of the installed release, which lacks <code>session view</code>.</p>
+<pre>Created a new Task tab; 0 new shells; Rex accepted display selection; conversation input remains with its current viewer
+Conversation: connected</pre>
+<p>The native screenshot showed this conversation selected and displaying live output. No provider restart or input takeover occurred. The saved Desktop layout contains Conversation only; the shell below was added with Rex's own Split Right button.</p>
+<h2>Native Split</h2><p><strong>Action:</strong> Split Right from the Conversation pane.<br><strong>Expected:</strong> a new shell in the Task checkout.<br><strong>Observed:</strong> native process inspection found zsh in:</p><pre>/Users/jack/src/loopflow.loo-498-open-and-restore</pre>
+<p>Before/after screenshots were observed through the computer-use tool; no screenshot files were saved. The Markdown record names the retained terminal captures and native receipts.</p>
+<h2>What remains visible</h2><p>The mirrored conversation showed text reflow artifacts after splitting. Opening and this directory-inheritance case succeeded; visual fidelity after resizing still needs attention. Split from other tools, cd-then-Split, remote Machines and cmux were not demonstrated here.</p>
+<details><summary>Earlier failure, preserved</summary><p>The previous demo mixed the branch opener with an installed viewer. Separately, Rex's client inventory included the listing CLI, which exited before inspection and caused “client not found”. Both causes are repaired. The earlier manually assembled layout did not prove workspace opening.</p></details>
+<p><a href="workspace-demo.md">Full review and evidence</a> · <a href="rex-workspace.md">Current design</a> · <a href="https://github.com/loopflowstudio/loopflow/pull/1814">PR #1814</a></p>
+<p>Validation: 19 opening unit tests and 24 workspace integration tests passed; formatting and Clippy passed. The live Rex opening and native Conversation → Split were also verified.</p><h2>Review</h2><ol><li>Is the new Rex tab showing the expected conversation and worktree shell?</li><li>How does the conversation look after resizing—does the text remain readable?</li></ol><label for="notes">Observations (reply in the conversation to retain them)</label><textarea id="notes"></textarea><p><small>All demo roots remain intact. No cleanup, installation or merge occurred.</small></p></html>

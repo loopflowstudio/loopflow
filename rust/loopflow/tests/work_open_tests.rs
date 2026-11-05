@@ -1178,6 +1178,58 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
 }
 
 #[test]
+fn rex_display_selection_ignores_the_listing_cli_that_has_already_exited() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    rex_reply(bin.path(), "session.focus_window", serde_json::json!({}));
+    rex_reply(
+        bin.path(),
+        "client.list",
+        serde_json::json!({"clients":[
+            {"client_id":"client:listing","info":{"kind":"cli"}},
+            {"client_id":"client:app","info":{"kind":"app"}}
+        ]}),
+    );
+    rex_reply(
+        bin.path(),
+        "client.inspect",
+        serde_json::json!({"actions":[{"name":"session.select"}]}),
+    );
+    rex_reply(bin.path(), "client.perform", serde_json::json!({}));
+    let peer = bin.path().join("rex-peer");
+    std::fs::rename(bin.path().join("rex"), &peer).unwrap();
+    std::fs::write(bin.path().join("rex"), format!(
+        "#!/bin/sh\ncase \"$*\" in *client:listing*) echo 'client not found' >&2; exit 1;; esac\nexec '{}' \"$@\"\n",
+        peer.display(),
+    )).unwrap();
+    std::fs::set_permissions(
+        bin.path().join("rex"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+
+    let report = json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", "--task", "INF-123", "--host", "rex", "--json"],
+    ));
+    assert!(
+        report["receipts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Rex accepted display selection"),
+        "{report}"
+    );
+}
+
+#[test]
 fn configured_task_layout_shapes_a_launch_without_a_saved_desktop_layout() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

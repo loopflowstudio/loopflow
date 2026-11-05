@@ -251,6 +251,11 @@ impl Rex {
         let clients = array(self.call("client.list", json!({}))?, "clients")?;
         let mut candidates = Vec::new();
         for client in clients {
+            // The CLI performing client.list appears in its own reply and exits
+            // before the next request. It cannot display the workspace.
+            if client["info"]["kind"] == "cli" {
+                continue;
+            }
             let Some(id) = client["client_id"].as_str() else {
                 continue;
             };
@@ -1162,10 +1167,16 @@ fn start_follower(
 }
 
 fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
-    let mut argv = vec![
+    // Tools belong to this opening, including its observer protocol. Keep an
+    // explicit private-Machine runtime, but never hand a dev build's real-Machine
+    // panes to the installed release.
+    let binary = if crate::store::custom_home_selected() {
         crate::os_process::resolve_lf_binary()?
-            .to_string_lossy()
-            .into_owned(),
+    } else {
+        std::env::current_exe()?
+    };
+    let mut argv = vec![
+        binary.to_string_lossy().into_owned(),
         "--cwd".into(),
         cwd.to_string_lossy().into_owned(),
     ];
@@ -1407,6 +1418,17 @@ mod tests {
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
     use serde_json::json;
+
+    #[test]
+    fn real_machine_tools_keep_the_build_that_opened_them() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        std::env::set_var("LF_BIN", "/old/installed/lf");
+        let cwd = std::env::current_dir().unwrap();
+        let argv = super::viewer_argv(&cwd, &["session", "view", "existing"]).unwrap();
+        assert_eq!(argv[0], std::env::current_exe().unwrap().to_string_lossy());
+        assert_eq!(&argv[3..], &["session", "view", "existing"]);
+    }
 
     #[test]
     fn caller_listener_preserves_argument_boundaries() {

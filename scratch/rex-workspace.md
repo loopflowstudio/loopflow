@@ -241,7 +241,7 @@ Rex shell joins that session; source drafts never reach argv (layout unit test).
    block_id, label, window_id and owner; `pwd`/`process` work per block; argv, cwd
    and env are not readable. Live LF tools know their own `REX_BLOCK`. An exited
    program's retained block can be checked by block id at cleanup time.
-2. Demo: app Split from each pane (Rex, Herdr, Desktop), cmux end to end
+2. Demo: app Split from each remaining pane (Rex, Herdr, Desktop), cmux end to end
    (including group join), agent-tool routing after viewer move, two-Machine open
    with a remote first arrival, real-provider input through "view again".
    `workspace-demo.md` holds the dated failed demos.
@@ -262,7 +262,28 @@ Rex shell joins that session; source drafts never reach argv (layout unit test).
 - Herdr 0.9.3/protocol 22 and cmux 0.65.0 (CLI at
   `/Applications/cmux.app/Contents/Resources/bin/cmux`) capabilities as above.
 
+## November 5 live-opening repair
+
+Jack Heart challenged the failed demo and asked about dev-lf. The branch opener
+was selecting the installed binary for its panes on the real Machine, where that
+release lacks `session view`. Workspace tools now keep the opening executable;
+explicit private-Machine runtime selection is unchanged. Rex display selection
+also skips the querying CLI client, which appears in client.list and exits before
+inspection. No host persistence or layout ownership was added.
+
+The repaired branch opened the real LOO-498 conversation in Rex, selected the tab,
+and received connected readiness. The native app's Split Right created a zsh in
+the actual Task checkout. This establishes Conversation → Split in Rex; the other
+pane/host cases remain. The mirrored conversation showed reflow artifacts after
+splitting, so visual fidelity is still a finding. Exact receipts and retained
+runtime identities are in [workspace-demo.md](workspace-demo.md).
+
 ## Verification
+
+Opening repair: open library 19/19; work_open integration 24/24 (+2 ignored native
+fixtures), including transient CLI-client selection and moved-viewer routing.
+Real-Machine native opening and Conversation → Split verified as described above.
+Formatting and `cargo clippy --all-targets -- -D warnings` passed.
 
 Realign pass 2 (November 5): notes only, no code change; prior results stand.
 

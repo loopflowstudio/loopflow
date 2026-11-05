@@ -305,7 +305,7 @@ lf task status LOO-1
 | Its account hits a limit, another is eligible | Continues the same conversation under that account |
 | Every eligible account is cooling | Waits, checking each minute, and continues at the first reset |
 | No account will free up | Fails with the limit, like any other failure |
-| Its Process ends during a wait | The run starts again at that step after the reset; earlier steps stay done |
+| Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset |
 
 Only accounts in the resolved route take a step on. The Task's agent and model
 stay as resolved, and nothing is written to your preferences. Commit messages

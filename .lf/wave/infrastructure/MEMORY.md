@@ -24,14 +24,15 @@ preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
 Jack Heart split LOO-714's recovery half into c0b373 on November 5: work keeps
 moving when an account runs out, with one place or none to recover Sessions.
-The `provider_rate_limited` code types the failure;
-text never decides, and a text-only limit cools the account by default. A Graph
-step recovers inside its own Process: it fails over carrying its native thread
-(adopt copies; the pin waits for the provider to report the thread under that
-launch), then polls the wall clock each minute while every route account cools,
-so the Graph never fails and no completed step replays. `agent_limit_recoveries`
-is the truth: `retry_at` set is waiting, null is moved; a step that dies waiting
-restarts the run at itself. Shared Claude limits reach lf only through the
+`provider_rate_limited` types the failure, never text; a text-only limit cools
+the account by default. A Graph step recovers inside its own Process: it fails
+over carrying its native thread (adopt copies; the pin follows the real launch),
+then polls the wall clock each minute while every route account cools, so the
+Graph never fails and no completed step replays. `agent_limit_recoveries` is the
+truth: `retry_at` set is waiting, null is moved. A step that dies waiting is
+where the next `lf task run` starts; one predicate, `restarts_by_itself`
+(assigned, unfinished, unblocked), decides both the sweep and whether status
+promises that restart. Shared Claude limits reach lf only through the
 `StopFailure` hook (no stream, no reset time): the login moves once, open Claude
 Sessions follow on their next message, nothing types into a terminal. Isolated
 and Codex Sessions move on resume. No model/harness fallback; failovers are capped.
@@ -592,12 +593,6 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 Earlier cleanup: `66da3fdf7:wave/infrastructure/MEMORY.md`, “Retained capture
 storage and autonomous cleanup”; see Capture cutover.
 
-## Project configuration and review direction (2026-10-05)
-
-LOO-366 remains unfinished (Optional chapters below). LOO-367's retry stopped on
-boot witness 819671; preserve its conversation/Flow. Review history:
-`906576f39:wave/infrastructure/MEMORY.md`.
-
 ## Release follow-through (reconciled 2026-10-05)
 
 Jack Heart assigned Infrastructure verified publication and installed acceptance.
@@ -620,15 +615,6 @@ metadata and unresolved Mac boot custody remain counterevidence, not repaired by
 deleting probes. Exact proofs and references:
 `5948e490eb7414a059f27ba39f838423a4730465:wave/infrastructure/MEMORY.md`
 under this heading.
-
-## Review replacement (2026-10-04)
-
-Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`. Installed
-acceptance is unproved; LOO-373 owns landing-placement reconciliation.
-
-Retain native history without inventing review success; protect unknown owners
-and independent reviews. Stop/launch ordering and evidence:
-`c28b7d0197:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Transient recovery (LOO-326, curated 2026-10-09)
 
@@ -1112,7 +1098,9 @@ was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this h
 
 ## Archived pointers
 
-Installed worker recovery is under Shipped history.
+Installed worker recovery is under Shipped history. Project configuration and
+review direction (LOO-366/367) and Review replacement (LOO-377/373):
+`77cf6113f7:.lf/wave/infrastructure/MEMORY.md`, those headings.
 Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
 follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths” referent:
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.

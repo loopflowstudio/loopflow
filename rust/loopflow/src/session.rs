@@ -260,6 +260,9 @@ pub(crate) struct SessionSummary {
     /// Available for a person, as of the read's clock.
     pub available: bool,
     pub program_status: Option<crate::program_status::Records>,
+    /// When its current AgentProcess's stream was last heard from, Unix seconds;
+    /// absent before it reported anything.
+    pub activity_observed_at: Option<i64>,
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<crate::id::LfProcessId>,
     pub task_terminal: bool,

@@ -132,6 +132,14 @@ pub enum Write {
         id: String,
         agent: Option<String>,
     },
+    /// `lf session answer <session> <text> [--submit] --json`: type into the
+    /// Session's terminal through its owner, Enter after with `submit`.
+    #[serde(rename = "session.answer")]
+    SessionAnswer {
+        session: crate::id::LfSessionId,
+        text: String,
+        submit: bool,
+    },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
@@ -324,6 +332,11 @@ impl Write {
             Self::SessionBind {
                 id, task, preview, ..
             } => super::session::bound(id, task, *preview),
+            Self::SessionAnswer {
+                session,
+                text,
+                submit,
+            } => value(&crate::engine::session::answer(session, text, *submit)?),
             Self::SessionResume { .. } | Self::SessionNew { .. } => {
                 let (cli, _) = self
                     .cli()
@@ -580,7 +593,7 @@ impl Write {
             | Self::DashboardSlots { directory, .. }
             | Self::TileMove { directory, .. }
             | Self::PaneLayout { directory, .. } => directory,
-            Self::Portfolio { .. } => Path::new("/"),
+            Self::Portfolio { .. } | Self::SessionAnswer { .. } => Path::new("/"),
         }
     }
 }

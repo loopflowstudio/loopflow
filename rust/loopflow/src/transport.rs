@@ -2402,6 +2402,94 @@ pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
     }
 }
 
+/// What delivering an answer to an execution owner came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Answer {
+    /// The owner took every byte; `terminal` says whether it runs a PTY.
+    Delivered { terminal: bool },
+    /// Another viewer holds input control; nothing was sent.
+    Busy,
+    /// No owner answers at its endpoint: it ended.
+    Ended,
+}
+
+/// How long the submitting key waits behind the text, so a program reading
+/// keystrokes sees typing and then Enter rather than one pasted line.
+const SUBMIT_PAUSE: Duration = Duration::from_millis(50);
+
+/// Type `text` into the execution `id`, then Enter with `submit`, as a viewer
+/// would: take input control only while it is free, write, and leave. Each
+/// write is confirmed before the next goes, so an error after the claim means
+/// delivery is uncertain; nothing is ever sent twice.
+pub(crate) fn answer(id: &LfProcessId, text: &[u8], submit: bool) -> Result<Answer> {
+    let mut socket = match UnixStream::connect(endpoint(id)?) {
+        Ok(socket) => socket,
+        Err(_) => return Ok(Answer::Ended),
+    };
+    socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let mut decoder = Decoder::default();
+    send(
+        &mut socket,
+        Request::Attach {
+            control: true,
+            replace: false,
+            own: None,
+            rows: 24,
+            cols: 80,
+            name: Some("session.answer".into()),
+            moved: None,
+        },
+    )?;
+    let terminal = match next_reply(&mut socket, &mut decoder)? {
+        Reply::Attached {
+            token: Some(_),
+            terminal,
+            ..
+        } => terminal,
+        Reply::Busy => return Ok(Answer::Busy),
+        other => bail!("unexpected transport reply {other:?}"),
+    };
+    let enter: &[u8] = if terminal { b"\r" } else { b"\n" };
+    let mut writes = vec![text];
+    if submit {
+        writes.push(enter);
+    }
+    for (index, bytes) in writes.into_iter().enumerate() {
+        if bytes.is_empty() {
+            continue;
+        }
+        if index > 0 {
+            std::thread::sleep(SUBMIT_PAUSE);
+        }
+        send_frame(&mut socket, Tag::Input, bytes)?;
+        // The owner answers requests in order, after the input before them.
+        send(&mut socket, Request::Controlled)?;
+        match next_reply(&mut socket, &mut decoder)? {
+            Reply::Controlled { held: true } => {}
+            other => bail!("input control was lost while answering: {other:?}"),
+        }
+    }
+    send(&mut socket, Request::Leave)?;
+    Ok(Answer::Delivered { terminal })
+}
+
+/// The next reply on an attached viewer's connection, past its stream frames.
+fn next_reply(socket: &mut UnixStream, decoder: &mut Decoder) -> Result<Reply> {
+    let mut bytes = [0; 65536];
+    loop {
+        while let Some((tag, payload)) = decoder.next()? {
+            if tag == Tag::Reply {
+                let reply: Outgoing = serde_json::from_slice(&payload)?;
+                return Ok(reply.reply);
+            }
+        }
+        let n = socket.read(&mut bytes)?;
+        anyhow::ensure!(n != 0, "Execution owner closed before answering");
+        decoder.extend(&bytes[..n]);
+    }
+}
+
 /// Read the reply on a control connection that carries no output stream.
 fn receive_reply(socket: &mut UnixStream) -> Result<Reply> {
     let mut decoder = Decoder::default();

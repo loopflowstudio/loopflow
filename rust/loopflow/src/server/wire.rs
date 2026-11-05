@@ -198,6 +198,8 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_comment.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_wait.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_asks.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_answer.json"),
         ] {
             let message: ClientMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(
@@ -217,6 +219,8 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_shipping.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_held.json"),
             include_str!("../../../../tests/fixtures/dto/server/ended.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_asks_reading.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_answered.json"),
         ] {
             let message: ServerMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(

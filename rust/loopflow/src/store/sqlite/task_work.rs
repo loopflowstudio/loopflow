@@ -204,6 +204,20 @@ pub(crate) struct TaskGraphRow {
     pub run: Option<(ExecutionCursor, LfProcess)>,
 }
 
+/// An open Task waiting at an interactive step, with no run carrying it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskAtStep {
+    pub task: TaskId,
+    /// The issue identifier a person names it by, such as `LOO-1`.
+    pub identifier: Option<String>,
+    pub title: String,
+    pub step: crate::task_graph::InteractiveStep,
+    /// When the Task arrived at the step, Unix seconds.
+    pub since: i64,
+    /// The Task's primary conversation, where the person takes part.
+    pub conversation: Option<crate::id::LfSessionId>,
+}
+
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
 /// step it stands at, and the cursor its run began from, if it is on one. The
 /// run's Process stays behind.
@@ -651,6 +665,54 @@ impl SqliteStore {
     pub(crate) fn task_graph(&self, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
         let row = self.task_graph_row(task)?;
         Ok(row.map(|row| self.read_task_graph(row)))
+    }
+
+    /// Every open Task standing at an interactive step of its graph with no
+    /// run carrying it: where a person takes part in its conversation now.
+    pub(crate) fn tasks_at_interactive_steps(&self) -> StoreResult<Vec<TaskAtStep>> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        let mut query = conn.prepare(&format!(
+            "SELECT t.id,t.issue_title,tg.graph,tg.step,tg.updated_at,t.primary_session_id
+             FROM task_graphs tg JOIN tasks t ON t.id=tg.task_id
+             WHERE tg.lf_process_id IS NULL AND tg.step NOT IN ('{START}','{END}')
+             AND {} ORDER BY tg.updated_at,t.id",
+            super::durable::task_open_sql("t")
+        ))?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<crate::id::LfSessionId>>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut waiting = Vec::new();
+        for (id, title, graph, step, since, conversation) in rows {
+            let task = TaskId::parse(&id)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+            let graph: CapturedGraph = serde_json::from_str(&graph)?;
+            let Some(interactive) = graph
+                .interactive_summary()
+                .into_iter()
+                .find(|interactive| interactive.name == step)
+            else {
+                continue;
+            };
+            waiting.push(TaskAtStep {
+                identifier: super::children::short_task_id(&conn, &task)?,
+                task,
+                title,
+                step: interactive,
+                since,
+                conversation,
+            });
+        }
+        Ok(waiting)
     }
 
     /// The Task's Graph as captured, for running it.

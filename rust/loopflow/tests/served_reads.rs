@@ -435,7 +435,8 @@ fn server_operations_match_their_lf_commands() {
         | Read::Tokens { .. }
         | Read::Retention
         | Read::Doctor
-        | Read::TaskWait { .. } => (
+        | Read::TaskWait { .. }
+        | Read::SessionAsks => (
             [
                 Read::MonitorPs,
                 plans(),
@@ -558,6 +559,7 @@ fn server_operations_match_their_lf_commands() {
                     issue: "INF-123".into(),
                     until: loopflow::ops::task::TaskWaitUntil::Terminal,
                 },
+                Read::SessionAsks,
             ],
             [
                 history(),
@@ -570,6 +572,7 @@ fn server_operations_match_their_lf_commands() {
                     directory: work_folder,
                 },
                 task_pane(),
+                Read::SessionAsks,
             ],
         ),
     };
@@ -694,6 +697,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskSteer { .. }
         | Write::TaskComment { .. }
         | Write::TaskInterrupt { .. }
+        // An answer types into a live owner; transport_tests proves its delivery.
+        | Write::SessionAnswer { .. }
         | Write::TaskSave { .. }
         | Write::SessionRename { .. }
         | Write::SessionBind { .. }
@@ -1581,6 +1586,18 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             spelled.extend(words(&["session", "new", id, "--prepare", "--json"]));
             (path(directory), spelled)
+        }
+        Write::SessionAnswer {
+            session,
+            text,
+            submit,
+        } => {
+            let mut spelled = words(&["session", "answer", session, text]);
+            if *submit {
+                spelled.push("--submit".into());
+            }
+            spelled.push("--json".into());
+            ("/".into(), spelled)
         }
         Write::WaveAdd {
             directory,

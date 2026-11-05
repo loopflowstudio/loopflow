@@ -137,6 +137,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     let mut summary = crate::session::SessionSummary {
         preview: None,
         program_status: None,
+        activity_observed_at: None,
         agent_process_id: None,
         primary_scope: None,
         agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,

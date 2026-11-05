@@ -212,6 +212,10 @@ pub enum Read {
         issue: String,
         until: crate::ops::task::TaskWaitUntil,
     },
+    /// `lf session asks --json`: what agents on this Machine wait on a person
+    /// for. Subscribed, the whole list whenever it may change.
+    #[serde(rename = "session.asks")]
+    SessionAsks,
 }
 
 impl Read {
@@ -397,6 +401,7 @@ impl Read {
                     "--json",
                 ])
             }
+            Self::SessionAsks => words(&["session", "asks", "--json"]),
         }
     }
 
@@ -581,6 +586,7 @@ impl Read {
             )?),
             Self::Doctor => value(&super::doctor::report()?),
             Self::TaskWait { issue, until } => value(&crate::engine::task::waited(issue, *until)?),
+            Self::SessionAsks => value(&crate::engine::session::asks()?),
         }
     }
 
@@ -625,6 +631,7 @@ impl Read {
             Self::TaskWait { issue, until } => {
                 crate::engine::task::watch_wait(issue, until, transport)
             }
+            Self::SessionAsks => crate::engine::session::watch_asks(transport),
             other => {
                 return Err(crate::engine::Error::new(
                     crate::engine::ErrorCode::Invalid,

@@ -267,12 +267,11 @@ pub(super) enum Event {
         held: bool,
     },
     /// Input control changed hands. A recipient with `held: false` restores
-    /// its terminal, prints `notice`, then runs the full successor command
-    /// when the owner is retiring, or leaves when another viewer took control.
+    /// its terminal, prints `notice` and leaves: another viewer took control,
+    /// or the owner is ending.
     Control {
         held: bool,
         notice: Option<String>,
-        successor: Option<Vec<String>>,
     },
     ChildExited {
         code: u8,

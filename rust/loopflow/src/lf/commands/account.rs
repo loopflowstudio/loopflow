@@ -77,6 +77,9 @@ pub fn run(
         (Some(AccountCommand::Use { email }), Some(provider)) => {
             rt.block_on(use_account(provider.as_str(), email))
         }
+        (Some(AccountCommand::Drain { email, to }), Some(provider)) => {
+            rt.block_on(drain_account(provider, email, to.as_deref()))
+        }
         (Some(cmd), _) => rt.block_on(run_async(cmd)),
         (None, provider) => rt.block_on(account_status::run(provider, !cached, details, json)),
     }
@@ -129,7 +132,9 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             file,
             chrome_profile,
         } => token_account(provider, email, file.as_deref(), chrome_profile.as_deref()).await,
-        AccountCommand::Use { .. } => unreachable!("run handles use with its provider"),
+        AccountCommand::Use { .. } | AccountCommand::Drain { .. } => {
+            unreachable!("run handles use and drain with their provider")
+        }
         AccountCommand::Route {
             repo,
             default,
@@ -222,6 +227,20 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
             format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account codex use {login}`", native.display())
         })?;
     }
+    Ok(())
+}
+
+/// `lf account <provider> drain <email> [--to <email>]`.
+async fn drain_account(provider: Provider, email: &str, to: Option<&str>) -> Result<()> {
+    let store = open_account_store().await?;
+    let (target, report) =
+        crate::ops::human_session::moves_bulk::drain_account(&store, provider, email, to).await?;
+    println!(
+        "{email} is explicit-only; {} Sessions go to {}",
+        provider.display_name(),
+        account_login(&target)
+    );
+    report.print();
     Ok(())
 }
 

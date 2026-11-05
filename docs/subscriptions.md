@@ -304,18 +304,41 @@ lf task status LOO-1
 | What happens | What the step does |
 |---|---|
 | Its account hits a limit, another is eligible | Continues the same conversation under that account |
-| Every eligible account is cooling | Waits, checking each minute, and continues at the first reset |
+| Every eligible account is held back and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
+| Those are held back too and `default_agent` lists another provider (`claude,codex`) | Continues on the next provider, seeded with the conversation so far, as `lf session new -a` does |
+| Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
 | No account will free up | Fails with the limit, like any other failure |
 | Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset |
 
-Only accounts in the resolved route take a step on. The Task's agent and model
-stay as resolved, and nothing is written to your preferences. Commit messages
-and PR text fail at once, because someone is waiting for them.
+Only accounts in the resolved route take a step on. An explicit `harness:model`
+stays on its model and changes only accounts; a bare harness may change model;
+only a preference list (`lf set default_agent claude,codex`, no explicit
+`agent`) lets a step change provider. Nothing is written to your preferences.
+Commit messages and PR text fail at once, because someone is waiting for them.
+
+A limit the provider scopes to one model, such as Claude's weekly Opus or Fable
+limit, holds back only launches of that model: Sonnet on the same account keeps
+going, and a launch that names no model waits for every scope on the account.
 
 Open Claude Sessions need nothing either. When one hits a limit in shared mode,
 the login moves to the eligible account that resets soonest, and every open Claude
-follows. Send your next message where you left off. Isolated Sessions and Codex
-keep their login until you `lf resume` them, which moves them.
+follows at its next request. Send your next message where you left off. Isolated
+Sessions and Codex keep their login until you `lf resume` them, which moves them.
+
+To see what would fail next, and move it in one go:
+
+```bash
+lf session list --blocked                       # Sessions whose login cannot take their model now
+lf session list --on claude:fable               # every open Fable Session
+lf session move --blocked -a claude:opus        # continue them on Opus: idle ones at their next open, busy ones after their turn
+lf session move --on jack@ --account work@      # switch the shared login; every open Claude follows
+lf account claude drain jack@ --to work@        # stop routing to a login and move what is on it
+```
+
+`--blocked` and `--on` are the one Session selector; `list` previews what
+`move` acts on. A move never writes preferences. Sessions pinned to their own
+login are listed with the `lf resume --account` that moves them. In the Desktop,
+View → Move Blocked Sessions… runs the same move.
 
 ## Switch the shared account
 

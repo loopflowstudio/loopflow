@@ -255,7 +255,7 @@ impl Cli {
                 } | SessionCommand::New {
                     connection: SessionConnectionArgs { prepare: false, .. },
                     ..
-                }
+                } | SessionCommand::Move { .. }
             ),
             Some(Commands::Ops { cmd }) => match cmd {
                 OpsCommand::Commit { message, .. } => message.is_none(),
@@ -1195,6 +1195,7 @@ impl SessionCommand {
             | Self::New { .. }
             | Self::Steer { .. }
             | Self::Rename { .. }
+            | Self::Move { .. }
             | Self::Send { .. }
             | Self::Receive { .. } => true,
         }
@@ -1320,7 +1321,8 @@ fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
             | AccountCommand::Set { .. }
             | AccountCommand::Token { .. }
             | AccountCommand::RedeemReset { .. }
-            | AccountCommand::Use { .. },
+            | AccountCommand::Use { .. }
+            | AccountCommand::Drain { .. },
         ) => true,
     }
 }
@@ -1597,6 +1599,8 @@ impl SessionConnectionArgs {
 /// Which Sessions `lf session list` and `lf desktop sessions` read.
 #[derive(Args, Debug, Clone)]
 pub struct SessionListArgs {
+    #[command(flatten)]
+    pub selector: SessionSelectorArgs,
     #[arg(long)]
     pub json: bool,
     /// Include Sessions from every repository on this machine
@@ -1634,8 +1638,37 @@ pub struct SessionListArgs {
     pub watch: bool,
 }
 
+/// Which Sessions a list shows or an action moves; `lf session list` with the
+/// same flags is the preview.
+#[derive(Args, Debug, Clone, Default)]
+pub struct SessionSelectorArgs {
+    /// Sessions whose next message would fail: their login cannot take their model now
+    #[arg(long)]
+    pub blocked: bool,
+    /// Sessions on this login (email) or agent (harness[:model])
+    #[arg(long, value_name = "ACCOUNT|AGENT")]
+    pub on: Option<String>,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Move the selected open Sessions to another login (--account) or agent
+    /// (-a harness[:model]); `lf session list` with the same flags previews them
+    #[command(
+        after_help = "Idle Sessions move now; a busy one moves after its turn. A login switch is one act every open Claude follows at its next request; Codex follows when resumed. Sessions pinned to their own login are listed for `lf resume --account`. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus\n  lf session move --on jack@ --account work@   switch the shared login"
+    )]
+    Move {
+        #[command(flatten)]
+        selector: SessionSelectorArgs,
+        /// Another login of the same provider
+        #[arg(long, value_name = "EMAIL")]
+        account: Option<String>,
+        /// Sessions from every repository on this machine
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Run the process a Session lives in while terminals come and go
     Serve {
         /// Relay the execution to an attached terminal
@@ -2893,6 +2926,17 @@ pub enum AccountCommand {
     /// `lf account <provider> use <email>`
     #[command(override_usage = "lf account <PROVIDER> use <EMAIL>")]
     Use { email: String },
+    /// Stop routing to a login and move its open Sessions elsewhere:
+    /// `lf account <provider> drain <email> [--to <email>]`
+    #[command(
+        override_usage = "lf account <PROVIDER> drain <EMAIL> [--to <EMAIL>]",
+        after_help = "Marks the login explicit-only, then moves the open Sessions on it to --to or the route's next login: the shared login switches once and every open Claude follows; Sessions pinned to the login are listed for `lf resume --account`."
+    )]
+    Drain {
+        email: String,
+        #[arg(long, value_name = "EMAIL")]
+        to: Option<String>,
+    },
     /// Explain configured and automatic account selection; `lf set
     /// account.<provider>` replaces a route
     Route {
@@ -2917,7 +2961,10 @@ impl AccountCommand {
             (Some(Self::Use { .. }), None) => {
                 Some("name the provider: lf account <provider> use <email>")
             }
-            (Some(Self::Use { .. }), Some(_)) | (None, _) => None,
+            (Some(Self::Drain { .. }), None) => {
+                Some("name the provider: lf account <provider> drain <email>")
+            }
+            (Some(Self::Use { .. } | Self::Drain { .. }), Some(_)) | (None, _) => None,
             (Some(_), None) if !overview_flags => None,
             (Some(_), _) => Some(
                 "the provider and --cached, --details and --json before a subcommand apply to `lf account` alone",
@@ -3500,6 +3547,74 @@ mod tests {
             provider: Some(crate::provider_auth::Provider::Codex),
             ..
         } }) if email == "jack@loopflow.studio")
+        );
+    }
+
+    #[test]
+    fn session_move_takes_the_selector_and_the_global_agent() {
+        let cli = Cli::try_parse_from(["lf", "session", "move", "--blocked", "-a", "claude:opus"])
+            .unwrap();
+        assert_eq!(cli.agent.as_deref(), Some("claude:opus"));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Move {
+                    selector: SessionSelectorArgs {
+                        blocked: true,
+                        on: None
+                    },
+                    account: None,
+                    ..
+                }
+            })
+        ));
+        let cli =
+            Cli::try_parse_from(["lf", "session", "list", "--on", "jack@example.com"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::List(SessionListArgs {
+                    selector: SessionSelectorArgs {
+                        blocked: false,
+                        on: Some(_)
+                    },
+                    ..
+                })
+            })
+        ));
+    }
+
+    #[test]
+    fn account_drain_takes_its_provider_before_the_verb() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "ops",
+            "account",
+            "claude",
+            "drain",
+            "jack@example.com",
+            "--to",
+            "work@example.com",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Ops { cmd: OpsCommand::Account {
+                cmd: Some(AccountCommand::Drain { email, to: Some(to) }),
+                provider: Some(crate::provider_auth::Provider::Claude),
+                ..
+            } }) if email == "jack@example.com" && to == "work@example.com"
+        ));
+        assert_eq!(
+            AccountCommand::misuse(
+                Some(&AccountCommand::Drain {
+                    email: "jack@example.com".into(),
+                    to: None
+                }),
+                None,
+                false
+            ),
+            Some("name the provider: lf account <provider> drain <email>")
         );
     }
 

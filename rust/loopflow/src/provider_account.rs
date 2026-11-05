@@ -119,6 +119,80 @@ fn earliest_release<'a>(
         .min()
 }
 
+/// What open conversations' next messages could launch on, read once: the
+/// stored logins and their limits. A Session is blocked when the login it
+/// would use (its pinned account, else the provider's active login) cannot
+/// take its model now.
+#[derive(Debug, Default)]
+pub(crate) struct LaunchCapacity {
+    accounts: Vec<ProviderAccount>,
+    limits: Vec<AccountLimitRow>,
+    /// Which stored login each managed provider's ordinary home is signed in
+    /// as, read once: finding it compares credential files.
+    active: Vec<(Provider, Option<ProviderAccountId>)>,
+    now: i64,
+}
+
+impl LaunchCapacity {
+    pub(crate) fn read(
+        store: &crate::store::sqlite::SqliteStore,
+    ) -> crate::store::StoreResult<Self> {
+        let accounts = store.list_provider_accounts(None)?;
+        let active = [Provider::Claude, Provider::Codex]
+            .into_iter()
+            .map(|provider| {
+                let login = activation::active_account(
+                    provider,
+                    &activation::native_home(provider, None),
+                    &accounts,
+                )
+                .map(|account| account.account_id.clone());
+                (provider, login)
+            })
+            .collect();
+        Ok(Self {
+            accounts,
+            limits: store.provider_account_limits(None)?,
+            active,
+            now: now_unix(),
+        })
+    }
+
+    /// The login a `provider` conversation uses next: `pinned`, else the one
+    /// signed in to the provider's ordinary home. None for unmanaged providers.
+    pub(crate) fn login(
+        &self,
+        provider: &str,
+        pinned: Option<&ProviderAccountId>,
+    ) -> Option<&ProviderAccount> {
+        let account_id = match pinned {
+            Some(pinned) => pinned,
+            None => {
+                let provider: Provider = provider.parse().ok()?;
+                self.active
+                    .iter()
+                    .find(|(active, _)| *active == provider)?
+                    .1
+                    .as_ref()?
+            }
+        };
+        self.accounts
+            .iter()
+            .find(|account| account.provider == provider && account.account_id == *account_id)
+    }
+
+    pub(crate) fn blocks(
+        &self,
+        provider: &str,
+        pinned: Option<&ProviderAccountId>,
+        model: Option<&str>,
+    ) -> bool {
+        self.login(provider, pinned).is_some_and(|account| {
+            account_held_until(account, &self.limits, model, self.now).is_some()
+        })
+    }
+}
+
 /// Stable sort: larger plans lead, then the account whose limiting window for
 /// `model` resets soonest, so no account resets with quota unused; then the
 /// most room; declared route order breaks ties.
@@ -1225,13 +1299,15 @@ async fn resolve_selected_provider_account(
     let repo_id = current_repo_id()?;
     let Some(mut candidates) = ordered_selected_candidates(
         provider,
-        agent_session,
-        exact_account_id,
+        LaunchAsk {
+            agent_session,
+            exact_account_id,
+            model,
+        },
         repo_id.as_ref(),
         wave_id,
         local_store.as_ref(),
         true,
-        model,
     )
     .await?
     else {
@@ -1323,16 +1399,28 @@ fn active_candidate(
     })
 }
 
+/// What a launch asks of the route: the thread it continues, the login it
+/// names, and the model it runs.
+#[derive(Debug, Clone, Copy, Default)]
+struct LaunchAsk<'a> {
+    agent_session: Option<&'a AgentSessionId>,
+    exact_account_id: Option<&'a ProviderAccountId>,
+    model: Option<&'a str>,
+}
+
 async fn ordered_selected_candidates(
     provider: Provider,
-    agent_session: Option<&AgentSessionId>,
-    exact_account_id: Option<&ProviderAccountId>,
+    ask: LaunchAsk<'_>,
     repo_id: Option<&CanonicalRepo>,
     wave_id: Option<&WaveId>,
     local_store: Option<&SharedStore>,
     verify_identity: bool,
-    model: Option<&str>,
 ) -> Result<Option<Vec<(AccountCandidate, bool)>>, ProviderAccountError> {
+    let LaunchAsk {
+        agent_session,
+        exact_account_id,
+        model,
+    } = ask;
     let mut catalog = match &local_store {
         Some(store) => store.list_provider_accounts(None).await?,
         None => Vec::new(),
@@ -1592,7 +1680,12 @@ pub(crate) async fn inspect_provider_route(
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
         return Ok(ordered_selected_candidates(
-            provider, None, None, repo_id, None, store, false, None,
+            provider,
+            LaunchAsk::default(),
+            repo_id,
+            None,
+            store,
+            false,
         )
         .await?
         .map(|candidates| {

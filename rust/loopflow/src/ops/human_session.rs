@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::WorkRef;
+use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
 use crate::store::sqlite::sessions::OwnerRetention;
@@ -26,6 +27,7 @@ use crate::work::task::Task;
 
 pub(crate) mod conversation_log;
 pub(crate) mod moves;
+pub(crate) mod moves_bulk;
 pub(crate) mod primary;
 pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
@@ -317,6 +319,11 @@ pub struct SessionRecord {
     /// The login its conversation is pinned to; absent for a shared or
     /// unrouted conversation.
     pub account: Option<crate::store::ProviderAccountId>,
+    /// The model its current input launched with, when one was named.
+    pub model: Option<String>,
+    /// Its next message would fail: the login it would use cannot take its
+    /// model now. `lf session move --blocked` moves these.
+    pub blocked: bool,
     pub cwd: String,
     pub state: SessionState,
     pub ready_summary: Option<String>,
@@ -419,19 +426,24 @@ pub(crate) async fn list(
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
     // Checkout resolution must precede Task filtering and pagination: SQL path
-    // prefixes cannot recognize symlink aliases or nested repositories.
-    let association_filter = filter.orphan || filter.task.is_some();
+    // prefixes cannot recognize symlink aliases or nested repositories. Neither
+    // can they judge capacity.
+    let association_filter =
+        filter.orphan || filter.task.is_some() || filter.blocked || filter.on.is_some();
     let mut selection = filter.clone();
     if association_filter {
         selection.task = None;
         selection.orphan = false;
+        selection.blocked = false;
+        selection.on = None;
         selection.limit = 0;
         selection.offset = 0;
     }
     let mut sessions = Vec::new();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let capacity = LaunchCapacity::read(&store.sqlite)?;
     for session in store.session_summaries(&selection, now).await? {
-        sessions.push(summary_surface(&session));
+        sessions.push(summary_surface(&session, &capacity));
     }
     workspace::associate(store, &mut sessions).await?;
     if association_filter {
@@ -446,6 +458,11 @@ pub(crate) async fn list(
                     || task
                         .as_ref()
                         .is_some_and(|task| session.task_ids.contains(task)))
+                && (!filter.blocked || session.blocked)
+                && filter
+                    .on
+                    .as_deref()
+                    .is_none_or(|on| on_selects(on, session, &capacity))
         });
         let offset = if filter.after.is_some() {
             0
@@ -485,15 +502,40 @@ fn graph_occurrence(
 /// One Session as `list` reads it; `None` once it is gone.
 pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let capacity = LaunchCapacity::read(&store.sqlite)?;
     Ok(store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session)))
+        .map(|session| summary_surface(&session, &capacity)))
+}
+
+/// `--on <account|harness[:model]>`: a login by email or account id, or an
+/// agent. A bare harness selects every model on it.
+fn on_selects(on: &str, session: &SessionRecord, capacity: &LaunchCapacity) -> bool {
+    let Some(provider) = session.provider.as_deref() else {
+        return false;
+    };
+    let (harness, model) = crate::config::parse_agent(on);
+    if !on.contains('@') && crate::harness::HarnessKind::parse(&harness).is_some() {
+        return provider == harness && (model.is_none() || model == session.model);
+    }
+    capacity
+        .login(provider, session.account.as_ref())
+        .is_some_and(|account| {
+            account.account_id.as_str().eq_ignore_ascii_case(on)
+                || account
+                    .login_email
+                    .as_ref()
+                    .is_some_and(|email| email.as_str().eq_ignore_ascii_case(on))
+        })
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
 /// Connect/complete still enter find_session and surface, with full validation.
-fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
+fn summary_surface(
+    session: &crate::session::SessionSummary,
+    capacity: &LaunchCapacity,
+) -> SessionRecord {
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -569,6 +611,10 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             .map_or(provider.clone(), |model| format!("{provider}:{model}")),
         provider: session.provider.clone(),
         account: session.account.clone(),
+        model: session.model.clone(),
+        blocked: session.provider.as_deref().is_some_and(|provider| {
+            capacity.blocks(provider, session.account.as_ref(), session.model.as_deref())
+        }),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -1316,6 +1362,16 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         detail: launch_model(session),
         provider: session.provider.clone(),
         account: metadata.account.clone(),
+        model: session.model.clone(),
+        blocked: session.provider.as_deref().is_some_and(|provider| {
+            LaunchCapacity::read(&store.sqlite).is_ok_and(|capacity| {
+                capacity.blocks(
+                    provider,
+                    metadata.account.as_ref(),
+                    session.model.as_deref(),
+                )
+            })
+        }),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),

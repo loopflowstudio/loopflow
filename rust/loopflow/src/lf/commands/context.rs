@@ -313,7 +313,18 @@ pub fn emit_block(
         }
     }
     if moment == crate::context_block::ContextMoment::Stop {
-        return acquire_planning(&delivery);
+        acquire_planning(&delivery)?;
+        // A move asked of this Session while it was busy happens now that its
+        // turn has ended; the new thread opens where the Session is shown.
+        if let Some(thread) = input["session_id"].as_str() {
+            if let Err(error) = crate::ops::human_session::moves_bulk::apply_pending_move_blocking(
+                &delivery.home,
+                thread,
+            ) {
+                tracing::warn!(%error, "pending Session move did not apply");
+            }
+        }
+        return Ok(());
     }
     emit_context(delivery, input, moment, adapter.as_ref())
 }

@@ -437,6 +437,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::SessionBind { .. }
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
+        | Write::SessionMove { .. }
         | Write::WaveAdd { .. }
         | Write::PlanningRefresh { .. }
         | Write::NewChapter { .. }
@@ -490,6 +491,14 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     directory: directory.clone(),
                     id: session.clone(),
                     agent: None,
+                },
+                // No fixture login is held back, so nothing is blocked to move.
+                Write::SessionMove {
+                    directory: directory.clone(),
+                    blocked: true,
+                    on: None,
+                    agent: Some("codex".into()),
+                    account: None,
                 },
                 Write::TaskComplete {
                     directory: directory.clone(),

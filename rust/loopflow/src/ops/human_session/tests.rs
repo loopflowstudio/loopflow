@@ -177,7 +177,7 @@ fn session_metadata_keeps_unknown_position_visible() {
         wave_name: Some("Infrastructure".into()),
         task_identifier: Some("INF-123".into()),
     };
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, &LaunchCapacity::default());
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(crate::durable::WorkRef::Task(task)));
     assert_eq!(row.wave_id, Some(wave));
@@ -193,14 +193,14 @@ fn session_metadata_keeps_unknown_position_visible() {
     ));
     summary.graph_step_latest = true;
     assert!(matches!(
-        super::summary_surface(&summary).graph_membership,
+        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
         super::SessionGraphMembership::Step {
             occurrence: super::SessionGraphOccurrence::Current,
             ..
         }
     ));
     summary.graph.as_mut().unwrap().state = crate::session::GraphProcessSummaryState::Stopped;
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, &LaunchCapacity::default());
     assert!(matches!(
         row.graph_membership,
         super::SessionGraphMembership::Step {
@@ -215,16 +215,16 @@ fn session_metadata_keeps_unknown_position_visible() {
     );
     summary.graph_lf_process_id = None;
     assert!(matches!(
-        super::summary_surface(&summary).graph_membership,
+        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
         super::SessionGraphMembership::Unknown { .. }
     ));
     summary.independent = true;
     assert_eq!(
-        super::summary_surface(&summary).graph_membership,
+        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
         super::SessionGraphMembership::Independent
     );
     summary.ready_summary = Some("Exact retained feedback".into());
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, &LaunchCapacity::default());
     assert_eq!(row.state, super::SessionState::Unknown);
     assert_eq!(row.ready_summary, summary.ready_summary);
     assert_eq!(row.availability, None);
@@ -255,6 +255,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     }
 }
 
+use crate::provider_account::LaunchCapacity;
 use std::ffi::OsString;
 
 use super::human_session_argv;
@@ -323,6 +324,12 @@ fn session_action_fixtures_match_the_shared_boundary() {
     for case in cases {
         assert_eq!(super::session_actions(case.state, true), case.actions);
     }
+    let report = include_str!("../../../../../tests/fixtures/dto/session_move_report.json");
+    let parsed: super::moves_bulk::MoveReport = serde_json::from_str(report).unwrap();
+    assert_eq!(
+        serde_json::to_value(&parsed).unwrap(),
+        serde_json::from_str::<serde_json::Value>(report).unwrap()
+    );
     for fixture in [
         include_str!("../../../../../tests/fixtures/dto/session.json"),
         &serde_json::from_str::<serde_json::Value>(include_str!(

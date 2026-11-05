@@ -507,3 +507,36 @@ fn write_private(path: &Path, contents: &[u8]) -> Result<(), ProviderAccountErro
         .map_err(|error| filesystem(error.error))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod credentials_marker_tests {
+    use std::fs;
+    use std::time::{Duration, SystemTime};
+
+    use super::touch_claude_credentials_marker;
+
+    /// Claude 2.1.318 re-reads the Keychain only when this file's mtime moves.
+    #[test]
+    fn a_claude_switch_marks_the_credentials_file_so_open_sessions_reread_it() {
+        let home = tempfile::tempdir().unwrap();
+        let marker = home.path().join(".credentials.json");
+        touch_claude_credentials_marker(home.path()).unwrap();
+        assert!(
+            !marker.exists(),
+            "no marker is created where Claude keeps none"
+        );
+
+        fs::write(&marker, "{}").unwrap();
+        let stale = SystemTime::now() - Duration::from_secs(3_600);
+        fs::File::options()
+            .append(true)
+            .open(&marker)
+            .unwrap()
+            .set_modified(stale)
+            .unwrap();
+        touch_claude_credentials_marker(home.path()).unwrap();
+        let modified = fs::metadata(&marker).unwrap().modified().unwrap();
+        assert!(modified > stale + Duration::from_secs(1_800));
+        assert_eq!(fs::read_to_string(&marker).unwrap(), "{}");
+    }
+}

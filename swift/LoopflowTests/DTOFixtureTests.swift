@@ -763,6 +763,15 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(SessionRecord.self, from: JSONEncoder().encode(session)) == session)
     }
 
+    @Test("A Session move report round-trips and summarizes every outcome")
+    func sessionMoveReportFixture() throws {
+        let report = try JSONDecoder().decode(SessionMoveReport.self, from: loadFixtureData("session_move_report.json"))
+        #expect(report.moved.count == 1)
+        #expect(report.pending.first?.how == "continues on claude:opus after its turn")
+        #expect(report.summary.contains("Release notes: skipped, pinned to work"))
+        #expect(try JSONDecoder().decode(SessionMoveReport.self, from: JSONEncoder().encode(report)) == report)
+    }
+
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(

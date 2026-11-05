@@ -156,6 +156,48 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             Ok(())
         }
         SessionCommand::List(_) => unreachable!("lists return before any runtime"),
+        SessionCommand::Move {
+            selector,
+            account,
+            all,
+            json,
+        } => {
+            use crate::ops::human_session::moves_bulk::{move_sessions, MoveTarget};
+            if !selector.blocked && selector.on.is_none() {
+                bail!(
+                    "lf session move needs a selector: --blocked or --on <account|harness[:model]>"
+                );
+            }
+            let target = match (account, cli.agent.as_deref()) {
+                (Some(email), None) => MoveTarget::Account(email.clone()),
+                (None, Some(agent)) => MoveTarget::Agent(agent.to_owned()),
+                (Some(_), Some(_)) => {
+                    bail!("name one target: --account <email> or -a harness[:model]")
+                }
+                (None, None) => {
+                    bail!("lf session move needs a target: --account <email> or -a harness[:model]")
+                }
+            };
+            let filter = crate::session::SessionFilter {
+                blocked: selector.blocked,
+                on: selector.on.clone(),
+                repo: if *all {
+                    None
+                } else {
+                    crate::repository::CanonicalRepo::containing(&std::env::current_dir()?)?
+                        .map(|repo| repo.to_string())
+                },
+                ..Default::default()
+            };
+            let store = open_shared_store().await?;
+            let report = move_sessions(&store, &filter, &target).await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                report.print();
+            }
+            Ok(())
+        }
         SessionCommand::Resume {
             id,
             connection,
@@ -342,6 +384,8 @@ pub(crate) fn list_filter(
     directory: &std::path::Path,
 ) -> anyhow::Result<crate::session::SessionFilter> {
     Ok(crate::session::SessionFilter {
+        blocked: args.selector.blocked,
+        on: args.selector.on.clone(),
         available: args.available,
         repo: if args.all {
             None
@@ -442,6 +486,35 @@ pub(crate) fn binding_preview(
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         crate::ops::human_session::preview_binding(&store, id, task).await
+    })
+}
+
+/// The report `lf session move --all --json` prints for the selector and target.
+pub(crate) fn moved(
+    blocked: bool,
+    on: Option<&str>,
+    agent: Option<&str>,
+    account: Option<&str>,
+) -> anyhow::Result<crate::ops::human_session::moves_bulk::MoveReport> {
+    use crate::ops::human_session::moves_bulk::{move_sessions, MoveTarget};
+    anyhow::ensure!(
+        blocked || on.is_some(),
+        "a Session move needs a selector: blocked or on"
+    );
+    let target = match (account, agent) {
+        (Some(email), None) => MoveTarget::Account(email.to_owned()),
+        (None, Some(agent)) => MoveTarget::Agent(agent.to_owned()),
+        _ => bail!("a Session move needs one target: an account or an agent"),
+    };
+    let filter = crate::session::SessionFilter {
+        blocked,
+        on: on.map(str::to_owned),
+        repo: None,
+        ..Default::default()
+    };
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        move_sessions(&store, &filter, &target).await
     })
 }
 

@@ -20,3 +20,10 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='processes'; E
 -- back only launches of that model. The window keeps the provider's own name.
 ALTER TABLE provider_account_limits ADD COLUMN model TEXT;
 ALTER TABLE provider_account_limits ADD COLUMN limited_until INTEGER;
+
+-- A move `lf session move` asked of a busy Session; its Stop hook applies it.
+CREATE TABLE session_moves (
+    session_id TEXT PRIMARY KEY,
+    agent TEXT NOT NULL,
+    requested_at INTEGER NOT NULL
+);

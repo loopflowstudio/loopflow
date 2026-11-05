@@ -22,7 +22,10 @@ skills:
 ```
 
 Use `agent` for a choice you want applied. Use `default_agent` for a fallback
-that lets another applicable `agent` choose differently. The examples below are
+that lets another applicable `agent` choose differently. A `default_agent` list
+(`claude,codex`) launches its first entry and lets a headless Graph step fall
+through to the next when every account for the first is held back by a usage
+limit; an explicit `agent` never changes provider. The examples below are
 separate setups; combine the pieces that fit your work.
 
 ## Let a project choose its exceptions

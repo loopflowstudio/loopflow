@@ -1357,6 +1357,37 @@ impl SqliteStore {
         Ok(limits)
     }
 
+    // -- Session moves --------------------------------------------------------
+
+    /// Leave a move for a busy Session; its next Stop hook applies it.
+    pub fn record_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_moves (session_id, agent, requested_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(session_id) DO UPDATE SET
+                agent = excluded.agent,
+                requested_at = excluded.requested_at",
+            params![session, agent, now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// Take the move left for `session`, if any.
+    pub fn take_session_move(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let agent = conn
+            .query_row(
+                "SELECT agent FROM session_moves WHERE session_id = ?1",
+                [session],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if agent.is_some() {
+            conn.execute("DELETE FROM session_moves WHERE session_id = ?1", [session])?;
+        }
+        Ok(agent)
+    }
+
     // -- Access profiles and provider routes ----------------------------------
 
     pub fn upsert_access_profile(&self, profile: &AccessProfile) -> StoreResult<()> {

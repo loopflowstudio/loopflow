@@ -93,6 +93,17 @@ pub enum Write {
         id: String,
         agent: Option<String>,
     },
+    /// `lf [--agent <agent>] session move --all [--blocked] [--on <on>]
+    /// [--account <account>] --json`: the open Sessions the selector names
+    /// move to the agent or login; the report says which moved, which move
+    /// after their turn, and which were skipped.
+    SessionMove {
+        directory: PathBuf,
+        blocked: bool,
+        on: Option<String>,
+        agent: Option<String>,
+        account: Option<String>,
+    },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     WaveAdd {
@@ -248,6 +259,30 @@ impl Write {
                 words.extend(["session", "new", id, "--prepare", "--json"]);
                 words
             }
+            Self::SessionMove {
+                blocked,
+                on,
+                agent,
+                account,
+                ..
+            } => {
+                let mut words = Vec::new();
+                if let Some(agent) = agent {
+                    words.extend(["--agent", agent]);
+                }
+                words.extend(["session", "move", "--all"]);
+                if *blocked {
+                    words.push("--blocked");
+                }
+                if let Some(on) = on {
+                    words.extend(["--on", on]);
+                }
+                if let Some(account) = account {
+                    words.extend(["--account", account]);
+                }
+                words.push("--json");
+                words
+            }
             Self::WaveAdd {
                 wave, objective, ..
             } => {
@@ -364,6 +399,7 @@ impl Write {
             | Self::SessionBind { directory, .. }
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
+            | Self::SessionMove { directory, .. }
             | Self::WaveAdd { directory, .. }
             | Self::PlanningRefresh { directory, .. }
             | Self::NewChapter { directory, .. }
@@ -472,6 +508,18 @@ impl Write {
             Self::SessionResume { directory, .. } | Self::SessionNew { directory, .. } => {
                 pretty(&super::session::prepared(cli, directory)?)?
             }
+            Self::SessionMove {
+                blocked,
+                on,
+                agent,
+                account,
+                ..
+            } => pretty(&super::session::moved(
+                *blocked,
+                on.as_deref(),
+                agent.as_deref(),
+                account.as_deref(),
+            )?)?,
             Self::WaveAdd {
                 wave, objective, ..
             } => pretty(&tokio::runtime::Runtime::new()?.block_on(
@@ -602,6 +650,22 @@ mod tests {
             ]
         );
         assert_eq!(
+            write(
+                r#"{"write":"session_move","directory":"/r","blocked":true,"on":null,"agent":"claude:opus","account":null}"#
+            ),
+            [
+                "--cwd",
+                "/r",
+                "--agent",
+                "claude:opus",
+                "session",
+                "move",
+                "--all",
+                "--blocked",
+                "--json"
+            ]
+        );
+        assert_eq!(
             write(r#"{"write":"session_new","directory":"/r","id":"session_1","agent":"codex"}"#),
             [
                 "--cwd",
@@ -703,6 +767,13 @@ mod tests {
                 directory: directory.clone(),
                 id: "session_1".into(),
                 agent: None,
+            },
+            Write::SessionMove {
+                directory: directory.clone(),
+                blocked: true,
+                on: None,
+                agent: Some("claude:opus".into()),
+                account: None,
             },
         ];
         // Arrangement, a customized Graph and a chapter preview record nothing.

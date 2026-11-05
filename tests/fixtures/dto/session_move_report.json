@@ -1,0 +1,23 @@
+{
+  "moved": [
+    {
+      "id": "session_00000000000000000000000000000001",
+      "title": "Simplify cross-Work questions",
+      "how": "continues on claude:opus at its next open"
+    }
+  ],
+  "pending": [
+    {
+      "id": "session_00000000000000000000000000000002",
+      "title": "Rebuild the sidebar",
+      "how": "continues on claude:opus after its turn"
+    }
+  ],
+  "skipped": [
+    {
+      "id": "session_00000000000000000000000000000003",
+      "title": "Release notes",
+      "reason": "pinned to work; `lf resume --account work@example.com session_00000000000000000000000000000003` moves it"
+    }
+  ]
+}

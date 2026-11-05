@@ -204,6 +204,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let provider: String?
     /// The login its conversation is pinned to; nil for a shared or unrouted one.
     public let account: String?
+    /// The model its current input launched with, when one was named.
+    public let model: String?
+    /// Its next message would fail: the login it would use cannot take its model now.
+    public let blocked: Bool
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
@@ -226,7 +230,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, interactive, work, workspace, title, detail, provider, account, cwd, state, availability
+        case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
         case preview
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
@@ -255,6 +259,33 @@ public struct TaskSessionGroups: Sendable, Equatable {
         let primaryFirst = open.filter(\.taskPrimary) + open.filter { !$0.taskPrimary }
         available = primaryFirst.filter { $0.availability == .available }
         working = primaryFirst.filter { $0.availability != .available }
+    }
+}
+
+/// What `lf session move --json` reports: Sessions moved now, Sessions that
+/// move after their turn, and Sessions skipped with why.
+public struct SessionMoveReport: Codable, Sendable, Hashable {
+    public struct Moved: Codable, Sendable, Hashable {
+        public let id: String
+        public let title: String
+        public let how: String
+    }
+
+    public struct Skipped: Codable, Sendable, Hashable {
+        public let id: String
+        public let title: String
+        public let reason: String
+    }
+
+    public let moved: [Moved]
+    public let pending: [Moved]
+    public let skipped: [Skipped]
+
+    /// One line per outcome, as the Desktop shows after a move.
+    public var summary: String {
+        let lines = moved.map { "\($0.title): \($0.how)" } + pending.map { "\($0.title): \($0.how)" }
+            + skipped.map { "\($0.title): skipped, \($0.reason)" }
+        return lines.isEmpty ? "No blocked Sessions." : lines.joined(separator: "\n")
     }
 }
 
@@ -287,6 +318,8 @@ extension SessionRecord {
         detail = try values.decode(String.self, forKey: .detail)
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         account = try values.decodeIfPresent(String.self, forKey: .account)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        blocked = try values.decode(Bool.self, forKey: .blocked)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)

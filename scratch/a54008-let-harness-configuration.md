@@ -85,3 +85,26 @@ No open product choice; nothing left half-built.
 - Compress: `cargo test -p loopflow --lib -- agent:: harness::codex::` 48 ok; `--test session_launch_contract` 27 ok;
   `cargo clippy -p loopflow --all-targets -D warnings` ok. Gate owns `config::`, `settings_launch_tests`,
   `config_tests`, `agent_tests`, `context_launch_tests`, `cli_discovery`.
+
+## Demo (2026-11-05, headless, standing in for Jack)
+
+Built branch `target/debug/lf`, private root `~/.lf-demo/a54008` (`LF_HOME=…/machine`,
+stand-in `claude`/`pi` on PATH recording argv; no live owners, nothing to tear down;
+delete the root when no longer wanted). Observed preference flags per launch:
+
+| Launch | Claude | Pi |
+|---|---|---|
+| unset, `-i` | none | none |
+| `--chrome on` / `off` | `--chrome` / `--no-chrome` | none |
+| `--yolo` | `--dangerously-skip-permissions` | none |
+| pinned model | `--model sonnet` | `--model anthropic/claude-sonnet-4` |
+
+`lf config catalog` names the gaps: `yolo` "Pi keeps its own tool policy"; `chrome`
+"Codex, OpenCode and Pi have no equivalent". Codex and OpenCode need protocol stand-ins,
+so their half of the table is proven by `--test session_launch_contract` (27 ok, incl. the
+Codex fixture's own `on-request` showing through) and `--lib agent:: harness::codex::
+harness::opencode::` (59 ok). Matches the parity table; decision: advance.
+
+## Gate (2026-11-05)
+- `scripts/test.py --reuse-passing --rust-filter 'test(config::) | test(agent::) | test(harness::{codex,claude,opencode}::) | test(session_record::) | test(lf::commands::{run,replay}::) | test({config,settings_launch,context_launch}_tests::) | test(cli_discovery::) | binary(session_launch_contract) | binary(agent_tests)'`: architecture, rustfmt, inventory, website pass; Rust 312/314, the 2 failures are machine state (below); `cargo clippy --all-targets -- -D warnings` ok.
+- `agent_tests::{direct_native_codex_launch_preserves_account_policy_and_literal_input, release_acceptance_recovers_from_a_revoked_selected_account}` fail inside this checkout because `/Users/jack/src/loopflow/lf.config.local.yaml` routes Codex to `manabot-eng`; both pass from `/tmp`. Unrelated to this diff; CI owns them.

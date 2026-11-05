@@ -16,8 +16,7 @@ An abandoned review releases nothing, and its root stays reported as retained.
 This Task's `auto` graph has no demo step, and the assumption that LOO-722's demo would
 carry the reading and the abandoned-review question failed: he approved it and its
 record shows neither. They reach him through the PR body, which Auto-Ship can land before he
-reads it; landing marks and deletes nothing. Combined cleanup proof now has no owner, and
-running it here or filing a follow-up Task is the caller's choice. Installed acceptance
+reads it; landing marks and deletes nothing. Installed acceptance
 is assumed to belong to LOO-723's authorized rollout.
 See [the owners](loo-725.md#obligations-and-owners--reconciled-2026-11-04).
 
@@ -30,15 +29,14 @@ Jack Heart's "`lf resume` always gets you back" as ending an unanswering owner o
 completed Session, since no work is known there; a draft nothing recorded can be lost,
 as in idle takeover. See [the direction](loo-725.md#no-open-session-at-resume--concept-review-2026-11-04).
 
-Marker guidance lives in `.lf/skills/disk-cleanup.md`, the only live cleanup guidance
-under `.lf/`. A demo run does not load that skill, so `demo.md` carries one generic
-line sending it to the repository's cleanup guidance; a demo agent must still find the
-file. LOO-722 rewrites the same skill, so that text conflict needs this section kept.
+Marker guidance lives in `scripts/disk-cleanup.md`, and `.lf/skills/disk-cleanup.md` points
+to it. A demo run does not load that skill, so `demo.md` carries one generic line sending it
+to the repository's cleanup guidance; a demo agent must still find the file.
 
-The decision pass advanced without running option A. #1818 has since merged, so the plan's
-recommendation is B; A also needs #1820's unmerged cleaner, and landing marks or deletes
-nothing. The cleanup proof stays unowned and is stated as unproved in the PR; no follow-up
-Task was filed.
+The cleanup proof ran under a private person Home, not the real `~/.lf-machine`: an unscoped
+`Cleaner.run()` would reach other Tasks' roots. It proves the cleaner against real demo roots,
+not the installed job. A surviving reparented provider is reported to LOO-722, not patched,
+because its hooks proved bounded. See [the receipt](loo-725.md#cleanup-proof-receipt--2026-11-04).
 
 `resume_takes_over_an_owner_from_another_build` failed "viewer left the conversation" in
 2 of 9 parallel focused runs during the #1818 sync (load average 40-70) and 0 of 3 alone.

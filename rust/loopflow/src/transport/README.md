@@ -76,9 +76,8 @@ lifetime policy moves; an older owner without the policy needs another resume.
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
 ends idle owners directly; existing viewers may close and need `lf resume` again.
-Rollover and lifetime diagnostics name what retains an owner: native input, a
-running Graph, no open Session, a headless Run or a live turn. Resume,
-rollover and lifetime policy use the same judgment, independent of reachability.
+Rollover names the same retention reasons. Resume, rollover and lifetime policy
+share this judgment; work holds independent of reachability. Only resume asks whether the owner answers, and only for no open Session.
 Graph runners keep running and launch each next step through the entry.
 Owners and runners whose store has advanced beyond their reader floor cannot
 recover themselves through this policy.

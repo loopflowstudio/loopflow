@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """LOO-725 headless demo walkthrough: demo.md's two roots, copied lf, stand-in provider.
 
-Touches only the two roots below (plus one relink of this checkout's target/debug/lf).
-Signals only PIDs read from the private store and verified against the copied binary.
+`loo-725-walkthrough.py ID` walks the lifecycle. It touches only the two roots below
+(plus one relink of this checkout's target/debug/lf).
+`loo-725-walkthrough.py ID cleanup` drives scripts/disk_cleanup.py's real entry point
+against real demo roots inside a private person Home at ~/.lf-machine/demo-history/ID.
+Both signal only PIDs read from the private store and verified against private paths.
 """
 import collections
 import fcntl
@@ -22,6 +25,7 @@ import threading
 import time
 
 ID = sys.argv[1] if len(sys.argv) > 1 else "loo-725-walkthrough"
+CLEANUP = sys.argv[2:] == ["cleanup"]
 GRACE = 3
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILT = REPO_ROOT / "target/debug/lf"
@@ -39,7 +43,7 @@ PRESSURE_CPU = 200  # scripts/test.py's host-security threshold, sustained 15 se
 PRESSURE_SECONDS = 15
 
 STAND_IN = r"""#!/opt/homebrew/bin/python3
-import json, os, pathlib, subprocess, sys, tty
+import json, os, pathlib, signal, subprocess, sys, time, tty
 if sys.argv[1:] == ["--version"]:
     print("2.1.317")
     sys.exit(0)
@@ -51,10 +55,37 @@ def value(flag):
 resumed = value("--resume")
 native = resumed or value("--session-id") or "standin"
 settings = json.loads(pathlib.Path(value("--settings")).read_text())
+behavior_path = home / "standin.json"
+behavior = json.loads(behavior_path.read_text()) if behavior_path.exists() else {}
+def note_signal(number, frame):
+    with open(home / "signals", "a") as log:
+        log.write(signal.Signals(number).name + "\n")
+for name in behavior.get("ignore", []):
+    signal.signal(getattr(signal, name), note_signal)
+held = open(behavior["hold"], "a") if "hold" in behavior else None
+if "detached_holder" in behavior:  # outlives the owner's teardown of its provider
+    code = ("import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "signal.signal(signal.SIGHUP, signal.SIG_IGN); f = open(sys.argv[1], 'a'); time.sleep(180)")
+    holder = subprocess.Popen([sys.executable, "-c", code, behavior["detached_holder"]], start_new_session=True,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    (home / "holder-pid").write_text(str(holder.pid))
 def hook(event, **extra):
     command = settings["hooks"][event][0]["hooks"][0]["command"]
     payload = dict(session_id=native, hook_event_name=event, **extra)
-    subprocess.run(command, shell=True, input=json.dumps(payload).encode(), stdout=subprocess.DEVNULL, check=False)
+    started = time.time()
+    try:
+        status = subprocess.run(command, shell=True, input=json.dumps(payload).encode(), stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=30, check=False).returncode
+    except subprocess.TimeoutExpired:
+        status = "timeout"
+    with open(home / "hook-log", "a") as log:
+        log.write(json.dumps({"at": started, "event": event, "status": status, "seconds": time.time() - started}) + "\n")
+def outlive_terminal():
+    deadline = time.time() + behavior.get("survive_seconds", 180)
+    while time.time() < deadline:
+        hook("PostToolUse", tool_name="Bash", tool_input={}, tool_response={})
+        hook("Stop", prompt_id="orphan", background_tasks=[], session_crons=[])
+        time.sleep(behavior.get("hook_pause", 1))
 hook("SessionStart", source="resume" if resumed else "startup")
 if not resumed:
     hook("UserPromptSubmit", prompt_id="seed", prompt="initial")
@@ -64,7 +95,12 @@ tty.setraw(terminal)
 os.write(1, (b"EDITOR_RESUMED\r\n" if resumed else b"EDITOR_READY\r\n"))
 draft = bytearray()
 while True:
-    key = os.read(terminal, 1)
+    try:
+        key = os.read(terminal, 1)
+    except OSError:
+        key = b""
+    if key == b"" and behavior.get("survive_hangup"):
+        outlive_terminal()
     if key in (b"\x04", b""):
         break
     if key == b"\x7f":
@@ -325,15 +361,9 @@ def wait_for_clear_host(limit: int = 900) -> float:
     return time.time() - started
 
 
-def main():
-    waited = wait_for_clear_host()
-    results = {"checks": {}, "observations": {"waited_for_clear_host_seconds": round(waited)}}
-    check = results["checks"]
-    observed = results["observations"]
-    for path in (DURABLE, RUNTIME, REOPEN_RUNTIME, PARKED):
-        if path.exists():
-            sys.exit(f"{path} already exists; inspect it before rerunning")
-    for path in (HOME, REPO, PROVIDER_BIN, EVIDENCE, RUNTIME / "bin"):
+def create_demo() -> pathlib.Path:
+    """demo.md's roots before launch: durable Machine, provider and repository; runtime copy."""
+    for path in (HOME, REPO, PROVIDER_BIN, RUNTIME / "bin"):
         path.mkdir(parents=True)
     (HOME / "config.yaml").write_text(f"agent: claude\nsession:\n  end_detached_after: {GRACE}s\n")
     stand_in = PROVIDER_BIN / "claude"
@@ -345,6 +375,19 @@ def main():
                        cwd=REPO, check=True, env={"PATH": "/usr/bin:/bin", "HOME": str(HOME)})
     lf = RUNTIME / "bin/lf"
     shutil.copy2(BUILT, lf)
+    return lf
+
+
+def main():
+    waited = wait_for_clear_host()
+    results = {"checks": {}, "observations": {"waited_for_clear_host_seconds": round(waited)}}
+    check = results["checks"]
+    observed = results["observations"]
+    for path in (DURABLE, RUNTIME, REOPEN_RUNTIME, PARKED):
+        if path.exists():
+            sys.exit(f"{path} already exists; inspect it before rerunning")
+    EVIDENCE.mkdir(parents=True)
+    lf = create_demo()
     copied_inode = lf.stat().st_ino
     built_inode = BUILT.stat().st_ino
 
@@ -558,5 +601,395 @@ def main():
         print(json.dumps(results, indent=1, default=str))
 
 
+# Cleanup proof: scripts/disk_cleanup.py against real demo roots
+
+PERSON = MACHINE / "demo-history" / ID
+SCRIPTS = REPO_ROOT / "scripts"
+PAST_WINDOW_DAYS = 8  # a demo records no outcome, so its window is seven days
+MARKER_TEXT = "disposable runtime; evidence stored elsewhere"
+# The driver's clock moves instead of any file: _measure reads every mtime and the owner's
+# executable identity includes mtime, so aging the copied lf would look like a replacement.
+LAUNCHER = """
+import sys, time
+from pathlib import Path
+sys.path.insert(0, {scripts!r})
+shift = {shift!r}
+real_time = time.time
+time.time = lambda: real_time() + shift
+import resource_envelope, disk_cleanup
+disk_cleanup._temporary_roots = lambda: {{Path({temp!r})}}
+resource_envelope.Path = lambda p: Path({person!r}) if p == '/tmp' else Path(p)
+sys.argv = ['disk-cleanup']
+sys.exit(disk_cleanup.main())
+"""
+
+
+def use_demo(name: str):
+    global DURABLE, RUNTIME, REOPEN_RUNTIME, HOME, REPO, PROVIDER_BIN
+    machine = PERSON / ".lf-machine"
+    DURABLE = machine / "demo-history" / name
+    RUNTIME = machine / "demos" / name
+    REOPEN_RUNTIME = machine / "demos" / f"{name}-reopen"
+    HOME = DURABLE / "home"
+    REPO = DURABLE / "repo"
+    PROVIDER_BIN = DURABLE / "provider"
+
+
+def create_person():
+    global EVIDENCE
+    EVIDENCE = PERSON / "evidence"
+    if PERSON.exists():
+        sys.exit(f"{PERSON} already exists; inspect it before rerunning")
+    state = PERSON / ".lf-machine/maintenance/disk-cleanup"
+    for path in (EVIDENCE, state, PERSON / "src", PERSON / "temp"):
+        path.mkdir(parents=True)
+    (state / "config.json").write_text('{"enabled": true}')
+
+
+def run_cleaner(label: str, shift_days: float, interrupt_when=None) -> dict:
+    """disk_cleanup.main() under the private person; Docker, uv and sccache stay off PATH."""
+    receipt = PERSON / "Library/Logs/loopflow-disk-cleanup.json"
+    receipt.unlink(missing_ok=True)
+    env = {"HOME": str(PERSON), "LF_HOME": str(PERSON / ".lf"), "LOOPFLOW_SRC": str(PERSON / "src"),
+           "TMPDIR": str(PERSON / "temp"), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+    code = LAUNCHER.format(scripts=str(SCRIPTS), shift=shift_days * 86400, temp=str(PERSON / "temp"), person=str(PERSON))
+    started = time.time()
+    with open(EVIDENCE / f"cleaner-{label}.log", "w") as output:
+        process = subprocess.Popen(["/usr/bin/python3", "-c", code], cwd=PERSON, env=env, stdin=subprocess.DEVNULL,
+                                   stdout=output, stderr=subprocess.STDOUT)
+    interrupted_after = None
+    deadline = started + 240
+    while process.poll() is None and time.time() < deadline:
+        if interrupt_when and interrupted_after is None and interrupt_when():
+            interrupted_after = round(time.time() - started, 2)
+            process.send_signal(signal.SIGTERM)
+        time.sleep(0.05)
+    if process.poll() is None:
+        process.kill()
+        process.wait()
+        raise RuntimeError(f"cleaner {label} exceeded its limit")
+    report = json.loads(receipt.read_text()) if receipt.exists() else None
+    if report:
+        shutil.copy2(receipt, EVIDENCE / f"receipt-{label}.json")
+        report.pop("usage", None)
+    return {"status": process.returncode, "seconds": round(time.time() - started, 1),
+            "interrupted_after": interrupted_after, "report": report}
+
+
+def receipt_entries(run: dict, root: pathlib.Path) -> list:
+    return [e for e in (run["report"] or {}).get("candidates", []) if e.get("path") == str(root)]
+
+
+def brief(run: dict, root: pathlib.Path) -> dict:
+    report = run["report"] or {}
+    return {"status": run["status"], "seconds": run["seconds"], "interrupted_after": run["interrupted_after"],
+            "failures": report.get("failures"), "entries": receipt_entries(run, root),
+            "stopped": [(s["pid"], s["signal"]) for s in report.get("stopped_processes", [])],
+            "maintenance": report.get("maintenance")}
+
+
+def stopped_pids(run: dict) -> set:
+    return {s["pid"] for s in (run["report"] or {}).get("stopped_processes", [])}
+
+
+def launch(name: str, behavior: dict | None, tracked: set) -> tuple:
+    """Launch a demo holding an unsettled draft, then detach past its grace."""
+    use_demo(name)
+    lf = create_demo()
+    if behavior:
+        (HOME / "standin.json").write_text(json.dumps(behavior))
+    term = Term(lf, name=f"{name}-launch")
+    if not term.wait("EDITOR_READY", 45):
+        raise RuntimeError(f"{name}: stand-in never reached its editor")
+    time.sleep(1)
+    facts = session_facts()
+    tracked.update({facts["owner_pid"], facts["provider_pid"]})
+    sampler.owner = facts["owner_pid"]
+    term.send("unsettled draft")
+    if not term.wait("EDITOR:unsettled draft", 5):
+        raise RuntimeError(f"{name}: draft never echoed")
+    time.sleep(1)
+    facts["native_input"] = session_facts()["owner_native_input"]
+    term.close()
+    time.sleep(GRACE + 3)
+    return lf, facts
+
+
+def write_marker():
+    (RUNTIME / ".disposable-coding-demo").write_text(MARKER_TEXT)
+
+
+def durable_facts() -> dict:
+    db = sqlite3.connect(f"file:{HOME}/loopflow.db?mode=ro", uri=True, timeout=5)
+    return {"integrity": db.execute("PRAGMA integrity_check").fetchone()[0],
+            "sessions": db.execute("SELECT count(*) FROM agent_sessions").fetchone()[0],
+            "launches_recorded": len(launches()), "repository": (REPO / ".git").exists()}
+
+
+def wait_gone(*pids: int, limit: float = 30) -> float:
+    started = time.time()
+    while time.time() - started < limit and any(pid and alive(pid) for pid in pids):
+        time.sleep(0.05)
+    return round(time.time() - started, 2)
+
+
+def reopen(label: str, facts: dict, tracked: set) -> dict:
+    """lf resume from a new copied runtime, then end it by provider exit and remove that runtime."""
+    (HOME / "standin.json").unlink(missing_ok=True)
+    (REOPEN_RUNTIME / "bin").mkdir(parents=True)
+    binary = REOPEN_RUNTIME / "bin/lf"
+    shutil.copy2(BUILT, binary)
+    before = len(launches())
+    term = Term(binary, "resume", facts["session"], name=f"{label}-reopen")
+    opened = term.wait("EDITOR_RESUMED", 30)
+    time.sleep(1)
+    launched = launches()
+    current = session_facts()
+    tracked.update({current["owner_pid"], current["provider_pid"]})
+    result = {"editor_resumed": opened, "same_session": current["session"] == facts["session"],
+              "used_resume": len(launched) == before + 1 and "--resume" in launched[-1]["argv"],
+              "draft_restored": term.saw("unsettled draft")}
+    term.send("\x04")
+    result["ended_seconds"] = wait_gone(current["owner_pid"], current["provider_pid"])
+    result["ended"] = not alive(current["owner_pid"]) and not alive(current["provider_pid"])
+    term.close()
+    holders = root_holders(REOPEN_RUNTIME)
+    if not holders:
+        shutil.rmtree(REOPEN_RUNTIME)
+    result["runtime_removed"] = not REOPEN_RUNTIME.exists()
+    return result
+
+
+def hook_rows() -> list:
+    path = HOME / "hook-log"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def private_processes() -> list:
+    table = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True).stdout
+    me = str(os.getpid())
+    return [line.strip()[:200] for line in table.splitlines()
+            if str(PERSON) in line and line.split()[0] != me and "/usr/bin/python3 -c" not in line]
+
+
+def release_case(check: dict, observed: dict, tracked: set):
+    """One root through unmarked, inside the window, then past it with an unsettled draft."""
+    lf, facts = launch("release", None, tracked)
+    observed["ids"] = facts
+    check["draft_recorded_before_release"] = bool(facts["native_input"])
+    check["owner_held_by_draft"] = alive(facts["owner_pid"]) and alive(facts["provider_pid"])
+    observed["holders"] = root_holders(RUNTIME)
+    observed["provider_holds_root"] = str(facts["provider_pid"]) in observed["holders"]
+
+    sampler.set("unmarked")
+    run = run_cleaner("unmarked", PAST_WINDOW_DAYS)
+    observed["unmarked"] = brief(run, RUNTIME)
+    entries = receipt_entries(run, RUNTIME)
+    check["unmarked_retained_and_reported"] = (
+        run["status"] == 0 and len(entries) == 1 and entries[0]["status"] == "retained"
+        and "unmarked" in entries[0]["reason"] and RUNTIME.exists())
+    check["unmarked_owner_alive"] = alive(facts["owner_pid"]) and alive(facts["provider_pid"])
+
+    sampler.set("inside-window")
+    write_marker()
+    run = run_cleaner("inside-window", 0)
+    observed["inside_window"] = brief(run, RUNTIME)
+    entries = receipt_entries(run, RUNTIME)
+    check["inside_window_retained_and_reported"] = (
+        run["status"] == 0 and len(entries) == 1 and entries[0]["status"] == "retained"
+        and "written in the last" in entries[0]["reason"] and RUNTIME.exists())
+    check["inside_window_names_owner"] = len(entries) == 1 and facts["owner_pid"] in entries[0].get("owner_pids", [])
+    check["inside_window_owner_alive"] = alive(facts["owner_pid"]) and alive(facts["provider_pid"])
+    check["inside_window_signalled_nothing"] = not stopped_pids(run)
+
+    sampler.set("past-window")
+    run = run_cleaner("past-window", PAST_WINDOW_DAYS)
+    observed["past_window"] = brief(run, RUNTIME)
+    sampler.owner = None
+    check["past_window_exit_zero"] = run["status"] == 0
+    check["past_window_owner_stopped"] = not alive(facts["owner_pid"])
+    check["past_window_provider_stopped"] = not alive(facts["provider_pid"])
+    check["past_window_stopped_verified_owner"] = facts["owner_pid"] in stopped_pids(run)
+    check["past_window_root_removed"] = not RUNTIME.exists()
+    durable = durable_facts()
+    observed["durable"] = durable
+    check["durable_root_intact"] = durable["integrity"] == "ok" and durable["sessions"] >= 1 and durable["repository"]
+
+    sampler.set("release-reopen")
+    result = reopen("release", facts, tracked)
+    observed["reopen"] = result
+    check["reopened_saved_history"] = result["editor_resumed"] and result["same_session"] and result["used_resume"]
+    check["reopen_ended_and_removed"] = result["ended"] and result["runtime_removed"]
+
+
+def interrupted_case(check: dict, observed: dict, tracked: set):
+    """A detached holder ignoring TERM holds grace open; the cleaner is signalled inside it.
+
+    The owner's own teardown ends its provider, so only a process outside it survives.
+    """
+    sampler.set("interrupted-launch")
+    use_demo("interrupted")
+    held = RUNTIME / "generated/held.log"
+    lf, facts = launch_holding(held, tracked)
+    observed["ids"] = facts
+    observed["holders"] = root_holders(RUNTIME)
+    holder = int((HOME / "holder-pid").read_text())
+    tracked.add(holder)
+    check["holder_holds_root"] = str(holder) in observed["holders"]
+    write_marker()
+
+    sampler.set("interrupted-run")
+    signals = HOME / "signals"
+    run = run_cleaner("interrupted", PAST_WINDOW_DAYS, lambda: signals.exists() and "SIGTERM" in signals.read_text())
+    observed["first_run"] = brief(run, RUNTIME)
+    failures = (run["report"] or {}).get("failures", [])
+    check["signalled_inside_grace"] = run["interrupted_after"] is not None
+    check["interruption_exits_nonzero"] = run["status"] != 0
+    check["interruption_reported"] = any("interrupted" in failure for failure in failures)
+    check["root_stays_after_interruption"] = (RUNTIME / "bin/lf").exists() and held.exists()
+    check["surviving_holder_alive"] = alive(holder)
+    observed["owner_alive_after_interruption"] = alive(facts["owner_pid"])
+    observed["provider_alive_after_interruption"] = alive(facts["provider_pid"])
+    observed["holders_after_interruption"] = root_holders(RUNTIME)
+
+    sampler.set("interrupted-rerun")
+    run = run_cleaner("interrupted-rerun", PAST_WINDOW_DAYS)
+    observed["rerun"] = brief(run, RUNTIME)
+    check["rerun_exit_zero"] = run["status"] == 0
+    check["rerun_removed_root"] = not RUNTIME.exists()
+    check["rerun_escalated_past_term"] = (holder, "SIGKILL") in [tuple(item) for item in observed["rerun"]["stopped"]]
+    check["rerun_left_no_owner"] = not any(map(alive, (facts["owner_pid"], facts["provider_pid"], holder)))
+    durable = durable_facts()
+    observed["durable"] = durable
+    check["durable_root_intact"] = durable["integrity"] == "ok" and durable["repository"]
+
+    sampler.set("interrupted-reopen")
+    result = reopen("interrupted", facts, tracked)
+    observed["reopen"] = result
+    check["reopened_saved_history"] = result["editor_resumed"] and result["same_session"] and result["used_resume"]
+
+
+def launch_holding(held: pathlib.Path, tracked: set) -> tuple:
+    held.parent.mkdir(parents=True)
+    behavior = {"ignore": ["SIGTERM", "SIGHUP"], "hold": str(held), "detached_holder": str(held), "survive_hangup": True}
+    return launch("interrupted", behavior, tracked)
+
+
+def reparented_case(check: dict, observed: dict, tracked: set):
+    """SIGKILL the owner under a provider that ignores HUP; report what the cleaner can see."""
+    sampler.set("reparented-launch")
+    behavior = {"ignore": ["SIGHUP"], "survive_hangup": True, "survive_seconds": 180, "hook_pause": 3}
+    lf, facts = launch("reparented", behavior, tracked)
+    observed["ids"] = facts
+    owner, provider = facts["owner_pid"], facts["provider_pid"]
+    if str(RUNTIME) not in command_of(owner):
+        raise RuntimeError("owner PID does not match the copied runtime")
+    os.kill(owner, signal.SIGKILL)
+    check["owner_killed"] = wait_gone(owner, limit=5) < 5 and not alive(owner)
+    time.sleep(2)
+    survived = alive(provider)
+    observed["provider_survived_owner_kill"] = survived
+    observed["provider_parent"] = subprocess.run(["ps", "-o", "ppid=", "-p", str(provider)], capture_output=True, text=True).stdout.strip()
+    observed["holders_after_kill"] = root_holders(RUNTIME)
+    observed["provider_holds_root"] = str(provider) in observed["holders_after_kill"]
+    write_marker()
+
+    sampler.set("reparented-run")
+    # Its hooks exec the copied lf, so one can be in flight during a run. Retry as the
+    # hourly job would; a run that sees an in-flight hook is expected to fail closed.
+    before_removal = len(hook_rows())
+    attempts = []
+    for attempt in range(8):
+        run = run_cleaner(f"reparented-{attempt}", PAST_WINDOW_DAYS)
+        attempts.append(brief(run, RUNTIME))
+        if not RUNTIME.exists():
+            break
+        time.sleep(1.3)
+    observed["runs"] = attempts
+    check["failed_runs_kept_root_whole"] = all(
+        a["status"] == 0 or a["entries"][0]["status"] == "failed" for a in attempts)
+    check["root_reclaimed_around_provider"] = not RUNTIME.exists()
+    observed["provider_survives_cleanup"] = alive(provider)
+    observed["provider_stopped_by_cleaner"] = any(provider == item[0] for a in attempts for item in a["stopped"])
+    observed["hook_processes_stopped_by_cleaner"] = [item for a in attempts for item in a["stopped"]]
+
+    sampler.set("reparented-orphan")
+    removed_at = time.time()
+    time.sleep(20)
+    rows = [row for row in hook_rows() if row["at"] >= removed_at]
+    observed["hooks_before_removal"] = before_removal
+    observed["hooks_after_removal"] = len(rows)
+    observed["hook_statuses_after_removal"] = dict(collections.Counter(str(row["status"]) for row in rows))
+    observed["hook_seconds_max_after_removal"] = round(max((row["seconds"] for row in rows), default=0), 3)
+    observed["hook_rate_per_second"] = round(len(rows) / 20, 2)
+    observed["private_processes_after_removal"] = private_processes()
+    observed["fds_provider"] = fds(provider) if alive(provider) else None
+    check["hooks_ran_against_removed_lf"] = survived and not RUNTIME.exists() and len(rows) > 0
+    check["hooks_bounded"] = all(row["status"] != "timeout" and row["seconds"] < 5 for row in rows)
+    check["no_hook_recreated_runtime"] = not RUNTIME.exists()
+
+    sampler.set("reparented-stop")
+    if alive(provider):
+        command = command_of(provider)
+        if str(PROVIDER_BIN) not in command:
+            raise RuntimeError("provider PID does not match the stand-in")
+        os.kill(provider, signal.SIGTERM)
+        observed["provider_stop_seconds"] = wait_gone(provider, limit=5)
+    check["provider_stopped_by_verified_pid"] = not alive(provider)
+    observed["durable"] = durable_facts()
+    sampler.set("reparented-reopen")
+    result = reopen("reparented", facts, tracked)
+    observed["reopen"] = result
+    check["reopened_saved_history"] = result["editor_resumed"] and result["same_session"] and result["used_resume"]
+
+
+def main_cleanup():
+    global sampler
+    waited = wait_for_clear_host()
+    real_demos = sorted(p.name for p in (MACHINE / "demos").iterdir()) if (MACHINE / "demos").exists() else []
+    create_person()
+    use_demo("release")
+    results = {"waited_for_clear_host_seconds": round(waited), "cases": {}}
+    tracked: set = set()
+    sampler = Sampler()
+    sampler.start()
+    sampler.set("baseline")
+    time.sleep(10)
+    first_start = time.time()
+    try:
+        for name, case in (("release", release_case), ("interrupted", interrupted_case), ("reparented", reparented_case)):
+            entry = results["cases"].setdefault(name, {"checks": {}, "observed": {}})
+            sampler.set(f"{name}-start")
+            try:
+                case(entry["checks"], entry["observed"], tracked)
+            except Exception as error:  # the next case still runs; the receipt reports this one
+                entry["error"] = repr(error)
+            log = HOME / "logs/lf.log"
+            if log.exists():
+                shutil.copy2(log, EVIDENCE / f"lf-{name}.log")
+                entry["observed"]["lf_log_lines"] = log.read_text(errors="replace").splitlines()[-12:]
+    finally:
+        forced = []
+        for pid in sorted(p for p in tracked if p):
+            if alive(pid) and str(PERSON) in command_of(pid):
+                forced.append(pid)
+                os.kill(pid, signal.SIGKILL)
+        results["forced_stops"] = forced
+        sampler.stopped.set()
+        sampler.join(5)
+        results["private_processes_left"] = private_processes()
+        results["real_demos_unchanged"] = real_demos == (
+            sorted(p.name for p in (MACHINE / "demos").iterdir()) if (MACHINE / "demos").exists() else [])
+        results["samples"] = summarize(sampler)
+        results["syspolicyd_log"] = syspolicyd_log(first_start - 10, time.time())
+        (EVIDENCE / "results.json").write_text(json.dumps(results, indent=1, default=str))
+        print(json.dumps(results, indent=1, default=str))
+        failed = [f"{name}.{key}" for name, entry in results["cases"].items()
+                  for key, value in entry["checks"].items() if not value]
+        total = sum(len(entry["checks"]) for entry in results["cases"].values())
+        print(f"checks {total - len(failed)}/{total}; failed {failed}; errors "
+              f"{[entry['error'] for entry in results['cases'].values() if 'error' in entry]}", flush=True)
+
+
 if __name__ == "__main__":
-    main()
+    main_cleanup() if CLEANUP else main()

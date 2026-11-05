@@ -122,8 +122,12 @@ current intent, including through `openLinkedTask`. Only a refused reveal fetche
 the explicit Start offer (`RegistryQuery.startOffer`, one `--explain` read that
 offers nothing on a failed read); a failed Start shows its error with Retry on the
 workspace intent. A primary's Retry (`SessionsWorkspace.openPrimaryConversation`)
-reads the Wave name `prefetchPrimary` left on the workspace; the Dashboard tile's
-in-place opener follows the Task's intent like every other opening. `WorkModel.conversationIsOpening` shows “Opening conversation…”
+reads the Wave name `prefetchPrimary` left on the workspace. A Dashboard tile is
+the same `ConversationPlaceholder` as the pane; while a view plan is presented and
+the tile is visible, its button re-enters the warm opener in place
+(`SessionsWorkspaceRegistry.openConversation(in:store:)`: Rust's Start after a
+refused reveal, else Retry on the workspace intent, readmitting a closed tile),
+so the Dashboard stays. `WorkModel.conversationIsOpening` shows “Opening conversation…”
 for an eligible working Task queued behind the slots or its Sessions read.
 `confirmMachine` replays Sessions so a quiet fresh repository opens its Tasks.
 Warm intent (recent and closed keys) persists per Machine and repository in
@@ -184,11 +188,10 @@ reconciliation and conversation lookup agree.
   presents its conversation.
 - `DashboardConversationOffer` and `attachTaskConversation`, the Dashboard tile's
   own placeholder ("No conversation open", a button always labelled **Open
-  conversation**) and third opener: proposed November 5 (eighth concept review).
-  The tile shows the shared placeholder and `ConversationOpenButton`; its one
-  difference, attaching in place without leaving the Dashboard, is where the
-  button routes, not a second view. The warm queue's `openWarmConversation(in:)`
-  is already that in-place opener with refusal handling.
+  conversation**), the primary tile's actionless "No primary Session" fallback and
+  `SessionPaneView.emptyWorkspace`: deleted November 5 (eighth concept review).
+  One `ConversationPlaceholder` serves pane and tile; attaching in place is where
+  the button routes, not a second view.
 - Preserve explicit Start as recovery outside eligible working Task navigation;
   preserve Rust's Start/Reveal/Take back intents, Close and late-result fences,
   selected-first scheduling, input claims and LOO-717 retention. No new launch,
@@ -296,18 +299,15 @@ offers the same button again: its own text names a recovery the tile cannot
 reach, while the pane fetches `startOffer` and labels the button with it. Who
 chose the view says nothing about what the state is. Settled by the sixth pass's
 "one placeholder serves every Work" and the accepted "preserve explicit Start as
-recovery": next implement direction, no new product choice. The tile shows the
-same placeholder, note and button as the pane; what differs is only that a tile's
-action stays in place, the Dashboard rule `dashboardTileOpensConversationInPlace`
-protects. `openConversation(in:store:)` for a Task workspace that is a visible
-tile and not the selected Work clears its error and re-enters the warm opener for
-that key (`openWarmConversation(in:)` already validates location, fetches Rust's
-Start on a refused reveal and presents the record without navigating); the two
-tile views and `attachTaskConversation` are deleted. Tests: the two tile tests
-move to the shared `open-conversation` identifier and Retry label, plus one case
-where a finished tile without history shows Rust's Start label after its refused
-reveal. Open choices unchanged: the five demo questions stand as recorded
-defaults.
+recovery": no new product choice. Done the same day: one `ConversationPlaceholder`
+for pane and tile, the tile's button routed in place through the warm opener (see
+Implementation), the two tile views and `attachTaskConversation` deleted. The
+"Dashboard rule" the review named is the `WorkDestinationTests` case
+`dashboardTileOpensConversationInPlace`, kept under that name on the shared
+`open-conversation` identifier: a failed tile says **Retry** and attaches in
+place; a second case shows a finished tile without history offering Rust's Start
+label after its refused reveal and starting in place. Open choices unchanged: the
+five demo questions stand as recorded defaults.
 
 ## Verification
 
@@ -378,4 +378,6 @@ full slots; `cargo test -p loopflow --lib ops::human_session::` 36 passed,
 `SessionOpenIntent` through `human_session.rs` and `commands/session.rs`, no
 `owner_retention` use on this branch); origin/main moved to `27dbe31b69` with the
 same five conflicting files; Wave memory gains the finished-Task pane rule; no code
-change, no rerun.
+change, no rerun. Implement, November 5 (eighth-review tile direction): Swift-only
+edits; same filter plus `DashboardWorkspaceTests`, 181 passed in 8 suites; Rust
+unchanged, no rerun.

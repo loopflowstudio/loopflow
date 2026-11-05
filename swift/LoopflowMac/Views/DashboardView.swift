@@ -242,16 +242,10 @@ struct DashboardTile: View {
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
                         .equatable()
-                } else if let task = task?.task {
-                    // Only an unstarted Task offers Start. A started one opens its conversation,
-                    // which `lf resume --task` creates when only headless Runs exist.
-                    if task.awaitsStart {
-                        TaskStartOffer(model: model, task: task)
-                    } else {
-                        DashboardConversationOffer(model: model, task: task, workspace: entry)
-                    }
                 } else {
-                    PaneEmptyState(title: "No primary Session", systemImage: "bubble.left")
+                    // The same placeholder as the pane; its button attaches here and the
+                    // Dashboard stays. The zoom control is the way into the Work.
+                    ConversationPlaceholder(workspace: entry, model: model, sessions: sessions)
                 }
             } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -330,26 +324,6 @@ extension WorkModel {
             dashboardError = "Save this Dashboard before arranging its Work."; return
         }
         Task { await setDashboardTile(id, member: member.work, hidden: hidden) }
-    }
-}
-
-/// A tile's Task with a recorded conversation and none attached here. Opening
-/// attaches it in the tile; the zoom control is the way into the Task.
-struct DashboardConversationOffer: View {
-    let model: WorkModel
-    let task: RoadmapTask
-    let workspace: SessionsWorkspace
-
-    var body: some View {
-        if model.conversationIsOpening(workspace) {
-            ProgressView("Opening conversation…").frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            PaneEmptyState(title: "No conversation open", systemImage: "bubble.left",
-                           description: workspace.conversationError ?? "Open this Task’s conversation here.") {
-                Button("Open conversation") { Task { await model.attachTaskConversation(task.id, in: workspace) } }
-                    .accessibilityIdentifier("dashboard-open-conversation-\(task.id)")
-            }
-        }
     }
 }
 

@@ -364,12 +364,13 @@ struct WorkCacheTests {
         let prepared = await source.preparedTasks
         let queued = try #require(working.first { !prepared.contains($0) })
         let tile = try #require(registry.retained(key(queued)))
-        let task = try #require(model.task(id: queued)?.task)
         #expect(registry.visibleWork.contains(tile.key))
         #expect(!tile.openingConversation)
-        let offer = DashboardConversationOffer(model: model, task: task, workspace: tile)
+        // The tile shows the pane's placeholder: a queued working Task is opening, never a gate.
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        let offer = ConversationPlaceholder(workspace: tile, model: model, sessions: store)
         #expect(throws: (any Error).self) {
-            try offer.inspect().find(viewWithAccessibilityIdentifier: "dashboard-open-conversation-\(task.id)")
+            try offer.inspect().find(viewWithAccessibilityIdentifier: "open-conversation")
         }
         _ = try offer.inspect().find(text: "Opening conversation…")
 

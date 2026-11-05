@@ -20,8 +20,9 @@ Task, Wave and repository panes show the same placeholder when a conversation is
 not open; selecting a completed Task you own with no history shows its record,
 never a Start or Open placeholder, and its history appears in panes once revealed;
 a Dashboard tile whose Task conversation failed to open reads the same as the
-pane, **Retry** on the failure and Rust's Start label after a refused reveal, once
-the eighth-review tile direction lands.
+pane, **Retry** on the failure and Rust's Start label after a refused reveal, and
+either attaches in the tile with the Dashboard still shown (in the tree since the
+eighth-review tile direction).
 
 ## Current open candidate — November 5
 

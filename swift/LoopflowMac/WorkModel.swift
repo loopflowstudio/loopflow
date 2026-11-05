@@ -778,9 +778,15 @@ final class WorkModel {
     /// The placeholder's one action for any Work whose conversation is not open
     /// here: a Task's explicit Start after a refused reveal, a failed opening's
     /// Retry on the workspace intent, or a reveal; a primary prepares in place.
-    /// Automatic opening runs through the warm queue, never through here.
+    /// A Dashboard tile's Task also opens in place, through the warm opener, so
+    /// the Dashboard stays. Automatic opening runs through the warm queue.
     func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
         switch workspace.key.kind {
+        case .task where selectedViewPlan != nil && workspaceRegistry?.visibleWork.contains(workspace.key) == true:
+            if let task = task(id: workspace.key.id)?.task, workspace.location == nil {
+                workspace.location = taskWorkspaceIdentity(task)
+            }
+            await workspaceRegistry?.openConversation(in: workspace, store: store)
         case .task:
             if workspace.conversationStart != nil, let found = task(id: workspace.key.id) {
                 let remote = workspace.location?.machineId != workspace.localMachineId
@@ -806,23 +812,6 @@ final class WorkModel {
         else { return false }
         let held = Set(registry.sessionStore(repository: repository, repoPath: repoPath, query: query).sessions.map(\.id))
         return workspace.showsConversation(held: held)
-    }
-
-    /// Attach a Task's primary conversation in its retained workspace without
-    /// navigating: a Dashboard tile shows it in place and the Dashboard stays.
-    func attachTaskConversation(_ id: String, in workspace: SessionsWorkspace) async {
-        guard let found = task(id: id), let registry = workspaceRegistry, let repository = workspaceRepository else { return }
-        await workspace.openConversation {
-            let record = try await query.prepareTaskSession(issue: found.task.runtime?.workId ?? found.task.id,
-                                                            cwd: found.task.task.repo, intent: found.task.conversationIntent)
-            // One opened Session updates its own reading; an unrelated inventory failure stays.
-            let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
-            sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
-            let store = registry.sessionStore(repository: repository, repoPath: found.task.task.repo, query: query)
-            store.reconcile([record])
-            store.adoptPreparation(record, intent: found.task.conversationIntent)
-            _ = placeSession(record, in: workspace, store: store, registry: registry, navigating: false)
-        }
     }
 
     func openPaletteWave(_ id: String) {

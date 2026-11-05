@@ -73,6 +73,42 @@ struct ConversationOpenButton: View {
     }
 }
 
+/// The Session slot before any conversation is open here, in a pane or a
+/// Dashboard tile. Every Work opens its own; this says why it has not and
+/// offers the one next action. An unstarted Task has no checkout and so no
+/// conversation: it offers Start.
+struct ConversationPlaceholder: View {
+    @Environment(\.theme) private var theme
+    let workspace: SessionsWorkspace
+    let model: WorkModel
+    let sessions: SessionsStore
+
+    var body: some View {
+        if model.conversationIsOpening(workspace) {
+            ProgressView("Opening conversation…")
+                .foregroundStyle(theme.palette.text)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
+            TaskStartOffer(model: model, task: task)
+        } else {
+            let failed = workspace.conversationError != nil
+            PaneEmptyState(title: failed ? "Conversation failed to open" : "Conversation not open",
+                           systemImage: failed ? "exclamationmark.triangle" : "terminal",
+                           description: note) {
+                ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
+            }
+        }
+    }
+
+    private var note: String {
+        if let error = workspace.conversationError { return error }
+        if let start = workspace.conversationStart { return start.help }
+        if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
+        if model.showsSavedWork { return WorkCache.savedReason }
+        return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
+    }
+}
+
 /// Inputs compared without `onFocus`: a closure never compares equal, so it
 /// would re-run every pane on each parent render. It captures only references.
 extension WorkspacePanesView: Equatable {
@@ -707,7 +743,7 @@ struct SessionPaneView: View {
                     _sessionPlaceholder(item)
                 }
             } else {
-                emptyWorkspace
+                ConversationPlaceholder(workspace: workspace, model: model, sessions: sessions)
             }
         case .shell:
             VStack(spacing: 0) {
@@ -771,35 +807,6 @@ struct SessionPaneView: View {
                 }
             }
         }
-    }
-
-    /// The Session slot before any conversation is open here. Every Work opens
-    /// its own; this pane says why it has not and offers the one next action.
-    /// An unstarted Task has no checkout and so no conversation: it offers Start.
-    @ViewBuilder
-    var emptyWorkspace: some View {
-        if model.conversationIsOpening(workspace) {
-            ProgressView("Opening conversation…")
-                .foregroundStyle(theme.palette.text)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
-            TaskStartOffer(model: model, task: task)
-        } else {
-            let failed = workspace.conversationError != nil
-            PaneEmptyState(title: failed ? "Conversation failed to open" : "Conversation not open",
-                           systemImage: failed ? "exclamationmark.triangle" : "terminal",
-                           description: _conversationNote) {
-                ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
-            }
-        }
-    }
-
-    private var _conversationNote: String {
-        if let error = workspace.conversationError { return error }
-        if let start = workspace.conversationStart { return start.help }
-        if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
-        if model.showsSavedWork { return WorkCache.savedReason }
-        return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
     }
 
     /// The pane a Session occupies before its terminal exists here. Each state

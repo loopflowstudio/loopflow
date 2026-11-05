@@ -121,3 +121,13 @@ Implementation assumptions, November 5 (primaries):
 - The queue verifies a primary's Machine but not its checkout, because Rust places
   primaries in the scope's persistent agent worktree, which Desktop's navigation
   location (the repository root) never names.
+
+Implementation assumptions, November 5 (eighth-review tile direction):
+
+- A tile opens in place while a view plan is presented and the tile is visible,
+  not "when it is not the selected Work": on a Dashboard the focused tile is the
+  selected Work, so that reading would have left the Dashboard. An entered tile
+  (`.entered`) keeps the pane's navigating Retry.
+- The primary tile's "No primary Session" text, which offered nothing, also became
+  the shared placeholder; its button prepares the primary in place through
+  `openPrimaryConversation`, the same route as the primary's selected pane.

@@ -702,22 +702,52 @@ final class SessionsWorkspaceRegistry {
                 guard id != nil || workspace.conversationIntent == .start || key == selectedWork
                         || recentTasks.contains(key) else { continue }
             }
-            openings[key] = Task { [weak self, weak workspace] in
-                guard let self, let workspace else { return }
-                defer {
-                    if !Task.isCancelled {
-                        self.openings[key] = nil
-                        self.openWarmConversations(store: store)
-                        self.onPreparationFinished?()
-                    }
+            openings[key] = opening(workspace, existing: existing, intent: nil, store: store)
+        }
+    }
+
+    /// The placeholder's explicit action for a Work shown in place, such as a
+    /// Dashboard tile: Rust's Start after a refused reveal, else Retry on the
+    /// workspace intent. The same opener as automatic opening, so a refusal lands
+    /// the same offer or error here, and a deliberate press readmits a closed one.
+    func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
+        let key = workspace.key
+        guard openings[key] == nil, !workspace.openingConversation else { return }
+        sessions = store
+        if workspace.conversationClosed {
+            closedConversations.remove(key)
+            workspace.conversationClosed = false
+            reconcileWarmth()
+        }
+        let intent: SessionOpenIntent? = workspace.conversationStart == nil ? nil : .start
+        workspace.conversationStart = nil
+        let id = workspace.multiplexer.sessionPane?.sessionId
+        let existing = id.flatMap { id in store.sessions.first { $0.id == id } }
+        let opening = opening(workspace, existing: existing, intent: intent, store: store)
+        openings[key] = opening
+        await opening.value
+    }
+
+    /// One opening in the slots: the workspace's intent, or an explicit one that
+    /// no later intent change supersedes.
+    private func opening(_ workspace: SessionsWorkspace, existing: SessionItem?, intent explicit: SessionOpenIntent?,
+                         store: SessionsStore) -> Task<Void, Never> {
+        let key = workspace.key
+        return Task { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            defer {
+                if !Task.isCancelled {
+                    self.openings[key] = nil
+                    self.openWarmConversations(store: store)
+                    self.onPreparationFinished?()
                 }
-                await workspace.openConversation {
-                    let intent = workspace.conversationIntent
-                    do {
-                        try await self.openWarmConversation(in: workspace, existing: existing, intent: intent, store: store)
-                    } catch where workspace.conversationIntent != intent {
-                        // Superseded: this queue's `defer` opens with the current intent.
-                    }
+            }
+            await workspace.openConversation {
+                let intent = explicit ?? workspace.conversationIntent
+                do {
+                    try await self.openWarmConversation(in: workspace, existing: existing, intent: intent, store: store)
+                } catch where explicit == nil && workspace.conversationIntent != intent {
+                    // Superseded: this queue's `defer` opens with the current intent.
                 }
             }
         }

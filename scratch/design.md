@@ -48,12 +48,11 @@ All in the branch, checked against the code 2026-11-04:
   and Git planning failed on it. Proved by
   `a_stored_released_regression_row_leaves_peer_planning_readable` and
   `a_released_regression_mark_round_trips_the_plan_ref_unread`.
-- `release/README.md` and the `release-run` skill lead with the commands.
+- `release/README.md`, `docs/ops.md` and the `release-run` skill lead with the commands.
   `release/README.md` says the dedicated host follows `dev`.
 
 ## Remaining
 
-- Gate: affected suites and Swift.
 - The PR body predates the commands and names the abandoned column-drop Task.
   pr-publish rewrites it with LOO-730, which deletes the variant, the
   `task_regressed_in` rows and the column together, since scratch clears.
@@ -77,4 +76,4 @@ Standalone realign leaves `.lf/wave/` read-only. For `release/MEMORY.md`: `stabl
 holds come from `regressed-in:vX.Y.Z` GitHub issues, not any Machine's store;
 release state read from one Machine's Tasks fails silently on every other.
 
-Check: `cargo test -p loopflow --lib ops::release::` 48/48; `--test release_tests` 88/88; `planning_write::` 6/6 reused; clippy and affected suites deferred to lint/gate.
+Check: `scripts/test.py --reuse-passing --rust-filter <release, store::sqlite, work, ops::task, ops::linear, binary(lf), CLI, DTO and planning exchange>` PASS on the tree merged with main at a5000ef889: Rust 698/698, clippy, fmt, architecture, website, Swift. `--loopflow`, `e2e` and the full Rust matrix deferred to CI.

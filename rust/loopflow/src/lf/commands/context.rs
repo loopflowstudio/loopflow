@@ -15,6 +15,7 @@ use serde::Serialize;
 use crate::prompt::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
 use crate::prompt::{gather_documents, GatherSpec};
 use crate::steer::NativeBoundary;
+use crate::store::RecordingGap;
 
 #[derive(Debug, Serialize)]
 struct ContextReport {
@@ -291,31 +292,55 @@ pub fn emit_block(
         _ => None,
     };
     // Turn evidence is independent of steering and planning delivery: even a
-    // failed context refresh must preserve work the provider has started.
+    // failed context refresh must preserve work the provider has started. A
+    // store the hook cannot reach is a recording gap, never a failed turn.
     if let (Some(adapter), Some(yielded)) = (&adapter, yielded) {
         let thread = input["session_id"]
             .as_str()
             .ok_or_else(|| anyhow!("Provider turn callback has no native conversation"))?;
-        let store = crate::store::sqlite::SqliteStore::new(&delivery.home.join("loopflow.db"))?;
         // Claude's Stop snapshot includes work that will wake the conversation
         // again. A yielded reply cannot settle a watch or a scheduled wakeup.
         let open_tools = input["background_tasks"]
             .as_array()
             .zip(input["session_crons"].as_array())
             .map(|(tasks, crons)| tasks.len() + crons.len());
-        store.record_native_turn(adapter, thread, yielded, open_tools)?;
-        if let Some(prompt_id) = input["prompt_id"].as_str().filter(|id| !id.is_empty()) {
-            if yielded {
-                store.acknowledge_native_input(adapter, thread, prompt_id, None)?;
-            } else if let Some(prompt) = input["prompt"].as_str() {
-                store.acknowledge_native_input(adapter, thread, prompt_id, Some(prompt))?;
+        let mut gap = recording_gap(&delivery.home, thread);
+        let recorded = hook_store(&delivery.home).and_then(|store| {
+            store.record_native_turn(adapter, thread, yielded, open_tools)?;
+            if let Some(prompt_id) = input["prompt_id"].as_str().filter(|id| !id.is_empty()) {
+                if yielded {
+                    store.acknowledge_native_input(adapter, thread, prompt_id, None)?;
+                } else if let Some(prompt) = input["prompt"].as_str() {
+                    store.acknowledge_native_input(adapter, thread, prompt_id, Some(prompt))?;
+                }
             }
+            store.close_recording_gap(&adapter.session, &mut gap)
+        });
+        if let Err(error) = recorded {
+            gap.note("turn evidence", &error);
         }
     }
     if moment == crate::context_block::ContextMoment::Stop {
-        return acquire_planning(&delivery);
+        if let Err(error) = acquire_planning(&delivery) {
+            tracing::warn!(%error, "planning refresh unavailable at this turn boundary");
+        }
+        return Ok(());
     }
     emit_context(delivery, input, moment, adapter.as_ref())
+}
+
+fn hook_store(
+    home: &std::path::Path,
+) -> crate::store::StoreResult<crate::store::sqlite::SqliteStore> {
+    crate::store::sqlite::SqliteStore::open_for_hook(&home.join("loopflow.db"))
+}
+
+/// Every hook is a fresh process, so the native conversation keeps its open gap
+/// beside its delivery file.
+fn recording_gap(home: &std::path::Path, thread: &str) -> RecordingGap {
+    RecordingGap::marked(
+        crate::context_block::native_delivery_path(home, thread).with_extension("store-gap"),
+    )
 }
 
 fn read_callback() -> Result<serde_json::Value> {
@@ -343,7 +368,7 @@ fn load_delivery(
         .or_else(|| std::env::var_os(crate::context_block::CONTEXT_DELIVERY_ENV).map(Into::into))
         .or_else(|| {
             input["session_id"].as_str().map(|session| {
-                crate::context_block::codex_delivery_path(&crate::store::lf_home_dir(), session)
+                crate::context_block::native_delivery_path(&crate::store::lf_home_dir(), session)
             })
         })
         .ok_or_else(|| {
@@ -359,7 +384,10 @@ fn load_delivery(
                 path.display()
             )
         })?;
-    delivery.relocate()?;
+    if let Err(error) = delivery.relocate() {
+        let thread = input["session_id"].as_str().unwrap_or_default();
+        recording_gap(&delivery.home, thread).note("checkout relocation", &error);
+    }
     Ok(delivery)
 }
 
@@ -412,8 +440,13 @@ fn deliver_steers(
         let thread = input["session_id"].as_str().ok_or_else(|| {
             anyhow::anyhow!("Provider context callback has no native conversation")
         })?;
-        let store = crate::store::sqlite::SqliteStore::new(&delivery.home.join("loopflow.db"))?;
-        store.recover_prepared_steers(&adapter.session)?;
+        // Context is emitted once: a store failure after the write is only a gap.
+        let wrote = std::cell::Cell::new(false);
+        let write_once = |text: &str| -> crate::store::StoreResult<()> {
+            wrote.set(true);
+            write(text)
+        };
+        let write = &write_once;
         let boundary = match event {
             "SessionStart" => NativeBoundary::Select {
                 source: input["source"].as_str().unwrap_or("startup"),
@@ -421,40 +454,55 @@ fn deliver_steers(
             "OpenCodeMessagesTransform" | "PiContext" => NativeBoundary::Activate { source: event },
             _ => NativeBoundary::Turn,
         };
-        store.with_provider_context(adapter, thread, boundary, || {
-            let invocation = input["tool_use_id"]
-                .as_str()
-                .or_else(|| input["adapter_invocation_id"].as_str())
-                .or_else(|| input["turn_id"].as_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            let boundary = format!(
-                "{event}:{}:{invocation}",
-                input["turn_id"].as_str().unwrap_or("")
-            );
-            let emitted = store.emit_session_steers(
-                adapter,
-                thread,
-                &boundary,
-                |batch, steers, remaining| {
-                    more.set(remaining > 0);
-                    let (prefix, excerpts) =
-                        render_steers(delivery, &adapter.session, batch, steers, remaining)
-                            .map_err(|error| {
-                                crate::store::StoreError::InvalidData(error.to_string())
-                            })?;
-                    Ok(crate::steer::SteerContext {
-                        text: render(&prefix)?,
-                        excerpts,
-                    })
-                },
-                write,
-            )?;
-            if !emitted {
-                write(&render("")?)?;
+        let mut gap = recording_gap(&delivery.home, thread);
+        let delivered = hook_store(&delivery.home).and_then(|store| {
+            store.recover_prepared_steers(&adapter.session)?;
+            store.with_provider_context(adapter, thread, boundary, || {
+                let invocation = input["tool_use_id"]
+                    .as_str()
+                    .or_else(|| input["adapter_invocation_id"].as_str())
+                    .or_else(|| input["turn_id"].as_str())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let boundary = format!(
+                    "{event}:{}:{invocation}",
+                    input["turn_id"].as_str().unwrap_or("")
+                );
+                let emitted = store.emit_session_steers(
+                    adapter,
+                    thread,
+                    &boundary,
+                    |batch, steers, remaining| {
+                        more.set(remaining > 0);
+                        let (prefix, excerpts) =
+                            render_steers(delivery, &adapter.session, batch, steers, remaining)
+                                .map_err(|error| {
+                                    crate::store::StoreError::InvalidData(error.to_string())
+                                })?;
+                        Ok(crate::steer::SteerContext {
+                            text: render(&prefix)?,
+                            excerpts,
+                        })
+                    },
+                    write,
+                )?;
+                if !emitted {
+                    write(&render("")?)?;
+                }
+                Ok(())
+            })?;
+            store.close_recording_gap(&adapter.session, &mut gap)
+        });
+        match delivered {
+            Ok(()) => {}
+            Err(error) => {
+                gap.note("steers and turn boundary", &error);
+                // The native thread still gets its context from the delivery file alone.
+                if !wrote.get() {
+                    write(&render("")?)?;
+                }
             }
-            Ok(())
-        })?;
+        }
     } else {
         write(&render("")?)?;
     }
@@ -471,8 +519,12 @@ fn acquire_planning(delivery: &crate::context_block::ContextDelivery) -> Result<
         .enable_all()
         .build()?
         .block_on(async {
-            let store =
-                crate::store::open_store(&crate::store::StorageConfig::sqlite(database)).await?;
+            let store = tokio::time::timeout(
+                crate::store::sqlite::HOOK_BUSY_TIMEOUT,
+                crate::store::open_store(&crate::store::StorageConfig::sqlite(database)),
+            )
+            .await
+            .map_err(|_| anyhow!("store busy past the hook's budget"))??;
             let _ = tokio::time::timeout(
                 std::time::Duration::from_secs(8),
                 crate::ops::linear_observe::sync_repository(

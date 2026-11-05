@@ -164,6 +164,19 @@ When changing the SQLite schema:
   before the whole release batch, not before a draft within it.
 - Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns
 
+When editing harness, transport or hook code (`rust/loopflow/src/harness/**`, `transport*`):
+- lf is a session manager, context adder and hook interjector on top of a harness,
+  never a middleman that can break the conversation (Jack Heart, 2026-11-05). It is
+  never in the byte path between a person and their provider except as a pass-through
+  that keeps passing when lf's own state (the store, a hook, a lock) is unavailable.
+  Every lf invocation at a turn or tool boundary is best-effort: it records a gap in
+  `logs/lf.log` instead of failing the turn, the tool or the quit. A recording gap is
+  one type, `store::RecordingGap` (`note` once per changed failure, `recovered` once);
+  hooks keep theirs in a marker file and write the gap into the Session history as a
+  `store-gap` observation when the store answers again. The Codex relay is
+  the one remaining in-path piece; it tolerates store loss, and its removal is a
+  separate Task.
+
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it
 - Run `cargo clippy --all-targets -- -D warnings` locally; CI treats warnings as errors

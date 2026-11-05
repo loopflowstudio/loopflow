@@ -172,11 +172,15 @@ impl CodexConnection {
     }
 }
 
+/// The saved first input every connection in one launch shares, and the native
+/// conversation Codex reported for it: a reconnect reads that here when the store
+/// cannot answer.
 #[derive(Debug)]
 pub(crate) struct NativeInput {
     pub params: Option<Value>,
     pub text: Option<String>,
     pub context: Option<crate::context_block::ContextDelivery>,
+    pub thread: Option<AgentSessionId>,
 }
 
 /// Receipts belong to the immutable captured input, alongside its saved prompt.
@@ -209,7 +213,9 @@ impl RelayOperation {
 
 struct RelayDiagnostics<'a> {
     connection: &'a CodexConnection,
-    input: String,
+    /// None when the store could not name the Session's input before the
+    /// handshake; the relay then serves without receipts or retained failures.
+    input: Option<String>,
     attachment: Option<SessionAttachment>,
 }
 
@@ -225,13 +231,17 @@ impl RelayDiagnostics<'_> {
             message.truncate(end);
             message.push_str("...");
         }
+        let Some(input) = &self.input else {
+            tracing::warn!(session = %self.connection.session_id, "codex relay failed without a store to retain it: {message}");
+            return;
+        };
         // A failed diagnostic write must never end the listener or reach the TUI.
         let _ = super::dispatch::off_reactor(|| {
             self.connection.store.retain_codex_relay_failure(
-                &self.input,
+                input,
                 self.attachment.as_ref(),
                 &json!({
-                    "source": "codex_relay", "input_id": self.input,
+                    "source": "codex_relay", "input_id": input,
                     "operation": operation.map_or("process", |op| op.operation),
                     "direction": operation.map_or("relay", |op| op.direction),
                     "error": message,
@@ -407,17 +417,28 @@ impl CodexConnection {
         endpoint: &Path,
         initial: Option<Arc<tokio::sync::Mutex<NativeInput>>>,
     ) -> Result<()> {
-        let session = self
-            .store
-            .session(&self.session_id)?
-            .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
+        // A reconnecting client is accepted whatever the store says: its
+        // records describe the conversation and never gate carrying it.
+        let input = match self.store.session(&self.session_id) {
+            Ok(Some(session)) => Some(session.input_key()?.clone()),
+            Ok(None) => return Err(anyhow!("Session disappeared during native startup")),
+            Err(error) => {
+                tracing::warn!(%error, session = %self.session_id, "store unavailable before the client handshake; serving the conversation without its records");
+                None
+            }
+        };
+        let attachment = self.attachment.clone().or_else(|| {
+            self.store
+                .session_attachment(&self.session_id)
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, session = %self.session_id, "store unavailable; relay failures will not name their attachment");
+                    None
+                })
+        });
         let diagnostics = RelayDiagnostics {
             connection: self,
-            input: session.input_key()?.clone(),
-            attachment: self
-                .attachment
-                .clone()
-                .or(self.store.session_attachment(&self.session_id)?),
+            input,
+            attachment,
         };
         let result = self
             .serve_relay(client, endpoint, initial, &diagnostics)
@@ -444,7 +465,12 @@ impl CodexConnection {
         let mut upstream = connect_upstream(socket)
             .await
             .context(RelayOperation::new("handshake", "relay_to_provider"))?;
-        let input_key = &diagnostics.input;
+        let input_key = diagnostics.input.as_deref();
+        let receipt_key = || input_key.expect("saved input dispatches only with its receipt key");
+        // The store records this conversation; it never carries it. Every store
+        // failure below except a lost attachment is logged once and relaying
+        // continues. Only the saved initial input keeps waiting for its receipt.
+        let mut store_failure = crate::store::RecordingGap::default();
         let mut history = super::codex::CodexStream::new(super::fact_writer::FactWriter::new(
             self.store.clone(),
             self.session_id.to_string(),
@@ -468,15 +494,25 @@ impl CodexConnection {
                     updates.pending(&self.store, &self.session_id)
                 }) {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
-                Err(error) => return Err(error.into()),
+                Err(error) => store_failure.note("task updates", &error),
             }
         }
         let disconnected_deadline = tokio::time::sleep(Duration::from_secs(15));
         tokio::pin!(disconnected_deadline);
-        let mut thread = self
-            .store
-            .session_thread(&self.session_id)?
-            .or_else(|| self.thread_id.clone());
+        // The conversation's identity: the store's record, then the thread this
+        // launch already saw Codex select, then the connection's own.
+        let saved = match self.store.session_thread(&self.session_id) {
+            Ok(saved) => saved,
+            Err(error) => {
+                store_failure.note("conversation lookup", &error);
+                None
+            }
+        };
+        let launched = match &initial {
+            Some(initial) => initial.lock().await.thread.clone(),
+            None => None,
+        };
+        let mut thread = saved.or(launched).or_else(|| self.thread_id.clone());
         loop {
             // A disconnected renderer cannot cancel work already dispatched.
             // Drain only outstanding startup replies, saving their native identity.
@@ -489,15 +525,32 @@ impl CodexConnection {
             }
             tokio::select! {
                 _ = update_clock.tick(), if subscribed && client_open && !busy && initial_request.is_none() && update_request.is_none() => {
+                    // An idle tick is also when a reading the store refused catches
+                    // up (the tracker logs its own misses) and when a closed gap
+                    // enters the Session's history.
+                    let caught_up = matches!(
+                        history.writer.catch_up(),
+                        Ok(()) | Err(StoreError::InvalidAuthority(_))
+                    );
                     let pending = match &self.attachment {
                         Some(attachment) => self.store.with_session_attachment(&self.session_id, attachment,
                             || updates.pending(&self.store, &self.session_id)),
                         None => Ok(None),
                     };
                     let pending = match pending {
-                        Ok(pending) => pending,
+                        Ok(pending) => {
+                            if caught_up {
+                                if let Err(error) = self.store.close_recording_gap(&self.session_id, &mut store_failure) {
+                                    store_failure.note("recording gap", &error);
+                                }
+                            }
+                            pending
+                        }
                         Err(StoreError::InvalidAuthority(_)) => None,
-                        Err(error) => return Err(error.into()),
+                        Err(error) => {
+                            store_failure.note("task updates", &error);
+                            None
+                        }
                     };
                     if let Some(update) = pending {
                         let id = json!(format!("lf-task-update-{}", uuid::Uuid::new_v4()));
@@ -506,14 +559,20 @@ impl CodexConnection {
                             "toolOutput":{"name":"loopflow_task_update","output":&update.text,"retain":true}
                         }});
                         if let Err(error) = history.outbound(&request).await {
-                            if matches!(error.downcast_ref::<StoreError>(), Some(StoreError::InvalidAuthority(_))) { continue; }
-                            return Err(error);
+                            if !matches!(error.downcast_ref::<StoreError>(), Some(StoreError::InvalidAuthority(_))) {
+                                store_failure.note("task update history", &error);
+                            }
+                            continue;
                         }
                         let sent;
                         (upstream, sent) = self.send_task_update(upstream, &request, &update).await?;
-                        if sent {
-                            busy = true;
-                            update_request = Some((id, update));
+                        match sent {
+                            Ok(true) => {
+                                busy = true;
+                                update_request = Some((id, update));
+                            }
+                            Ok(false) | Err(StoreError::InvalidAuthority(_)) => {}
+                            Err(error) => store_failure.note("task update dispatch", &error),
                         }
                     }
                 }
@@ -535,7 +594,13 @@ impl CodexConnection {
                     // A reconnecting fresh TUI still asks to start. Its Session
                     // may already have received the original start response.
                     if rpc["method"] == "thread/start" && !subscribed {
-                        thread = self.store.session_thread(&self.session_id)?.or(thread);
+                        thread = match self.store.session_thread(&self.session_id) {
+                            Ok(saved) => saved.or(thread),
+                            Err(error) => {
+                                store_failure.note("conversation lookup", &error);
+                                thread
+                            }
+                        };
                         if let Some(thread) = &thread {
                             rpc["method"] = json!("thread/resume");
                             rpc["params"]["threadId"] = json!(thread);
@@ -553,10 +618,21 @@ impl CodexConnection {
                         "initialize" | "initialized" => true,
                         "thread/read" => target == thread.as_ref().map(AgentSessionId::as_str),
                         "thread/start" | "thread/resume" => {
-                            let params = match &initial {
-                                Some(initial) => initial.lock().await.params.take(),
+                            let mut saved = match &initial {
+                                Some(initial) => Some(initial.lock().await),
                                 None => None,
                             };
+                            // Saved input dispatches only with its receipt key. Without
+                            // the store it stays saved for the next reconnect.
+                            if input_key.is_none()
+                                && saved.as_ref().is_some_and(|saved| saved.params.is_some() || saved.text.is_some())
+                            {
+                                drop(saved);
+                                reject(&mut client, &rpc, "Loopflow store is unavailable; saved input is retained; reconnect to retry").await?;
+                                continue;
+                            }
+                            let params = saved.as_mut().and_then(|saved| saved.params.take());
+                            drop(saved);
                             if starting && params.is_none() {
                                 reject(&mut client, &rpc, "Conversation startup was already submitted").await?;
                                 continue;
@@ -580,7 +656,7 @@ impl CodexConnection {
                                 reject(&mut client, &rpc, reason).await?;
                                 continue;
                             }
-                            _ => return Err(error),
+                            _ => store_failure.note("client request history", &error),
                         }
                     }
                     if rpc["method"] == "turn/start" { busy = true; client_turn_request = rpc.get("id").cloned(); }
@@ -590,7 +666,7 @@ impl CodexConnection {
                     } else {
                         let outcome;
                         (upstream, outcome) = self.send(upstream, message,
-                            starting.then_some((input_key.as_str(), NativeSubmission::ThreadDispatched))).await?;
+                            starting.then(|| (receipt_key(), NativeSubmission::ThreadDispatched))).await?;
                         match outcome {
                             Ok(()) => {},
                             Err(StoreError::InvalidAuthority(reason)) => {
@@ -611,7 +687,11 @@ impl CodexConnection {
                             if startup_reply {
                                 let (_, params) = startup_request.take().expect("matched startup request");
                                 if rpc.get("error").is_some() && thread.is_none() {
-                                    self.record_submission(input_key, NativeSubmission::ThreadRejected)?;
+                                    if let Some(key) = input_key {
+                                        if let Err(error) = self.record_submission(key, NativeSubmission::ThreadRejected) {
+                                            store_failure.note("thread rejection receipt", &error);
+                                        }
+                                    }
                                     if let Some(initial) = &initial {
                                         initial.lock().await.params = params;
                                     }
@@ -633,10 +713,15 @@ impl CodexConnection {
                                     return Err(anyhow!("Codex selected another conversation"));
                                 }
                                 let selected_thread = AgentSessionId::from(selected);
+                                if let Some(initial) = &initial {
+                                    initial.lock().await.thread = Some(selected_thread.clone());
+                                }
                                 if bind_thread {
                                     if let Some(attachment) = &self.attachment {
-                                        self.store.record_session_connection(&self.session_id, attachment,
-                                            &endpoint.to_string_lossy(), &selected_thread)?;
+                                        if let Err(error) = self.store.record_session_connection(&self.session_id, attachment,
+                                            &endpoint.to_string_lossy(), &selected_thread) {
+                                            store_failure.note("conversation selection", &error);
+                                        }
                                     }
                                 }
                                 thread = Some(selected_thread);
@@ -647,20 +732,32 @@ impl CodexConnection {
                                         if let Some(context) = &initial.context {
                                             // Hooks run on the app-server, which never inherits the
                                             // terminal's launch file. Bind before the UI can send a turn.
-                                            self.store.with_session_attachment(&self.session_id, attachment, || {
+                                            match self.store.with_session_attachment(&self.session_id, attachment, || {
                                                 Ok(context.bind_codex_session(selected))
-                                            })??;
-                                            initial.context = None;
+                                            }) {
+                                                Ok(bound) => {
+                                                    bound?;
+                                                    initial.context = None;
+                                                }
+                                                Err(error @ StoreError::InvalidAuthority(_)) => return Err(error.into()),
+                                                Err(error) => store_failure.note("hook context binding", &error),
+                                            }
                                         }
                                     }
                                 }
                             }
                             if rpc["method"] == "turn/started" && initial.is_some() {
                                 if let Some(thread) = &thread {
-                                    let session = self.store.session(&self.session_id)?
-                                        .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
-                                    crate::session_record::write_provider_session(
-                                        &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_route.as_ref().map(|route| route.account_id().clone()))?;
+                                    let written = (|| -> Result<()> {
+                                        let session = self.store.session(&self.session_id)?
+                                            .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
+                                        crate::session_record::write_provider_session(
+                                            &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_route.as_ref().map(|route| route.account_id().clone()))?;
+                                        Ok(())
+                                    })();
+                                    if let Err(error) = written {
+                                        store_failure.note("provider session record", &error);
+                                    }
                                 }
                             }
                             if client_turn_request.as_ref().is_some_and(|id| rpc.get("id") == Some(id)) {
@@ -673,23 +770,32 @@ impl CodexConnection {
                                 busy = rpc.pointer("/result/thread/turns").and_then(Value::as_array)
                                     .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"));
                             }
-                            history.inbound(&rpc, thread.as_ref()).await.1?;
+                            if let Err(error) = history.inbound(&rpc, thread.as_ref()).await.1 {
+                                store_failure.note("provider history", &error);
+                            }
                             if update_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, update) = update_request.take().expect("matched update request");
                                 let state = if rpc.get("error").is_some() { busy = false; "rejected" } else { "accepted" };
-                                self.store.record_task_update(&self.session_id, &update.key, state, &update.observation)?;
+                                if let Err(error) = self.store.record_task_update(&self.session_id, &update.key, state, &update.observation) {
+                                    store_failure.note("task update receipt", &error);
+                                }
                                 continue;
                             }
                             if initial_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, text) = initial_request.take().expect("matched initial request");
+                                let key = receipt_key();
                                 if let Some(error) = rpc.get("error") {
-                                    self.record_submission(input_key, NativeSubmission::InputRejected)?;
+                                    if let Err(error) = self.record_submission(key, NativeSubmission::InputRejected) {
+                                        store_failure.note("input rejection receipt", &error);
+                                    }
                                     if let Some(initial) = &initial {
                                         initial.lock().await.text = Some(text);
                                     }
                                     return Err(anyhow!("Codex rejected the initial request: {error}; saved input is available on reconnect"));
                                 }
-                                self.record_submission(input_key, NativeSubmission::InputAccepted)?;
+                                if let Err(error) = self.record_submission(key, NativeSubmission::InputAccepted) {
+                                    store_failure.note("input acceptance receipt", &error);
+                                }
                                 continue;
                             }
                             resumed.then_some(rpc)
@@ -708,8 +814,14 @@ impl CodexConnection {
                             .ok_or_else(|| anyhow!("Codex returned no native turn history"))?;
                         if !turns.is_empty() {
                             initial.text = None;
-                            if self.submission()? == Some(NativeSubmission::InputDispatched) {
-                                self.record_submission(input_key, NativeSubmission::InputAccepted)?;
+                            match (self.submission(), input_key) {
+                                (Ok(Some(NativeSubmission::InputDispatched)), Some(key)) => {
+                                    if let Err(error) = self.record_submission(key, NativeSubmission::InputAccepted) {
+                                        store_failure.note("input acceptance receipt", &error);
+                                    }
+                                }
+                                (Ok(_), _) => {}
+                                (Err(error), _) => store_failure.note("submission receipt", &error),
                             }
                         }
                         if let Some(text) = initial.text.take() {
@@ -717,10 +829,12 @@ impl CodexConnection {
                             let request = json!({"id":id,"method":"turn/start","params":{
                                 "threadId":thread,"input":[{"type":"text","text":&text}]
                             }});
-                            history.outbound(&request).await?;
+                            if let Err(error) = history.outbound(&request).await {
+                                store_failure.note("initial request history", &error);
+                            }
                             let outcome;
                             (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into()),
-                                Some((input_key.as_str(), NativeSubmission::InputDispatched))).await?;
+                                Some((receipt_key(), NativeSubmission::InputDispatched))).await?;
                             outcome.context(RelayOperation::new("dispatch", "relay_to_provider"))?;
                             initial_request = Some((id, text));
                         }
@@ -738,14 +852,14 @@ impl CodexConnection {
         mut upstream: WebSocketStream<UnixStream>,
         request: &Value,
         update: &super::task_updates::TaskUpdate,
-    ) -> Result<(WebSocketStream<UnixStream>, bool)> {
+    ) -> Result<(WebSocketStream<UnixStream>, StoreResult<bool>)> {
         let Some(attachment) = self.attachment.clone() else {
-            return Ok((upstream, false));
+            return Ok((upstream, Ok(false)));
         };
         let connection = self.clone();
         let update = update.clone();
         let message = Message::Text(request.to_string().into());
-        let (upstream, result) = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let result =
                 connection
                     .store
@@ -763,12 +877,8 @@ impl CodexConnection {
                     });
             (upstream, result)
         })
-        .await?;
-        match result {
-            Ok(sent) => Ok((upstream, sent)),
-            Err(StoreError::InvalidAuthority(_)) => Ok((upstream, false)),
-            Err(error) => Err(error.into()),
-        }
+        .await
+        .map_err(|error| anyhow!("Native dispatch task failed: {error}"))
     }
 
     async fn send(
@@ -791,17 +901,32 @@ impl CodexConnection {
         // Keep the attachment comparison and bounded socket dispatch under the
         // Session lock. History and other Sessions can still use the database.
         tokio::task::spawn_blocking(move || {
+            let mut message = Some(message);
             let outcome =
                 connection
                     .store
                     .with_session_dispatch(&connection.session_id, &attachment, || {
                         // The admitted write and its durable uncertainty receipt share
                         // the attachment fence. A rejected stale writer records no dispatch.
-                        if let Some((input, state)) = submission {
-                            connection.record_submission(&input, state)?;
+                        if let Some((input, state)) = &submission {
+                            connection.record_submission(input, *state)?;
                         }
+                        let message = message.take().expect("one dispatch per send");
                         super::dispatch::send_fenced(&mut upstream, message)
                     });
+            // `message` is still here only when the fence never ran the dispatch.
+            // A person's own turn is then sent unfenced rather than held back by
+            // the store; saved initial input keeps waiting for its receipt.
+            let outcome = match (outcome, message) {
+                (Err(error), Some(message))
+                    if submission.is_none()
+                        && !matches!(error, StoreError::InvalidAuthority(_)) =>
+                {
+                    tracing::warn!(%error, session = %connection.session_id, "store unavailable; dispatching the turn without its fence");
+                    super::dispatch::send_fenced(&mut upstream, message)
+                }
+                (outcome, _) => outcome,
+            };
             (upstream, outcome)
         })
         .await
@@ -887,7 +1012,7 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
 #[cfg(test)]
 mod tests {
     use super::{CodexConnection, NativeInput};
-    use crate::context_block::{codex_delivery_path, ContextDelivery};
+    use crate::context_block::{native_delivery_path, ContextDelivery};
     use crate::id::LfProcessId;
     use crate::provider_account::ProviderAccountRoute;
     use crate::provider_auth::Provider;
@@ -1018,6 +1143,149 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn idle_relay_survives_store_failure_and_accepts_a_reconnect() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let connection = attached_connection(home.path());
+        let store = connection.store.clone();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=1 WHERE id='conversation'",
+                [],
+            )
+            .unwrap();
+        let endpoint = home.path().join("provider.sock");
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let provider = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let request = fixture_rpc(&mut socket).await;
+                fixture_send(
+                    &mut socket,
+                    json!({"id":request["id"],"result":{"thread":{"id":"native-thread","turns":[]}}}),
+                )
+                .await;
+                while let Some(Ok(Message::Text(text))) = socket.next().await {
+                    let rpc: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    if rpc["method"] == "thread/read" {
+                        fixture_send(
+                            &mut socket,
+                            json!({"id":rpc["id"],"result":{"thread":{"id":"native-thread"}}}),
+                        )
+                        .await;
+                    }
+                }
+            }
+        });
+        let initial = Arc::new(tokio::sync::Mutex::new(NativeInput {
+            params: Some(json!({})),
+            text: None,
+            context: None,
+            thread: None,
+        }));
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        let (relay_connection, relay_endpoint, relay_initial) =
+            (connection.clone(), endpoint.clone(), initial.clone());
+        let relay = tokio::spawn(async move {
+            relay_connection
+                .serve_with_input(relay, &relay_endpoint, Some(relay_initial))
+                .await
+        });
+        let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+        fixture_send(
+            &mut terminal,
+            json!({"id":1,"method":"thread/start","params":{}}),
+        )
+        .await;
+        let started = fixture_rpc(&mut terminal).await;
+        assert_eq!(started["result"]["thread"]["id"], "native-thread");
+        // The store the idle relay polls every second disappears under it.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE agent_sessions RENAME TO agent_sessions_gone")
+            .unwrap();
+        assert!(store.session("conversation").is_err());
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+        assert!(!relay.is_finished(), "an idle poll ended the conversation");
+        fixture_send(
+            &mut terminal,
+            json!({"id":2,"method":"thread/read","params":{"threadId":"native-thread"}}),
+        )
+        .await;
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            fixture_rpc(&mut terminal),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read["id"], 2);
+        // The store answers again: the relay's gap enters the Session's history
+        // once, at the idle tick, with nothing typed.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE agent_sessions_gone RENAME TO agent_sessions")
+            .unwrap();
+        let observations = || -> i64 {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM session_events WHERE session_id='conversation'
+                     AND kind='observed' AND json_extract(payload,'$.source')='store-gap'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while observations() == 0 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the restored store never heard of the relay's gap"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(observations(), 1, "a closed gap is recorded once");
+        terminal.close(None).await.unwrap();
+        drop(terminal);
+        relay.await.unwrap().unwrap();
+        // A reconnecting client is accepted without the store and lands on the
+        // thread this launch already selected.
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        let relay = tokio::spawn(async move {
+            connection
+                .serve_with_input(relay, &endpoint, Some(initial))
+                .await
+        });
+        let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+        fixture_send(
+            &mut terminal,
+            json!({"id":1,"method":"thread/start","params":{}}),
+        )
+        .await;
+        let resumed = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            fixture_rpc(&mut terminal),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resumed["result"]["thread"]["id"], "native-thread");
+        terminal.close(None).await.unwrap();
+        drop(terminal);
+        relay.await.unwrap().unwrap();
+        provider.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn task_update_dispatch_survives_reconnect_and_fences_takeover() {
         let home = tempfile::tempdir().unwrap();
         let connection = attached_connection(home.path());
@@ -1036,7 +1304,7 @@ mod tests {
             .send_task_update(sender, &request, &update)
             .await
             .unwrap();
-        assert!(sent);
+        assert!(sent.unwrap());
         assert_eq!(fixture_rpc(&mut receiver).await, request);
         // No reply: reconnect must retain uncertainty instead of replaying.
         let (sender, sent) = connection
@@ -1044,7 +1312,7 @@ mod tests {
             .send_task_update(sender, &request, &update)
             .await
             .unwrap();
-        assert!(!sent);
+        assert!(!sent.unwrap());
         let process = LfProcessId::new();
         connection
             .store
@@ -1074,7 +1342,10 @@ mod tests {
             .send_task_update(sender, &request, &newer)
             .await
             .unwrap();
-        assert!(!sent);
+        assert!(matches!(
+            sent,
+            Err(crate::store::StoreError::InvalidAuthority(_))
+        ));
         assert!(!connection
             .store
             .session_history("conversation", 0, 0)
@@ -1138,7 +1409,7 @@ mod tests {
             .unwrap();
         let diagnostics = super::RelayDiagnostics {
             connection: &connection,
-            input,
+            input: Some(input),
             attachment: connection.attachment.clone(),
         };
         for index in 0..32 {
@@ -1178,7 +1449,7 @@ mod tests {
             submitted_docs: None,
             references: Vec::new(),
         };
-        let binding = codex_delivery_path(home.path(), "native-thread");
+        let binding = native_delivery_path(home.path(), "native-thread");
         for resume in [false, true] {
             let endpoint = home
                 .path()
@@ -1205,6 +1476,7 @@ mod tests {
                 params: (!resume).then(|| json!({})),
                 text: None,
                 context: Some(context.clone()),
+                thread: None,
             }));
             let (terminal, relay) = UnixStream::pair().unwrap();
             let relay = tokio::spawn(async move {
@@ -1246,6 +1518,7 @@ mod tests {
             params: Some(json!({})),
             text: Some("saved skill".into()),
             context: None,
+            thread: None,
         }));
         for reconnect in [false, true] {
             let endpoint = home.path().join(if reconnect {
@@ -1414,6 +1687,7 @@ mod tests {
                 params: Some(json!({})),
                 text: Some("retained draft".into()),
                 context: None,
+                thread: None,
             }));
             let (terminal, relay) = UnixStream::pair().unwrap();
             let relay_connection = connection.clone();
@@ -1517,6 +1791,7 @@ mod tests {
             params: Some(json!({})),
             text: None,
             context: None,
+            thread: None,
         }));
         let (terminal, relay) = UnixStream::pair().unwrap();
         let relay_connection = connection.clone();
@@ -1622,6 +1897,7 @@ mod tests {
                 params: Some(json!({})),
                 text: Some("retained draft".into()),
                 context: None,
+                thread: None,
             }));
             let (terminal, relay) = UnixStream::pair().unwrap();
             let relay_connection = connection.clone();
@@ -1721,6 +1997,7 @@ mod tests {
                 params: Some(json!({"threadId":"saved-thread"})),
                 text: recovered,
                 context: None,
+                thread: None,
             }));
             let relay = tokio::spawn(async move {
                 relay_connection
@@ -1797,6 +2074,7 @@ mod tests {
             params: Some(json!({})),
             text: Some("saved skill".into()),
             context: None,
+            thread: None,
         }));
         let (terminal, relay) = UnixStream::pair().unwrap();
         let relay_connection = connection.clone();
@@ -1883,6 +2161,7 @@ mod tests {
             params: Some(json!({})),
             text: Some("once".into()),
             context: None,
+            thread: None,
         }));
         let mut relays = Vec::new();
         let mut terminals = Vec::new();

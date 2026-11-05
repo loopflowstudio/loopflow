@@ -1223,15 +1223,6 @@ pub(crate) fn live_process_pid(store: &SqliteStore, process: &LfProcessId) -> Op
     live
 }
 
-/// The executable this process runs, as the kernel names it: the file itself,
-/// even when the symlink it was launched through has since been re-pointed.
-pub(crate) fn current_executable() -> std::io::Result<PathBuf> {
-    match OsProcess::executable(std::process::id()) {
-        Some(path) => Ok(path),
-        None => std::env::current_exe().and_then(fs::canonicalize),
-    }
-}
-
 /// The recorded Process's own receipt, read by its locator without listing others.
 pub(crate) fn recorded_process_receipt(
     store: &SqliteStore,

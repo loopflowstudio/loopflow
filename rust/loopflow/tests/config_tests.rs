@@ -66,7 +66,7 @@ fn load_config_or_default_returns_defaults() {
 
     assert!(config.agent.is_none());
     assert!(!config.yolo);
-    assert!(!config.chrome);
+    assert_eq!(config.chrome, None);
 }
 
 // =============================================================================
@@ -115,7 +115,7 @@ pr: true
         .unwrap()
         .unwrap();
     assert!(config.yolo);
-    assert!(config.chrome);
+    assert_eq!(config.chrome, Some(true));
     assert!(config.pr);
 }
 
@@ -138,7 +138,7 @@ context:
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.context, vec!["src/", "lib/"]);
+    assert_eq!(config.context.docs, vec!["src/", "lib/"]);
 }
 
 #[test]
@@ -156,7 +156,7 @@ exclude:
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.exclude, vec!["*.log", "node_modules/"]);
+    assert_eq!(config.context.exclude, vec!["*.log", "node_modules/"]);
 }
 
 // =============================================================================

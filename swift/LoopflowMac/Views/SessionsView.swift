@@ -591,7 +591,25 @@ final class SessionsWorkspaceRegistry {
     }
 
     /// A partial inventory can update content location, never remove a Work tab.
-    func reconcileMembership(_ records: [SessionRecord]) {
+    @discardableResult
+    func reconcileMembership(_ records: [SessionRecord]) -> WorkReference? {
+        var selection: WorkReference?
+        for record in records {
+            guard let localMachineId, record.workspace?.machineId == localMachineId,
+                  record.work?.kind == .task, let task = record.work?.id,
+                  let sourceKey = key(containingSession: record.id),
+                  let source = retained(sourceKey) else { continue }
+            let destination = WorkWorkspaceKey(repository: sourceKey.repository, kind: .task, id: task)
+            guard sourceKey != destination else { continue }
+            let target = workspace(for: destination, title: record.title, location: record.workspace?.identity)
+            revealSession(record, in: target)
+            target.presentation.selectedSessionId = record.id
+            target.presentation.content = .terminals
+            if selectedWork == sourceKey, source.presentation.selectedSessionId == record.id {
+                selection = destination.reference
+            }
+            source.presentation.selectedSessionId = nil
+        }
         for workspace in workspaces.values {
             for record in records {
                 let belongs: Bool?
@@ -610,6 +628,7 @@ final class SessionsWorkspaceRegistry {
                 else { workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity) }
             }
         }
+        return selection
     }
 
     /// One native occurrence per repository. A deliberate eligible Work opening can
@@ -1053,7 +1072,10 @@ private struct SessionsReconciler: View {
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                       let records else { return }
                 store.reconcile(records)
-                if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.revealPrimaryConversation() }
+                if model.sessions.errorMessage == nil {
+                    if let selection = workspaces.reconcileMembership(records) { model.select(selection) }
+                    model.revealPrimaryConversation()
+                }
             }
     }
 }

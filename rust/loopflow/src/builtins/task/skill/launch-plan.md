@@ -108,7 +108,7 @@ user's explicit Graph selection governs; otherwise use the Wave chapter recommen
 Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
-For an approved design, `--graph pursue` enters implement → compress → refresh
+For an approved design, `--graph pursue` enters write-docs → implement → compress → refresh
 → loop-or-next → concept-review → loop-or-next. Refresh runs sync → realign.
 Either decider's Iterate returns to implementation; the second's Advance
 publishes and ends the pursuit. The `code` graph starts with that pursuit;

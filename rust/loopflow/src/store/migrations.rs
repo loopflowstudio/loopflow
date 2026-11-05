@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub use super::migration_catalog::{Migration, MigrationId};
-use super::migration_schema::{product_schema, ForeignKeyDefinition, ProductSchemaObject};
+use super::migration_schema::{product_schema, ProductSchemaObject};
 use crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
@@ -84,25 +84,21 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
     Migration {
         version: "0.11.008_context_pressure",
         sql: include_str!("migrations/0.11.009_context_pressure.sql"),
-        reader_floor: "0.11.008_context_pressure",
         merged: true,
     },
     Migration {
         version: "0.11.009_context_input_normalization",
         sql: include_str!("migrations/0.11.010_context_input_normalization.sql"),
-        reader_floor: "0.11.009_context_input_normalization",
         merged: true,
     },
     Migration {
         version: "0.11.010_profiles",
         sql: include_str!("migrations/0.11.011_profiles.sql"),
-        reader_floor: "0.11.010_profiles",
         merged: true,
     },
     Migration {
         version: "0.11.011_provider_account_lifecycle",
         sql: include_str!("migrations/0.11.012_provider_account_lifecycle.sql"),
-        reader_floor: "0.11.011_provider_account_lifecycle",
         merged: true,
     },
 ];
@@ -123,7 +119,19 @@ const LEGACY_BASELINE_VERSION: &str = "001_initial";
 // -- Applying -----------------------------------------------------------------
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
-    apply_sqlite_transaction(conn, |_| Ok(()))
+    apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |_| Ok(()))
+}
+
+/// Advance a validation snapshot without changing preferences in the real
+/// checkouts its rows reference. Promotion owns the actual settings cutover.
+pub(crate) fn apply_sqlite_preview(conn: &rusqlite::Connection) -> StoreResult<()> {
+    apply_sqlite_transaction(conn, MigrationPurpose::Preview, |_| Ok(()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MigrationPurpose {
+    Upgrade,
+    Preview,
 }
 
 /// Stage a fresh connection one migration behind the binary's known head. The
@@ -141,22 +149,15 @@ pub(crate) fn prior_known_version() -> String {
 
 /// Stand in for a newer build: apply one more migration after this binary's
 /// head, as the build that knows it would, and return its version. This binary
-/// is then the older reader. An additive migration keeps the current floor.
+/// is then the older reader.
 #[cfg(test)]
 pub(crate) fn apply_newer_migration(
     conn: &rusqlite::Connection,
     sql: &'static str,
-    additive: bool,
 ) -> StoreResult<String> {
-    let head = MIGRATIONS.last().expect("the catalog is not empty");
     let newer = Migration {
         version: "newer_migration",
         sql,
-        reader_floor: if additive {
-            head.reader_floor
-        } else {
-            "newer_migration"
-        },
         merged: true,
     };
     let set: Vec<Migration> = MIGRATIONS.iter().copied().chain([newer]).collect();
@@ -170,10 +171,10 @@ pub(crate) fn apply_newer_migration(
 /// shared-frontier regression sabotage-sensitive.
 #[cfg(test)]
 pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
-    let prior = &MIGRATIONS[..MIGRATIONS.len() - 1];
-    applied_versions(conn)
-        .and_then(|applied| pending_migrations(conn, &applied, prior).map(<[_]>::is_empty))
-        .unwrap_or(false)
+    let prior = MIGRATIONS[..MIGRATIONS.len() - 1]
+        .iter()
+        .map(Migration::version);
+    applied_versions(conn).is_ok_and(|applied| applied.into_iter().eq(prior))
 }
 
 /// Validate the schema this binary already understands without advancing it.
@@ -189,13 +190,9 @@ pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult
             ));
         }
         let applied = applied_versions(conn)?;
-        let newer = admitted_newer_floor(conn, &applied, MIGRATIONS)?;
+        pending_migrations(conn, &applied, MIGRATIONS)?;
         validate_applied_checksums(conn, MIGRATIONS)?;
-        if newer.is_some() {
-            validate_schema_within(conn, MIGRATIONS)
-        } else {
-            validate_schema(conn, &MIGRATIONS[..applied.len()])
-        }
+        validate_applied_schema(conn, MIGRATIONS, &applied)
     })
 }
 
@@ -209,11 +206,12 @@ pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 
 fn apply_sqlite_transaction(
     conn: &rusqlite::Connection,
+    purpose: MigrationPurpose,
     before_migration: impl FnOnce(&rusqlite::Connection) -> StoreResult<()>,
 ) -> StoreResult<()> {
     _migration_transaction(conn, |conn, guards| {
         before_migration(conn)?;
-        apply_set(conn, MIGRATIONS, guards)?;
+        apply_set_with_purpose(conn, MIGRATIONS, guards, purpose)?;
         validate_foreign_keys(conn)?;
         validate_persisted_json(conn)
     })
@@ -423,7 +421,7 @@ pub(crate) fn apply_sqlite_with_backup(
     let result = match requires_migration_sqlite(conn) {
         Ok(false) => Ok(()),
         Ok(true) => {
-            let migrated = apply_sqlite_transaction(conn, |conn| {
+            let migrated = apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |conn| {
                 backup_before_migration(conn, path).map(|_| ())
             });
             if migrated.is_ok() {
@@ -510,20 +508,18 @@ fn backup_before_migration(
     Ok(Some(backup_path))
 }
 
-/// Each release that migrates clones the store first. Once a migration commits
-/// only the generation it made stays, and once its install settles none does
-/// (`kept` 0). Names this writer did not produce are left alone, and a failed
-/// removal is retried by the next migration or settlement.
-pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
+/// The clones this writer made beside `path`, oldest first:
+/// `loopflow.db.backup-<version>-<16 hex>`. Names it did not produce are not listed.
+pub(crate) fn migration_backups(path: &Path) -> Vec<PathBuf> {
     let (Some(parent), Some(file_name)) = (
         path.parent(),
         path.file_name().and_then(|name| name.to_str()),
     ) else {
-        return;
+        return Vec::new();
     };
     let prefix = format!("{file_name}.backup-");
     let Ok(entries) = std::fs::read_dir(parent) else {
-        return;
+        return Vec::new();
     };
     let mut backups: Vec<(std::time::SystemTime, PathBuf)> = entries
         .filter_map(Result::ok)
@@ -542,8 +538,17 @@ pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
         .collect();
     backups.sort();
+    backups.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Each release that migrates clones the store first. Once a migration commits
+/// only the generation it made stays (`kept` 1); once its install settles with no
+/// process left on an older build, none does (`kept` 0). A failed removal is
+/// retried by the next migration or settlement.
+pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
+    let backups = migration_backups(path);
     let superseded = backups.len().saturating_sub(kept);
-    for (_, backup) in backups.into_iter().take(superseded) {
+    for backup in backups.into_iter().take(superseded) {
         if let Err(error) = std::fs::remove_file(&backup) {
             tracing::warn!(%error, backup = %backup.display(), "superseded migration backup was not removed");
             continue;
@@ -618,10 +623,20 @@ fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
 /// Apply every migration in `set` the database has not seen, in id order, exactly
 /// once. Taking the set as an argument is what lets the fixtures below drive
 /// synthetic release histories without a test-only seam in the store.
+#[cfg(test)]
 fn apply_set(
     conn: &rusqlite::Connection,
     set: &[Migration],
     guards: &mut Vec<File>,
+) -> StoreResult<()> {
+    apply_set_with_purpose(conn, set, guards, MigrationPurpose::Upgrade)
+}
+
+fn apply_set_with_purpose(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
     validate_set(set).map_err(StoreError::InvalidData)?;
 
@@ -645,7 +660,7 @@ fn apply_set(
     let applied = applied_versions(conn)?;
     for (offset, migration) in pending_migrations(conn, &applied, set)?.iter().enumerate() {
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
-        migration_preflight(conn, migration, guards)?;
+        migration_preflight(conn, migration, guards, purpose)?;
         conn.execute_batch(migration.sql)?;
         convert_released_data(conn, migration.sql)?;
         backfill_known_checksums(conn, set)?;
@@ -653,7 +668,7 @@ fn apply_set(
     }
 
     validate_applied_checksums(conn, set)?;
-    validate_schema(conn, set)
+    validate_applied_schema(conn, set, &applied_versions(conn)?)
 }
 
 /// Convert stored rows whose shape a migration's SQL changes. Released
@@ -729,7 +744,12 @@ fn migration_preflight(
     conn: &rusqlite::Connection,
     migration: &Migration,
     guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
+    if purpose == MigrationPurpose::Upgrade && migration_contains(migration, "settings_authority") {
+        crate::config::migrate::preflight(conn, guards)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    }
     if migration_contains(migration, "canonical_structured_ids") {
         super::canonical_ids::preflight(conn, guards)?;
     }
@@ -884,13 +904,33 @@ fn insert_applied_migration(
             [migration.version()],
         )?;
     }
+    carry_reader_floor(conn, migration)
+}
+
+/// Builds released before the floor's deletion read `reader_floor` on every row past
+/// their own head, and a row with none names itself, so one NULL there refuses them.
+/// This build reads it for nothing: the new row repeats the ledger's newest floor so
+/// those builds stay admitted past additive migrations. Task f5981e removes this 30
+/// days after that release.
+fn carry_reader_floor(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
     if ledger_has_reader_floor(conn)? {
         conn.execute(
-            "UPDATE schema_migrations SET reader_floor=?1 WHERE version=?2",
-            (migration.reader_floor, migration.version()),
+            "UPDATE schema_migrations SET reader_floor = (
+                SELECT reader_floor FROM schema_migrations
+                WHERE reader_floor IS NOT NULL ORDER BY applied_at DESC, rowid DESC LIMIT 1
+             ) WHERE version = ?1",
+            [migration.version()],
         )?;
     }
     Ok(())
+}
+
+fn ledger_has_reader_floor(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name='reader_floor')",
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 fn validate_applied_checksums(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
@@ -907,7 +947,7 @@ fn validate_applied_checksums(conn: &rusqlite::Connection, set: &[Migration]) ->
     for row in rows {
         let (version, checksum) = row?;
         let Some(migration) = set.iter().find(|migration| migration.version() == version) else {
-            // Callers check history first; only an admitted newer tail reaches here.
+            // Callers check history first; only a newer build's tail reaches here.
             continue;
         };
         if checksum != migration_checksum(migration) {
@@ -1098,9 +1138,10 @@ fn validate_divergent_schema(
 
 /// The migrations still to run, given what the database has already applied.
 ///
-/// The applied versions must be exactly the leading run of `set`: a database that
-/// skipped a migration, or that carries one this binary does not know, cannot be
-/// brought forward by running the tail.
+/// A history that starts with all of `set` owes nothing, however long its tail:
+/// a newer lf extended it. Otherwise the applied versions must be exactly the
+/// leading run of `set`: a database that skipped a migration, or that carries one
+/// this binary does not know, cannot be brought forward by running the tail.
 ///
 /// An unknown released id or slug came from a newer lf. Anything else — the flat
 /// ledger of the pre-loop store, abandoned when the runtime collapsed to waves,
@@ -1111,10 +1152,10 @@ fn pending_migrations<'a>(
     set: &'a [Migration],
 ) -> StoreResult<&'a [Migration]> {
     let known: Vec<String> = set.iter().map(Migration::version).collect();
-    for version in applied {
-        if known.contains(version) {
-            continue;
-        }
+    if applied.starts_with(&known) {
+        return Ok(&[]);
+    }
+    if let Some(version) = applied.iter().find(|version| !known.contains(version)) {
         return if MigrationId::parse_version(version).is_some()
             || super::migration_catalog::is_slug(version)
         {
@@ -1129,130 +1170,10 @@ fn pending_migrations<'a>(
             Err(incompatible(conn))
         };
     }
-    if applied.len() > known.len() || *applied != known[..applied.len()] {
+    if !known.starts_with(applied) {
         return Err(incompatible(conn));
     }
     Ok(&set[applied.len()..])
-}
-
-// -- Reader floor -------------------------------------------------------------
-//
-// A migration's floor is the newest migration at or before it that older
-// readers cannot read past. A binary opens a store holding migrations it does
-// not know only when it knows every one of their floors.
-
-fn ledger_has_reader_floor(conn: &rusqlite::Connection) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name='reader_floor')",
-        [],
-        |row| row.get(0),
-    )?)
-}
-
-/// The floor of the newest migration the store applied that `set` does not
-/// know, when `set` knows that floor; `None` when the store holds nothing
-/// newer. The known part must be exactly `set`, as for every open.
-fn admitted_newer_floor(
-    conn: &rusqlite::Connection,
-    applied: &[String],
-    set: &[Migration],
-) -> StoreResult<Option<String>> {
-    let known: Vec<String> = set.iter().map(Migration::version).collect();
-    if applied.len() <= set.len() || applied[..set.len()] != known[..] {
-        pending_migrations(conn, applied, set)?;
-        return Ok(None);
-    }
-    if !ledger_has_reader_floor(conn)? {
-        return Err(incompatible(conn));
-    }
-    let mut floor = None;
-    for version in &applied[set.len()..] {
-        let recorded = applied_floor(conn, version)?;
-        if !known.contains(&recorded) && !applied[set.len()..].contains(&recorded) {
-            return Err(StoreError::InvalidData(format!(
-                "database migration {version} records unreadable reader floor {recorded:?}"
-            )));
-        }
-        floor = Some(recorded);
-    }
-    let floor = floor.expect("a newer tail has at least one row");
-    if !known.contains(&floor) {
-        return Err(StoreError::InvalidData(format!(
-            "this store needs an lf that knows {floor} (it has {}; latest known {}); run `lf install`",
-            applied.last().expect("a newer tail is not empty"),
-            known.last().map(String::as_str).unwrap_or("none"),
-        )));
-    }
-    Ok(Some(floor))
-}
-
-/// The reader floor of a store a newer build migrated, when it still admits
-/// this binary; `None` when the store is at or behind this binary's history.
-pub(crate) fn newer_store_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    admitted_newer_floor(conn, &applied_versions(conn)?, MIGRATIONS)
-}
-
-/// The migration a reader must know to open this store: the floor of its
-/// newest applied migration. `None` for an empty store.
-pub(crate) fn store_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    if !has_ledger(conn)? {
-        return Ok(None);
-    }
-    let Some(newest) = applied_versions(conn)?.pop() else {
-        return Ok(None);
-    };
-    if !ledger_has_reader_floor(conn)? {
-        return Ok(Some(newest));
-    }
-    applied_floor(conn, &newest).map(Some)
-}
-
-/// An applied row's recorded floor; a row written before floors were recorded
-/// names itself.
-fn applied_floor(conn: &rusqlite::Connection, version: &str) -> StoreResult<String> {
-    let floor: Option<String> = conn.query_row(
-        "SELECT reader_floor FROM schema_migrations WHERE version=?1",
-        [version],
-        |row| row.get(0),
-    )?;
-    Ok(floor
-        .filter(|floor| {
-            MigrationId::parse_version(floor).is_some() || super::migration_catalog::is_slug(floor)
-        })
-        .unwrap_or_else(|| version.to_string()))
-}
-
-/// The newest pending migration that older builds cannot read past, or `None`
-/// when every build that opens the store now still can after it advances.
-pub(crate) fn raised_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    let applied = applied_versions(conn)?;
-    Ok(pending_migrations(conn, &applied, MIGRATIONS)?
-        .iter()
-        .rev()
-        .find(|migration| migration.breaks_readers())
-        .map(Migration::version))
-}
-
-// -- Reader catalog -----------------------------------------------------------
-
-/// The reader floors this build knows, in catalog order: every released batch
-/// and every breaking migration. Packages ship it (`lf self install
-/// reader-catalog`) so an updater can rule out a candidate before downloading it.
-pub fn reader_catalog() -> Vec<&'static str> {
-    MIGRATIONS
-        .iter()
-        .filter(|migration| migration.breaks_readers())
-        .map(|migration| migration.version)
-        .collect()
-}
-
-/// Whether a build whose reader catalog is `catalog` opens this store: it knows
-/// the floor of the store's newest migration. It then applies what it knows
-/// that the store lacks, or reads past additive migrations it does not know.
-pub fn can_open(conn: &rusqlite::Connection, catalog: &[String]) -> StoreResult<bool> {
-    _read_snapshot(conn, |conn| {
-        Ok(store_reader_floor(conn)?.is_none_or(|floor| catalog.contains(&floor)))
-    })
 }
 
 /// Pending migrations origin/main has not added. The shared store never
@@ -1265,9 +1186,6 @@ pub(crate) fn pending_unmerged(conn: &rusqlite::Connection) -> StoreResult<Vec<S
             .collect());
     }
     let applied = applied_versions(conn)?;
-    if admitted_newer_floor(conn, &applied, MIGRATIONS)?.is_some() {
-        return Ok(Vec::new());
-    }
     Ok(pending_migrations(conn, &applied, MIGRATIONS)?
         .iter()
         .filter(|migration| !migration.merged)
@@ -1333,41 +1251,18 @@ fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResul
     Ok(())
 }
 
-/// A store a newer release migrated additively still holds every object `set`
-/// builds unchanged; its tables may have gained columns.
-fn validate_schema_within(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
-    let expected = expected_schema(set.iter().map(|migration| migration.sql))?;
-    let actual = product_schema(conn)?;
-    if let Some(missing) = expected
-        .iter()
-        .find(|old| !actual.iter().any(|new| schema_object_within(old, new)))
-    {
-        return Err(StoreError::InvalidData(format!(
-            "a newer lf changed {} {}, which lf {} reads; run `lf install`",
-            missing.object_type,
-            missing.name,
-            crate::build_info::BUILD_VERSION
-        )));
+/// Validate what this build's catalog says the applied history built. A store a
+/// newer build extended has no schema this catalog can name: SQLite reports
+/// anything this build reads that is gone, at the statement that reads it.
+fn validate_applied_schema(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    applied: &[String],
+) -> StoreResult<()> {
+    match set.get(..applied.len()) {
+        Some(known) => validate_schema(conn, known),
+        None => Ok(()),
     }
-    Ok(())
-}
-
-fn schema_object_within(old: &ProductSchemaObject, new: &ProductSchemaObject) -> bool {
-    if old == new {
-        return true;
-    }
-    old.object_type == "table"
-        && new.object_type == "table"
-        && old.name == new.name
-        && old.foreign_keys.iter().all(|key| {
-            new.foreign_keys.iter().any(|other| {
-                ForeignKeyDefinition {
-                    id: key.id,
-                    ..other.clone()
-                } == *key
-            })
-        })
-        && super::migration_catalog::table_within(&old.sql, &new.sql)
 }
 
 /// Cache the immutable reference derived from this build's ordered SQL. Every
@@ -1418,7 +1313,7 @@ pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String>
     if !pending_migrations(conn, &applied, MIGRATIONS)?.is_empty() {
         return Err(incompatible(conn));
     }
-    validate_schema(conn, MIGRATIONS)?;
+    validate_applied_schema(conn, MIGRATIONS, &applied)?;
     applied.last().cloned().ok_or_else(|| incompatible(conn))
 }
 
@@ -1430,7 +1325,7 @@ pub fn latest_known_version() -> String {
 }
 
 /// The next migration this binary knows that the store has not applied, or
-/// `None` when the store is exactly at this binary's frontier.
+/// `None` when the store has reached this binary's frontier.
 ///
 /// Call only after [`validate_sqlite_schema`] has confirmed the applied history is a
 /// clean recognized prefix; then `pending_migrations` cannot error and this is a
@@ -1439,9 +1334,6 @@ pub fn latest_known_version() -> String {
 /// pending migration adds, so reusing the older schema would only fail later.
 pub(crate) fn pending_shared_migration(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
     let applied = applied_versions(conn)?;
-    if admitted_newer_floor(conn, &applied, MIGRATIONS)?.is_some() {
-        return Ok(None);
-    }
     Ok(pending_migrations(conn, &applied, MIGRATIONS)?
         .first()
         .map(Migration::version))
@@ -1534,9 +1426,9 @@ mod tests {
     use super::apply_newer_migration;
     use super::{
         applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
-        apply_sqlite_with_backup, backup_before_migration, can_open, latest_applied_version_sqlite,
+        apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
         latest_known_version, latest_version_sqlite, migration_checksum, pending_migrations,
-        product_schema, prune_migration_backups, reader_catalog, validate_foreign_keys,
+        product_schema, prune_migration_backups, requires_migration_sqlite, validate_foreign_keys,
         validate_persisted_json, validate_schema, validate_set, validate_sqlite,
         validate_sqlite_schema, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
@@ -1552,13 +1444,11 @@ mod tests {
     const SECOND_IN_SAME_MINOR: Migration = Migration {
         version: "add_note",
         sql: "ALTER TABLE waves ADD COLUMN note TEXT;",
-        reader_floor: "0.10.001_initial",
         merged: true,
     };
     const FIRST_IN_NEXT_MINOR: Migration = Migration {
         version: "add_colour",
         sql: "ALTER TABLE waves ADD COLUMN colour TEXT;",
-        reader_floor: "0.10.001_initial",
         merged: true,
     };
 
@@ -1576,43 +1466,60 @@ mod tests {
     }
 
     #[test]
-    fn a_candidate_opens_a_store_only_when_its_catalog_knows_the_store_floor() {
-        let current: Vec<String> = reader_catalog().into_iter().map(str::to_string).collect();
-        let older = current[..current.len() - 1].to_vec();
+    fn task_session_promotion_releases_shared_scope_but_preserves_permanent_binds() {
         let conn = open();
-        assert!(
-            can_open(&conn, &older).unwrap(),
-            "an empty store opens anywhere"
-        );
+        apply_before_migration(&conn, "task_session_promotion");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_session_promotion.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
 
-        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
-        assert!(can_open(&conn, &current).unwrap());
-        assert!(!can_open(&conn, &older).unwrap());
-
-        for (additive, opens) in [(true, true), (false, false)] {
-            let newer = open();
-            apply_set(&newer, MIGRATIONS, &mut Vec::new()).unwrap();
-            apply_newer_migration(&newer, "CREATE TABLE newer_table (id TEXT);", additive).unwrap();
-            assert_eq!(
-                can_open(&newer, &current).unwrap(),
-                opens,
-                "additive: {additive}"
-            );
+        conn.execute(
+            "UPDATE agent_sessions SET primary_scope=NULL,wave_id=NULL WHERE id='primary'",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE agent_sessions SET task_id='task_promotion',bound_at=2,work_source='bound' WHERE id='primary'", []).unwrap();
+        let history: (String, String) = conn.query_row(
+            "SELECT s.cwd,e.wave_id FROM agent_sessions s JOIN session_events e ON e.session_id=s.id WHERE s.id='primary' AND e.kind='captured'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(history, ("/repo/wave".into(), "wave-promotion".into()));
+        for sql in [
+            "UPDATE agent_sessions SET task_id='task_other' WHERE id='primary'",
+            "UPDATE agent_sessions SET task_id=NULL WHERE id='primary'",
+            "UPDATE agent_sessions SET wave_id=NULL WHERE id='ordinary'",
+            "UPDATE agent_sessions SET wave_id='wave-promotion' WHERE id='primary'",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "{sql}");
         }
     }
 
     #[test]
-    fn a_newer_tail_must_leave_this_builds_schema_intact() {
+    fn a_newer_tail_changes_nothing_this_build_validates() {
+        for sql in [
+            "CREATE TABLE newer_table (id TEXT);",
+            "DROP INDEX idx_tasks_project;",
+            "ALTER TABLE waves DROP COLUMN promoted_at;",
+        ] {
+            let conn = open();
+            apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
+            let newer = apply_newer_migration(&conn, sql).unwrap();
+
+            validate_sqlite_schema(&conn).unwrap();
+            assert_eq!(latest_version_sqlite(&conn).unwrap(), newer, "{sql}");
+            assert!(!requires_migration_sqlite(&conn).unwrap(), "{sql}");
+        }
+    }
+
+    #[test]
+    fn this_builds_own_frontier_stays_exact() {
         let conn = open();
         apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
-        apply_newer_migration(&conn, "DROP INDEX idx_tasks_project;", true).unwrap();
+        conn.execute_batch("DROP INDEX idx_tasks_project;").unwrap();
 
-        let error = validate_sqlite_schema(&conn).unwrap_err().to_string();
-
-        assert!(
-            error.contains("a newer lf changed index idx_tasks_project"),
-            "{error}"
-        );
+        assert!(validate_sqlite_schema(&conn).is_err());
     }
 
     fn apply_project_content_cut(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
@@ -3077,6 +2984,57 @@ mod tests {
         section.sql[section.body].to_string()
     }
 
+    fn reader_floors(conn: &rusqlite::Connection) -> Vec<Option<String>> {
+        conn.prepare("SELECT reader_floor FROM schema_migrations ORDER BY applied_at, rowid")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// Released builds check every row past their own head, and a row with no floor
+    /// names itself, so one NULL in that tail refuses them.
+    #[test]
+    fn every_new_migration_repeats_the_ledgers_newest_reader_floor() {
+        let conn = open();
+        apply_pending_migrations(&conn);
+        conn.execute_batch(
+            "UPDATE schema_migrations SET reader_floor='older_floor' WHERE rowid=1;
+             UPDATE schema_migrations SET reader_floor='recorded_floor' WHERE rowid=2;",
+        )
+        .unwrap();
+        let colour = Migration {
+            version: "add_colour",
+            sql: "ALTER TABLE waves ADD COLUMN colour TEXT;",
+            merged: true,
+        };
+        let shade = Migration {
+            version: "add_shade",
+            sql: "ALTER TABLE waves ADD COLUMN shade TEXT;",
+            merged: true,
+        };
+        let set: Vec<Migration> = MIGRATIONS.iter().copied().chain([colour, shade]).collect();
+
+        apply_set(&conn, &set, &mut Vec::new()).unwrap();
+
+        let recorded = Some("recorded_floor".to_string());
+        assert_eq!(
+            reader_floors(&conn)[MIGRATIONS.len()..],
+            [recorded.clone(), recorded]
+        );
+    }
+
+    #[test]
+    fn a_ledger_with_no_recorded_floor_stays_without_one() {
+        let conn = open();
+        apply_pending_migrations(&conn);
+
+        apply_newer_migration(&conn, "ALTER TABLE waves ADD COLUMN colour TEXT;").unwrap();
+
+        assert!(reader_floors(&conn).iter().all(Option::is_none));
+    }
+
     #[test]
     fn ownership_log_records_released_evidence_without_inventing_owners() {
         let conn = open();
@@ -3459,31 +3417,27 @@ mod tests {
     }
 
     #[test]
-    fn task_agent_migration_preserves_existing_tasks() {
-        let conn = open();
-        apply_before_migration(&conn, "task_agent");
-        conn.execute_batch("INSERT INTO waves (id, name, repo, created_at)
-            VALUES ('wave_agent', 'agent', '/repo', 1);
-            INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
-            VALUES ('project_agent', 'wave_agent', 'linear-project', 1, 1);
-            INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, worktree, workspace_slug, created_at, updated_at)
-            VALUES ('task_agent', 'project_agent', 'linear-issue', 'TEST-1', '/repo.task', 'task-agent', 1, 1);").unwrap();
-        conn.execute_batch(&migration_section_sql("task_agent"))
-            .unwrap();
-        let retained = conn
-            .query_row(
-                "SELECT issue_identifier, worktree, agent FROM tasks WHERE id='task_agent'",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(retained, ("TEST-1".into(), "/repo.task".into(), None));
+    fn settings_authority_preserves_task_history_and_migrates_preferences() {
+        let home = tempfile::tempdir().unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        apply_before_migration(&conn, "settings_authority");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/settings_authority_released.sql"
+        ))
+        .unwrap();
+        let mut guards = Vec::new();
+        crate::config::migrate::preflight(&conn, &mut guards).unwrap();
+        drop(guards);
+        upgrade_from_migration(&conn, "settings_authority");
+        let retained: (String, String) = conn.query_row("SELECT t.worktree,s.provider FROM tasks t JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(retained, ("/repo.task".into(), "claude".into()));
+        let values: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &std::fs::read_to_string(home.path().join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(values["skills"]["design"]["agent"], "codex:o3");
+        assert_eq!(values["skills"]["implement"]["agent"], "codex");
+        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('scope_settings','scope_defaults','provider_routes')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
     }
 
     #[test]
@@ -5977,14 +5931,27 @@ mod tests {
         let conn = open();
         apply_set(&conn, &[baseline(), FIRST_IN_NEXT_MINOR], &mut Vec::new()).unwrap();
 
-        let error = apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap_err();
+        let branch = Migration {
+            version: "branch_only",
+            sql: "SELECT 1;",
+            merged: false,
+        };
+        let error = apply_set(&conn, &[baseline(), branch], &mut Vec::new()).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("add_colour"), "{message}");
-        assert!(
-            message.contains("latest known 0.10.001_initial"),
-            "{message}"
-        );
+        assert!(message.contains("latest known branch_only"), "{message}");
         assert!(message.contains("run `lf install`"), "{message}");
+    }
+
+    #[test]
+    fn applying_an_older_catalog_leaves_a_newer_history_alone() {
+        let conn = open();
+        let newer = [baseline(), FIRST_IN_NEXT_MINOR];
+        apply_set(&conn, &newer, &mut Vec::new()).unwrap();
+
+        apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), 2);
     }
 
     fn assert_keeps_the_store(error: &crate::store::StoreError) {
@@ -6292,7 +6259,7 @@ mod tests {
                 .unwrap();
         });
 
-        apply_sqlite_transaction(&conn, |conn| {
+        apply_sqlite_transaction(&conn, super::MigrationPurpose::Upgrade, |conn| {
             backup_before_migration(conn, &path)?;
             start_writer.send(()).unwrap();
             assert!(

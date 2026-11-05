@@ -27,12 +27,13 @@ fn usd(text: String) -> StoreResult<Usd> {
 }
 
 fn name_taken_in(conn: &Connection, name: &str) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pools WHERE name=?1)
-             OR EXISTS(SELECT 1 FROM ondemands WHERE name=?1)",
-        [name],
-        |row| row.get(0),
-    )?)
+    let document = crate::config::placement::read(conn, None).map_err(invalid)?;
+    Ok(["pools", "ondemands"].iter().any(|key| {
+        document
+            .get(key)
+            .and_then(|value| value.get(name))
+            .is_some()
+    }))
 }
 
 fn require_name(name: &str) -> StoreResult<()> {
@@ -42,32 +43,54 @@ fn require_name(name: &str) -> StoreResult<()> {
     Ok(())
 }
 
-const POOL_COLUMNS: &str = "name,off,created_at";
-
-fn map_pool(row: &rusqlite::Row<'_>) -> StoreResult<Pool> {
-    Ok(Pool {
-        name: row.get(0)?,
-        off: row.get(1)?,
-        created_at: at(row.get(2)?)?,
-    })
+fn declared_pools(conn: &Connection) -> StoreResult<Vec<Pool>> {
+    crate::config::placement::global_settings(conn)
+        .map_err(invalid)?
+        .pools
+        .into_iter()
+        .map(|(name, declaration)| {
+            let created_at = conn
+                .query_row(
+                    "SELECT created_at FROM pools WHERE name=?1",
+                    [&name],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            Ok(Pool {
+                name,
+                off: declaration.off,
+                created_at: at(created_at)?,
+            })
+        })
+        .collect()
 }
 
-const ONDEMAND_COLUMNS: &str =
-    "name,provider,template,max_machines,max_usd_per_hour,hours,created_at";
-
-fn map_ondemand(row: &rusqlite::Row<'_>) -> StoreResult<OnDemand> {
-    let provider: String = row.get(1)?;
-    let template: String = row.get(2)?;
-    Ok(OnDemand {
-        name: row.get(0)?,
-        provider: Provider::parse(&provider)
-            .ok_or_else(|| invalid(format!("unknown provider {provider}")))?,
-        hardware: serde_json::from_str::<Hardware>(&template)?,
-        max_machines: row.get(3)?,
-        max_usd_per_hour: usd(row.get(4)?)?,
-        hours: row.get(5)?,
-        created_at: at(row.get(6)?)?,
-    })
+fn declared_ondemands(conn: &Connection) -> StoreResult<Vec<OnDemand>> {
+    crate::config::placement::global_settings(conn)
+        .map_err(invalid)?
+        .ondemands
+        .into_iter()
+        .map(|(name, declaration)| {
+            let created_at = conn
+                .query_row(
+                    "SELECT created_at FROM ondemands WHERE name=?1",
+                    [&name],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            Ok(OnDemand {
+                name,
+                provider: declaration.provider,
+                hardware: declaration.hardware,
+                max_machines: declaration.max_machines,
+                max_usd_per_hour: declaration.max_usd_per_hour,
+                hours: declaration.hours,
+                created_at: at(created_at)?,
+            })
+        })
+        .collect()
 }
 
 const RENTAL_COLUMNS: &str = "id,ondemand,provider,provider_name,provider_id,machine_id,by_hand,
@@ -146,50 +169,49 @@ impl SqliteStore {
 
     pub fn add_pool(&self, name: &str) -> StoreResult<Pool> {
         require_name(name)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if name_taken_in(&tx, name)? {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if name_taken_in(&conn, name)? {
             return Err(invalid(format!("{name} already names a pool or on-demand")));
         }
-        tx.execute(
-            "INSERT INTO pools(name,off,created_at) VALUES(?1,0,?2)",
+        crate::config::placement::write(
+            &conn,
+            None,
+            &["pools", name],
+            Some(
+                serde_yaml_ng::to_value(crate::config::placement::PoolDeclaration { off: false })
+                    .map_err(invalid)?,
+            ),
+        )
+        .map_err(invalid)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO pools(name,created_at) VALUES(?1,?2)",
             params![name, now_unix()],
         )?;
-        let pool = tx.query_row(
-            &format!("SELECT {POOL_COLUMNS} FROM pools WHERE name=?1"),
-            [name],
-            |row| Ok(map_pool(row)),
-        )??;
-        tx.commit()?;
-        Ok(pool)
+        declared_pools(&conn)?
+            .into_iter()
+            .find(|pool| pool.name == name)
+            .ok_or(StoreError::NotFound)
     }
 
     pub fn pools(&self) -> StoreResult<Vec<Pool>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        collect(
-            &conn,
-            &format!("SELECT {POOL_COLUMNS} FROM pools ORDER BY name"),
-            [],
-            map_pool,
-        )
+        declared_pools(&conn)
     }
 
     pub fn pool(&self, name: &str) -> StoreResult<Option<Pool>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            &format!("SELECT {POOL_COLUMNS} FROM pools WHERE name=?1"),
-            [name],
-            |row| Ok(map_pool(row)),
-        )
-        .optional()?
-        .transpose()
+        Ok(declared_pools(&conn)?
+            .into_iter()
+            .find(|pool| pool.name == name))
     }
 
     pub fn set_pool_off(&self, name: &str, off: bool) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute("UPDATE pools SET off=?2 WHERE name=?1", params![name, off])? == 0 {
+        if !declared_pools(&conn)?.iter().any(|pool| pool.name == name) {
             return Err(StoreError::NotFound);
         }
+        crate::config::placement::write(&conn, None, &["pools", name, "off"], Some(off.into()))
+            .map_err(invalid)?;
         Ok(())
     }
 
@@ -197,10 +219,11 @@ impl SqliteStore {
     pub fn remove_pool(&self, name: &str) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("UPDATE machines SET pool=NULL WHERE pool=?1", [name])?;
-        if tx.execute("DELETE FROM pools WHERE name=?1", [name])? == 0 {
+        if !crate::config::placement::write(&tx, None, &["pools", name], None).map_err(invalid)? {
             return Err(StoreError::NotFound);
         }
+        tx.execute("UPDATE machines SET pool=NULL WHERE pool=?1", [name])?;
+        tx.execute("DELETE FROM pools WHERE name=?1", [name])?;
         tx.commit()?;
         Ok(())
     }
@@ -210,9 +233,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let ids = {
-            let mut statement = snapshot.prepare(
-                "SELECT id FROM machines WHERE pool=?1 AND label IS NOT NULL ORDER BY label",
-            )?;
+            let mut statement =
+                snapshot.prepare("SELECT id FROM machines WHERE pool=?1 ORDER BY id")?;
             let rows = statement.query_map([name], |row| row.get::<_, String>(0))?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
@@ -246,6 +268,18 @@ impl SqliteStore {
         )?;
         if rented {
             return Err(invalid("a rented machine has no pool, cost or expiry"));
+        }
+        if let Some(pool) = &ownership.pool {
+            if !declared_pools(&tx)?
+                .iter()
+                .any(|candidate| &candidate.name == pool)
+            {
+                return Err(StoreError::NotFound);
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO pools(name,created_at) VALUES(?1,?2)",
+                params![pool, now_unix()],
+            )?;
         }
         let changed = tx.execute(
             "UPDATE machines SET pool=?2,cost_usd=?3,expires_at=?4 WHERE id=?1",
@@ -313,39 +347,37 @@ impl SqliteStore {
 
     pub fn add_ondemand(&self, ondemand: &OnDemand) -> StoreResult<()> {
         require_name(&ondemand.name)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if name_taken_in(&tx, &ondemand.name)? {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if name_taken_in(&conn, &ondemand.name)? {
             return Err(invalid(format!(
                 "{} already names a pool or on-demand",
                 ondemand.name
             )));
         }
-        tx.execute(
-            "INSERT INTO ondemands(name,provider,template,max_machines,max_usd_per_hour,hours,created_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7)",
-            params![
-                ondemand.name,
-                ondemand.provider.as_str(),
-                serde_json::to_string(&ondemand.hardware)?,
-                ondemand.max_machines,
-                ondemand.max_usd_per_hour.to_decimal(),
-                ondemand.hours,
-                ondemand.created_at.unix_timestamp()
-            ],
+        let declaration = crate::config::placement::OnDemandDeclaration {
+            provider: ondemand.provider,
+            hardware: ondemand.hardware.clone(),
+            max_machines: ondemand.max_machines,
+            max_usd_per_hour: ondemand.max_usd_per_hour,
+            hours: ondemand.hours,
+        };
+        crate::config::placement::write(
+            &conn,
+            None,
+            &["ondemands", &ondemand.name],
+            Some(serde_yaml_ng::to_value(declaration).map_err(invalid)?),
+        )
+        .map_err(invalid)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO ondemands(name,created_at) VALUES(?1,?2)",
+            params![ondemand.name, ondemand.created_at.unix_timestamp()],
         )?;
-        tx.commit()?;
         Ok(())
     }
 
     pub fn ondemands(&self) -> StoreResult<Vec<OnDemand>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        collect(
-            &conn,
-            &format!("SELECT {ONDEMAND_COLUMNS} FROM ondemands ORDER BY name"),
-            [],
-            map_ondemand,
-        )
+        declared_ondemands(&conn)
     }
 
     pub fn ondemand(&self, name: &str) -> StoreResult<Option<OnDemand>> {
@@ -356,13 +388,16 @@ impl SqliteStore {
     /// Change the limit; current machines stay.
     pub fn set_ondemand_max(&self, name: &str, max: u32) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute(
-            "UPDATE ondemands SET max_machines=?2 WHERE name=?1",
-            params![name, max],
-        )? == 0
-        {
+        if ondemand_in(&conn, name)?.is_none() {
             return Err(StoreError::NotFound);
         }
+        crate::config::placement::write(
+            &conn,
+            None,
+            &["ondemands", name, "max_machines"],
+            Some(max.into()),
+        )
+        .map_err(invalid)?;
         Ok(())
     }
 
@@ -375,9 +410,12 @@ impl SqliteStore {
                 "{name} still has {live} live machine(s); `lf machine end` gives them back"
             )));
         }
-        if conn.execute("DELETE FROM ondemands WHERE name=?1", [name])? == 0 {
+        if !crate::config::placement::write(&conn, None, &["ondemands", name], None)
+            .map_err(invalid)?
+        {
             return Err(StoreError::NotFound);
         }
+        conn.execute("DELETE FROM ondemands WHERE name=?1", [name])?;
         Ok(())
     }
 
@@ -531,13 +569,9 @@ impl SqliteStore {
 }
 
 fn ondemand_in(conn: &Connection, name: &str) -> StoreResult<Option<OnDemand>> {
-    conn.query_row(
-        &format!("SELECT {ONDEMAND_COLUMNS} FROM ondemands WHERE name=?1"),
-        [name],
-        |row| Ok(map_ondemand(row)),
-    )
-    .optional()?
-    .transpose()
+    Ok(declared_ondemands(conn)?
+        .into_iter()
+        .find(|ondemand| ondemand.name == name))
 }
 
 fn live_in(conn: &Connection, ondemand: &str) -> StoreResult<u32> {

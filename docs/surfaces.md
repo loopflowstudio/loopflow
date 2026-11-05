@@ -26,6 +26,23 @@ workspace starts and you get the one workspace.
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
 
+## Present documentation in Desktop
+
+```bash
+lf open --host desktop --file docs/usage.md --file README.md
+```
+
+Present the original files in an attached Desktop Files view, without starting a
+host or conversation. Paths are relative to the selected checkout. Markdown and
+HTML render in read mode; active edits keep their selection and draft while
+another file becomes a tab. Desktop retains its existing remote Files transport.
+
+With no Desktop attached, the command reports paths and opens nothing. A missing
+file, invalid Work selection or unmatched view reports an error; correct the
+path or destination and retry presentation without rewriting the docs. The
+docs-first workflow reports paths and continues when presentation is unavailable.
+It never launches a terminal editor, browser or host as a fallback.
+
 ## Share a link
 
 ```bash

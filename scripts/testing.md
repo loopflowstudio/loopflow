@@ -13,6 +13,11 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+Changes to `scripts/resource_envelope.py` or its imports also include
+`test(build_cleanup::)` in the gate's Rust filter. That suite invokes Python
+recovery outside pytest's configured import path. Use the gate's prepared CLI
+so compilation cannot outlast its process-liveness fixtures.
+
 ## Implement: one focused test
 
 ```bash
@@ -33,8 +38,8 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
-On macOS it also builds the CLI before isolated Python cleanup tests, so native
-archives and Cargo dependencies are fetched before networking is disabled.
+On macOS it builds the CLI before isolated Python checkout-refresh proofs, so
+native archives and Cargo dependencies are fetched before networking is disabled.
 `binary(name)` matches the standalone `[[test]]` binaries in
 `rust/loopflow/Cargo.toml` and the CLI's own unit tests as `binary(lf)`;
 suites inside `integration` take `test(name::)`, and an unknown binary name
@@ -53,9 +58,10 @@ and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
-After building the candidate, set `LF_BIN` to its absolute path for the gate or
-website command when the installed CLI differs; otherwise the docs check reads
-the installed build's command tree.
+After building the candidate, prepend its directory to `PATH` for the gate or
+website command when the installed CLI differs: `PATH="$PWD/target/debug:$PATH"`.
+The network boundary clears inherited `LF_*`, including `LF_BIN`; PATH keeps
+the docs check on the candidate's command tree inside that boundary.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
 (`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
 unless the diff reaches them; together they exceed the 1200 s Rust budget, and

@@ -129,7 +129,8 @@ impl ContextDelivery {
         let Some((id, source)) = &self.repository else {
             return Ok(());
         };
-        let store = crate::store::sqlite::SqliteStore::new(&self.home.join("loopflow.db"))?;
+        let store =
+            crate::store::sqlite::SqliteStore::open_for_hook(&self.home.join("loopflow.db"))?;
         let Some(destination) = store.repository_path(id)? else {
             return Ok(());
         };
@@ -232,7 +233,7 @@ impl ContextDelivery {
     /// App-server hooks inherit the server environment, not thread shell policy.
     /// Bind before the first turn so sibling threads never borrow launch context.
     pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
-        let path = codex_delivery_path(&self.home, session);
+        let path = native_delivery_path(&self.home, session);
         let parent = path.parent().expect("context binding has a parent");
         fs::create_dir_all(parent)?;
         let file = tempfile::NamedTempFile::new_in(parent)?;
@@ -269,7 +270,7 @@ impl ContextDelivery {
     }
 }
 
-pub(crate) fn codex_delivery_path(home: &Path, session: &str) -> PathBuf {
+pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
     // Native IDs are opaque; never interpret one as a filesystem path.
     home.join("context-deliveries")
         .join(format!("{}.json", hex::encode(Sha256::digest(session))))
@@ -490,9 +491,10 @@ mod tests {
                 name: "test".into(),
                 content: Some("Test skill".into()),
                 agent: None,
-                default_agent: None,
+                occurrence: None,
+                settings: Default::default(),
                 action_style: None,
-                docs: Vec::new(),
+                docs: None,
             }),
             message: Some("Fix this".into()),
             clipboard: Some("🦀 $reference\r\n".repeat(10_000)),

@@ -1,7 +1,6 @@
 ---
 requires: intended outcome and work to reconcile
 produces: aligned plan, implementation, and Wave memory, with a minimal review of progress and evidence
-default_agent: claude
 action_style: procedural
 ---
 Bring the plan and the implementation into agreement with what the work has taught us.

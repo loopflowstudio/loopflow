@@ -324,10 +324,11 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
             {
                 continue;
             }
-            if !store
+            if store
                 .sqlite
-                .owner_waits_for_person(&owner)
+                .owner_retention(&owner)
                 .map_err(task_error)?
+                .is_some()
             {
                 return Err(task_error(
                     "Requested work, a draft or a pending request still holds this Task",

@@ -2447,11 +2447,9 @@ fi
                 rank: 0,
                 assignee: None,
                 due_date: None,
-                regressed_in: None,
                 state: None,
                 completed_at: None,
                 observation: Observation::NotRequired,
-                agent: None,
             };
             let mut pr = TaskPr {
                 id: TaskPrId::new(),
@@ -2709,11 +2707,9 @@ esac
                 rank: 0,
                 assignee: None,
                 due_date: None,
-                regressed_in: None,
                 state: None,
                 completed_at: None,
                 observation: Observation::NotRequired,
-                agent: None,
             };
             let pr = TaskPr {
                 id: TaskPrId::new(),
@@ -3823,7 +3819,7 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
             Some(wave.slug()),
             Some("New Linear Task".into()),
             Some("Retain this work".into()),
-            None,
+            crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
         assert!(saved.linear_id.is_some());

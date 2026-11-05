@@ -191,7 +191,7 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
             fixture.assert_retained();
         }
         fixture.sql().execute("UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1", []).unwrap();
-        fixture.store.sqlite.record_owner_input(&agent, b"unfinished draft").unwrap();
+        assert!(fixture.store.sqlite.try_record_owner_input(&agent, b"unfinished draft").unwrap());
         assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
         fixture.store.sqlite.clear_owner_input(&agent).unwrap();
         worker.0.kill().unwrap();

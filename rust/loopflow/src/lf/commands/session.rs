@@ -636,7 +636,13 @@ async fn resume(
         let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
+        let lock_id = session.id.to_string();
+        let launch = tokio::task::spawn_blocking(move || {
+            crate::ops::human_session::lock_session_process(&lock_id)
+        })
+        .await??;
         let session = crate::ops::human_session::admit_workspace(&store, session).await?;
+        drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
     }

@@ -272,7 +272,7 @@ pub struct WaveGraph {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GraphDefault {
     pub name: String,
-    pub source: crate::work::wave::setup::SetupSource,
+    pub source: crate::config::ConfigSource,
 }
 
 /// `selector: None` reads the ambient Wave; `in_wave: false` the repository.

@@ -74,7 +74,6 @@ pub use children::ClosedTaskPage;
 pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub use scope_defaults::ScopeSettings;
 pub use task_details::TaskDetailFacts;
 pub(crate) use task_work::TaskShipping;
 
@@ -82,6 +81,10 @@ pub(crate) use task_work::TaskShipping;
 /// default while every process opens and records its first receipt. Durable
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A provider hook at a turn or tool boundary waits this long for a locked
+/// store, then treats it as unavailable: a busy install never stalls a turn.
+pub(crate) const HOOK_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Bytes of write-ahead log kept on disk after a checkpoint resets it.
 const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
@@ -106,8 +109,12 @@ fn unapplied_message(path: &Path, pending: &str) -> String {
     }
 }
 
-fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult<()> {
-    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+fn configure_write_connection(
+    conn: &mut Connection,
+    path: &Path,
+    busy: Duration,
+) -> StoreResult<()> {
+    conn.busy_timeout(busy)?;
     // A deferred transaction that reads, then writes after another process
     // committed, fails at once with SQLITE_BUSY_SNAPSHOT: the busy handler
     // never runs. Taking the write lock at BEGIN makes it wait instead.
@@ -268,7 +275,7 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
         |row| row.get(0),
     )?;
     let local = if placed {
-        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
     } else {
         "0"
     };
@@ -402,58 +409,34 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
     })
 }
 
-fn read_provider_account(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<ProviderAccount>> {
-    let provider = row.get(0)?;
-    let account_id = row.get::<_, String>(1)?;
-    let home = row
-        .get::<_, Option<String>>(2)?
-        .map(std::path::PathBuf::from);
-    let login_email = row.get::<_, Option<String>>(3)?;
-    let credential_state = row.get::<_, String>(4)?;
-    let routing_state = row.get::<_, String>(5)?;
-    let plan = row.get(6)?;
-    let paid_through = row.get::<_, Option<i32>>(7)?;
-    let utilization_percent = row.get(8)?;
-    let cooldown_until = row.get(9)?;
-    let cooldown_reason = row.get(10)?;
-    let last_selected_at = row.get(11)?;
-    let created_at = row.get(12)?;
-    let updated_at = row.get(13)?;
-    Ok((|| {
-        let account_id = ProviderAccountId::parse(&account_id).map_err(StoreError::InvalidData)?;
-        let login_email = login_email
-            .map(|value| EmailAddress::parse(&value))
-            .transpose()
-            .map_err(StoreError::InvalidData)?;
-        let credential_state =
-            CredentialState::from_db(&credential_state).map_err(StoreError::InvalidData)?;
-        let routing_state =
-            RoutingState::from_db(&routing_state).map_err(StoreError::InvalidData)?;
-        let paid_through = paid_through
-            .map(time::Date::from_julian_day)
-            .transpose()
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        Ok(ProviderAccount {
-            provider,
-            account_id,
-            home,
-            login_email,
-            observed_email: row.get(14)?,
-            observed_subject: row.get(15)?,
-            observed_plan: row.get(16)?,
-            observed_credential_digest: row.get(17)?,
-            credential_state,
-            routing_state,
-            plan,
-            paid_through,
-            utilization_percent,
-            cooldown_until,
-            cooldown_reason,
-            last_selected_at,
-            created_at,
-            updated_at,
-        })
-    })())
+const PROVIDER_ACCOUNT_COLUMNS: &str = "provider, account_id, home, credential_state,
+    utilization_percent, cooldown_until, cooldown_reason, last_selected_at,
+    created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest";
+
+fn read_provider_account(row: &rusqlite::Row) -> StoreResult<ProviderAccount> {
+    Ok(ProviderAccount {
+        provider: row.get(0)?,
+        account_id: ProviderAccountId::parse(&row.get::<_, String>(1)?)
+            .map_err(StoreError::InvalidData)?,
+        home: row.get::<_, Option<String>>(2)?.map(PathBuf::from),
+        credential_state: CredentialState::from_db(&row.get::<_, String>(3)?)
+            .map_err(StoreError::InvalidData)?,
+        utilization_percent: row.get(4)?,
+        cooldown_until: row.get(5)?,
+        cooldown_reason: row.get(6)?,
+        last_selected_at: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        observed_email: row.get(10)?,
+        observed_subject: row.get(11)?,
+        observed_plan: row.get(12)?,
+        observed_credential_digest: row.get(13)?,
+        // Authored preferences are applied from one configuration read per operation.
+        login_email: None,
+        routing_state: RoutingState::Automatic,
+        plan: None,
+        paid_through: None,
+    })
 }
 
 fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccountLimitRow>> {
@@ -498,42 +481,6 @@ fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<Acce
         }))
 }
 
-fn read_auth_browser_binding(
-    row: &rusqlite::Row,
-) -> rusqlite::Result<StoreResult<AuthBrowserBinding>> {
-    let provider = row.get::<_, String>(0)?;
-    let account_id = row.get::<_, Option<String>>(1)?;
-    let position = row.get::<_, i64>(2)? as usize;
-    let profile_id = row.get::<_, String>(3)?;
-    Ok(provider
-        .parse::<Provider>()
-        .map_err(|error| StoreError::InvalidData(error.to_string()))
-        .and_then(|provider| {
-            account_id
-                .as_deref()
-                .map(ProviderAccountId::parse)
-                .transpose()
-                .map_err(StoreError::InvalidData)
-                .map(|account_id| (provider, account_id))
-        })
-        .and_then(|(provider, account_id)| {
-            ProfileId::parse(&profile_id)
-                .map_err(StoreError::InvalidData)
-                .map(|profile_id| AuthBrowserBinding {
-                    provider,
-                    account_id,
-                    position,
-                    profile_id,
-                })
-        }))
-}
-
-fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<ProviderAccountId> {
-    ProviderAccountId::parse(&row.get::<_, String>(0)?).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, error.into())
-    })
-}
-
 impl SqliteStore {
     #[cfg(test)]
     pub(crate) fn assert_no_historical_runs(&self) {
@@ -557,7 +504,18 @@ impl SqliteStore {
     /// shared frontier is the promotion boundary's job — see
     /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden)
+        Self::open(
+            path,
+            super::FrontierAdvance::Forbidden,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
+    }
+
+    /// Open for a provider hook at a turn or tool boundary. It waits at most
+    /// [`HOOK_BUSY_TIMEOUT`] for a locked store; the caller treats any error as
+    /// a recording gap and lets the turn continue.
+    pub(crate) fn open_for_hook(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Forbidden, HOOK_BUSY_TIMEOUT)
     }
 
     /// Revalidate a connection after a child executable may have upgraded it.
@@ -570,7 +528,11 @@ impl SqliteStore {
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Authorized)
+        Self::open(
+            path,
+            super::FrontierAdvance::Authorized,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
     }
 
     /// Open a hermetic, fully-migrated store at `path`: this build's whole
@@ -588,18 +550,18 @@ impl SqliteStore {
         }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migrations::apply_sqlite(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+    fn open(path: &Path, advance: super::FrontierAdvance, busy: Duration) -> StoreResult<Self> {
         if super::serves_in_app() {
             return Self::open_in_app(path);
         }
-        Self::open_with(path, &super::machine_home_dir(), advance)
+        Self::open_with(path, &super::machine_home_dir(), advance, busy)
     }
 
     /// An app's in-process reads and writes: the store `lf` prepared, at this
@@ -623,7 +585,7 @@ impl SqliteStore {
                 path.display()
             )));
         }
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -632,7 +594,12 @@ impl SqliteStore {
     /// Open resolving the migration decision against an explicit machine home.
     /// Production opens pass the real one through [`Self::open`]; the
     /// same-module shared-frontier regressions pass a temp home.
-    fn open_with(path: &Path, home: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+    fn open_with(
+        path: &Path,
+        home: &Path,
+        advance: super::FrontierAdvance,
+        busy: Duration,
+    ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
@@ -666,7 +633,7 @@ impl SqliteStore {
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, busy)?;
 
         if shared_database && !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
@@ -713,12 +680,6 @@ impl SqliteStore {
             validate_process_schema(&conn)?;
         }
         Ok(store)
-    }
-
-    /// The migration a reader must know to open this store; `None` when it is empty.
-    pub(crate) fn reader_floor(&self) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        crate::store::migrations::store_reader_floor(&conn)
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
@@ -1103,57 +1064,15 @@ impl SqliteStore {
     // -- Provider accounts -----------------------------------------------------
 
     pub fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO provider_accounts (
-                provider, account_id, home, login_email, credential_state,
-                routing_state, plan, paid_through, utilization_percent,
-                cooldown_until, cooldown_reason, last_selected_at, created_at,
-                updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18
-             )
-             ON CONFLICT(provider, account_id) DO UPDATE SET
-                home = excluded.home,
-                login_email = excluded.login_email,
-                observed_email = excluded.observed_email,
-                observed_subject = excluded.observed_subject,
-                observed_plan = excluded.observed_plan,
-                observed_credential_digest = excluded.observed_credential_digest,
-                credential_state = excluded.credential_state,
-                routing_state = excluded.routing_state,
-                plan = excluded.plan,
-                paid_through = excluded.paid_through,
-                utilization_percent = excluded.utilization_percent,
-                cooldown_until = excluded.cooldown_until,
-                cooldown_reason = excluded.cooldown_reason,
-                last_selected_at = excluded.last_selected_at,
-                updated_at = excluded.updated_at",
-            params![
-                account.provider,
-                account.account_id.as_str(),
-                account
-                    .home
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                account.login_email.as_ref().map(EmailAddress::as_str),
-                account.credential_state.as_str(),
-                account.routing_state.as_str(),
-                account.plan,
-                account.paid_through.map(time::Date::to_julian_day),
-                account.utilization_percent,
-                account.cooldown_until,
-                account.cooldown_reason,
-                account.last_selected_at,
-                account.created_at,
-                account.updated_at,
-                account.observed_email,
-                account.observed_subject,
-                account.observed_plan,
-                account.observed_credential_digest,
-            ],
-        )?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+            ON CONFLICT(provider,account_id) DO UPDATE SET home=excluded.home,credential_state=excluded.credential_state,utilization_percent=excluded.utilization_percent,cooldown_until=excluded.cooldown_until,cooldown_reason=excluded.cooldown_reason,last_selected_at=excluded.last_selected_at,updated_at=excluded.updated_at,observed_email=excluded.observed_email,observed_subject=excluded.observed_subject,observed_plan=excluded.observed_plan,observed_credential_digest=excluded.observed_credential_digest",
+            params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|path| path.to_string_lossy().to_string()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.last_selected_at,account.created_at,account.updated_at,account.observed_email,account.observed_subject,account.observed_plan,account.observed_credential_digest])?;
+        crate::config::placement::write_account_preferences(&tx, account)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1190,19 +1109,21 @@ impl SqliteStore {
     ) -> StoreResult<Option<ProviderAccount>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT provider, account_id, home, login_email, credential_state,
-                    routing_state, plan, paid_through, utilization_percent,
-                    cooldown_until, cooldown_reason, last_selected_at,
-                    created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-             FROM provider_accounts
-             WHERE provider = ?1 AND account_id = ?2",
+            &format!("SELECT {PROVIDER_ACCOUNT_COLUMNS} FROM provider_accounts WHERE provider = ?1 AND account_id = ?2"),
         )?;
         statement
-            .query_row(
-                params![provider, account_id.as_str()],
-                read_provider_account,
-            )
+            .query_row(params![provider, account_id.as_str()], |row| {
+                Ok(read_provider_account(row))
+            })
             .optional()?
+            .transpose()?
+            .map(|account| {
+                crate::config::placement::global_settings(&conn)
+                    .and_then(|config| {
+                        crate::config::placement::account_preferences(&config, account)
+                    })
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
             .transpose()
     }
 
@@ -1211,42 +1132,19 @@ impl SqliteStore {
         provider: Option<&str>,
     ) -> StoreResult<Vec<ProviderAccount>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let sql = match provider {
-            Some(_) => {
-                "SELECT provider, account_id, home, login_email, credential_state,
-                        routing_state, plan, paid_through, utilization_percent,
-                        cooldown_until, cooldown_reason, last_selected_at,
-                        created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-                 FROM provider_accounts
-                 WHERE provider = ?1
-                 ORDER BY provider, account_id"
-            }
-            None => {
-                "SELECT provider, account_id, home, login_email, credential_state,
-                        routing_state, plan, paid_through, utilization_percent,
-                        cooldown_until, cooldown_reason, last_selected_at,
-                        created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-                 FROM provider_accounts
-                 ORDER BY provider, account_id"
-            }
-        };
-        let mut statement = conn.prepare(sql)?;
-        let mut accounts = Vec::new();
-        match provider {
-            Some(provider) => {
-                let rows = statement.query_map([provider], read_provider_account)?;
-                for row in rows {
-                    accounts.push(row??);
-                }
-            }
-            None => {
-                let rows = statement.query_map([], read_provider_account)?;
-                for row in rows {
-                    accounts.push(row??);
-                }
-            }
-        }
-        Ok(accounts)
+        let mut statement = conn.prepare(&format!(
+            "SELECT {PROVIDER_ACCOUNT_COLUMNS} FROM provider_accounts
+             WHERE (?1 IS NULL OR provider = ?1) ORDER BY provider, account_id"
+        ))?;
+        let accounts = statement.query_map([provider], |row| Ok(read_provider_account(row)))?;
+        let config = crate::config::placement::global_settings(&conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        accounts
+            .map(|account| {
+                crate::config::placement::account_preferences(&config, account??)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
+            .collect()
     }
 
     /// Store a long-lived token on an existing account. False when no such account.
@@ -1308,28 +1206,16 @@ impl SqliteStore {
 
     pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET login_email = ?3,
-                 routing_state = ?4,
-                 plan = ?5,
-                 paid_through = ?6,
-                 updated_at = ?7
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                account.provider,
-                account.account_id.as_str(),
-                account.login_email.as_ref().map(EmailAddress::as_str),
-                account.routing_state.as_str(),
-                account.plan,
-                account.paid_through.map(time::Date::to_julian_day),
-                account.updated_at,
-            ],
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM provider_accounts WHERE provider=?1 AND account_id=?2)",
+            params![account.provider, account.account_id.as_str()],
+            |row| row.get(0),
         )?;
-        if changed == 0 {
+        if !exists {
             return Err(StoreError::NotFound);
         }
-        Ok(())
+        crate::config::placement::write_account_preferences(&conn, account)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
     pub fn clear_provider_account_cooldown(
@@ -1543,32 +1429,23 @@ impl SqliteStore {
         account_id: Option<&ProviderAccountId>,
         profile_ids: &[ProfileId],
     ) -> StoreResult<()> {
-        let unique = profile_ids.iter().collect::<std::collections::HashSet<_>>();
-        if unique.len() != profile_ids.len() {
-            return Err(StoreError::InvalidData(
-                "account access profiles must be unique".to_string(),
-            ));
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut path = vec!["auth_browsers", provider.as_str()];
+        if let Some(account) = account_id {
+            path.extend(["accounts", account.as_str()]);
+        } else {
+            path.push("default");
         }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute(
-            "DELETE FROM auth_browser_bindings WHERE provider = ?1 AND account_id IS ?2",
-            params![provider.as_str(), account_id.map(ProviderAccountId::as_str)],
-        )?;
-        for (position, profile_id) in profile_ids.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO auth_browser_bindings (
-                    provider, account_id, position, profile_id
-                 ) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    provider.as_str(),
-                    account_id.map(ProviderAccountId::as_str),
-                    position as i64,
-                    profile_id.as_str(),
-                ],
-            )?;
-        }
-        transaction.commit()?;
+        crate::config::placement::write(
+            &conn,
+            None,
+            &path,
+            Some(
+                serde_yaml_ng::to_value(profile_ids)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+            ),
+        )
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         Ok(())
     }
 
@@ -1578,76 +1455,116 @@ impl SqliteStore {
         account_id: Option<&ProviderAccountId>,
     ) -> StoreResult<Vec<AuthBrowserBinding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let provider = provider.map(|value| value.as_str());
-        let account_id = account_id.map(ProviderAccountId::as_str);
-        let mut statement = conn.prepare(
-            "SELECT provider, account_id, position, profile_id
-             FROM auth_browser_bindings
-             WHERE (?1 IS NULL OR provider = ?1)
-               AND (?2 IS NULL OR account_id = ?2)
-             ORDER BY provider, account_id, position",
-        )?;
-        let rows = statement.query_map(params![provider, account_id], read_auth_browser_binding)?;
-        rows.map(|row| row?).collect()
+        let declarations = crate::config::placement::global_settings(&conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .auth_browsers;
+        let mut out = Vec::new();
+        for (name, declaration) in declarations {
+            let selected = name
+                .parse::<Provider>()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            if provider.is_some_and(|provider| provider != selected) {
+                continue;
+            }
+            for (account, profiles) in std::iter::once((None, declaration.default)).chain(
+                declaration
+                    .accounts
+                    .into_iter()
+                    .map(|(account, profiles)| (Some(account), profiles)),
+            ) {
+                if account_id.is_some_and(|id| account.as_deref() != Some(id.as_str())) {
+                    continue;
+                }
+                for (position, profile) in profiles.into_iter().enumerate() {
+                    out.push(AuthBrowserBinding {
+                        provider: selected,
+                        account_id: account
+                            .as_deref()
+                            .map(ProviderAccountId::parse)
+                            .transpose()
+                            .map_err(StoreError::InvalidData)?,
+                        position,
+                        profile_id: ProfileId::parse(&profile).map_err(StoreError::InvalidData)?,
+                    });
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub fn set_provider_route(&self, route: &ProviderRoute) -> StoreResult<()> {
-        if route.accounts.is_empty() {
-            return Err(StoreError::InvalidData(
-                "provider route needs at least one account".to_string(),
-            ));
-        }
-        let unique = route
-            .accounts
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (path, prefix) = crate::config::placement::route_location(&conn, &route.scope)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let parts: Vec<_> = prefix
             .iter()
-            .collect::<std::collections::HashSet<_>>();
-        if unique.len() != route.accounts.len() {
-            return Err(StoreError::InvalidData(
-                "provider route accounts must be unique".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute(
-            "DELETE FROM provider_routes
-             WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3",
-            params![
-                route.scope.kind(),
-                route.scope.id(),
-                route.provider.as_str()
-            ],
-        )?;
-        for (position, account_id) in route.accounts.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO provider_routes (
-                    scope, scope_id, provider, position, account_id, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    route.scope.kind(),
-                    route.scope.id(),
-                    route.provider.as_str(),
-                    position as i64,
-                    account_id.as_str(),
-                    route.created_at,
-                    route.updated_at,
-                ],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
+            .map(String::as_str)
+            .chain(["account", route.provider.as_str()])
+            .collect();
+        crate::config::files::update(&path, |document| {
+            crate::config::settings::insert(
+                document,
+                &parts,
+                serde_yaml_ng::to_value(&route.accounts)?,
+            );
+            Ok(())
+        })
+        .map_err(|e| StoreError::InvalidData(e.to_string()))
     }
 
-    /// Clear a provider's route at one scope; false when it had none.
     pub fn clear_provider_route(
         &self,
         scope: &RouteScope,
         provider: Provider,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "DELETE FROM provider_routes WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3",
-            params![scope.kind(), scope.id(), provider.as_str()],
-        )? > 0)
+        let (path, prefix) = crate::config::placement::route_location(&conn, scope)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let parts: Vec<_> = prefix
+            .iter()
+            .map(String::as_str)
+            .chain(["account", provider.as_str()])
+            .collect();
+        crate::config::files::update(&path, |document| {
+            Ok(crate::config::files::remove(document, &parts))
+        })
+        .map_err(|e| StoreError::InvalidData(e.to_string()))
+    }
+
+    pub(crate) fn account_declarations(
+        &self,
+        scopes: &[RouteScope],
+    ) -> StoreResult<Vec<crate::config::ConfigDeclarations>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        scopes
+            .iter()
+            .map(|scope| {
+                let (path, prefix) = crate::config::placement::route_location(&conn, scope)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                let mut document = crate::config::files::read(&path)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                crate::config::remote::apply_document(&path, &mut document)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                let accounts = prefix
+                    .iter()
+                    .try_fold(&document, |value, key| value.get(key))
+                    .and_then(|value| value.get("account"));
+                let mut value = serde_yaml_ng::Value::Mapping(Default::default());
+                if let Some(accounts) = accounts {
+                    value["account"] = accounts.clone();
+                }
+                Ok(crate::config::ConfigDeclarations {
+                    source: crate::config::ConfigSource::Personal,
+                    scope: match scope {
+                        RouteScope::Wave(_) => crate::config::settings::SettingScope::Wave,
+                        RouteScope::Repo(_) => crate::config::settings::SettingScope::Repository,
+                        RouteScope::Default => crate::config::settings::SettingScope::Global,
+                    },
+                    path,
+                    value,
+                })
+            })
+            .collect()
     }
 
     pub fn provider_route(
@@ -1655,42 +1572,53 @@ impl SqliteStore {
         scope: &RouteScope,
         provider: Provider,
     ) -> StoreResult<Option<ProviderRoute>> {
+        let observed = self.list_provider_accounts(Some(provider.as_str()))?;
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT account_id, created_at, updated_at
-             FROM provider_routes
-             WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3
-             ORDER BY position",
-        )?;
-        let rows = statement.query_map(
-            params![scope.kind(), scope.id(), provider.as_str()],
-            |row| {
-                Ok((
-                    read_provider_route_account(row)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        )?;
-        let mut accounts = Vec::new();
-        let mut created_at = 0;
-        let mut updated_at = 0;
-        for row in rows {
-            let (account_id, row_created_at, row_updated_at) = row?;
-            accounts.push(account_id);
-            created_at = if created_at == 0 {
-                row_created_at
-            } else {
-                created_at.min(row_created_at)
-            };
-            updated_at = updated_at.max(row_updated_at);
-        }
-        Ok((!accounts.is_empty()).then(|| ProviderRoute {
+        let (path, prefix) = crate::config::placement::route_location(&conn, scope)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let mut document = crate::config::files::read(&path)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        crate::config::remote::apply_document(&path, &mut document)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let parts: Vec<_> = prefix
+            .iter()
+            .map(String::as_str)
+            .chain(["account", provider.as_str()])
+            .collect();
+        let Some(value) = parts
+            .iter()
+            .try_fold(&document, |value, key| value.get(*key))
+        else {
+            return Ok(None);
+        };
+        let order: crate::config::placement::AccountOrder =
+            serde_yaml_ng::from_value(value.clone())
+                .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        let candidates: Vec<_> = observed.iter().collect();
+        let accounts = order
+            .iter()
+            .map(
+                |selector| match crate::provider_account::match_account(&candidates, selector) {
+                    crate::provider_account::AccountMatch::One(account) => {
+                        Ok(account.account_id.clone())
+                    }
+                    crate::provider_account::AccountMatch::None => Err(StoreError::InvalidData(
+                        format!("account reference {selector} has no resident login"),
+                    )),
+                    crate::provider_account::AccountMatch::Ambiguous(_) => {
+                        Err(StoreError::InvalidData(format!(
+                            "account reference {selector} is ambiguous"
+                        )))
+                    }
+                },
+            )
+            .collect::<StoreResult<Vec<_>>>()?;
+        Ok(Some(ProviderRoute {
             scope: scope.clone(),
             provider,
             accounts,
-            created_at,
-            updated_at,
+            created_at: 0,
+            updated_at: 0,
         }))
     }
 
@@ -1841,21 +1769,23 @@ impl SqliteStore {
             limits
         };
         let mut account_statement = transaction.prepare(
-            "SELECT provider, account_id, home, login_email, credential_state,
-                    routing_state, plan, paid_through, utilization_percent,
-                    cooldown_until, cooldown_reason, last_selected_at,
-                    created_at, updated_at, observed_email, observed_subject, observed_plan, observed_credential_digest
-             FROM provider_accounts
-             WHERE provider = ?1 AND account_id = ?2",
+            &format!("SELECT {PROVIDER_ACCOUNT_COLUMNS} FROM provider_accounts WHERE provider = ?1 AND account_id = ?2"),
         )?;
+        let config = crate::config::placement::global_settings(&transaction)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut available = Vec::new();
         for account_id in candidates {
             let account = account_statement
-                .query_row(
-                    params![provider.as_str(), account_id.as_str()],
-                    read_provider_account,
-                )
+                .query_row(params![provider.as_str(), account_id.as_str()], |row| {
+                    Ok(read_provider_account(row))
+                })
                 .optional()?
+                .transpose()?;
+            let account = account
+                .map(|account| {
+                    crate::config::placement::account_preferences(&config, account)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))
+                })
                 .transpose()?;
             if let Some(account) = account
                 .filter(|account| crate::provider_account::account_route_eligible(account, now))
@@ -2239,7 +2169,7 @@ mod frontier_tests {
         home: &Path,
         advance: FrontierAdvance,
     ) -> crate::store::StoreResult<SqliteStore> {
-        SqliteStore::open_with(path, home, advance)
+        SqliteStore::open_with(path, home, advance, super::SQLITE_WRITE_BUSY_TIMEOUT)
     }
 
     fn frontier(path: &Path) -> Option<String> {
@@ -2286,8 +2216,8 @@ mod frontier_tests {
         open(&path, &shared.home, Forbidden).unwrap();
     }
 
-    /// A newer build that only adds leaves this lf reading and writing the
-    /// shared store; one that breaks names the migration that locked it out.
+    /// A newer build leaves this lf reading and writing the shared store.
+    /// Promotion selecting this build applies nothing to history it does not know.
     #[test]
     fn an_older_lf_keeps_working_on_a_store_a_newer_build_extended() {
         let shared = SharedMachine::new();
@@ -2299,13 +2229,12 @@ mod frontier_tests {
             &conn,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
         let newer = frontier(&path);
 
-        let store = open(&path, &shared.home, Forbidden)
-            .expect("an additive newer release leaves the store readable");
+        let store =
+            open(&path, &shared.home, Forbidden).expect("a newer build leaves the store readable");
         let wave = Wave::new(WaveId::new(), "From older lf".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         assert_eq!(
@@ -2317,36 +2246,38 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), newer);
-        open(&path, &shared.home, Authorized)
-            .expect_err("promotion never accepts history it does not know");
+        open(&path, &shared.home, Authorized).expect("selecting an older build applies nothing");
+        assert_eq!(frontier(&path), newer);
+    }
 
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
+    /// A contract migration past its staging window still opens: the one
+    /// statement that reads what it dropped fails, naming the column.
+    #[test]
+    fn a_dropped_column_fails_the_statement_that_reads_it_and_nothing_else() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        let newer = apply_newer_migration(
-            &conn,
-            "CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            false,
-        )
-        .unwrap();
-        let refusal = open(&path, &broken.home, Forbidden)
-            .expect_err("a breaking newer migration locks this lf out")
-            .to_string();
-        assert!(
-            refusal.contains(&format!(
-                "this store needs an lf that knows {newer} (it has "
-            )) && refusal.ends_with("run `lf install`"),
-            "{refusal}"
-        );
+        apply_newer_migration(&conn, "ALTER TABLE waves DROP COLUMN promoted_at;").unwrap();
+
+        running
+            .validate_current_schema()
+            .expect("the running reader keeps its store");
+        let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
+
+        let error = store.get_wave(&WaveId::new()).unwrap_err().to_string();
+
+        assert!(error.contains("promoted_at"), "{error}");
+        assert!(!error.contains("lf install"), "{error}");
+        store.health_check().expect("the rest of the store answers");
     }
 
     /// A Graph holds its store across steps and revalidates it after each one
     /// (`validate_current_schema`). A newer build that adds a slug migration
-    /// meanwhile leaves that running reader working; one that breaks stops it
-    /// with the skew and `lf install`, never advice to delete the database.
+    /// meanwhile leaves that running reader working.
     #[test]
-    fn a_running_older_reader_survives_an_additive_upgrade_under_it() {
+    fn a_running_older_reader_survives_an_upgrade_under_it() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, &shared.home, Authorized).unwrap();
@@ -2359,13 +2290,12 @@ mod frontier_tests {
             &newer,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
 
         running
             .validate_current_schema()
-            .expect("an additive newer migration keeps the running reader valid");
+            .expect("a newer migration keeps the running reader valid");
         let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
         running.create_wave(&after).unwrap();
         for wave in [&before, &after] {
@@ -2377,27 +2307,6 @@ mod frontier_tests {
                 Some(wave.name().to_string())
             );
         }
-
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
-        let running = open(&path, &broken.home, Forbidden).unwrap();
-        let newer = apply_newer_migration(
-            &rusqlite::Connection::open(&path).unwrap(),
-            "CREATE TABLE wave_marks (wave_id TEXT NOT NULL);",
-            false,
-        )
-        .unwrap();
-        let refusal = running
-            .validate_current_schema()
-            .expect_err("a breaking newer migration stops the running reader")
-            .to_string();
-        assert!(
-            refusal.contains(&format!("this store needs an lf that knows {newer}"))
-                && refusal.ends_with("run `lf install`")
-                && !refusal.contains("delete"),
-            "{refusal}"
-        );
     }
 
     #[test]
@@ -2603,14 +2512,14 @@ mod frontier_tests {
 
 #[cfg(test)]
 mod wal_tests {
-    use super::{configure_write_connection, WAL_SIZE_LIMIT_BYTES};
+    use super::{configure_write_connection, SQLITE_WRITE_BUSY_TIMEOUT, WAL_SIZE_LIMIT_BYTES};
 
     #[test]
     fn a_burst_does_not_leave_its_wal_on_disk() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let mut conn = rusqlite::Connection::open(&path).unwrap();
-        configure_write_connection(&mut conn, &path).unwrap();
+        configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
         conn.execute_batch("CREATE TABLE history (payload BLOB)")
             .unwrap();
         let wal = directory.path().join("loopflow.db-wal");
@@ -2634,7 +2543,7 @@ mod wal_tests {
         let path = directory.path().join("loopflow.db");
         let open = || {
             let mut conn = rusqlite::Connection::open(&path).unwrap();
-            configure_write_connection(&mut conn, &path).unwrap();
+            configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
             conn
         };
         let mut first = open();
@@ -2751,8 +2660,6 @@ mod linear_oauth_tests {
 #[cfg(test)]
 mod account_observation_tests {
     use super::SqliteStore;
-    use crate::profile::{ProviderRoute, RouteScope};
-    use crate::provider_auth::Provider;
     use crate::store::{
         AccountLimitWindow, CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
     };
@@ -2781,32 +2688,54 @@ mod account_observation_tests {
     }
 
     #[test]
-    fn route_edits_invalidate_wave_setup() {
+    fn account_file_edits_apply_to_single_and_filtered_reads() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
-        let account = account();
-        store.upsert_provider_account(&account).unwrap();
-        let before = store.revisions().unwrap().planning;
-        store
-            .set_provider_route(&ProviderRoute {
-                scope: RouteScope::Default,
-                provider: Provider::Claude,
-                accounts: vec![account.account_id],
-                created_at: 1,
-                updated_at: 1,
-            })
-            .unwrap();
-        let after_set = store.revisions().unwrap().planning;
-        assert!(after_set > before);
-        assert!(store
-            .clear_provider_route(&RouteScope::Default, Provider::Claude)
-            .unwrap());
-        let after_unset = store.revisions().unwrap().planning;
-        assert!(after_unset > after_set);
-        assert!(!store
-            .clear_provider_route(&RouteScope::Default, Provider::Claude)
-            .unwrap());
-        assert_eq!(store.revisions().unwrap().planning, after_unset);
+        let mut expected = account();
+        expected.login_email =
+            Some(crate::profile::EmailAddress::parse("work@example.com").unwrap());
+        expected.paid_through =
+            Some(time::Date::from_calendar_date(2026, time::Month::December, 1).unwrap());
+        expected.observed_email = Some("observed@example.com".into());
+        expected.observed_subject = Some("subject".into());
+        expected.observed_plan = Some("observed plan".into());
+        expected.observed_credential_digest = Some("digest".into());
+        store.upsert_provider_account(&expected).unwrap();
+
+        let assert_reads = |expected: &ProviderAccount| {
+            assert_eq!(
+                store
+                    .get_provider_account("claude", &expected.account_id)
+                    .unwrap()
+                    .as_ref(),
+                Some(expected)
+            );
+            for provider in [None, Some("claude")] {
+                assert_eq!(
+                    store.list_provider_accounts(provider).unwrap(),
+                    std::slice::from_ref(expected)
+                );
+            }
+            assert!(store
+                .list_provider_accounts(Some("codex"))
+                .unwrap()
+                .is_empty());
+        };
+        assert_reads(&expected);
+        let path = directory.path().join("config.yaml");
+        let mut declarations = crate::config::files::read(&path).unwrap();
+        declarations["accounts"]["claude"]["primary"]["plan"] = "edited".into();
+        std::fs::write(&path, serde_yaml_ng::to_string(&declarations).unwrap()).unwrap();
+        expected.plan = Some("edited".into());
+        assert_reads(&expected);
+
+        std::fs::write(path, "{}\n").unwrap();
+        expected.login_email = None;
+        expected.routing_state = RoutingState::Automatic;
+        expected.plan = None;
+        expected.paid_through = None;
+        assert_reads(&expected);
     }
 
     #[test]

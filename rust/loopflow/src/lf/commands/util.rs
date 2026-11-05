@@ -91,10 +91,10 @@ pub(crate) fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
     anyhow::ensure!(
-        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()).0.as_str()),
+        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
-        config.agent(),
-        config.agent(),
+        config.agent()?,
+        config.agent()?,
     );
     if let Some(provider) = provider_session {
         if session.provider.as_deref() != Some("codex") {
@@ -412,6 +412,8 @@ fn session_command_status_with_env(
         let outcome = result
             .as_ref()
             .map_or("failed", SessionCommandOutcome::capture_outcome);
+        // Records of the exit are best-effort: the provider's own result is
+        // what the person gets back, whatever the store says.
         if let Some((store, session, attachment)) = admitted {
             match crate::session_record::finish_session_attachment(
                 &store,
@@ -420,11 +422,15 @@ fn session_command_status_with_env(
                 outcome,
             ) {
                 Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+                }
             }
         }
         if let Some(capture) = capture {
-            capture.finish(outcome)?;
+            if let Err(error) = capture.finish(outcome) {
+                tracing::warn!(%error, "cannot settle the Session capture at exit");
+            }
         }
         result
     })
@@ -491,6 +497,7 @@ fn run_native_session(
                 agent_session.cloned(),
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
+                command.isolate,
             )
         })
         .transpose()
@@ -561,6 +568,7 @@ fn run_native_session(
             capture.observe_provider(agent_session.cloned(), account.clone());
         }
         let exit = crate::harness::native_exit::NativeExit {
+            isolate: command.isolate,
             session: owner.1.clone(),
             attachment: owner.2.clone(),
             provider: command.program.clone(),
@@ -612,6 +620,9 @@ fn run_native_session(
     })?;
 
     drop(activation);
+    if owned.is_none() {
+        crate::transport::report_directory(&command.cwd);
+    }
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
@@ -635,7 +646,10 @@ fn run_native_session(
         }
     };
     let interrupted = match owned {
-        Some(owner) => crate::harness::native_exit::record_exit(owner)?,
+        Some(owner) => crate::harness::native_exit::record_exit(owner).unwrap_or_else(|error| {
+            tracing::warn!(%error, "cannot record the provider's exit");
+            false
+        }),
         None => false,
     };
     // A mover ended this attachment; the conversation's home is now its business.
@@ -881,6 +895,7 @@ fn run_opencode_native(
                 }
                 drop(launch_lock);
                 let mut child = process.spawn()?;
+                crate::transport::report_directory(&command.cwd);
                 let _native = native_return(&owner);
                 let status = (|| -> Result<_> {
                     record_interactive_opened(environment)?;
@@ -954,12 +969,13 @@ fn run_codex_native(
         let prepared = ready_rx.recv();
         let result = match prepared {
             Ok((thread, remote, account)) => {
-                let client = crate::agent::native_connection_command(
+                let mut client = crate::agent::native_connection_command(
                     command.cwd.clone(),
                     thread.as_ref(),
                     remote,
                     command.attachment.clone(),
                 );
+                client.isolate = command.isolate;
                 run_native_session(
                     &client,
                     environment,
@@ -1043,6 +1059,7 @@ async fn serve_codex_native(
         params: Some(params),
         text: connection.recover_input(&launch.task_prompt)?,
         context: launch.conversation_context.clone(),
+        thread: thread.clone(),
     }));
     let directory = tempfile::tempdir()?;
     let relay = directory.path().join("client.sock");
@@ -1078,13 +1095,26 @@ async fn serve_codex_native(
             }
         }
     }
-    // A mover took the conversation; its new attachment owns recovery.
-    if attachment_lost(&owner)? {
-        return Ok(());
-    }
-    connection.ensure_thread_resolved()?;
-    if connection.submission()? == Some(NativeSubmission::InputDispatched) {
-        bail!("Codex initial input was dispatched without acknowledgement; resume saved history before sending again");
+    let verdict = (|| -> Result<()> {
+        // A mover took the conversation; its new attachment owns recovery.
+        if attachment_lost(&owner)? {
+            return Ok(());
+        }
+        connection.ensure_thread_resolved()?;
+        if connection.submission()? == Some(NativeSubmission::InputDispatched) {
+            bail!("Codex initial input was dispatched without acknowledgement; resume saved history before sending again");
+        }
+        Ok(())
+    })();
+    match verdict {
+        Ok(()) => {}
+        // Without the store the launch's receipts cannot be judged; the
+        // conversation still ended the way the person asked.
+        Err(error) if error.downcast_ref::<crate::store::StoreError>().is_some() => {
+            tracing::warn!(%error, session = %owner.1, "store unavailable at exit; receipts were not judged");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
     }
     if initial.lock().await.text.is_some() {
         bail!(
@@ -1262,6 +1292,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1473,6 +1504,7 @@ mod tests {
             }
         });
         let command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1495,6 +1527,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         let mut command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             program: "/bin/sh".into(),
@@ -1601,6 +1634,7 @@ mod tests {
             )]);
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
+                isolate: None,
                 launch: None,
                 input: None,
                 program: "/usr/bin/true".into(),
@@ -1688,6 +1722,7 @@ mod tests {
                 },
             )?;
             let command = SessionCommand {
+                isolate: None,
                 launch: None,
                 input: None,
                 context: None,

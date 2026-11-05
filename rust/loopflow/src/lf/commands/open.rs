@@ -6,6 +6,8 @@
 //! `lf session resume` for the resolved Work, whose admission and attachment
 //! fences own reuse. Desktop resolves the same address through `--link --json`.
 
+mod files;
+
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -1555,6 +1557,9 @@ fn drain(pipe: Option<impl std::io::Read>) -> String {
 pub struct OpenArgs {
     /// Work address, such as loopflow://loopflow/task/LOO-507
     pub url: Option<String>,
+    /// Present original files in an attached Desktop Files view; never launch a host
+    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["available", "session", "diff", "link"])]
+    pub files: Vec<PathBuf>,
     /// Presentation destination; auto opens in this Herdr/tmux/cmux host, then Desktop, then a terminal
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
@@ -1644,6 +1649,9 @@ fn links(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<WorkLink>, Vec<St
 }
 
 pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> {
+    if !args.files.is_empty() {
+        return files::run(cli, args, true);
+    }
     let (links, unknown) = links(cli, args)?;
     if json {
         println!(
@@ -1662,6 +1670,9 @@ pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> 
 }
 
 pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
+    if !args.files.is_empty() {
+        return files::run(cli, args, false);
+    }
     let json = args.json || cli.json;
     if args.link {
         let (links, unknown) = links(cli, args)?;

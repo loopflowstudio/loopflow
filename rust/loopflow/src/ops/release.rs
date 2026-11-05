@@ -43,7 +43,6 @@ const RELEASE_CONTEXT_MAX_TITLE_BYTES: usize = 300;
 const RELEASE_CONTEXT_MAX_PATH_BYTES: usize = 512;
 const RELEASE_CONTEXT_MAX_PR_BODY_BYTES: usize = 4 * 1024;
 const RELEASE_CONTEXT_MAX_DECISIONS_BYTES: usize = 16 * 1024;
-const RELEASE_CONTEXT_MAX_BREAKING_BYTES: usize = 4 * 1024;
 const RELEASE_CONTEXT_MAX_PREVIOUS_NOTES_BYTES: usize = 16 * 1024;
 const RELEASE_NOTES_MAX_BYTES: usize = 60 * 1024;
 const FALLBACK_NOTES_MAX_COMMITS: usize = 50;
@@ -364,9 +363,7 @@ pub fn generate_release(
     version_input: &str,
     progress: &impl Progress,
 ) -> OpsResult<String> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let target = default_release_target(repo);
     generate_release_with_target(repo, version_input, &target, progress)
@@ -396,9 +393,7 @@ fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
 }
 
 pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseStatusResult> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
@@ -421,11 +416,7 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
                 .iter()
                 .find(|release| preview_tag.as_deref() == Some(release.tag.as_str()))
                 .map(|release| release.published_at),
-            Some(stable_stream(
-                &releases,
-                &regressions(&main_repo)?,
-                chrono::Utc::now(),
-            )),
+            Some(read_stable_stream(&main_repo, &releases)),
         )
     } else {
         (None, None)
@@ -446,11 +437,18 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
 
 /// Check the exact git range since the last target tag.
 pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseChangeSet> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    if target.completion == ReleaseCompletion::GithubRelease {
+        // A Machine that cannot read them learns it here, before a run publishes
+        // and holds `stable`.
+        regressions(&main_repo).map_err(|error| {
+            OpsError::Message(format!(
+                "this Machine cannot read regressions, so stable would hold: {error}"
+            ))
+        })?;
+    }
     collect_release_changes(&main_repo, &target)
 }
 
@@ -466,9 +464,7 @@ pub fn release_notes(
     target_name: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<String> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let checkout = crate::repo::discover_repo_root(repo)
@@ -539,7 +535,7 @@ pub fn preview_release_notes(
         changes.commits.len(),
         changes.merged_prs.len()
     ));
-    let ((previous, previous_omitted), (decisions, decisions_omitted), (breaking, _)) =
+    let ((previous, previous_omitted), (decisions, decisions_omitted)) =
         if tagged_revision.is_some() {
             (
                 read_bounded_revision_text(
@@ -551,11 +547,6 @@ pub fn preview_release_notes(
                     &repo,
                     &format!("{revision}:release/v{version}/DECISIONS.md"),
                     RELEASE_CONTEXT_MAX_DECISIONS_BYTES,
-                )?,
-                read_bounded_revision_text(
-                    &repo,
-                    &format!("{revision}:release/v{version}/BREAKING.md"),
-                    RELEASE_CONTEXT_MAX_BREAKING_BYTES,
                 )?,
             )
         } else {
@@ -576,10 +567,6 @@ pub fn preview_release_notes(
                     &release_file("DECISIONS.md"),
                     RELEASE_CONTEXT_MAX_DECISIONS_BYTES,
                 )?,
-                read_bounded_text(
-                    &release_file("BREAKING.md"),
-                    RELEASE_CONTEXT_MAX_BREAKING_BYTES,
-                )?,
             )
         };
     let (context, json) = build_release_notes_context(
@@ -590,7 +577,6 @@ pub fn preview_release_notes(
         &target,
         decisions,
         decisions_omitted,
-        breaking_lines(breaking.as_deref()),
         previous,
         previous_omitted,
     )?;
@@ -631,9 +617,7 @@ pub fn release_publish(
     assets: &[PathBuf],
     finalize: bool,
 ) -> OpsResult<()> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
+    require_gh()?;
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let config = load_config_or_default(Some(&main_repo));
     let matching: Vec<_> = config
@@ -757,14 +741,123 @@ pub fn release_run(
 ) -> OpsResult<ReleaseRunOutcome> {
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let lock = &ReleaseLock::acquire(&main_repo, &target.name)?;
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".into()));
-    }
+    require_gh()?;
     let outcome = release_version(&main_repo, &target, version_input, progress, lock)?;
     if target.completion == ReleaseCompletion::GithubRelease {
-        advance_stable(&main_repo, &target, progress, lock)?;
+        let stable = advance_stable(&main_repo, &target, progress, lock)?;
+        for hold in &stable.holds {
+            progress.status(&hold.to_string());
+        }
     }
     Ok(outcome)
+}
+
+/// Move `stable` to the newest soaked release no regression covers, or with
+/// `dry_run` only say what would move. Returns the stream as read: `next` is
+/// where it moved, `holds` what keeps newer releases back. Regressions that
+/// cannot be read are an error here, where a person asked for the move.
+pub fn release_promote(
+    repo: &Path,
+    target_name: Option<&str>,
+    dry_run: bool,
+    progress: &impl Progress,
+) -> OpsResult<StableStream> {
+    let (main_repo, target) = resolve_stable_target(repo, target_name)?;
+    let stable = if dry_run {
+        read_stable_stream(&main_repo, &published_releases(&main_repo, &target)?)
+    } else {
+        let lock = ReleaseLock::acquire(&main_repo, &target.name)?;
+        advance_stable(&main_repo, &target, progress, &lock)?
+    };
+    if let Some(unread) = stable
+        .holds
+        .iter()
+        .find(|hold| matches!(hold, StableHold::RegressionsUnread { .. }))
+    {
+        return Err(OpsError::Message(format!("stable holds: {unread}")));
+    }
+    Ok(stable)
+}
+
+/// The issues reported against `version`: those labelled with it and those
+/// from earlier releases it still carries. Without a version, every open
+/// regression. Newest release first.
+pub fn release_issues(
+    repo: &Path,
+    version: Option<&str>,
+    target_name: Option<&str>,
+) -> OpsResult<Vec<ReleaseIssue>> {
+    let version = version.map(required_version).transpose()?;
+    let (main_repo, target) = resolve_stable_target(repo, target_name)?;
+    let releases = published_releases(&main_repo, &target)?;
+    let mut regressions = regressions(&main_repo)?;
+    regressions.sort_by_key(|regression| (std::cmp::Reverse(regression.version), regression.issue));
+    let past_stable = releases_past_stable(&releases, &regressions, chrono::Utc::now());
+    let release =
+        version.and_then(|version| releases.iter().find(|release| release.version == version));
+    Ok(regressions
+        .iter()
+        .filter(|regression| match version {
+            Some(version) => {
+                regression.version == version
+                    || release.is_some_and(|release| regression.covers(release))
+            }
+            None => regression.state == "OPEN",
+        })
+        .map(|regression| regression.issue_holding(&past_stable))
+        .collect())
+}
+
+/// File a regression against `version`, creating its label when this is the
+/// release's first. Returns the issue's URL.
+pub fn release_regress(repo: &Path, version: &str, title: &str) -> OpsResult<String> {
+    require_gh()?;
+    let tag = version_tag(required_version(version)?);
+    let label = format!("{REGRESSED_IN_PREFIX}{tag}");
+    if !labels(repo)?.contains(&label) {
+        run_stdout(repo, "gh", &["label", "create", &label])?;
+    }
+    // `gh issue create` refuses to run without a terminal unless given a body.
+    let url = run_stdout(
+        repo,
+        "gh",
+        &[
+            "issue",
+            "create",
+            "--title",
+            title,
+            "--label",
+            &label,
+            "--body",
+            &format!("Regressed in {tag}."),
+        ],
+    )?;
+    Ok(url.trim().to_string())
+}
+
+fn version_tag((major, minor, patch): (u64, u64, u64)) -> String {
+    format!("v{major}.{minor}.{patch}")
+}
+
+fn required_version(version: &str) -> OpsResult<(u64, u64, u64)> {
+    parse_version(version)
+        .ok_or_else(|| OpsError::Message(format!("invalid release version: {version}")))
+}
+
+/// A target with a `stable` stream: one that completes on a GitHub Release.
+fn resolve_stable_target(
+    repo: &Path,
+    target_name: Option<&str>,
+) -> OpsResult<(PathBuf, ReleaseTarget)> {
+    require_gh()?;
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    if target.completion != ReleaseCompletion::GithubRelease {
+        return Err(OpsError::Message(format!(
+            "release target {} has no stable stream: it does not complete on a GitHub Release",
+            target.name
+        )));
+    }
+    Ok((main_repo, target))
 }
 
 fn release_version(
@@ -923,7 +1016,10 @@ fn release_version(
                     ))
                 })?;
                 // No candidate was built yet, so the version is unspent: corrections
-                // merged after the release PR ship under the same version.
+                // merged after the release PR ship under the same version. An unseen
+                // merge commit means origin's default branch is stale too; one fetch
+                // refreshes both.
+                ensure_commit_local(main_repo, &release_commit, lock)?;
                 let main_ref = format!("origin/{default_branch}");
                 let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
                 if current_main != release_commit
@@ -1146,6 +1242,9 @@ fn materialize_exact_source_worktree(
     };
     let path = worktree_path(repo, worktree_name);
     let branch = release_branch_name(repo, worktree_name)?;
+    // Release revisions often come from GitHub (a merge commit or a remote tag)
+    // after this run last fetched.
+    ensure_commit_local(repo, revision, lock)?;
     let expected_commit = rev_parse(repo, &format!("{revision}^{{commit}}"))?;
     let registrations = list_porcelain(repo)?;
     let registered_at_path = registrations
@@ -1901,9 +2000,6 @@ struct ReleaseNotesContext {
     commits: Vec<ReleaseCommit>,
     merged_prs: Vec<MergedPr>,
     decisions: Option<String>,
-    /// Release-cut lines that every reader must see, such as
-    /// `lf < 0.15.0 can no longer open the store`; finalized notes carry them verbatim.
-    breaking: Vec<String>,
     previous_release_notes: Option<String>,
     source_limits: ReleaseNotesSourceLimits,
     omissions: ReleaseNotesOmissions,
@@ -1961,10 +2057,6 @@ fn run_release_notes_stage(
             .join("DECISIONS.md");
         let (decisions, decisions_omitted) =
             read_bounded_text(&decisions_path, RELEASE_CONTEXT_MAX_DECISIONS_BYTES)?;
-        let (breaking, _) = read_bounded_text(
-            &breaking_path(repo, version),
-            RELEASE_CONTEXT_MAX_BREAKING_BYTES,
-        )?;
         let (context, context_json) = build_release_notes_context(
             version,
             prev_tag,
@@ -1973,7 +2065,6 @@ fn run_release_notes_stage(
             target,
             decisions,
             decisions_omitted,
-            breaking_lines(breaking.as_deref()),
             previous_notes,
             previous_notes_omitted,
         )?;
@@ -2043,7 +2134,7 @@ fn generate_notes_file(
         },
     };
 
-    finalize_release_notes(output, &context.version, &context.breaking, degradation)?;
+    finalize_release_notes(output, &context.version, degradation)?;
     match degradation {
         None => progress.status("Release notes: narrative; release gate safe."),
         Some(reason) => progress.warning(&format!(
@@ -2090,7 +2181,6 @@ fn build_release_notes_context(
     target: &ReleaseTarget,
     decisions: Option<String>,
     decisions_omitted: usize,
-    breaking: Vec<String>,
     previous_release_notes: Option<String>,
     previous_release_notes_omitted: usize,
 ) -> OpsResult<(ReleaseNotesContext, Vec<u8>)> {
@@ -2153,7 +2243,6 @@ fn build_release_notes_context(
             .map(|pr| bound_merged_pr(pr, &mut omissions))
             .collect(),
         decisions,
-        breaking,
         previous_release_notes,
         source_limits: ReleaseNotesSourceLimits {
             context_bytes: RELEASE_CONTEXT_MAX_BYTES,
@@ -2421,7 +2510,6 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
 fn finalize_release_notes(
     repo: &Path,
     version: &str,
-    breaking: &[String],
     degradation: Option<ReleaseNotesDegradation>,
 ) -> OpsResult<()> {
     let path = repo.join("RELEASE_NOTES.md");
@@ -2473,15 +2561,7 @@ fn finalize_release_notes(
             reason.slug()
         ),
     };
-    let missing: Vec<String> = breaking
-        .iter()
-        .filter(|line| !body.contains(line.as_str()))
-        .map(|line| format!("**{line}**\n\n"))
-        .collect();
-    let content = format!(
-        "{expected_header}\n\n{marker}\n\n{}{body}",
-        missing.concat()
-    );
+    let content = format!("{expected_header}\n\n{marker}\n\n{body}");
     if content.len() > RELEASE_NOTES_MAX_BYTES {
         return Err(OpsError::Message(format!(
             "release gate blocked: release notes are {} bytes; maximum queue metadata is {RELEASE_NOTES_MAX_BYTES} bytes",
@@ -2529,22 +2609,6 @@ fn promote_unreleased_dir(repo: &Path, version: &str) -> OpsResult<()> {
             let incoming = fs::read_to_string(entry.path())?;
             let existing = fs::read_to_string(&dest)?;
             if incoming == existing {
-                fs::remove_file(entry.path())?;
-                continue;
-            }
-            // A repair cut under the same version adds its own compatibility lines.
-            if entry.file_name() == "BREAKING.md" {
-                let mut merged = existing.clone();
-                for line in incoming.lines() {
-                    if !existing.lines().any(|known| known == line) {
-                        if !merged.is_empty() && !merged.ends_with('\n') {
-                            merged.push('\n');
-                        }
-                        merged.push_str(line);
-                        merged.push('\n');
-                    }
-                }
-                write_atomic(&dest, merged.as_bytes())?;
                 fs::remove_file(entry.path())?;
                 continue;
             }
@@ -2646,36 +2710,9 @@ fn release_commit_message(target: &ReleaseTarget, version: &str) -> String {
     }
 }
 
-/// A release cut records lines every reader of the release must see here,
-/// one per line; `release/unreleased/` becomes this directory at the notes stage.
-fn breaking_path(repo: &Path, version: &str) -> PathBuf {
-    repo.join("release")
-        .join(format!("v{version}"))
-        .join("BREAKING.md")
-}
-
-fn breaking_lines(text: Option<&str>) -> Vec<String> {
-    text.unwrap_or_default()
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
 fn release_pr_copy(repo: &Path, target: &ReleaseTarget, version: &str) -> OpsResult<PrCopy> {
-    let (breaking, _) = read_bounded_text(
-        &breaking_path(repo, version),
-        RELEASE_CONTEXT_MAX_BREAKING_BYTES,
-    )?;
-    let mut title = release_commit_message(target, version);
-    // The title names the break; the notes name what raised it.
-    if let Some(line) = breaking_lines(breaking.as_deref()).last() {
-        let line = line.split(" (raised by:").next().unwrap_or(line);
-        title = format!("{title}: {line}");
-    }
     Ok(PrCopy {
-        title,
+        title: release_commit_message(target, version),
         body: fs::read_to_string(repo.join("RELEASE_NOTES.md"))?,
     })
 }
@@ -2989,7 +3026,6 @@ fn generate_release_with_target(
         target,
         None,
         0,
-        Vec::new(),
         None,
         0,
     )?;
@@ -4062,7 +4098,7 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate, lock: &Releas
     }
 }
 
-/// Ensure `sha` exists in `repo`'s local object database, fetching from
+/// Ensure `revision` exists in `repo`'s local object database, fetching from
 /// origin if it doesn't.
 ///
 /// `git rev-parse <40-char-hex>` echoes the input without verifying the
@@ -4070,25 +4106,21 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate, lock: &Releas
 /// (a merge commit landed on origin via the merge queue), the local repo
 /// may not have fetched it yet — and `git tag <name> <sha>` then fails
 /// with `trying to write ref ... with nonexistent object`.
-fn ensure_commit_local(repo: &Path, sha: &str, lock: &ReleaseLock) -> OpsResult<()> {
-    if commit_exists_locally(repo, sha) {
+fn ensure_commit_local(repo: &Path, revision: &str, lock: &ReleaseLock) -> OpsResult<()> {
+    if commit_exists_locally(repo, revision) {
         return Ok(());
     }
-    let _ = lock
-        .command("git")
-        .args(["fetch", "origin"])
-        .current_dir(repo)
-        .output();
-    if commit_exists_locally(repo, sha) {
+    run_locked_stdout(lock, repo, "git", &["fetch", "origin"])?;
+    if commit_exists_locally(repo, revision) {
         return Ok(());
     }
     Err(OpsError::Message(format!(
-        "commit {sha} is not present locally even after fetching origin"
+        "commit {revision} is not present locally even after fetching origin"
     )))
 }
 
-fn commit_exists_locally(repo: &Path, sha: &str) -> bool {
-    run_output(repo, "git", &["cat-file", "-e", sha])
+fn commit_exists_locally(repo: &Path, revision: &str) -> bool {
+    run_output(repo, "git", &["cat-file", "-e", revision])
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
@@ -4293,11 +4325,14 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
         .collect())
 }
 
-/// A regression Task as the stable rule reads it: releases from `version` on
-/// carry the bug, until the first release published after its fix landed.
+/// A regression as the stable rule reads it: releases from `version` on carry
+/// the bug, until the first release published after its issue closed.
 #[derive(Debug)]
 struct Regression {
-    task: String,
+    issue: u64,
+    title: String,
+    state: String,
+    url: String,
     version: (u64, u64, u64),
     fixed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -4309,36 +4344,140 @@ impl Regression {
                 .fixed_at
                 .is_none_or(|fixed_at| release.published_at < fixed_at)
     }
+
+    fn held_tags(&self, past_stable: &[&PublishedRelease]) -> Vec<String> {
+        past_stable
+            .iter()
+            .filter(|release| self.covers(release))
+            .map(|release| release.tag.clone())
+            .collect()
+    }
+
+    fn issue_holding(&self, past_stable: &[&PublishedRelease]) -> ReleaseIssue {
+        ReleaseIssue {
+            number: self.issue,
+            title: self.title.clone(),
+            state: self.state.clone(),
+            url: self.url.clone(),
+            regressed_in: version_tag(self.version),
+            holds: self.held_tags(past_stable),
+        }
+    }
 }
 
-/// The repository's regression Tasks. A done Task whose completion time is
-/// unreadable keeps covering, so a stalled `stable` is the failure, not a bug.
-fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::ops::planning_sync::planning_store())?;
-    let tasks = store
-        .sqlite
-        .regression_tasks(&repo.to_string_lossy())
-        .map_err(|error| OpsError::Message(format!("read regression Tasks: {error}")))?;
-    Ok(tasks
-        .into_iter()
-        .filter(|task| task.state.as_deref() != Some("canceled"))
-        .filter_map(|task| {
-            let fixed_at = if task.state.as_deref() == Some("completed") {
-                task.completed_at
-                    .as_deref()
-                    .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-                    .map(|at| at.with_timezone(&chrono::Utc))
-            } else {
-                None
-            };
-            Some(Regression {
-                version: parse_version(task.regressed_in.as_deref()?)?,
-                task: task.identifier,
-                fixed_at,
-            })
+/// A regression as `lf release issues` reports it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ReleaseIssue {
+    pub number: u64,
+    pub title: String,
+    /// GitHub's `OPEN` or `CLOSED`.
+    pub state: String,
+    pub url: String,
+    pub regressed_in: String,
+    /// The releases past `stable` it keeps back, newest first.
+    pub holds: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhRegressionIssue {
+    number: u64,
+    title: String,
+    url: String,
+    state: String,
+    state_reason: Option<String>,
+    closed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl GhRegressionIssue {
+    /// Open holds; closed as not planned or as a duplicate holds nothing. A
+    /// closed issue without a time keeps covering, so a stalled `stable` is
+    /// the failure, not a bug.
+    fn regression(self, version: (u64, u64, u64)) -> Option<Regression> {
+        let fixed_at = match (self.state.as_str(), self.state_reason.as_deref()) {
+            ("OPEN", _) => None,
+            (_, Some("NOT_PLANNED" | "DUPLICATE")) => return None,
+            _ => self.closed_at,
+        };
+        Some(Regression {
+            issue: self.number,
+            title: self.title,
+            state: self.state,
+            url: self.url,
+            version,
+            fixed_at,
         })
-        .collect())
+    }
+}
+
+const REGRESSED_IN_PREFIX: &str = "regressed-in:";
+
+/// The repository's regressions: its GitHub issues labelled
+/// `regressed-in:vX.Y.Z`, so every Machine reads the same ones.
+fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
+    let mut regressions = Vec::new();
+    for label in labels(repo)? {
+        let Some(version) = label
+            .strip_prefix(REGRESSED_IN_PREFIX)
+            .and_then(parse_version)
+        else {
+            continue;
+        };
+        let json = run_stdout(
+            repo,
+            "gh",
+            &[
+                "issue",
+                "list",
+                "--state",
+                "all",
+                "--label",
+                &label,
+                "--limit",
+                "1000",
+                "--json",
+                "number,title,url,state,stateReason,closedAt",
+            ],
+        )?;
+        let issues: Vec<GhRegressionIssue> = serde_json::from_str(&json)
+            .map_err(|err| OpsError::Parse(format!("failed to parse issues: {err}")))?;
+        regressions.extend(
+            issues
+                .into_iter()
+                .filter_map(|issue| issue.regression(version)),
+        );
+    }
+    Ok(regressions)
+}
+
+/// `--search` is a fuzzy match that misses labels, so this reads them all.
+fn labels(repo: &Path) -> OpsResult<Vec<String>> {
+    let names = run_stdout(
+        repo,
+        "gh",
+        &[
+            "label", "list", "--limit", "10000", "--json", "name", "--jq", ".[].name",
+        ],
+    )?;
+    Ok(names.lines().map(str::to_string).collect())
+}
+
+/// The stable stream against the repository's regressions. Unread regressions
+/// hold `stable` where it is and say why.
+fn read_stable_stream(repo: &Path, releases: &[PublishedRelease]) -> StableStream {
+    match regressions(repo) {
+        Ok(regressions) => stable_stream(releases, &regressions, chrono::Utc::now()),
+        Err(error) => StableStream {
+            current: releases
+                .iter()
+                .find(|release| release.is_latest)
+                .map(StreamRelease::from),
+            next: None,
+            holds: vec![StableHold::RegressionsUnread {
+                reason: error.to_string(),
+            }],
+        },
+    }
 }
 
 /// The release `stable` should point at now, when that is ahead of where it
@@ -4362,6 +4501,24 @@ fn stable_advance<'a>(
         })
         .max_by_key(|release| release.version)
         .filter(|candidate| current.is_none_or(|current| candidate.version > current))
+}
+
+/// The published releases newer than where `stable` stands after its next
+/// move, newest first. Each is held: one soaked and uncovered would be the move.
+fn releases_past_stable<'a>(
+    releases: &'a [PublishedRelease],
+    regressions: &[Regression],
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<&'a PublishedRelease> {
+    let floor = stable_advance(releases, regressions, now)
+        .or_else(|| releases.iter().find(|release| release.is_latest))
+        .map(|release| release.version);
+    let mut past: Vec<&PublishedRelease> = releases
+        .iter()
+        .filter(|release| floor.is_none_or(|floor| release.version > floor))
+        .collect();
+    past.sort_by_key(|release| std::cmp::Reverse(release.version));
+    past
 }
 
 /// One release as the stable stream names it.
@@ -4389,8 +4546,12 @@ pub enum StableHold {
         until: chrono::DateTime<chrono::Utc>,
     },
     Regression {
-        task: String,
+        issue: u64,
         tags: Vec<String>,
+    },
+    /// The repository's regressions could not be read; `stable` stays put.
+    RegressionsUnread {
+        reason: String,
     },
 }
 
@@ -4400,8 +4561,11 @@ impl std::fmt::Display for StableHold {
             Self::Soaking { tag, until } => {
                 write!(formatter, "{tag} soaks until {}", until.format("%Y-%m-%d"))
             }
-            Self::Regression { task, tags } => {
-                write!(formatter, "{task} holds {}", tags.join(", "))
+            Self::Regression { issue, tags } => {
+                write!(formatter, "#{issue} holds {}", tags.join(", "))
+            }
+            Self::RegressionsUnread { reason } => {
+                write!(formatter, "regressions unread: {reason}")
             }
         }
     }
@@ -4423,23 +4587,13 @@ fn stable_stream(
 ) -> StableStream {
     let current = releases.iter().find(|release| release.is_latest);
     let next = stable_advance(releases, regressions, now);
-    let floor = next.or(current).map(|release| release.version);
-    let mut newer: Vec<&PublishedRelease> = releases
-        .iter()
-        .filter(|release| floor.is_none_or(|floor| release.version > floor))
-        .collect();
-    newer.sort_by_key(|release| std::cmp::Reverse(release.version));
-    // Every newer release is held: one soaked and uncovered would be `next`.
+    let newer = releases_past_stable(releases, regressions, now);
     let mut holds: Vec<StableHold> = regressions
         .iter()
         .filter_map(|regression| {
-            let tags: Vec<String> = newer
-                .iter()
-                .filter(|release| regression.covers(release))
-                .map(|release| release.tag.clone())
-                .collect();
-            (!tags.is_empty()).then(|| StableHold::Regression {
-                task: regression.task.clone(),
+            let tags = regression.held_tags(&newer);
+            (!tags.is_empty()).then_some(StableHold::Regression {
+                issue: regression.issue,
                 tags,
             })
         })
@@ -4472,17 +4626,10 @@ fn advance_stable(
     target: &ReleaseTarget,
     progress: &impl Progress,
     lock: &ReleaseLock,
-) -> OpsResult<()> {
-    let stable = stable_stream(
-        &published_releases(repo, target)?,
-        &regressions(repo)?,
-        chrono::Utc::now(),
-    );
-    for hold in &stable.holds {
-        progress.status(&hold.to_string());
-    }
-    let Some(next) = stable.next else {
-        return Ok(());
+) -> OpsResult<StableStream> {
+    let stable = read_stable_stream(repo, &published_releases(repo, target)?);
+    let Some(next) = &stable.next else {
+        return Ok(stable);
     };
     progress.status(&format!(
         "Moving stable to {} (published {})...",
@@ -4507,7 +4654,7 @@ fn advance_stable(
         "gh",
         &["release", "edit", &next.tag, "--latest"],
     )?;
-    Ok(())
+    Ok(stable)
 }
 
 #[allow(clippy::too_many_arguments)] // Hook expansion and the two independent ownership scopes.
@@ -4543,6 +4690,14 @@ fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
         .current_dir(repo)
         .status()
         .is_ok_and(|status| status.success())
+}
+
+fn require_gh() -> OpsResult<()> {
+    if command_exists("gh") {
+        Ok(())
+    } else {
+        Err(OpsError::Message("gh CLI not found".to_string()))
+    }
 }
 
 fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
@@ -4617,7 +4772,15 @@ mod tests {
 
     fn regression(version: &str, fixed_days_ago: Option<i64>) -> Regression {
         Regression {
-            task: "LOO-1".to_string(),
+            issue: 1,
+            title: "Sessions lose their name".to_string(),
+            state: if fixed_days_ago.is_some() {
+                "CLOSED"
+            } else {
+                "OPEN"
+            }
+            .to_string(),
+            url: "https://github.com/acme/app/issues/1".to_string(),
             version: parse_version(version).unwrap(),
             fixed_at: fixed_days_ago.map(|days| chrono::Utc::now() - chrono::TimeDelta::days(days)),
         }
@@ -4681,7 +4844,7 @@ mod tests {
         assert_eq!(stable.current.unwrap().tag, "v0.15.2");
         assert_eq!(stable.next.unwrap().tag, "v0.15.9");
         let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
-        assert_eq!(holds, ["LOO-1 holds v0.16.2, v0.16.1, v0.16.0"]);
+        assert_eq!(holds, ["#1 holds v0.16.2, v0.16.1, v0.16.0"]);
 
         let soaking = stable_stream(&releases[..1], &[], now);
         assert_eq!(
@@ -4942,7 +5105,6 @@ mod tests {
             &target,
             None,
             0,
-            Vec::new(),
             None,
             0,
         )
@@ -5388,37 +5550,6 @@ version = "2.0.0"
         assert_eq!(copy.body, "# v1.2.3\n\n## Highlights\n\n- Releases work.");
     }
 
-    #[test]
-    fn a_raised_reader_floor_reaches_the_pr_title_and_the_notes() {
-        let tmp = tempfile::tempdir().unwrap();
-        let target = default_release_target(tmp.path());
-        let line = "lf < 1.2.3 can no longer open the store (raised by: drop_waves)";
-        fs::create_dir_all(tmp.path().join("release/unreleased")).unwrap();
-        fs::write(
-            tmp.path().join("release/unreleased/BREAKING.md"),
-            format!("{line}\n"),
-        )
-        .unwrap();
-        promote_unreleased_dir(tmp.path(), "1.2.3").unwrap();
-        fs::write(
-            tmp.path().join("RELEASE_NOTES.md"),
-            "# v1.2.3\n\n## Highlights\n\n- Releases work.",
-        )
-        .unwrap();
-        let breaking = breaking_lines(Some(
-            &fs::read_to_string(breaking_path(tmp.path(), "1.2.3")).unwrap(),
-        ));
-
-        finalize_release_notes(tmp.path(), "1.2.3", &breaking, None).unwrap();
-        let copy = release_pr_copy(tmp.path(), &target, "1.2.3").unwrap();
-
-        assert_eq!(
-            copy.title,
-            "release: v1.2.3: lf < 1.2.3 can no longer open the store"
-        );
-        assert!(copy.body.contains(&format!("**{line}**\n\n## Highlights")));
-    }
-
     // ======================================================================
     // release/unreleased → release/v<version> promotion + NOTES archival
     // ======================================================================
@@ -5468,30 +5599,6 @@ version = "2.0.0"
         assert_eq!(
             fs::read_to_string(version_dir.join("NOTES.md")).unwrap(),
             "backfilled notes",
-        );
-    }
-
-    #[test]
-    fn promote_unreleased_appends_a_repair_cuts_breaking_lines() {
-        let tmp = tempfile::tempdir().unwrap();
-        let unreleased = tmp.path().join("release").join("unreleased");
-        fs::create_dir_all(&unreleased).unwrap();
-        fs::write(
-            unreleased.join("BREAKING.md"),
-            "floor raised by b\nfloor raised by a\n",
-        )
-        .unwrap();
-
-        let version_dir = tmp.path().join("release").join("v0.9.10");
-        fs::create_dir_all(&version_dir).unwrap();
-        fs::write(version_dir.join("BREAKING.md"), "floor raised by a\n").unwrap();
-
-        promote_unreleased_dir(tmp.path(), "0.9.10").unwrap();
-
-        assert!(!unreleased.exists());
-        assert_eq!(
-            fs::read_to_string(version_dir.join("BREAKING.md")).unwrap(),
-            "floor raised by a\nfloor raised by b\n",
         );
     }
 

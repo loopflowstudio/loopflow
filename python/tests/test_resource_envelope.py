@@ -200,6 +200,27 @@ def test_concurrent_recovery_skips_busy_cleaner_then_reports_unavailable_build_o
     assert artifact.exists()
 
 
+@pytest.mark.parametrize("protection", ["saved-record", "nested-marker", "recent-artifact"])
+def test_manual_gate_recovery_preserves_saved_and_recent_evidence(tmp_path, protection):
+    root = tmp_path / resources.GATE_RELATIVE_PATH / "run-old"
+    artifact = root / "case/output.log"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("verification evidence")
+    if protection == "saved-record":
+        (root / ".cleanup-evidence.json").write_text('{"saved": true}')
+    elif protection == "nested-marker":
+        (artifact.parent / ".cleanup-keep").touch()
+    old = time.time() - 8 * 86400
+    for path in [*root.rglob("*"), root]:
+        os.utime(path, (old, old))
+    if protection == "recent-artifact":
+        artifact.write_text("recent verification evidence")
+    source = _source(tmp_path, id="gate:fixture", kind="gate")
+
+    assert resources._prune_old_gate_artifacts(source, _policy(), time.time()) is None
+    assert artifact.exists()
+
+
 def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, monkeypatch) -> None:
     cache = tmp_path / "uv-cache"
     unused = cache / "archive-v0" / "unused"

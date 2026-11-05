@@ -113,19 +113,23 @@ lf machine list                                      # each Machine with the def
 A Wave or repository has two settings, where its new Tasks run and where its
 primary Session runs. `machine.tasks` or `machine.session` sets one; `machine`
 sets both. Each resolves on its own, with no fallback from one to the other.
-A default lives in Machine-local SQLite `scope_defaults`, keyed by Wave or
-repository identity, and is copied to the
-person's other added Machines over `lf --machine`, so the laptop launches there and
-mini receives the runs. An unreachable Machine gets a warning; rerun later.
-Resolution for an unowned Task walks its Wave, its parent Waves, its repository, then this Machine,
-so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
-same resolver.
+Placement preferences are authored in personal configuration files. The private
+repository file is shared across linked Task worktrees; independent clones can have
+different defaults. Machine alias/identity references are portable declarations;
+this installation's own identity and observed state remain runtime facts. Connection
+addresses may require host-local bindings. [Settings ownership](settings.md) defines
+the catalogue, file writer and migration boundary.
 
-Setting the Session Machine moves the Wave Session with its native provider
-history, as `lf --machine <machine> resume <session>` does. `lf resume --wave <w>`,
-a bare resume resolving to a Wave or the repository, and Desktop's Wave Session
-route to the Session Machine over `lf --machine`. `lf open` reads a primary on
-another of your Machines through that resume, never from this Machine's copy.
+Resolve the selected machine to its durable ID at the initiating LF instance. If
+it is the current identity, execute locally. Already assigned work does not choose
+placement again on arrival. The executor provides local tools and credentials;
+the originating profile supplies portable preferences. Retaining those preferences
+for later direct commands is a separate, inspectable file update.
+
+Saving a preference selects future placement. Moving an existing Task or Session
+is an explicit domain operation that preserves its identity and native history;
+it must not be hidden in a generic file edit. CLI and Desktop expose the same
+placement resolution and movement operations.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
 moves no existing Task; `lf task move <task> --machine <machine>` moves one. It
@@ -226,7 +230,7 @@ Session bindings retain membership independently of checkout location.
 ## Own and rent Machines
 
 A **pool** names machines you own (`machines.pool`, with `cost_usd` and
-`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a
+`expires_at`); it knows no provider. An **on-demand** declaration in personal configuration is a
 provider (Daytona, Modal, RunPod or AWS), hardware with at most one GPU
 (RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
 meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the
@@ -249,12 +253,13 @@ resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
 binary instead of the published `lf`, so a development build rents sandboxes
 running its own code.
 
-`lf [--repo REPO] [--wave WAVE] set machine R`, naming a pool or on-demand, sets the
-scope's Tasks capacity (`scope_defaults.tasks_capacity`) in place of a Tasks
+`lf [--repo REPO] [--wave WAVE] set machine.capacity R`, naming a pool or on-demand, sets the
+scope's personal Tasks capacity preference in place of a Tasks
 Machine; the nearest scope that sets either wins. `lf task run` places an
 unowned Task by that default as `--pool` or `--rent` would. Its Session stays
-where it runs, and pools and on-demands are this Machine's own, so the default
-is not copied to your other Machines.
+where it runs. Pool and on-demand bindings remain host-local; transporting a
+preference does not create that capacity on another machine. File-backed setting
+resolution must distinguish the authored capacity choice from its runtime binding.
 
 Providers are reached through one embedded bridge
 (`rust/loopflow/src/rental/sandbox.py`) under `uv`, with the provider's pinned
@@ -368,10 +373,12 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 Ordinary commands, provider children, hooks, Session connections and Graph steps
 use the stable installed entry. Each new execution selects the current installed
 CLI; main-Machine dispatch ignores inherited `LF_BIN` selections. The caller's
-Machine selection and Session attribution stay intact. Installation does not
-restart existing processes or wait for their exit; they may continue or fail
-naturally. Clients and hooks launched before this behavior may retain their old
-executable paths.
+Machine selection and Session attribution stay intact. Installation quits and
+reopens a running Desktop. It does not restart other processes or wait for their
+exit; they may continue or fail naturally. A Session owner on a superseded lf
+keeps serving: `lf resume` moves one Session onto the installed lf, and `lf
+monitor rollover` moves every eligible owner at once. Clients and hooks launched before this
+behavior may retain their old executable paths.
 
 Private-Home development and tests retain explicit `LF_BIN` selection. Store
 schema validation and migration authority still apply to every build; ordinary
@@ -388,9 +395,17 @@ Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the
 installation promotion lock. The snapshot is validation input, never a second live
 Machine. Published switch receipts support interrupted release installation;
-they do not choose ordinary command data directories. A settled install retains
-its published fallback and the one it replaced; superseded content-addressed
-binaries and app bundles are removed unless a live process executes them.
+they do not choose ordinary command data directories. Every published switch
+makes its target the published fallback, so a settled install retains the active
+build and the fallback it replaced, normally the previous build. Other
+content-addressed binaries and app bundles are removed unless a live process
+executes them.
+
+Retained bytes are not a rollback path. `lf self install rollback` refuses
+receipt-managed installs, so going back means switching to a stream whose release
+still opens the store. After a release raises the store's reader floor, older
+binaries, retained or released, fail their own preflight and no rollback path
+exists.
 
 `lf self` owns published updates and skill exports; `lf install`
 remains the short update command. Its directory retains the stored

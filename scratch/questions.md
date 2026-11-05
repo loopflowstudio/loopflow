@@ -1,5 +1,17 @@
 # LOO-717 — Accepted implementation scope
 
+## Current precedence — November 5
+
+Jack Heart clarified that only an open LF viewer of a Task Session retains the
+checkout; a random shell in its directory does not. The LF viewer process lifetime
+is the boundary. A surviving native tab after viewer exit is not an extra hold.
+No LF persistence of external host/workspace/occurrence identities, and no LF
+closure of Rex shells. These supersede older host occurrence/lease/native-settlement
+assumptions below. The rewritten loo-717-shell-lifetimes.md is authoritative.
+Jack requested a new pursue run after this design update, through review publication
+only; no ship, merge, installation or live-store migration. No open product choice.
+
+
 Jack Heart approved building this design on November 3, 2026: “ok. lets build it!”
 Implementation and review publication are approved through interactive demo;
 shipping, merging and installation are not.
@@ -116,3 +128,21 @@ native resources die with that process. Remote verification uses an already
 registered route back to that Machine; absent routes/network failure stay unknown.
 No new watcher daemon or reverse connection setup. Desktop process instances get
 independent occurrences; old-instance exit cannot release a newer instance.
+
+## Current Rex boundary — November 4 direction, reconciled November 5
+
+Jack Heart's accepted direction in comment `04388b59-a9ab-434c-a1d2-c120ec38b7e9`
+supersedes every earlier Rex away/timed-close/native-settlement instruction above.
+LF automatically cleans up only Loopflow Desktop-owned shells and must not close
+Rex shells. A Rex terminal retained for an LF Task Session keeps the Task retained
+even when hidden or unfocused. Confirmed removal of the last relevant terminal
+releases that hold, subject to ordinary conditions and other holds. Unavailable
+inventory remains unknown. Rex owns layout mutations and restoration; LF layouts
+are one-way input. LOO-498 owns its native adapter.
+
+The published confirmed-Desktop-exit implementation passed its recorded focused
+checks, but transport/README.md and earlier design paragraphs still describe the
+superseded Rex handshake. Reconcile that documentation and demonstrate the newer
+terminal-existence retention boundary with LOO-498 before claiming cross-host
+acceptance. Publication of PR #1811 is not that evidence. No Graph is launched
+or review advanced by this recorded completion update.

@@ -1,220 +1,160 @@
-# LOO-717 — Native shells and completed-Task cleanup
+# LOO-717 — Shell lifetime and Task Session viewers
 
-Status: **Accepted; implemented, installed acceptance incomplete.**
-Jack Heart approved building and review publication on November 3, 2026, then
-selected confirmed retaining-host exit recovery (option 1a) on November 4 and
-requested implementation. The existing feature Graph stops at interactive demo.
-No Auto-Ship, merge, installation or independent LOO-498 launch is authorized.
+Status: **Design revised November 5; implementation must be reconciled.**
+Jack Heart clarified that an open LF viewer of a Task Session retains the Task's
+worktree, while a random shell in that directory does not. Jack then requested:
+"ok. update the design then laucnh a new pursue". Build and review publication are
+authorized; no shipping, installation or live-store migration. The Task stays at
+its existing demo boundary while a separate Task-bound pursue Graph does this work.
 
-The full earlier design, simulated review, failed probes and dated evidence are
-preserved at `e7fd5db44f:scratch/loo-717-shell-lifetimes.md`. This plan supersedes
-its unimplemented November 4 section without changing the accepted contract.
+This design supersedes the external-host occurrence/lease/settlement architecture
+published in PR #1811 at b81df60579. Its earlier implementation evidence and design
+remain at `b81df60579:scratch/loo-717-shell-lifetimes.md`. The complete November 5
+LOO-498 handoff and this conversation's refinement are copied into
+`rex-coordination.md`; paths in sibling checkouts are not required context.
 
-## Accepted experience and owners
+## Accepted experience
 
-- Rex owns its native layouts and shells; Desktop owns its own presentation and
-  shells. Shared lf Task/Session identity, Machine routing and retention serve
-  both hosts equally. No mirrored Rex split tree, mandatory shell relay, live
-  ordinary-shell attachment in Rex, or process migration between hosts.
-- Desktop shells run on the Task's recorded Machine in its recorded checkout.
-  New Shell is explicit. Repeated create/attach uses the receipt's execution
-  identity; uncertain startup never silently replaces it. Reconnect preserves
-  surviving execution. Remote failure, authentication loss or shell exit never
-  opens a local successor prompt in the Task pane. No arbitrary command replay.
-- Close a Desktop shell ends it and its ordinary jobs. Hide, Task switching and
-  app exit detach presentation and preserve execution until eligible retirement.
-  Undo restores the ended identity/history, not a new shell process. Rex retains
-  native detach/close semantics. A saved screen is not live shell state.
-- Hosts own retention/release policy. Desktop retains selected Work, releases on
-  departure (including unfinished Tasks), and explicitly closes on repository
-  window Close. A separate retaining occurrence keeps shared resources alive.
-- LOO-709's owner remains the sole agent-ending authority: two minutes of eligible
-  unviewed quiet, measured in wall time. Active requested work, drafts, pending
-  input, native turns, running Graphs and headless Runs protect execution. Task
-  membership alone does not. Ordinary shell output is not an agent turn; typing
-  lf inside an ordinary shell does not change its creation purpose.
+- Desktop shells run on the Task's recorded Machine and checkout. Hide, Task
+  switching and app exit preserve live shell execution until eligible cleanup.
+  Reconnect attaches to surviving execution. Remote failure never exposes a local
+  successor prompt. New Shell is explicit and never replays arbitrary commands.
+- Close a Desktop shell ends that shell and its ordinary jobs. Undo restores
+  identity/history, not a new process. LF automatically cleans up only its
+  Desktop-owned shells. Rex owns its own shells, layouts and restoration.
+- **An open LF viewer of a Session associated with the Task retains its checkout.**
+  Selection, focus and native tab visibility are irrelevant while that viewer
+  remains open. Passive viewing also counts; input control is a separate claim.
+  Any remaining qualifying viewer keeps the hold after another viewer exits.
+- **A random shell whose cwd is the worktree does not retain it.** Do not scan
+  cwd, titles, editable labels or native window inventory to manufacture a hold.
+  Running LF to view the Task Session establishes a real Session-view relationship;
+  merely running an unrelated command in its directory does not.
+- Jack's latest clarification identifies the LF viewer process as the boundary.
+  Its confirmed exit releases its hold. A Rex tab left behind after that viewer
+  exits does not preserve the hold just because the tab or saved screen remains.
+  This supersedes the stronger retained-native-block interpretation in the LOO-498
+  handoff. Agent/provider exit and viewer exit are separate events.
+- Unknown viewer liveness is not confirmed exit. A lost remote connection does
+  not by itself establish that the LF viewer process is gone. Use existing
+  Session/process/attachment evidence and preserve conservative cleanup when
+  evidence is unavailable; do not introduce a host registry to bridge the gap.
 
-## Retirement contract
+## Completion and cleanup
 
-| Situation | Result |
-| --- | --- |
-| Task unfinished | No completed-Task checkout retirement |
-| Any retained occurrence | Keep shared workspace resources |
-| Last host releases as away | Begin fifteen-minute workspace absence grace |
-| Two eligible idle minutes | Agent may end; shells/checkout remain |
-| Return before retirement | Cancel deadline; later release starts a fresh interval |
-| Last active occurrence explicitly closes | Skip grace once requested work settles |
-| Requested final work runs beyond the deadline | Wait; no second fifteen-minute grace when it settles |
-| Exact retaining instance is confirmed exited | Release as away and start ordinary grace without relaunch |
-| Lease expires, network fails, or Rex client disappears | Unknown; never infer retaining-server death |
-| All native and destination resources settle after eligibility | Remove eligible checkout/branches and retain Task/conversation history |
-| Task reopens or placement/completion changes | Revoke the old pinned cleanup intent |
+Unfinished Tasks do not acquire completed-Task checkout cleanup. Completion keeps
+Task/conversation history and permits follow-up while a Session viewer remains.
+After the last qualifying viewer/accepted Desktop hold releases, apply ordinary
+absence cleanup: eligible unviewed idle agents use the existing two-minute policy;
+completed-Task Desktop shells and checkout can retire at fifteen minutes total.
+Keep explicit-Close behavior where already accepted. A renewed viewer cancels a
+queued retirement. Confirmed Desktop process exit releases its views without an
+app relaunch (accepted option 1a); do not require the dead app to report again.
 
-Jack selected disposal of uncommitted tracked edits and untracked files during
-eligible completed-Task cleanup. Preserve existing safeguards for primary and
-persistent checkouts, changed/unmerged committed refs, moved remote refs, other
-Tasks and unrelated resources. Ordinary resume during retained-checkout grace
-remains; automatic restoration of a deleted checkout is outside scope.
+Requested final work, drafts, pending input and running Graphs still protect
+execution. Work finishing after an elapsed deadline does not start another
+fifteen-minute wait. Use wall-clock deadlines. Ordinary shell output alone is not
+an agent turn. Cleanup discards eligible uncommitted files, preserving existing
+committed-ref, primary/persistent-checkout and unrelated-resource safeguards.
+LF never closes Rex shells, even if they still have cwd in the deleted checkout.
+History survives; automatic deleted-checkout reconstruction stays outside scope.
 
-Use one durable retirement intent pinned to completion, checkout and branch.
-Host writes and destructive passes share a Task lock. Prepare existing landed
-Git deletion, then request settlement, wait on native resources and destination
-Session/shell owners, recheck the intent, and apply deletion. Partial failure
-keeps a pending reason and retries remaining effects on the next host report or
-scheduling call. Active-work waits stay in the executor; recorded cleanup errors
-end that run. This is not unattended retry after every failure. Cancellation is a fence
-between effects, not rollback of external Git/process effects already underway.
+## One walkthrough
 
-## Confirmed exit implementation — November 4
+Complete a Task with its LF conversation viewer open in Rex. Hide that Rex tab:
+the viewer still retains the checkout. Open an ordinary shell in the same
+worktree, then close the LF viewer. With no other Task Session viewer or protected
+work, ordinary cleanup becomes eligible. The ordinary Rex shell stays Rex's;
+it neither retains the checkout nor gets a Close request from LF.
 
-Extend the existing revisioned host observation and Task migration, not a new
-host registry, daemon or cleanup authority. The optional `TaskHostOwner` carries
-`machine_id`, `pid`, kernel `started_at` in Unix seconds and `settles_on_exit`.
-Desktop supplies its own process on its source Machine, even for remote Tasks.
-Separate Desktop process instances have distinct occurrence IDs; a new app
-cannot overwrite another instance's retention.
+Repeat with two LF viewers: closing one retains the checkout. Repeat with a
+network failure: unavailable liveness cannot count as confirmed viewer exit.
+Recovery either confirms the surviving viewer or its exit, without restoring
+LF host-occurrence rows or requiring Rex-native terminal metadata. Reconnection
+must not replay provider input or transfer input ownership automatically.
 
-The existing retirement executor stays alive while verifiable retaining owners
-remain, even when retention clears its cleanup deadline. It uses the existing OS
-process identity reader locally and a bounded, Machine-validated SSH read remotely.
-Remote observation needs an existing route from the execution Machine back to
-the retaining Machine. Missing routes, malformed/failed responses and network
-loss are unknown; no reverse route, credential or installation is created here.
-PID plus start time distinguishes a reused PID; unreadable process evidence is
-never death. The source's Machine identity prevents reading the same PID on the
-wrong Machine. Network probes happen outside the Task mutation lock.
+## Actions → model → APIs
 
-Positive exit updates only the inspected occurrence, revision and owner. A newer
-return wins over an old exit read. Repeated exit observations do not restart the
-grace, and delayed reports from the exited instance cannot revive its hold.
-An exited historical occurrence does not veto a later instance's explicit Close.
-Normal departure and confirmed exit converge on the same retirement intent.
+| Action | LF concept | Implementation direction |
+| --- | --- | --- |
+| View a Task Session | Existing Session-associated LF viewer | Reuse attachment and Process identity; viewing need not claim input |
+| Hide the native tab | Same viewer still open | No host focus/away report |
+| Open a shell in the worktree | Ordinary shell | No checkout retention registration |
+| Exit the last LF viewer | Release that Session-view hold | Confirm viewer exit, recheck other holds, schedule existing retirement |
+| Complete Task / last hold releases | Task retirement intent | Keep one completion/checkout/branch-pinned executor |
+| Cleanup becomes eligible | LF-owned execution and Git resources | Settle Desktop shell owners and requested work; never close Rex shells |
 
-Exit settles native resources only when the adapter declares they die with the
-retaining process. Desktop's presentation qualifies because shells are owned on
-the destination. A Rex retaining server's death does not establish that every
-native job ended: its adapter must separately settle that Task's resources.
-Rex client loss never substitutes for server death. Destination owners always
-prove their own job settlement; process exit alone cannot delete the checkout.
+The serving owner already knows live viewer connections (`transport.rs` updates
+`Activity::view` from live viewers), and `transport/lifetime.rs` records viewed
+state on the existing process ledger. This is evidence to reuse, not proof that
+one cached boolean covers all viewer exits, network loss or owner replacement.
+Trace the real LF viewer process's Session association through the existing
+attachment/handoff lifecycle and repair that boundary where needed. Do not keep
+an agent alive merely to remember a dead viewer, or infer viewer death from agent
+exit. Test multiple viewers and stale release after a new viewer attaches.
 
-Clean Desktop quit remains away plus native settlement, with one five-second
-reporting budget across destinations. Quit fences window Close and heartbeats;
-a prior explicit Close keeps its policy. A failed request is unknown to its caller,
-but a lost reply does not undo a release committed at the destination. Retained
-and unknown reports clear earlier native settlement. Native settlement does not
-mean explicit Close and does not shorten absence grace.
+Remove external-host persistence and its write contract: no `task_host_occurrences`
+for Rex, lease-table exception, sidecar, copy registry or host creation journal.
+Delete or narrow the generic `task presence`/`TaskHostOwner` machinery rather than
+leaving an unused external-host path. Keep any needed Desktop state in existing
+Desktop/Session ownership, not a replacement universal host registry. Revise the
+one unreleased Task migration in place. Keep LF's Task/Session/Process identities,
+Desktop-owned shell receipts and completion-pinned retirement intent.
 
-## Delete — do not maintain
+No Rex native inventory, block-to-Task metadata, native-shell settlement handshake
+or reverse host-process probe is needed solely to retain a live LF Session viewer.
+Native host metadata is no longer a prerequisite for this design. Input claims,
+provider identities, local/remote Machine routing and newer-viewer fencing remain.
 
-Already removed: local prompt tail in `buildWorkspaceShellCommand`, separate local
-Desktop bootstrap, remote scripted-command refusal, termination via replacement
-of the Undo slot, `retirement_hosts_closed`, and conversion of phase=closing into
-`closeWorkspace()`. Preserve one destination shell path, literal initial argv,
-login configuration, shell integration and retained history on the surviving path.
+## Relationship to LOO-672 and LOO-498
 
-Confirmed-exit recovery also removed the indefinite hold after proven owner death
-and the executor's unconditional exit when retention clears due_at. Desktop now
-uses per-instance occurrences. Its old UserDefaults revision keys and wall-clock
-revisions are unnecessary: the retained workspace owns a monotonic counter for
-that process's lifetime. Hosts that restore the same occurrence still persist
-their revisions. Unknown-without-owner and failed-read protections remain.
+- **672 makes conversations ready in Desktop:** automatic open/prefetch, bounded
+  warmth for unfinished Tasks, explicit input takeover and Close. Its current
+  accepted scope includes repository and Wave primaries. It is stacked on 717;
+  preserve its shared Session preparation and retention integration. Its warm
+  Desktop views feed this lifetime contract, not another cleanup authority.
+  Completed Tasks release on departure under the existing accepted Desktop policy.
+- **498 renders layouts into Rex and other native hosts:** explicit open is fresh;
+  the native host owns subsequent arrangement and restoration. Config owns future
+  templates; LF DB owns sticky Desktop layouts only. It must not persist external
+  host occurrences or close Rex shells. An LF Session viewer launched in Rex
+  participates through LF's existing Session/process identity.
+- **717 owns shell execution and cleanup:** Desktop shell survival/Close/reconnect,
+  viewer-based retention and coordinated retirement of completed Task resources.
+  These are complementary responsibilities. Do not copy 672's prefetch policy or
+  498's native layout implementation into this Task.
 
-No remaining predecessor path needs deletion. Executor startup and continuation
-share `needs_executor`; host reports and reconciliation share `hold_retirement`
-inside their transactions, canceling queued retirement without undoing explicit
-shell Close. Keep one unreleased `task_workspace_lifetimes.sql` migration.
+November 5 read: 672's status was shipping and its latest native demo recorded
+repository/Wave/Task background startup; that is not authority to operate it.
+498's handoff reports PR #1814, code b1864599e76b2eca74a3a03fd8ffc41d287a1682,
+notes f129371904. Neither establishes this revised cleanup integration.
 
-## Implementation/proof remaining
+## Draft usage copy for the next implementation
 
-- Focused implementation checks are complete: exact process exit, stale-revision
-  races, other retaining instances, native job settlement after server exit,
-  requested work/drafts/pending input beyond the deadline, and cleanup without
-  another Desktop report. Real loopback SSH proves a failed remote read is unknown,
-  then the same executor observes exit after reconnect without fresh presence and
-  starts grace. Composed local Git fixtures prove deletion after job settlement;
-  the SSH exit fixture does not delete a remote checkout.
-- Gate owns affected suites, migration-frontier/DTO checks, CLI dispatch,
-  formatting, Clippy and broader completion/landing coverage. Relevant Rust scope:
-  store::sqlite::task_retirement, ops::task::retirement, transport::lifetime,
-  machine/SSH CLI, dto_fixtures and transport_tests::ssh_shells. Owner README also
-  requires CLI graph compilation and Machine global-command boundaries.
-- Demo owns installed Desktop quit/crash/relaunch, sleep, input/TUI preservation,
-  failed Close presentation, execution-owner failure and physical remote-Machine
-  recovery. Rex acceptance depends
-  on LOO-498's independent native integration. Logout/reboot require a disposable
-  OS environment. No saved preview or loopback fixture proves installed survival.
+> Keep a Task Session viewer open to retain its worktree. Hidden or unfocused
+> viewers count. Closing the last viewer lets a completed Task follow its normal
+> cleanup grace once requested work finishes. An ordinary shell in that directory
+> does not retain the worktree. Loopflow cleans up its Desktop shells; Rex shells
+> remain yours to manage in Rex. Task and conversation history remain after cleanup.
 
-November 4 reconciliation found no bounded runtime repair. Main through
-`ac8e088f5f` supplies native status restoration across reconnects; the branch retains
-that path and LOO-709's existing active-work/draft protections. No new product
-decision is needed. LOO-498's published PR #1814 is independent delivery evidence,
-not proof that its native adapter satisfies this contract.
+Update Swift/transport user docs with the implemented contract; remove the old
+Rex presence/native-settlement recipe. No new agent skill or user cleanup ritual.
 
-## Prior evidence and limits
+## Next proof and delivery
 
-`781e5dc5b4` passed workspace-retirement policy tests (6), the exact waited-land
-regression (1), Swift build and headless WorkspaceRetentionTests (11).
-`2abcfc28cc` added composed Git retirement (5) and real loopback SSH fixtures:
-twenty lifecycle cycles preserve shell PID/variable, reconnect after SSH loss,
-close owned jobs and inspect process/PTY/socket/receipt settlement; separate tests
-cover authentication failure, stale checkout and normal exit. These are earlier
-passes, not a passing result for the current changed tree.
+1. A real LF Session viewer retains a completed Task checkout while hidden; a
+   second viewer survives the first's exit. Passive viewers count without takeover.
+2. Closing the last viewer releases its hold; an unrelated shell with the same
+   cwd neither blocks checkout retirement nor gets terminated by LF.
+3. Agent idle ending, owner replacement and network loss do not fabricate viewer
+   exit. Confirmed Desktop exit settles its presentation without app relaunch.
+4. Retention survives stale detach/exit races; renewed viewing and reopened Task
+   cancel queued deletion. Requested work/drafts/pending input still protect work.
+5. No external-host records are persisted. Existing local/SSH shell continuity
+   and actual cleanup tests still pass. Formatting, Clippy and affected checks run
+   under repository cadence; previous architecture tests must change with it.
 
-Apple's sshd cannot nest its sandbox inside test_network.py; run the named SSH
-fixture directly with --ignored on macOS. Linux CI runs it in ordinary isolation.
-Use generated keys and disposable stores; no installed registry or SSH service.
-
-LOO-498's prior native probe preserved detach/reinsert continuity, but server
-restart kept block IDs while replacing programs with login shells; invalid cwd
-fell back to home. Its inspected APIs did not establish live cross-session moves.
-Those limits still require real adapter proof. No additional native claims follow.
-
-## Coordination and boundary
-
-LOO-498 owns Rex mapping, layouts, opening/move/copy, templates and its retention/
-cleanup adapter. Share exact API needs in the existing coordination note/comment;
-do not launch its work. LOO-593 owns broader Desktop-server architecture. Preserve
-LOO-709/719's active-work/idle policy and installed-proof boundary, LOO-714 routing,
-LOO-711 presentation and LOO-672 conversation recovery.
-
-No mobile, Tailscale setup, public hub, general network server, compulsory Rex
-backend, process migration, arbitrary replay or workload recipes. Review publication
-belongs to the feature Graph after implement; stop at interactive demo.
-
-## Concept review — November 4, after implementation
-
-Outcome: **no design change and no open product choice.** Jack Heart's accepted
-1a resolves the earlier mismatch: a confirmed dead retaining instance no longer
-requires a fresh report from that instance to release its hold. The implementation
-uses the existing host observation and retirement intent; no additional lifecycle
-or user action is needed. The review page now distinguishes the earlier behavior
-from the implemented path and from installed acceptance still outstanding.
-
-The normal interaction remains select, work, then leave. Departure releases
-retention; explicit Close also skips workspace grace. A crash converges on
-departure only after exact-owner exit evidence. A lost connection cannot do that:
-recovery needs an existing route to observe the retaining Machine, or a fresh host
-report. Return cancels cleanup, and an old exit observation cannot release another
-instance. These are consequences of the accepted contract, not new approvals.
-
-Keep release separate from native settlement. A Rex server can exit while its
-jobs survive; merging those facts would discard the accepted protection. Desktop
-presentation can settle independently because destination owners retain and end
-its shells. Requested work, drafts and pending requests remain with their existing
-owner policy. Deletion still requires the pinned completion, settled resources
-and existing Git safeguards. Task and conversation history survive it.
-
-The usage guidance in `swift/README.md` and `transport/README.md` already states
-this experience; no skill or API redesign is implied. Next proof remains gate's
-affected checks and demo's installed crash/quit/relaunch and physical remote
-recovery, including a surviving host during disconnect and another instance
-returning during cleanup. Existing focused results are not installed acceptance.
-
-Check: November 4 realignment — `git diff --check` and `lf context` passed; documentation only, reusing compression's `cargo test -p loopflow --lib retirement` (18 passed) and `scripts/test_desktop.sh --jobs 2 --filter WorkspaceRetentionTests` (11 passed, Desktop built). Earlier exact SSH (`--ignored`), DTO and migration checks passed; SDK/linker warnings remain. Broader checks belong to gate; installed proof belongs to demo.
-
-Review publication check, November 4: `lf sync` completed without conflicts onto
-`ac8e088f5f`. At `4edeaf8f4e`, `cargo test -p loopflow --lib retirement` passed
-all 18 tests; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
-and `git diff --check origin/main...HEAD` passed. The test linker reported the
-existing large unwind-section warning. This pass changes no runtime code and
-adds no installed acceptance; the gate/demo boundaries above still apply.
+No open product choice remains from this review. Engineering must establish the
+existing viewer evidence and necessary repair, not ask Jack to choose a registry.
+Run the explicitly requested pursue Graph through publication, leaving review,
+installation, merge and Task completion separate. Do not run past the Task's demo.

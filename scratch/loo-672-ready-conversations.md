@@ -50,8 +50,9 @@ reveals the already started Session, returning to an existing Task conversation
 keeps it, and no operator pass or Graph launched (`loo-672-demo.md`, required
 demonstration). `prepare-redemo.py` needs a Wave in the loaded repository for that
 case. `demo.html` and PR #1816's body still describe the Task-only scope, and the
-PR head (`eae0d31694`) predates the primaries change and the sixth-review
-implications; publication carries the five commits through `948e1fde7d`.
+PR head (`eae0d31694`) predates the primaries change, the sixth-review
+implications and the seventh-review residue; publication carries the nine commits
+through `6c0d41fa85`.
 
 ## Accepted outcome and constraints
 
@@ -192,7 +193,8 @@ Warm slots are not filtered by person: a teammate's owned Task on an unreachable
 Machine fails quietly and occupies one. Desktop has no local person identity to
 compare. Acceptable while Jack is the only owner; revisit before shared repositories.
 
-Sync, November 5 (re-checked at realign against `384505b120`): the stack parent's
+Sync, November 5 (re-checked at realign against `27dbe31b69`; the one commit since
+`384505b120`, #1827, touches migration CI and `lf install` only): the stack parent's
 tip is already contained and origin/main is not merged; the parent (#1811)
 integrates first. A trial merge of origin/main conflicts in three parent files (`transport.rs`, `transport/lifetime.rs`,
 `tests/README.md`) and two of this branch's: a comment line in `bin/lf.rs` and the
@@ -256,19 +258,19 @@ their intent and unstarted ones by `awaitsStart`, so the owner term decides only
 finished Task's default: an owned finished Task without history shows the shared
 placeholder with Rust's Start or a refusal, while the same Task nobody owns shows
 its record, and a refused reveal's offer or error is never rendered there. Who owns
-a finished Task says nothing about whether it has a conversation to show. Next
-implement direction, proposed: delete the owner term, so a finished Task shows its
-conversation once the selected reveal presents it (`presentSession` already chooses
-terminals) and its record otherwise, with Toggle still reaching the placeholder;
-cover a finished unowned Task revealing into visible panes and a finished Task
-without history showing its record. Consequence, settled by the accepted "preserve
-explicit Start as recovery" line: `RegistryQuery.startOffer` and `conversationStart`
-then reach a person only through a chosen terminals view on a finished Task without
-history, since an unstarted Task's pane is `TaskStartOffer` and never renders them;
-keep them, and the `prefetch-15` tests, as that recovery. No new product choice: the
-four demo questions of the fifth pass stand, and none of the owed native cases
-(repository, Waves, working and unstarted Tasks, return to an existing conversation)
-touches a finished Task, so this change can follow the demo if the loop prefers.
+a finished Task says nothing about whether it has a conversation to show. Done the
+same day (`977ff61b8b`): `showsTerminals` is working intent or the person's choice,
+so a finished Task shows its conversation once the selected reveal presents it
+(`presentSession` already chooses terminals) and its record otherwise, with Toggle
+still reaching the placeholder; two `WorkspacePanesTests` cover a finished unowned
+Task revealing into visible panes and a finished owned Task without history showing
+its record. Consequence, settled by the accepted "preserve explicit Start as
+recovery" line: `RegistryQuery.startOffer` and `conversationStart` reach a person
+only through a chosen terminals view on a finished Task without history, since an
+unstarted Task's pane is `TaskStartOffer` and never renders them; they and the
+`prefetch-15` tests stay as that recovery. No new product choice: the four demo
+questions of the fifth pass stand; the finished-Task case joins the demo list in
+`loo-672-demo.md` as a one-selection check.
 
 ## Verification
 
@@ -333,4 +335,10 @@ take it, `flag()` owns the two flag spellings), `awaitsStart` sits beside
 `isCompleted`/`conversationIntent` in `WaveWorkMap.swift`, the warm queue stops at
 full slots; `cargo test -p loopflow --lib ops::human_session::` 36 passed,
 `lf::commands::write::` 3 passed, clippy clean; same Desktop filter plus
-`DashboardWorkspaceTests`, 180 passed in 8 suites.
+`DashboardWorkspaceTests`, 180 passed in 8 suites. Realign, November 5
+(seventh-review residue): plan claims checked against the tree by inspection
+(`showsTerminals` has no owner term, the two finished-Task tests exist, one
+`SessionOpenIntent` through `human_session.rs` and `commands/session.rs`, no
+`owner_retention` use on this branch); origin/main moved to `27dbe31b69` with the
+same five conflicting files; Wave memory gains the finished-Task pane rule; no code
+change, no rerun.

@@ -954,12 +954,11 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 
 ## Sessions projection and native resume (reconciled 2026-11-05)
 
-Retired Ask/Ready/Complete and LOO-491 evidence:
-`a32c385044:.lf/wave/product/MEMORY.md`, this heading.
+Retired Ask/Ready/Complete and LOO-491 evidence: `a32c385044`, this heading.
 
-Jack Heart's November 4 LOO-672 approval selects warm unfinished Tasks,
-bottom-on-return and explicit **Take back** over the last screen; no Fork
-button/shared input, CLI fork remains. Selected-first admission honors Close;
+Jack Heart's November 4 LOO-672 approval: warm unfinished Tasks, bottom-on-return,
+explicit **Take back** over the last screen; no Fork button or shared input, CLI
+fork remains. Selected-first admission honors Close;
 saved display grants no retention. Eight conversations/two preparations remain
 provisional. Visible/protected work survives; completed departure releases
 through 717.
@@ -971,17 +970,18 @@ Tasks, owned or not (opening claims nothing), and the repository and Wave primar
 create their Session and start or resume the provider during load, before
 selection; primaries stay warm beside the Task bound. An unstarted Task has no
 checkout: its pane offers Start, since placing one starts the Task. One placeholder
-and one Retry serve every Work. Any primary's first turn without a request reads
+and one Retry serve every Work; a finished Task shows its record until a reveal
+presents its conversation, whoever owns it. Any primary's first turn without a request reads
 and reports, launching no Graph or operator; each start spends one provider turn. Start keeps non-replacing intent through argv, execution and claim; only Take back
 replaces input; Close fences late results. A consumed first launch with no history
-costs one Try again. Launch runs from the model: `.hidden()` panes never mount, so
-prepared Sessions start their terminal from the store and the pane adopts it.
+costs one Try again. `.hidden()` panes never mount, so prepared Sessions start their terminal from the
+store and the pane adopts it.
 `lf task run` on a graph without an interactive step approves Auto-Ship and
 recovery restarts it; fixtures end in `interactive: default`.
 
 Local retention uses the local query; remote presence uses observed remote
-identity (peer lookup of the local Machine failed “is not added”). The November 5
-disposable candidate proved four providers live on load with no Graph; primaries,
+identity (peer lookup of the local Machine fails “is not added”). The November 5
+candidate proved four providers live on load with no Graph; primaries,
 drafts, cold return, Rex takeover, reboot and twenty-Task footprint remain with demo.
 
 ### Task observation and retired Watch

@@ -17,7 +17,8 @@ unproven natively; the November 5 candidates predate it. Cases added the same da
 for the next demo: a started Task nobody owns opens on load like any other, with no
 Claim/Start gate; an unstarted Task's pane offers Start and no conversation gate;
 Task, Wave and repository panes show the same placeholder when a conversation is
-not open.
+not open; selecting a completed Task you own with no history shows its record,
+never a Start or Open placeholder, and its history appears in panes once revealed.
 
 ## Current open candidate — November 5
 

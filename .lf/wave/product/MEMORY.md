@@ -409,15 +409,14 @@ Jack Heart's October 17 Console approval replaces the sidebar's completion-range
 controls and selected-terminal-Task exception with explicit retained working order.
 The October 2–14 decisions, Growth counterexample, inline-edit semantics and proof
 limits remain at `ac973064c6:.lf/wave/product/MEMORY.md`, this heading. Historical
-records survive; navigation/filtering never completes Work or evicts panes and drafts.
+records survive; navigation/filtering never completes Work or evicts panes or drafts.
 
-Preserve provider cancellation separately from successful completion and actual
-completion time. Reopening makes planning current despite an old timestamp;
-snapshot acquisition cannot establish recency. Equal-revision enrichment may fill
-an absent key, never replace an observed null or date. Missing checkouts alone
-cannot establish settlement. CLI subscription fixtures establish neither mounted
-input continuity nor native acceptance. LOO-408 retains installed settlement;
-retired numeric/soak obligations remain historical. No external-progress credit follows.
+Preserve provider cancellation separately from completion and its time. Reopening
+makes planning current despite an old timestamp; snapshots cannot establish recency;
+equal-revision enrichment fills an absent key, never an observed null or date.
+Missing checkouts cannot establish settlement; CLI subscription fixtures prove
+neither mounted input continuity nor native acceptance. LOO-408 retains installed
+settlement; retired numeric/soak obligations are historical.
 
 ## Ask removal decision (2026-10-01; reconciled 2026-11-04)
 
@@ -902,55 +901,49 @@ Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafab
 
 ## Swift data path — RegistryQuery is the single reader
 
-Jack Heart selected LOO-593's split November 4, 2026, through publication and
-interactive demo, without Auto-Ship. Machine owns execution destinations; server
-client access; installation registration/update; Desktop automation. Shared native
-Read/Write/Subscription operations use the socket. Work FFI, Swift bridge and
-exclusive build wiring are deleted; Ghostty and execution owners stay separate.
+Jack Heart selected LOO-593's split November 4, 2026 (publication and interactive
+demo, no Auto-Ship): Machine owns execution destinations, server client access,
+installation registration/update and Desktop automation; native Read/Write/Subscription
+use the socket; Work FFI, Swift bridge and exclusive build wiring are deleted;
+Ghostty and execution owners stay separate.
 
-Jack's later November 4 decision replaces served-write CLI subprocesses with one
-complete shared Rust mutation path (`2d9c295d8a`). Defaults, routing, output and
-errors share dispatch; engine reuse alone previously allowed lfd drift. Request
-spans/effects use `logs/lf.log`, masking launcher attribution and carrying settings
-and diagnostics into nested blocking work. Explicit directory/I/O replace global
-mutation. Requests create no Process. An admitted write can finish after cancellation;
-a lost reply stays unknown and is never replayed.
+Jack's later November 4 decision replaces served-write CLI subprocesses with the one
+shared Rust mutation path (`2d9c295d8a`): defaults, routing, output and errors share
+dispatch (engine reuse alone allowed lfd drift); request spans use `logs/lf.log` and
+carry settings and diagnostics into nested blocking work; explicit directory/I/O
+replace global mutation; requests create no Process; an admitted write can finish
+after cancellation, and a lost reply stays unknown, never replayed.
 
 #1805 settings and #1807 Session adoption entered at `000c88709f`/`041ca8f1c5`.
-Configuration/status work without opening the registry. Client settings ignore
-launcher overrides. Explicit bind selects primary/cwd without moving live execution
-or historical attribution. Adoption exposed a merge hazard: shared operations can
-introduce raw stderr beneath served dispatch. Its directory warning now uses scoped
-diagnostics. `b11d49d32f` routes non-launching adoption through the shared
-`task_from_session` write. CLI/server parity covers prepared Session identity,
-repository-person claims and no fabricated Process/Graph; it proves no live
-provider continuity. Create-and-run retains its execution owners. Earlier passes
-do not establish merged-build acceptance.
+Configuration/status work without opening the registry; client settings ignore
+launcher overrides; explicit bind selects primary/cwd without moving live execution
+or attribution. Shared operations can introduce raw stderr beneath served dispatch
+(adoption's directory warning now uses scoped diagnostics). `b11d49d32f` routes
+non-launching adoption through the shared `task_from_session` write; parity covers
+prepared Session identity, repository-person claims and no fabricated Process/Graph,
+not provider continuity. Earlier passes do not establish merged-build acceptance.
+
+Protocol revision 2 (Task 4877de, November 5, after Jack asked to learn from Rex):
+one connection per client, `hello`/`welcome` negotiating
+the newest common revision, requests multiplexed by id; `attach` keeps its own
+connection so terminal bytes never share the control path's queue or fate; the
+one-byte revision-1 sniff is the whole compatibility layer and leaves with revision 1.
+Lessons: the shared watch `Reader` owns a blocking runtime, so a served subscription
+leaves through `spawn_blocking` however its task ends (its drop panic is swallowed);
+a client EOF means "older protocol" only before `welcome`; `session resume --prepare`
+resolves a harness it never starts, so fixtures name one. No local latency change was
+measured; the Desktop run awaits demo.
 
 Registration migrates OS labels while retaining socket/lock identity and disabled
-choices. Readiness is consumed once even on failure; Retry/watch recovery only
-observes status. Exact-owner recovery keeps status outside terminal bytes and
-preserves newer claims. Unavailable is not ended; Copy/Find/scroll stay local.
-Move here consumes its generation before takeover; lost acknowledgements recover
-passively without replay. Closure cancels recovery.
+choices. Readiness is consumed once even on failure; recovery only observes status;
+exact-owner recovery is in `server/README.md`. Native proof: `0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`, no final-build
+or speed/memory claim. LOO-718 owns remote
+admission/iOS; preserve wire identity/credentials; local trust cannot authenticate
+proxies; unattended hosting and phone takeover remain open. #1822 and LOO-724's contention repair prove no continuity, incident
+cause or configured recovery. Full text: `67a968bf84:.lf/wave/product/MEMORY.md`.
 
-Historical native proof and performance limits:
-`0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`. They establish neither
-final-build acceptance nor general speed/memory gains. Same-build replacement
-proves no upgrade; LaunchServices-owned updates model App Management, external
-bundle writes do not. Full Desktop, Xcode, Linux replacement, usage and combined
-mobile acceptance remain separate.
-
-LOO-718 owns remote admission/iOS; preserve wire identity/credentials. ViewPlan
-chooses primary Sessions; lookup starts nothing; local trust cannot authenticate
-proxies. Unattended hosting and phone takeover remain open. #1822 adds owner
-retirement and demo-runtime separation atop #1815/#1818/#1820; release is no
-continuity proof or authority to clean historical fixtures. LOO-724's contention
-repair proves no incident cause or configured recovery: retained drafts and
-continued input/turns matter beyond liveness.
-
-LOO-500 removed the placeholder scan: surviving files revived retired Waves.
-Writes register directories; reads list store rows. Unknown status stays explicit.
+LOO-500 removed the placeholder scan (surviving files revived retired Waves): writes
+register directories, reads list store rows, unknown status stays explicit.
 Transport history: `324a0f6dc45f43b608408b2b4a0f9403c236da20:.lf/wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)

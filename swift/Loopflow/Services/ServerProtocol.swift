@@ -1,21 +1,80 @@
 import Foundation
 
-/// Revision 1 of the server application protocol; carriers add no Work authority.
-public struct ServerRequest: Encodable, Sendable {
-    public let version: Int
-    public let id: String
-    public let operation: ServerOperation
+/// Revision 2 of the server protocol: one connection per client, a negotiated
+/// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
+/// carriers add no Work authority.
+public enum ServerProtocol {
+    public static let revision = 2
+    public static let minRevision = 2
+    public static let maxMessage = 32 * 1024 * 1024
+}
 
-    public init(version: Int, id: String, operation: ServerOperation) {
+/// Who connected, for diagnostics; it grants nothing.
+public struct ServerClientIdentity: Encodable, Sendable {
+    public let kind: String
+    public let platform: String
+    public let name: String
+    public let version: String
+
+    public init(kind: String, platform: String, name: String, version: String) {
+        self.kind = kind
+        self.platform = platform
+        self.name = name
         self.version = version
-        self.id = id
-        self.operation = operation
+    }
+}
+
+public struct ServerHello: Encodable, Sendable {
+    public let revision: Int
+    public let minRevision: Int
+    public let client: ServerClientIdentity
+
+    public init(revision: Int, minRevision: Int, client: ServerClientIdentity) {
+        self.revision = revision
+        self.minRevision = minRevision
+        self.client = client
+    }
+
+    private enum CodingKeys: String, CodingKey { case revision, client, minRevision = "min_revision" }
+}
+
+/// One message from the client.
+public enum ServerClientMessage: Encodable, Sendable {
+    case hello(ServerHello)
+    /// A pre-hello readiness probe; the server answers `status` and closes.
+    case status
+    case request(id: String, operation: ServerOperation)
+    /// One request line for the live subscription `id`.
+    case checkpoint(id: String, frame: JSONValue)
+    /// Forget a request's answer, or end a subscription.
+    case cancel(id: String)
+
+    private enum Keys: String, CodingKey { case type, id, operation, frame, revision, client, minRevision = "min_revision" }
+    public func encode(to encoder: Encoder) throws {
+        var box = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .hello(let hello):
+            try box.encode("hello", forKey: .type)
+            try box.encode(hello.revision, forKey: .revision)
+            try box.encode(hello.minRevision, forKey: .minRevision)
+            try box.encode(hello.client, forKey: .client)
+        case .status: try box.encode("status", forKey: .type)
+        case .request(let id, let operation):
+            try box.encode("request", forKey: .type)
+            try box.encode(id, forKey: .id)
+            try box.encode(operation, forKey: .operation)
+        case .checkpoint(let id, let frame):
+            try box.encode("checkpoint", forKey: .type)
+            try box.encode(id, forKey: .id)
+            try box.encode(frame, forKey: .frame)
+        case .cancel(let id):
+            try box.encode("cancel", forKey: .type)
+            try box.encode(id, forKey: .id)
+        }
     }
 }
 
 public enum ServerOperation: Encodable, Sendable {
-    case status
-    case bootstrap
     case sessionOwner(session: String)
     case read(ServedRead)
     case subscribe(ServedRead, generation: UInt64)
@@ -30,8 +89,6 @@ public enum ServerOperation: Encodable, Sendable {
         case .sessionOwner(let session):
             try box.encode("session_owner", forKey: .kind)
             try box.encode(session, forKey: .session)
-        case .status: try box.encode("status", forKey: .kind)
-        case .bootstrap: try box.encode("bootstrap", forKey: .kind)
         case .read(let query):
             try box.encode("read", forKey: .kind)
             try box.encode(query, forKey: .query)
@@ -52,43 +109,91 @@ public enum ServerOperation: Encodable, Sendable {
     }
 }
 
-public struct ServerResponse: Decodable, Sendable {
-    public let id: String
+/// One message from the server.
+public enum ServerMessage: Decodable, Sendable {
+    case welcome(ServerWelcome)
+    case status(ServerStatus)
+    case response(id: String, result: ServerReply)
+    case reading(id: String, generation: UInt64, frame: JSONValue)
+    /// `id` is nil before a request exists. An error for a subscription ends it.
+    case error(id: String?, code: String, message: String)
+
+    private enum Keys: String, CodingKey { case type, id, result, generation, frame, code, message }
+    public init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: Keys.self)
+        switch try box.decode(String.self, forKey: .type) {
+        case "welcome": self = .welcome(try ServerWelcome(from: decoder))
+        case "status": self = .status(try ServerStatus(from: decoder))
+        case "response":
+            self = .response(id: try box.decode(String.self, forKey: .id), result: try box.decode(ServerReply.self, forKey: .result))
+        case "reading":
+            self = .reading(id: try box.decode(String.self, forKey: .id), generation: try box.decode(UInt64.self, forKey: .generation),
+                            frame: try box.decode(JSONValue.self, forKey: .frame))
+        case "error":
+            self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
+                          message: try box.decode(String.self, forKey: .message))
+        default: throw DecodingError.dataCorruptedError(forKey: .type, in: box, debugDescription: "Unsupported server message; update the client")
+        }
+    }
+}
+
+public struct ServerWelcome: Decodable, Sendable {
+    /// The revision both sides speak for this connection.
+    public let revision: Int
+    public let serverRevision: Int
+    public let minRevision: Int
+    /// Changes with every server start.
     public let instance: String
-    public let result: ServerReply
+    public let build: String
+    public let executableSHA256: String
+    /// `.null` while the Machine registry is unavailable or uninitialized.
+    public let machine: JSONValue
+    public let capabilities: [String]
+    public let limits: ServerLimits
+
+    private enum CodingKeys: String, CodingKey {
+        case revision, instance, build, machine, capabilities, limits
+        case serverRevision = "server_revision", minRevision = "min_revision", executableSHA256 = "executable_sha256"
+    }
+}
+
+public struct ServerLimits: Decodable, Sendable {
+    public let maxMessage: Int
+    public let maxConnections: Int
+
+    private enum CodingKeys: String, CodingKey { case maxMessage = "max_message", maxConnections = "max_connections" }
+}
+
+public struct ServerStatus: Decodable, Sendable {
+    public let revision: Int
+    public let minRevision: Int
+    public let instance: String
+    public let executableSHA256: String
+
+    private enum CodingKeys: String, CodingKey { case revision, instance, minRevision = "min_revision", executableSHA256 = "executable_sha256" }
 }
 
 public enum ServerReply: Decodable, Sendable {
-    case status(version: Int, executableSHA256: String)
-    case bootstrap(version: Int, build: String, executableSHA256: String, machine: JSONValue, capabilities: [String], maxFrame: Int, maxConnections: Int)
-    case read(String)
-    case reading(generation: UInt64, frame: JSONValue)
-    case command(traceID: String, output: String, stderr: String, code: Int)
+    case read(JSONValue)
+    case subscribed
+    /// `value` is stdout parsed as JSON when the command's spelling prints JSON.
+    case command(traceID: String, code: Int, value: JSONValue?, output: String, stderr: String)
     case sessionOwner(owner: String?)
     case bridged
-    case error(code: String, message: String)
 
-    private enum Keys: String, CodingKey {
-        case kind, version, build, machine, capabilities, output, generation, frame, stderr, code, message, owner
-        case traceID = "trace_id"
-        case maxFrame = "max_frame", maxConnections = "max_connections", executableSHA256 = "executable_sha256"
-    }
+    private enum Keys: String, CodingKey { case kind, value, output, stderr, code, owner, traceID = "trace_id" }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .kind) {
-        case "status": self = .status(version: try box.decode(Int.self, forKey: .version), executableSHA256: try box.decode(String.self, forKey: .executableSHA256))
-        case "bootstrap":
-            self = .bootstrap(version: try box.decode(Int.self, forKey: .version), build: try box.decode(String.self, forKey: .build),
-                              executableSHA256: try box.decode(String.self, forKey: .executableSHA256),
-                              machine: try box.decode(JSONValue.self, forKey: .machine), capabilities: try box.decode([String].self, forKey: .capabilities),
-                              maxFrame: try box.decode(Int.self, forKey: .maxFrame), maxConnections: try box.decode(Int.self, forKey: .maxConnections))
-        case "read": self = .read(try box.decode(String.self, forKey: .output))
-        case "reading": self = .reading(generation: try box.decode(UInt64.self, forKey: .generation), frame: try box.decode(JSONValue.self, forKey: .frame))
-        case "command": self = .command(traceID: try box.decode(String.self, forKey: .traceID), output: try box.decode(String.self, forKey: .output), stderr: try box.decode(String.self, forKey: .stderr), code: try box.decode(Int.self, forKey: .code))
+        case "read": self = .read(try box.decode(JSONValue.self, forKey: .value))
+        case "subscribed": self = .subscribed
+        case "command":
+            self = .command(traceID: try box.decode(String.self, forKey: .traceID), code: try box.decode(Int.self, forKey: .code),
+                            value: try box.decodeIfPresent(JSONValue.self, forKey: .value),
+                            output: try box.decode(String.self, forKey: .output), stderr: try box.decode(String.self, forKey: .stderr))
         case "session_owner": self = .sessionOwner(owner: try box.decodeIfPresent(String.self, forKey: .owner))
         case "bridged": self = .bridged
-        case "error": self = .error(code: try box.decode(String.self, forKey: .code), message: try box.decode(String.self, forKey: .message))
-        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: box, debugDescription: "Unsupported Server response; update the client")
+        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: box, debugDescription: "Unsupported server result; update the client")
         }
     }
 }

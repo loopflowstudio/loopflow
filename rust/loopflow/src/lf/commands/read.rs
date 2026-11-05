@@ -366,43 +366,41 @@ impl Read {
         }
     }
 
-    /// What `lf <argv>` prints, read on the caller's thread.
-    pub fn read(&self) -> anyhow::Result<String> {
+    /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
+    /// A command that prints bare text (`config repository --path`) is a string.
+    pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
-            Self::MonitorPs => pretty(&super::top::load_snapshot()?),
+            Self::MonitorPs => value(&super::top::load_snapshot()?),
             Self::DesktopPlans { directory } => {
-                pretty(&super::desktop::read_plans(None, directory)?)
+                value(&super::desktop::read_plans(None, directory)?)
             }
-            Self::DesktopSessions { directory, .. } | Self::SessionPage { directory, .. } => {
-                pretty(&super::session::read_once(
-                    &self.session_filter(directory)?,
-                    Shape::Desktop,
-                )?)
-            }
+            Self::DesktopSessions { directory, .. } | Self::SessionPage { directory, .. } => value(
+                &super::session::read_once(&self.session_filter(directory)?, Shape::Desktop)?,
+            ),
             Self::DesktopTask { directory, issue } => {
-                pretty(&super::desktop::read_task_pane(directory, issue)?)
+                value(&super::desktop::read_task_pane(directory, issue)?)
             }
-            Self::TaskChanges { issue, base } => pretty(&task_changes(issue, base)?),
+            Self::TaskChanges { issue, base } => value(&task_changes(issue, base)?),
             Self::TaskDiff {
                 issue,
                 path,
                 base,
                 draft,
-            } => pretty(&task_diff(issue, path.as_deref(), base, draft.as_deref())?),
-            Self::TaskFile { issue, path } => pretty(&task_file(issue, path, false)?),
+            } => value(&task_diff(issue, path.as_deref(), base, draft.as_deref())?),
+            Self::TaskFile { issue, path } => value(&task_file(issue, path, false)?),
             Self::Waves => {
                 let waves = block_on(list_waves(true))??;
-                pretty(&waves.unwrap_or_default())
+                value(&waves.unwrap_or_default())
             }
-            Self::MachineId => pretty(&block_on(local_machine())??),
-            Self::Portfolio => pretty(&crate::portfolio::read()?),
+            Self::MachineId => value(&block_on(local_machine())??),
+            Self::Portfolio => value(&crate::portfolio::read()?),
             Self::Settings {
                 directory,
                 wave,
                 skill,
                 graph,
                 step,
-            } => pretty(&crate::config::api::inspect(
+            } => value(&crate::config::api::inspect(
                 &crate::repo::working_directory_in(directory)?,
                 wave.as_deref(),
                 skill.as_deref(),
@@ -412,8 +410,8 @@ impl Read {
             Self::PaneLayout { directory, work } => {
                 super::desktop::saved_layout(None, directory, work)
             }
-            Self::People { directory } => pretty(&super::people::people(directory)?.0),
-            Self::Graphs { directory } => pretty(&crate::graph::compiled::graph_catalog(
+            Self::People { directory } => value(&super::people::people(directory)?.0),
+            Self::Graphs { directory } => value(&crate::graph::compiled::graph_catalog(
                 &crate::repo::working_directory_in(directory)?,
             )?),
             Self::ViewPlan {
@@ -425,13 +423,13 @@ impl Read {
                 if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
                     anyhow::bail!("{}", plan.resolution.unavailable.join("; "));
                 }
-                pretty(&plan)
+                value(&plan)
             }
             Self::GraphProcesses {
                 directory,
                 task,
                 after,
-            } => pretty(&graph_inventory::page(
+            } => value(&graph_inventory::page(
                 directory,
                 &graph_inventory::GraphProcessInventoryArgs {
                     processes: true,
@@ -440,13 +438,13 @@ impl Read {
                     ..Default::default()
                 },
             )?),
-            Self::GraphProcess { id } => pretty(&graph_inventory::detail(id)?),
+            Self::GraphProcess { id } => value(&graph_inventory::detail(id)?),
             Self::Usage {
                 days,
                 wave,
                 project,
                 task,
-            } => pretty(&usage::sessions(
+            } => value(&usage::sessions(
                 *days,
                 super::WorkFilter {
                     wave: wave.as_deref(),
@@ -461,22 +459,22 @@ impl Read {
                     project: None,
                     task: Some(task),
                 };
-                pretty(&usage::context_report(&usage::sessions(0, filter, None)?)?)
+                value(&usage::context_report(&usage::sessions(0, filter, None)?)?)
             }
             Self::WaveDetail { directory, wave } => {
-                pretty(&super::waves::desktop_status(directory, wave)?)
+                value(&super::waves::desktop_status(directory, wave)?)
             }
             Self::ClosedTasks {
                 directory,
                 wave,
                 after,
-            } => pretty(&super::waves::desktop_closed_tasks(
+            } => value(&super::waves::desktop_closed_tasks(
                 directory,
                 wave,
                 after.as_deref(),
             )?),
-            Self::Machines => pretty(&block_on(machines())??),
-            Self::History(window) => pretty(&super::activity::snapshot(window)?),
+            Self::Machines => value(&block_on(machines())??),
+            Self::History(window) => value(&super::activity::snapshot(window)?),
             Self::Roadmap {
                 directory,
                 wave,
@@ -490,29 +488,30 @@ impl Read {
                 Shape::Desktop,
             ),
             Self::PlanningStatus { directory } => super::planning::status_json(directory),
-            Self::WorkLink { directory, url } => pretty(&super::open::url_links(directory, url)?),
+            Self::WorkLink { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
-            Self::RepositoryPath { id } => Ok(crate::repository::CanonicalRepo::containing(
-                &super::work_route::repository_path(id)?,
-            )?
-            .ok_or_else(|| anyhow::anyhow!("repository plan {id} has no local checkout"))?
-            .to_string()),
+            Self::RepositoryPath { id } => {
+                let checkout = super::work_route::repository_path(id)?;
+                let repo = crate::repository::CanonicalRepo::containing(&checkout)?
+                    .ok_or_else(|| anyhow::anyhow!("repository plan {id} has no local checkout"))?;
+                Ok(repo.to_string().into())
+            }
             Self::WaveGraph { directory, wave } => {
                 let repo = crate::repo::working_directory_in(directory)?;
-                pretty(&block_on(crate::ops::project::wave_graph(
+                value(&block_on(crate::ops::project::wave_graph(
                     &repo,
                     wave.as_deref(),
                     wave.is_some(),
                 ))??)
             }
             Self::Tokens { directory, days } => super::tokens::codebase(directory, *days),
-            Self::Retention => pretty(
+            Self::Retention => value(
                 &super::history_transcript::retention_summary()?
                     .ok_or_else(|| anyhow::anyhow!("No Sessions recorded."))?,
             ),
-            Self::Doctor => pretty(&super::doctor::report()?),
+            Self::Doctor => value(&super::doctor::report()?),
             Self::BindPreview { session, task } => {
-                pretty(&super::session::binding_preview(session, task)?)
+                value(&super::session::binding_preview(session, task)?)
             }
         }
     }
@@ -579,8 +578,8 @@ fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
     Ok(tokio::runtime::Runtime::new()?.block_on(future))
 }
 
-fn pretty(value: &impl Serialize) -> anyhow::Result<String> {
-    Ok(serde_json::to_string_pretty(value)?)
+fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
+    Ok(serde_json::to_value(value)?)
 }
 
 #[cfg(test)]

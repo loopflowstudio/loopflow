@@ -1,1 +1,1 @@
-{"id":"status-1","instance":"server-1","result":{"kind":"status","version":1,"executable_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+{"type":"status","revision":2,"min_revision":2,"instance":"server-1","executable_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}

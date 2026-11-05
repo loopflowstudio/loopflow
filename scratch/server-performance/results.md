@@ -56,6 +56,34 @@ completion after viewer disconnect. Remote ownership routing also passed.
 Later provider-admission cwd repairs and final Graph checks have their own
 verification; they are not silently included in these earlier observations.
 
+## Revision 2 — November 5, 2026 (Task 4877de)
+
+The same harness and workload against the branch's source-built debug `lf`
+speaking revision 2 (one connection per client, newline-delimited JSON), run
+twice in the headless realign step: once just after a Swift build finished on
+the host, once on a quiet host. The direct column is the run above.
+
+| Operation | Direct median / p95 (ms) | Revision 2, quiet host | Revision 2, loaded host |
+| --- | ---: | ---: | ---: |
+| Session rename | 10.77 / 20.63 | 11.76 / 14.90 | 12.08 / 16.60 |
+| Roadmap read | 28.00 / 52.67 | 30.61 / 56.28 | 33.36 / 79.73 |
+| Subscribe to first frame | 33.40 / 47.55 | 34.87 / 54.39 | 38.24 / 92.20 |
+| Subscription checkpoint | 21.66 / 28.49 | 22.63 / 30.22 | 25.34 / 31.47 |
+
+Connections the server admitted during the 31-iteration workload (31 reads,
+31 renames, 31 subscriptions with a checkpoint each): 1. Revision 1 opened one
+per operation. Medians sit 1–3 ms above the direct baseline, less than the
+spread between the two revision-2 runs, so these runs show no local latency
+change in either direction and claim no local improvement; the connection
+model targets remote clients, where a connection is a round trip or more.
+Readiness 308.23 ms (loaded host 492.25); stop/start plus a read through the
+same client 405.90 ms (loaded 1022.41), which now includes the client's
+reconnect backoff. Idle CPU 0% at the measurement resolution; RSS 267.0 MiB
+(loaded 270.0) against 255.5 before, both debug builds on an uncontrolled host,
+so no memory claim. Raw samples: `revision-2-quiet.json`, `revision-2.json`.
+The fixture names `-a claude` for its prepared Session: `session resume
+--prepare` resolves a harness it never starts.
+
 # Historical embedded-to-subprocess measurements — November 4, 2026
 
 Jack Heart requested deletion of the embedded Loopflow library and a performance comparison.

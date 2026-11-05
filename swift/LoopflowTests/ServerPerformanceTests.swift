@@ -17,13 +17,19 @@ struct ServerPerformanceTests {
             _ = try await lf.run(args, executable: "/usr/bin/git")
         }
         _ = try await lf.run(["task", "create", "--title", "Performance fixture", "--json"])
-        let prepared = try await lf.run(["session", "resume", "--prepare", "--json"])
+        // Prepare starts no provider but still resolves one; a host with several
+        // harnesses installed and no saved preference needs it named.
+        let prepared = try await lf.run(["session", "resume", "--prepare", "--json", "-a", "claude"])
         let session = try #require((JSONSerialization.jsonObject(with: Data(prepared.utf8)) as? [String: Any])?["id"] as? String)
-        let server = LocalServerFixture(lf)
+        let diagnostics = root.appendingPathComponent("server.log")
+        try Data().write(to: diagnostics)
+        let server = LocalServerFixture(lf, diagnostics: diagnostics)
         let location = server.location()
         let startup = ContinuousClock.now
         _ = try await location.path()
         var results: [String: [Double]] = ["server_ready_ms": [startup.elapsedMs]]
+        // Readiness probes connect too; the workload's own connections start here.
+        let admittedBeforeWorkload = try server.admittedConnections()
         for _ in 0..<31 {
             var start = ContinuousClock.now
             let reading = try await ServerClient.read(.allPlans, location: location)
@@ -44,6 +50,8 @@ struct ServerPerformanceTests {
             results["checkpoint_ms", default: []].append(start.elapsedMs)
             await watch.cancel()
         }
+        // Every read, write, subscription and checkpoint above shared one connection.
+        results["workload_connections"] = [Double(try server.admittedConnections() - admittedBeforeWorkload)]
         let watch = ServerClient.watch(.allPlans, location: location)
         var frames = watch.lines.makeAsyncIterator()
         _ = try #require(try await frames.next())

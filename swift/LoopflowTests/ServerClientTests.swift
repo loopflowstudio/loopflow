@@ -7,33 +7,51 @@ import Testing
 
 @Suite(.serialized)
 struct ServerClientTests {
-    @Test func cancelledReadReleasesItsConnection() async throws {
+    @Test func cancelledReadSendsCancelDropsLateAnswerAndKeepsTheConnection() async throws {
         let peer = try ServerPeer()
-        let request = Task { try await ServerClient.read(.machineId, location: peer.location) }
-        async let disconnected = peer.exchange { handle, _ in
-            request.cancel()
-            // The peer stays alive without answering. Cancellation must close
-            // the connection rather than wait for a response or stop the server.
-            return try handle.read(upToCount: 1)?.isEmpty ?? true
+        let firstId = Mutex<String?>(nil)
+        let sawCancel = Mutex<Bool>(false)
+        peer.serve { message, respond in
+            switch message["type"] as? String {
+            case "request":
+                let id = message["id"] as! String
+                if sawCancel.get() {
+                    respond(["type": "response", "id": id, "result": ["kind": "read", "value": ["id": "home_fixture"]]])
+                } else {
+                    firstId.set(id) // The cancelled read: answer it late, after the cancel.
+                }
+            case "cancel":
+                sawCancel.set(true)
+                if let late = firstId.get() {
+                    respond(["type": "response", "id": late, "result": ["kind": "read", "value": ["id": "late"]]])
+                }
+            default: break
+            }
+            return true
         }
+        let request = Task { try await ServerClient.read(.machineId, location: peer.location) }
+        peer.waitForMessage { $0["type"] as? String == "request" }
+        request.cancel()
         do {
             _ = try await request.value
             Issue.record("A cancelled read returned a reading")
         } catch { #expect(error is CancellationError) }
-        #expect(try await disconnected)
+        // The connection stays open; the dropped late answer does not corrupt it.
+        let reading = try await ServerClient.read(.machineId, location: peer.location)
+        #expect(reading.contains("home_fixture"))
+        #expect(!reading.contains("late"))
     }
 
     @Test func failedCommandPreservesOutputAndDiagnosis() async throws {
         let peer = try ServerPeer()
-        async let answered: Void = peer.exchange { handle, id in
-            let body = try JSONSerialization.data(withJSONObject: [
-                "id": id, "instance": "fixture", "result": [
-                    "kind": "command", "trace_id": "trace", "output": "saved partial result",
-                    "stderr": "fixture command failed", "code": 7,
-                ],
-            ])
-            var length = UInt32(body.count).bigEndian
-            try handle.write(contentsOf: withUnsafeBytes(of: &length) { Data($0) } + body)
+        peer.serve { message, respond in
+            if message["type"] as? String == "request" {
+                respond(["type": "response", "id": message["id"]!, "result": [
+                    "kind": "command", "trace_id": "trace", "code": 7, "value": NSNull(),
+                    "output": "saved partial result", "stderr": "fixture command failed",
+                ]])
+            }
+            return true
         }
         do {
             _ = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
@@ -42,7 +60,92 @@ struct ServerClientTests {
             #expect(error.stdout == "saved partial result")
             #expect(error.localizedDescription == "fixture command failed")
         }
-        try await answered
+    }
+
+    @Test func disconnectFailsEveryPendingRequestAndTheNextReopens() async throws {
+        let peer = try ServerPeer()
+        let seen = Mutex<Int>(0)
+        // The first connection reads two requests, then closes, answering neither.
+        peer.serve { message, _ in
+            message["type"] as? String != "request" || seen.increment() < 2
+        }
+        let first = Task { try await ServerClient.read(.machineId, location: peer.location) }
+        let second = Task { try await ServerClient.read(.portfolio, location: peer.location) }
+        for pending in [first, second] {
+            do {
+                _ = try await pending.value
+                Issue.record("A request outlived its connection")
+            } catch {
+                #expect(error.localizedDescription.contains("Server disconnected"))
+            }
+        }
+        peer.serve { message, respond in
+            if message["type"] as? String == "request" {
+                respond(["type": "response", "id": message["id"]!, "result": ["kind": "read", "value": "/src/again"]])
+            }
+            return true
+        }
+        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "/src/again")
+    }
+
+    @Test func stalledHandshakeFailsWithinTheBoundAndTheNextRequestReopens() async throws {
+        let peer = try ServerPeer()
+        peer.stall()
+        let started = Date()
+        do {
+            _ = try await ServerClient.read(.machineId, location: peer.location)
+            Issue.record("A stalled handshake produced a reading")
+        } catch {
+            #expect(error.localizedDescription == "Loopflow server did not answer within 10s; check `lf server status`")
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(elapsed >= 9 && elapsed < 20, "waited \(elapsed)s")
+        peer.serve { message, respond in
+            if message["type"] as? String == "request" {
+                respond(["type": "response", "id": message["id"]!, "result": ["kind": "read", "value": "/src/after-stall"]])
+            }
+            return true
+        }
+        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
+    }
+
+    @Test func serverEndingASubscriptionFailsItsWatchAlone() async throws {
+        let peer = try ServerPeer()
+        let subscription = Mutex<String?>(nil)
+        peer.serve { message, respond in
+            switch (message["type"] as? String, (message["operation"] as? [String: Any])?["kind"] as? String) {
+            case ("request", "subscribe"):
+                let id = message["id"] as! String
+                subscription.set(id)
+                respond(["type": "response", "id": id, "result": ["kind": "subscribed"]])
+                respond(["type": "reading", "id": id, "generation": 1, "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
+            case ("checkpoint", _):
+                #expect((message["frame"] as? [String: Any])?["id"] as? Int == 4)
+                let id = subscription.get()!
+                respond(["type": "reading", "id": id, "generation": 1, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
+                respond(["type": "error", "id": id, "code": "unavailable", "message": "gone"])
+            case ("request", _):
+                respond(["type": "response", "id": message["id"]!, "result": ["kind": "read", "value": "still here"]])
+            default: break
+            }
+            return true
+        }
+        let watch = ServerClient.watch(.allPlans, location: peer.location)
+        var frames = watch.lines.makeAsyncIterator()
+        let first = try #require(try await frames.next())
+        #expect((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["answers"] as? Int == 1)
+        watch.send(Data(#"{"id":4}"#.utf8 + [10]))
+        let last = try #require(try await frames.next())
+        #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
+        do {
+            _ = try await frames.next()
+            Issue.record("An ended subscription kept its watch open")
+        } catch {
+            #expect(error.localizedDescription == "unavailable: gone")
+        }
+        // The connection outlives the subscription.
+        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "still here")
+        await watch.cancel()
     }
 
     @Test(arguments: [false, true])
@@ -140,12 +243,35 @@ struct ServerClientTests {
     }
 }
 
-/// One same-account peer exercising the production framing and socket lifetime.
+/// A tiny lock around one value, for test coordination across threads.
+private final class Mutex<Value>: @unchecked Sendable {
+    let lock = NSLock()
+    private var value: Value
+    init(_ value: Value) { self.value = value }
+    func get() -> Value { lock.withLock { value } }
+    func set(_ next: Value) { lock.withLock { value = next } }
+}
+
+extension Mutex where Value == Int {
+    func increment() -> Int { lock.withLock { value += 1; return value } }
+}
+
+/// One same-account peer speaking revision 2. Each `serve` accepts one
+/// connection, welcomes it, then runs `handle` for every client message on a
+/// reader thread until the handler closes it or the client disconnects.
 private final class ServerPeer: @unchecked Sendable {
     private let listener: Int32
-    private let path = "/tmp/lf-peer-\(UUID().uuidString).sock"
+    private let path: String
+    let location: ServerLocation
+    private let lock = NSLock()
+    private var messages: [[String: Any]] = []
 
     init() throws {
+        let path = "/tmp/lf-peer-\(UUID().uuidString).sock"
+        self.path = path
+        location = ServerLocation { _ in
+            String(decoding: try JSONSerialization.data(withJSONObject: ["socket": path, "ready": true]), as: UTF8.self)
+        }
         listener = socket(AF_UNIX, SOCK_STREAM, 0)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
@@ -155,7 +281,7 @@ private final class ServerPeer: @unchecked Sendable {
                 Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard bound == 0, listen(listener, 1) == 0 else {
+        guard bound == 0, listen(listener, 2) == 0 else {
             Darwin.close(listener)
             throw RegistryQueryError("Cannot listen for fixture request")
         }
@@ -166,31 +292,84 @@ private final class ServerPeer: @unchecked Sendable {
         unlink(path)
     }
 
-    var location: ServerLocation {
-        let path = path
-        return ServerLocation { _ in
-            String(decoding: try JSONSerialization.data(withJSONObject: ["socket": path, "ready": true]), as: UTF8.self)
+    /// `handle` returns false to close the connection after this message.
+    func serve(_ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
+        Thread.detachNewThread { [self] in
+            let fd = accept(listener, nil, nil)
+            guard fd >= 0 else { return }
+            let connection = PeerConnection(fd: fd)
+            defer { connection.close() }
+            do {
+                _ = try connection.read() // hello
+                try connection.write([
+                    "type": "welcome", "revision": 2, "server_revision": 2, "min_revision": 2, "instance": "fixture",
+                    "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
+                    "capabilities": [], "limits": ["max_message": 33_554_432, "max_connections": 64],
+                ])
+                while let message = try connection.read() {
+                    lock.withLock { messages.append(message) }
+                    if !handle(message, { try? connection.write($0) }) { return }
+                }
+            } catch {}
         }
     }
 
-    func exchange<T: Sendable>(_ respond: @escaping @Sendable (FileHandle, String) throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            Thread.detachNewThread { [self] in
-                do {
-                    let fd = accept(listener, nil, nil)
-                    guard fd >= 0 else { throw RegistryQueryError("Fixture accept failed") }
-                    let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-                    defer { try? handle.close() }
-                    var timeout = timeval(tv_sec: 5, tv_usec: 0)
-                    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-                    let header = try #require(try handle.read(upToCount: 4))
-                    let length = header.reduce(0) { ($0 << 8) | Int($1) }
-                    let body = try #require(try handle.read(upToCount: length))
-                    let request = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
-                    continuation.resume(returning: try respond(handle, #require(request["id"] as? String)))
-                } catch { continuation.resume(throwing: error) }
+    /// Accept one connection and answer nothing until the client closes it.
+    func stall() {
+        Thread.detachNewThread { [self] in
+            let fd = accept(listener, nil, nil)
+            guard fd >= 0 else { return }
+            let connection = PeerConnection(fd: fd)
+            defer { connection.close() }
+            while (try? connection.read()) != nil {}
+        }
+    }
+
+    func waitForMessage(where matches: @escaping ([String: Any]) -> Bool) {
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if lock.withLock({ messages.contains(where: matches) }) { return }
+            usleep(5000)
+        }
+    }
+}
+
+/// The peer's side of one connection: whole JSON lines in and out.
+private final class PeerConnection: @unchecked Sendable {
+    private let fd: Int32
+    private var buffer = Data()
+
+    init(fd: Int32) { self.fd = fd }
+
+    /// The next message, or nil once the client closes.
+    func read() throws -> [String: Any]? {
+        while true {
+            if let newline = buffer.firstIndex(of: 10) {
+                let line = buffer.subdata(in: buffer.startIndex..<newline)
+                buffer.removeSubrange(buffer.startIndex...newline)
+                return try JSONSerialization.jsonObject(with: line) as? [String: Any]
+            }
+            var chunk = [UInt8](repeating: 0, count: 65536)
+            let received = chunk.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress!, $0.count) }
+            if received < 0 && errno == EINTR { continue }
+            guard received > 0 else { return nil }
+            buffer.append(contentsOf: chunk[..<received])
+        }
+    }
+
+    func write(_ message: [String: Any]) throws {
+        let bytes = try JSONSerialization.data(withJSONObject: message) + [10]
+        try bytes.withUnsafeBytes { buffer in
+            var offset = 0
+            while offset < buffer.count {
+                let sent = Darwin.write(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
+                if sent < 0 && errno == EINTR { continue }
+                guard sent > 0 else { throw RegistryQueryError("Fixture write failed") }
+                offset += sent
             }
         }
     }
+
+    func close() { Darwin.close(fd) }
 }
 #endif

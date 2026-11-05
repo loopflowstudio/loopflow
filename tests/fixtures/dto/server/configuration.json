@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "type": "request",
   "id": "config-1",
   "operation": {
     "kind": "configuration",

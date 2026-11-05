@@ -9,81 +9,110 @@ struct ServerProtocolTests {
         return try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server/\(name).json"))
     }
 
-    @Test func sharedSubscriptionShapeAndUnavailableReading() throws {
-        let request = ServerRequest(version: 1, id: "tasks-1", operation: .subscribe(
+    private func encoded(_ message: ServerClientMessage) throws -> JSONValue {
+        try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(message))
+    }
+
+    private func value(_ name: String) throws -> JSONValue {
+        try JSONDecoder().decode(JSONValue.self, from: fixture(name))
+    }
+
+    private func message(_ name: String) throws -> ServerMessage {
+        try JSONDecoder().decode(ServerMessage.self, from: fixture(name))
+    }
+
+    @Test func helloAndWelcomeNegotiateTheRevision() throws {
+        let hello = ServerClientMessage.hello(ServerHello(revision: 2, minRevision: 2, client: ServerClientIdentity(
+            kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1")))
+        #expect(try encoded(hello) == value("hello"))
+        guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
+        #expect(welcome.revision == 2)
+        #expect(welcome.serverRevision == 2)
+        #expect(welcome.minRevision == 2)
+        #expect(welcome.instance == "service-incarnation")
+        #expect(welcome.executableSHA256.count == 64)
+        #expect(welcome.capabilities.contains("session_owner"))
+        #expect(welcome.capabilities.contains("subscriptions"))
+        #expect(welcome.limits.maxMessage == 33554432)
+        #expect(welcome.limits.maxConnections == 64)
+        #expect(welcome.machine == .object([:]))
+    }
+
+    @Test func readinessProbesWithoutHello() throws {
+        #expect(try encoded(.status) == value("status_request"))
+        guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
+        #expect(status.revision == 2)
+        #expect(status.minRevision == 2)
+        #expect(status.instance == "server-1")
+        #expect(status.executableSHA256 == String(repeating: "a", count: 64))
+    }
+
+    @Test func subscriptionsCarryTheirRequestId() throws {
+        let request = ServerClientMessage.request(id: "tasks-1", operation: .subscribe(
             .roadmap(directory: "/", wave: nil, task: nil, all: true), generation: 7))
-        let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request))
-        #expect(encoded == (try JSONDecoder().decode(JSONValue.self, from: fixture("subscribe"))))
-        let response = try JSONDecoder().decode(ServerResponse.self, from: fixture("reading"))
-        #expect(response.id == "tasks-1")
-        guard case .reading(let generation, let frame) = response.result else { Issue.record("Missing reading"); return }
+        #expect(try encoded(request) == value("subscribe"))
+        guard case .reading(let id, let generation, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
+        #expect(id == "tasks-1")
         #expect(generation == 7)
         guard case .object(let fields) = frame else { Issue.record("Missing watch frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
+        #expect(try encoded(.checkpoint(id: "tasks-1", frame: .object(["id": .integer(3)]))) == value("checkpoint"))
+        #expect(try encoded(.cancel(id: "tasks-1")) == value("cancel"))
     }
 
     @Test func commandTraceAndExistingOwnerShareRustFixtures() throws {
-        let bootstrap = try JSONDecoder().decode(ServerResponse.self, from: fixture("bootstrap"))
-        guard case .bootstrap(let version, _, let executable, _, let capabilities, let maxFrame, let maxConnections) = bootstrap.result else {
-            Issue.record("Missing bootstrap"); return
+        guard case .response(let id, .command(let trace, let code, let value, let output, _)) = try message("command") else {
+            Issue.record("Missing command"); return
         }
-        #expect(version == 1)
-        #expect(executable.count == 64)
-        #expect(capabilities.contains("session_owner"))
-        #expect(capabilities.contains("view_plan"))
-        #expect(capabilities.contains("reads"))
-        #expect(capabilities.contains("subscriptions"))
-        #expect(capabilities.contains("commands"))
-        #expect(maxFrame == 33554432)
-        #expect(maxConnections == 64)
-        let command = try JSONDecoder().decode(ServerResponse.self, from: fixture("command"))
-        guard case .command(let trace, _, _, let code) = command.result else { Issue.record("Missing command"); return }
+        #expect(id == "rename-1")
         #expect(trace == "85c31c1e-850c-4821-878d-55527b6dba46")
         #expect(code == 0)
-        let owner = try JSONDecoder().decode(ServerResponse.self, from: fixture("owner"))
-        guard case .sessionOwner(let process) = owner.result else { Issue.record("Missing owner"); return }
+        #expect(value == (try JSONDecoder().decode(JSONValue.self, from: Data(output.utf8))))
+        guard case .response(_, .sessionOwner(let process)) = try message("owner") else { Issue.record("Missing owner"); return }
         #expect(process == trace)
-        let request = ServerRequest(version: 1, id: "owner-1", operation: .sessionOwner(session: "session_5e55105e000040008000000000000001"))
-        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("session_owner")))
-        let attach = ServerRequest(version: 1, id: "terminal-1", operation: .attach(owner: trace))
-        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(attach)) == JSONDecoder().decode(JSONValue.self, from: fixture("attach")))
+        let owner = ServerClientMessage.request(id: "owner-1", operation: .sessionOwner(session: "session_5e55105e000040008000000000000001"))
+        #expect(try encoded(owner) == self.value("session_owner"))
+        let attach = ServerClientMessage.request(id: "terminal-1", operation: .attach(owner: trace))
+        #expect(try encoded(attach) == self.value("attach"))
     }
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
-        let request = ServerRequest(version: 1, id: "view-1", operation: .read(
+        let request = ServerClientMessage.request(id: "view-1", operation: .read(
             .viewPlan(directory: "/repo", expression: "task:INF-123")))
-        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("view_plan")))
-    }
-
-    @Test func transportReadinessDoesNotRequireWorkBootstrap() throws {
-        let request = ServerRequest(version: 1, id: "status-1", operation: .status)
-        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("status_request")))
-        let response = try JSONDecoder().decode(ServerResponse.self, from: fixture("status"))
-        guard case .status(let version, let hash) = response.result else { Issue.record("Missing status"); return }
-        #expect(version == 1)
-        #expect(hash == String(repeating: "a", count: 64))
+        #expect(try encoded(request) == value("view_plan"))
     }
 
     @Test func configurationUsesTheSharedDestinationContract() throws {
-        let raw = try fixture("configuration")
-        let value = try JSONDecoder().decode(JSONValue.self, from: raw)
-        guard case .object(let root) = value, case .object(let operation) = root["operation"],
+        let raw = try value("configuration")
+        guard case .object(let root) = raw, case .object(let operation) = root["operation"],
               let request = operation["request"] else { Issue.record("Missing configuration request"); return }
-        let encoded = ServerRequest(version: 1, id: "config-1", operation: .configuration(request))
-        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(encoded)) == value)
+        #expect(try encoded(.request(id: "config-1", operation: .configuration(request))) == raw)
     }
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
-        let request = ServerRequest(version: 1, id: "adopt-1", operation: .command(
+        let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
             .taskFromSession(directory: "/repo", id: "session_5e55105e000040008000000000000001",
                              title: "Keep the conversation")))
-        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("task_from_session")))
+        #expect(try encoded(request) == value("task_from_session"))
     }
 
-    @Test func missingRequiredReplyDoesNotBecomeAnEmptyReading() {
+    @Test func connectionErrorsHaveNoRequestId() throws {
+        guard case .error(let id, let code, let message) = try message("error") else { Issue.record("Missing error"); return }
+        #expect(id == nil)
+        #expect(code == "incompatible")
+        #expect(message.contains("update the selected installation"))
+    }
+
+    @Test func missingRequiredFieldsDoNotBecomeDefaults() {
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerResponse.self, from: Data(#"{"id":"x","instance":"i","result":{"kind":"reading","generation":1}}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x","generation":1}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":2}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
         }
     }
 }

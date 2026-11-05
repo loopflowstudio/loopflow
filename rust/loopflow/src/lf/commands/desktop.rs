@@ -839,21 +839,21 @@ pub fn saved_layout(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
     work: &str,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::work::selection::DashboardId;
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
     Ok(match work.strip_prefix("query:") {
-        Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
+        Some(id) => serde_json::to_value(DesktopLayoutRecord::Dashboard(
             &reader
                 .sqlite
                 .read_dashboard(&repository, &DashboardId(id.into()))?
                 .ok_or(crate::store::StoreError::NotFound)?
                 .saved,
         ))?,
-        None => serde_json::to_string(&DesktopLayoutRecord::Work(
+        None => serde_json::to_value(DesktopLayoutRecord::Work(
             &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
         ))?,
     })

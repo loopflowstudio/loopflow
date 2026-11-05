@@ -6,8 +6,8 @@ pub mod wire;
 use std::path::PathBuf;
 
 pub fn socket_path() -> anyhow::Result<PathBuf> {
-    // Keep the installed revision-1 endpoint stable: relays from before the
-    // namespace cutover must reconnect to this same listener after an update.
+    // Keep the installed endpoint stable: relays from before the namespace
+    // cutover must reconnect to this same listener after an update.
     Ok(crate::transport::private_directory()?.join("machine.sock"))
 }
 

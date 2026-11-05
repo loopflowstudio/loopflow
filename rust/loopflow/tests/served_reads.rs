@@ -15,14 +15,15 @@ use support::{register_task_with_pr, EnvGuard};
 
 #[test]
 fn configuration_readiness_recognizes_an_older_server_for_replacement() {
-    use loopflow::server::wire::{ErrorCode, Reply, Response};
-    use std::io::{Read, Write};
+    use std::io::Read;
     use std::os::unix::net::UnixListener;
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let listener = UnixListener::bind(loopflow::server::socket_path().unwrap()).unwrap();
+    // A revision-1 listener reads the probe's first bytes as an absurd frame
+    // length and closes without answering.
     let older = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
         socket
@@ -30,29 +31,15 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
             .unwrap();
         let mut header = [0; 4];
         socket.read_exact(&mut header).unwrap();
-        let mut bytes = vec![0; u32::from_be_bytes(header) as usize];
-        socket.read_exact(&mut bytes).unwrap();
-        let request: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(request["operation"]["kind"], "status");
-        let response = serde_json::to_vec(&Response {
-            id: String::new(),
-            instance: "older-listener".into(),
-            result: Reply::Error {
-                code: ErrorCode::Invalid,
-                message: "unknown variant status".into(),
-            },
-        })
-        .unwrap();
-        socket
-            .write_all(&(response.len() as u32).to_be_bytes())
-            .unwrap();
-        socket.write_all(&response).unwrap();
+        assert_eq!(&header, b"{\"ty");
     });
     let status = loopflow::server::client::status().unwrap();
     older.join().unwrap();
     assert!(!status.ready);
-    assert_eq!(status.instance.as_deref(), Some("older-listener"));
-    assert!(status.error.unwrap().contains("unknown variant status"));
+    assert!(status.listening);
+    assert!(status.instance.is_none());
+    assert!(status.revision.is_none());
+    assert!(status.error.unwrap().contains("older protocol"));
     assert!(!home.path().join("loopflow.db").exists());
 }
 
@@ -73,18 +60,29 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let status: Value =
         serde_json::from_str(&read(repo.path(), home.path(), &["server", "status"], None)).unwrap();
     assert_eq!(status["ready"], true, "{status}");
-    let request = |request| {
-        let (_, response) =
-            loopflow::server::client::connect(Operation::Configuration { request }).unwrap();
+    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    assert!(
+        connection.welcome().machine.is_none(),
+        "an unreadable registry leaves the Machine unknown, not the connection refused"
+    );
+    let mut request = |request| {
         let Reply::Command {
             code,
             output,
             stderr,
             trace_id,
-        } = response.result
+            value,
+        } = connection
+            .request(Operation::Configuration { request })
+            .unwrap()
         else {
             panic!("configuration did not return a command result")
         };
+        if code == 0 {
+            assert_eq!(value, Some(serde_json::from_str(&output).unwrap()));
+        } else {
+            assert_eq!(value, None);
+        }
         (code, output, stderr, trace_id)
     };
     let (code, output, error, _) = request(Request::Catalog);
@@ -179,20 +177,21 @@ fn served_binding_returns_directory_diagnostics_and_selects_the_conversation() {
     assert_ne!(session["cwd"], destination.to_str().unwrap());
     let _server = Server::start(repo.path(), home.path());
     let before = processes(&home.path().join("loopflow.db"));
-    let (_, response) = loopflow::server::client::connect(Operation::Command {
-        change: Write::SessionBind {
-            directory: repo.path().to_owned(),
-            id: session["id"].as_str().unwrap().into(),
-            task: task["id"].as_str().unwrap().into(),
-        },
-    })
-    .unwrap();
     let Reply::Command {
         output,
         stderr,
         code,
         ..
-    } = response.result
+    } = loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(Operation::Command {
+            change: Write::SessionBind {
+                directory: repo.path().to_owned(),
+                id: session["id"].as_str().unwrap().into(),
+                task: task["id"].as_str().unwrap().into(),
+            },
+        })
+        .unwrap()
     else {
         panic!("binding did not return a command result")
     };
@@ -255,14 +254,16 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         };
         let served = |change| {
             let before = processes(&database);
-            let (_, response) =
-                loopflow::server::client::connect(Operation::Command { change }).unwrap();
             let Reply::Command {
                 output,
                 stderr,
                 code,
                 trace_id,
-            } = response.result
+                ..
+            } = loopflow::server::client::Connection::open()
+                .unwrap()
+                .request(Operation::Command { change })
+                .unwrap()
             else {
                 panic!("adoption did not return a command receipt")
             };
@@ -632,40 +633,30 @@ fn server_operations_match_their_lf_commands() {
         serve();
         assert_eq!(changes(&database), before, "{argv:?} wrote");
     };
-    for served in reads {
-        let owned = served.argv();
+    for query in reads {
+        let owned = query.argv();
         let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
-        let printed = read(repo.path(), home.path(), &argv, served.input());
-        let mut text = String::new();
-        unchanged(&argv, &mut || text = server_read(served.clone()));
-        let served = text;
+        let printed = read(repo.path(), home.path(), &argv, query.input());
+        let mut served = Value::Null;
+        unchanged(&argv, &mut || served = server_read(query.clone()));
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
-            // `config repository --path` prints a path, not JSON.
-            assert_eq!(served.trim(), printed.trim(), "{argv:?}");
+            // `config repository --path` prints a path, not JSON: its value is that text.
+            assert_eq!(served, Value::String(printed.trim().into()), "{argv:?}");
             continue;
         };
-        let served: Value = serde_json::from_str(&served).unwrap();
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
     for served in watches {
         let mut argv = served.argv();
         argv.push("--watch".into());
-        let mut frame = Vec::new();
+        let mut frame = Value::Null;
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
-            let (_, response) =
-                loopflow::server::client::connect(loopflow::server::wire::Operation::Subscribe {
-                    query: served.clone(),
-                    generation: 1,
-                })
-                .unwrap();
-            let loopflow::server::wire::Reply::Reading { frame: reading, .. } = response.result
-            else {
-                panic!("unexpected subscription: {:?}", response.result);
-            };
-            frame = serde_json::to_vec(&reading).unwrap();
+            let mut connection = loopflow::server::client::Connection::open().unwrap();
+            let id = connection.subscribe(served.clone(), 1).unwrap();
+            frame = connection.reading(&id).unwrap();
         });
-        let served: Value = serde_json::from_slice(&frame).unwrap();
+        let served = frame;
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
         let printed = first_frame(repo.path(), home.path(), &argv);
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
@@ -673,14 +664,11 @@ fn server_operations_match_their_lf_commands() {
 
     let directory = repo.path().to_owned();
     let file_revision = || {
-        let file: Value = serde_json::from_str(
-            &Read::TaskFile {
-                issue: "INF-123".into(),
-                path: "edit.txt".into(),
-            }
-            .read()
-            .unwrap(),
-        )
+        let file = Read::TaskFile {
+            issue: "INF-123".into(),
+            path: "edit.txt".into(),
+        }
+        .read()
         .unwrap();
         file["revision"].as_str().unwrap().to_owned()
     };
@@ -695,30 +683,24 @@ fn server_operations_match_their_lf_commands() {
     // What a write changed, as the app reads it.
     let effect = |issue: &str| {
         without_clock(
-            serde_json::from_str(
-                &Read::Roadmap {
-                    directory: directory.clone(),
-                    wave: None,
-                    task: Some(issue.into()),
-                    all: false,
-                }
-                .read()
-                .unwrap(),
-            )
+            Read::Roadmap {
+                directory: directory.clone(),
+                wave: None,
+                task: Some(issue.into()),
+                all: false,
+            }
+            .read()
             .unwrap(),
         )
     };
     let repository_id = repository["id"].as_str().unwrap().to_owned();
     // A saved record as the app reads it, and the revision a write names.
     let layout = |work: &str| -> Value {
-        serde_json::from_str(
-            &Read::PaneLayout {
-                directory: directory.clone(),
-                work: work.into(),
-            }
-            .read()
-            .unwrap(),
-        )
+        Read::PaneLayout {
+            directory: directory.clone(),
+            work: work.into(),
+        }
+        .read()
         .unwrap()
     };
     let revision = |work: &str| layout(work)["revision"].as_i64().unwrap();
@@ -868,11 +850,11 @@ fn server_operations_match_their_lf_commands() {
                         member: format!("task:{task_id}"),
                         hidden,
                     };
-                    let _ = loopflow::server::client::connect(
-                        loopflow::server::wire::Operation::Command {
+                    let _ = loopflow::server::client::Connection::open().and_then(|mut c| {
+                        c.request(loopflow::server::wire::Operation::Command {
                             change: tile(false),
-                        },
-                    );
+                        })
+                    });
                     tile(true)
                 }),
                 Box::new(|| Write::DashboardSlots {
@@ -975,19 +957,18 @@ fn server_operations_match_their_lf_commands() {
         issue: "INF-123".into(),
     };
     let stopped = || {
-        let task = Read::DesktopTask {
+        Read::DesktopTask {
             directory: directory.clone(),
             issue: "INF-123".into(),
         }
         .read()
-        .unwrap();
-        serde_json::from_str::<Value>(&task).unwrap()["execution"]["ship_stop"]["by"].clone()
+        .unwrap()["execution"]["ship_stop"]["by"]
+            .clone()
     };
     assert!(compare(stop.clone(), &|| stop.clone(), &stopped) > 0);
     assert_eq!(stopped()["kind"], "person", "no stop saved");
     // Which repositories the app shows, as the app reads them.
-    let portfolio =
-        || without_clock(serde_json::from_str(&Read::Portfolio.read().unwrap()).unwrap());
+    let portfolio = || without_clock(Read::Portfolio.read().unwrap());
     let manual = Write::Portfolio {
         change: vec!["manual".into()],
     };
@@ -1009,7 +990,7 @@ fn server_operations_match_their_lf_commands() {
     };
     assert_eq!(compare(customize.clone(), &recustomize, &customized), 0);
     // A chapter preview reads the rotation it would make and records nothing.
-    let waves: Value = serde_json::from_str(&Read::Waves.read().unwrap()).unwrap();
+    let waves = Read::Waves.read().unwrap();
     let wave_id = waves
         .as_array()
         .unwrap()
@@ -1060,19 +1041,22 @@ fn server_operations_match_their_lf_commands() {
         id: session.clone(),
         name: " ".into(),
     };
-    let (_, response) = loopflow::server::client::connect(Operation::Command {
-        change: failure.clone(),
-    })
-    .unwrap();
     let Reply::Command {
         trace_id,
         output,
         stderr,
         code,
-    } = response.result
+        value,
+    } = loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(Operation::Command {
+            change: failure.clone(),
+        })
+        .unwrap()
     else {
         panic!("expected failed command")
     };
+    assert_eq!(value, None, "a failed command prints no JSON");
     let cli = isolated_lf(repo.path(), home.path(), &failure.argv())
         .wait_with_output()
         .unwrap();
@@ -1117,19 +1101,22 @@ fn server_operations_match_their_lf_commands() {
                     name: name.into(),
                 };
                 threads.spawn(move || {
-                    let (_, response) =
-                        loopflow::server::client::connect(Operation::Command { change }).unwrap();
                     let Reply::Command {
                         trace_id,
                         code,
                         output,
                         stderr,
-                    } = response.result
+                        value,
+                    } = loopflow::server::client::Connection::open()
+                        .unwrap()
+                        .request(Operation::Command { change })
+                        .unwrap()
                     else {
                         panic!("expected command")
                     };
                     assert_eq!(code, 0, "{stderr}");
                     let saved: Value = serde_json::from_str(&output).unwrap();
+                    assert_eq!(value.as_ref(), Some(&saved), "`--json` output is the value");
                     assert_eq!(saved["id"], *id);
                     assert_eq!(saved["title"], name);
                     (trace_id, id.clone())
@@ -1204,22 +1191,16 @@ fn server_operations_match_their_lf_commands() {
     // persisted result after dropping the connection while the write is held.
     let lock = rusqlite::Connection::open(&database).unwrap();
     lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-    let request = loopflow::server::wire::Request {
-        version: loopflow::server::wire::VERSION,
-        id: "lost-reply".into(),
-        operation: Operation::Command {
+    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    connection
+        .send(Operation::Command {
             change: Write::SessionRename {
                 directory: directory.clone(),
                 id: other.clone(),
                 name: "After disconnect".into(),
             },
-        },
-    };
-    let bytes = serde_json::to_vec(&request).unwrap();
-    let mut socket =
-        std::os::unix::net::UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();
-    std::io::Write::write_all(&mut socket, &(bytes.len() as u32).to_be_bytes()).unwrap();
-    std::io::Write::write_all(&mut socket, &bytes).unwrap();
+        })
+        .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
@@ -1235,7 +1216,7 @@ fn server_operations_match_their_lf_commands() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    drop(socket);
+    drop(connection);
     lock.execute_batch("ROLLBACK").unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -1358,8 +1339,9 @@ impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
         let server = Self(isolated_lf(repo, home, &["server", "run"]));
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        while loopflow::server::client::connect(loopflow::server::wire::Operation::Status).is_err()
-        {
+        // Readiness as a client sees it; `status()` would compare the server's
+        // executable with this test binary.
+        while loopflow::server::client::Connection::open().is_err() {
             assert!(std::time::Instant::now() < deadline, "server did not start");
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -1374,21 +1356,23 @@ impl Drop for Server {
     }
 }
 
-fn server_read(query: loopflow::lf::commands::read::Read) -> String {
-    let (_, response) =
-        loopflow::server::client::connect(loopflow::server::wire::Operation::Read { query })
-            .unwrap();
-    match response.result {
-        loopflow::server::wire::Reply::Read { output } => output,
+fn server_read(query: loopflow::lf::commands::read::Read) -> Value {
+    match loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Read { query })
+        .unwrap()
+    {
+        loopflow::server::wire::Reply::Read { value } => value,
         result => panic!("unexpected read: {result:?}"),
     }
 }
 
 fn server_write(change: loopflow::lf::commands::write::Write) -> String {
-    let (_, response) =
-        loopflow::server::client::connect(loopflow::server::wire::Operation::Command { change })
-            .unwrap();
-    match response.result {
+    match loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Command { change })
+        .unwrap()
+    {
         loopflow::server::wire::Reply::Command {
             output,
             stderr,

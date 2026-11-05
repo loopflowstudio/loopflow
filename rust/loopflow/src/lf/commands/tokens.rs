@@ -322,11 +322,11 @@ fn print_history(snapshots: &[CodeSnapshot]) {
 
 /// What `lf ops tokens --json` prints in `directory`: its repository's
 /// tree, or with `days`, how big it was on each day it changed.
-pub(crate) fn codebase(directory: &Path, days: Option<u32>) -> Result<String> {
+pub(crate) fn codebase(directory: &Path, days: Option<u32>) -> Result<serde_json::Value> {
     let root = repo_root(directory)?;
     Ok(match days {
-        Some(days) => serde_json::to_string(&history(&root, days)?)?,
-        None => serde_json::to_string(&tree(&root)?)?,
+        Some(days) => serde_json::to_value(history(&root, days)?)?,
+        None => serde_json::to_value(tree(&root)?)?,
     })
 }
 

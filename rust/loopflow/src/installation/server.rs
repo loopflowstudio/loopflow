@@ -24,7 +24,7 @@ pub fn ensure() -> Result<crate::server::client::Status> {
     }
     let home = crate::store::lf_home_dir().canonicalize()?;
     let executable = crate::os_process::resolve_lf_binary()?;
-    register(&home, &executable, before.instance.is_some())?;
+    register(&home, &executable, before.listening)?;
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let status = crate::server::client::status()?;

@@ -796,7 +796,7 @@ pub(crate) fn show_json(
     task: Option<&str>,
     all: bool,
     shape: Shape,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
         let observe = shape == Shape::Tasks;
@@ -804,7 +804,7 @@ pub(crate) fn show_json(
         let roadmap = shape
             .print(store.as_ref(), roadmap, RoadmapSnapshot::rows)
             .await?;
-        Ok(serde_json::to_string(&roadmap)?)
+        Ok(serde_json::to_value(roadmap)?)
     })
 }
 

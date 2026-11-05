@@ -4459,17 +4459,10 @@ impl<'a> ServerProof<'a> {
     fn ready(&self) -> String {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if let Ok(mut socket) = UnixStream::connect(self.fixture.endpoint("machine")) {
-                socket
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                server_send(
-                    &mut socket,
-                    json!({"version":1,"id":"ready","operation":{"kind":"bootstrap"}}),
-                );
-                let response = server_receive(&mut socket);
-                assert_eq!(response["result"]["kind"], "bootstrap", "{response}");
-                return response["instance"].as_str().unwrap().to_owned();
+            if let Ok(connection) =
+                loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
+            {
+                return connection.welcome().instance.clone();
             }
             assert!(
                 Instant::now() < deadline,
@@ -4510,23 +4503,28 @@ impl<'a> ServerProof<'a> {
         }
     }
 
-    fn request(&self, id: &str, operation: Value) -> (UnixStream, Value) {
-        let mut socket = UnixStream::connect(self.fixture.endpoint("machine")).unwrap();
-        socket
+    fn connect(&self) -> loopflow::server::client::Connection {
+        let connection =
+            loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
+                .unwrap();
+        connection
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
-        server_send(
-            &mut socket,
-            json!({"version":1,"id":id,"operation":operation}),
-        );
-        let response = server_receive(&mut socket);
-        assert_eq!(response["id"], id);
-        (socket, response)
+        connection
+    }
+
+    fn request(&self, operation: Value) -> loopflow::server::wire::Reply {
+        self.connect()
+            .request(serde_json::from_value(operation).unwrap())
+            .unwrap()
     }
 
     fn viewer(&self, owner: &str) -> Viewer {
-        let (socket, response) = self.request("attach", json!({"kind":"attach","owner":owner}));
-        assert_eq!(response["result"]["kind"], "bridged");
+        let socket = loopflow::server::client::attach(
+            &self.fixture.endpoint("machine"),
+            &serde_json::from_value(json!(owner)).unwrap(),
+        )
+        .unwrap();
         Viewer::new(socket).attach(
             json!({"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80}),
         )
@@ -4567,24 +4565,6 @@ fn request_server_move(status: &Path) {
     let pending = status.with_extension("action-pending");
     std::fs::write(&pending, reading["generation"].to_string()).unwrap();
     std::fs::rename(pending, status.with_extension("move")).unwrap();
-}
-
-fn server_send(socket: &mut UnixStream, value: Value) {
-    let bytes = serde_json::to_vec(&value).unwrap();
-    socket
-        .write_all(&(bytes.len() as u32).to_be_bytes())
-        .unwrap();
-    socket.write_all(&bytes).unwrap();
-}
-
-fn server_receive(socket: &mut UnixStream) -> Value {
-    let mut header = [0; 4];
-    socket.read_exact(&mut header).unwrap();
-    let length = u32::from_be_bytes(header) as usize;
-    assert!(length <= 32 * 1024 * 1024);
-    let mut bytes = vec![0; length];
-    socket.read_exact(&mut bytes).unwrap();
-    serde_json::from_slice(&bytes).unwrap()
 }
 
 #[cfg(target_os = "macos")]
@@ -4697,48 +4677,62 @@ fn server_status_does_not_install_or_create_work() {
 
 #[test]
 fn server_invalid_checkpoints_use_shared_watch_errors() {
+    use loopflow::server::client::ServerError;
+    use loopflow::server::wire::ErrorCode;
+
     let fixture = Fixture::new();
     let service = ServerProof::start(&fixture, false);
+    let query = || {
+        serde_json::from_value(
+            json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true}),
+        )
+        .unwrap()
+    };
     for checkpoint in [json!({"unknown": 1}), json!({"id": 1, "args": false})] {
-        let (mut socket, initial) = service.request(
-            "tasks",
-            json!({"kind":"subscribe","query":{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":7}),
-        );
-        assert_eq!(initial["result"]["kind"], "reading");
-        server_send(&mut socket, checkpoint);
+        let mut connection = service.connect();
+        let id = connection.subscribe(query(), 7).unwrap();
+        let initial = connection.reading(&id).unwrap();
+        assert!(initial["unavailable"].is_null(), "{initial}");
+        connection.checkpoint(&id, checkpoint).unwrap();
         loop {
-            let response = server_receive(&mut socket);
-            assert_eq!(response["id"], "tasks");
-            assert_eq!(response["result"]["kind"], "reading");
-            assert_eq!(response["result"]["generation"], 7);
-            let frame = &response["result"]["frame"];
+            let frame = connection.reading(&id).unwrap();
             if let Some(error) = frame["unavailable"].as_str() {
                 assert!(error.contains("invalid watch request"), "{error}");
                 assert!(frame["body"].is_null());
                 break;
             }
         }
-        assert_eq!(socket.read(&mut [0]).unwrap(), 0);
+        // The watch's failure ends its subscription; the connection stays open.
+        let ended = connection.reading(&id).unwrap_err();
+        let ended = ended
+            .downcast::<ServerError>()
+            .unwrap_or_else(|other| panic!("not a server error: {other:?}"));
+        assert_eq!(ended.code, ErrorCode::Unavailable);
+        assert!(ended.message.contains("invalid watch request"), "{ended}");
+        let again = connection.subscribe(query(), 8).unwrap();
+        assert!(connection.reading(&again).unwrap()["unavailable"].is_null());
     }
 }
 
 #[test]
 fn server_subscriptions_refresh_work_and_resolve_primary_session() {
+    use loopflow::server::wire::Reply;
+
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
     let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
-    let (mut watch, initial) = service.request(
-        "tasks",
-        json!({"kind":"subscribe","query":query,"generation":7}),
-    );
-    assert_eq!(initial["result"]["kind"], "reading");
-    assert_eq!(initial["result"]["generation"], 7);
-    server_send(&mut watch, json!({"id":17}));
-    let confirmed = server_receive(&mut watch);
-    assert_eq!(confirmed["result"]["frame"]["answers"], 17);
+    let mut watch = service.connect();
+    let tasks = watch
+        .subscribe(serde_json::from_value(query).unwrap(), 7)
+        .unwrap();
+    let initial = watch.reading(&tasks).unwrap();
+    assert!(initial["unavailable"].is_null(), "{initial}");
+    watch.checkpoint(&tasks, json!({"id":17})).unwrap();
+    let confirmed = watch.reading(&tasks).unwrap();
+    assert_eq!(confirmed["answers"], 17);
 
     // Write parity, concurrent traces and no request Process rows are covered
     // by served_reads. This proof owns live subscription invalidation.
@@ -4756,13 +4750,16 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
         rusqlite::params![registered.task.id.as_str(), session],
     )
     .unwrap();
-    let (_, view) = service.request(
-        "primary",
-        json!({"kind":"read","query":{"read":"view_plan","directory":fixture.repo.path(),"expression":"task:INF-123"}}),
-    );
-    assert_eq!(view["result"]["kind"], "read", "{view}");
-    let socket_plan: Value =
-        serde_json::from_str(view["result"]["output"].as_str().unwrap()).unwrap();
+    // The read shares the watch's connection.
+    let Reply::Read { value: socket_plan } = watch
+        .request(
+            serde_json::from_value(json!({"kind":"read","query":{"read":"view_plan","directory":fixture.repo.path(),"expression":"task:INF-123"}}))
+                .unwrap(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a read")
+    };
     let cli = service
         .command(&["desktop", "view", "task:INF-123", "--plan", "--json"])
         .output()
@@ -4775,16 +4772,11 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let cli_plan: Value = serde_json::from_slice(&cli.stdout).unwrap();
     assert_eq!(socket_plan, cli_plan);
     assert_eq!(socket_plan["contents"][0]["primary_session"], session);
-    server_send(&mut watch, json!({"id":18}));
+    watch.checkpoint(&tasks, json!({"id":18})).unwrap();
     loop {
-        let changed = server_receive(&mut watch);
-        if changed["result"]["frame"]["answers"] == 18 {
-            assert!(
-                changed["result"]["frame"]["body"]
-                    .to_string()
-                    .contains("INF-123"),
-                "{changed}"
-            );
+        let changed = watch.reading(&tasks).unwrap();
+        if changed["answers"] == 18 {
+            assert!(changed["body"].to_string().contains("INF-123"), "{changed}");
             break;
         }
     }
@@ -5292,9 +5284,12 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let owner_pid = pid_of_process(&fixture, &owner);
     let session = fixture.session_of_owner(&owner);
     let first_instance = service.ready();
-    let (_, resolved) =
-        service.request("resolve", json!({"kind":"session_owner","session":session}));
-    assert_eq!(resolved["result"]["owner"], owner);
+    let loopflow::server::wire::Reply::SessionOwner { owner: resolved } =
+        service.request(json!({"kind":"session_owner","session":session}))
+    else {
+        panic!("expected the Session owner")
+    };
+    assert_eq!(serde_json::to_value(resolved).unwrap(), owner);
     let mut viewer = service.viewer(&owner);
     viewer.input("draft");
     drop(viewer); // Desktop quit: the owner keeps its native editor.

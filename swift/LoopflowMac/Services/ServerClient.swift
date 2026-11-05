@@ -3,90 +3,87 @@ import Darwin
 import Foundation
 import Loopflow
 
-/// Shared Work operations use the server; service errors remain visible.
+/// Shared Work operations use the server over one connection per location;
+/// service errors remain visible.
 enum ServerClient {
+    /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
     static func read(_ query: ServedRead, location: ServerLocation = .shared) async throws -> String {
-        let response = try await request(.read(query), location: location)
-        guard case .read(let output) = response else { throw RegistryQueryError("Unexpected Server reading") }
-        return output
+        guard case .read(let value) = try await request(.read(query), location: location) else {
+            throw RegistryQueryError("Unexpected Server reading")
+        }
+        if case .string(let text) = value { return text }
+        return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
     }
 
     static func write(_ change: ServedWrite, location: ServerLocation = .shared) async throws -> String {
-        let response = try await request(.command(change), location: location)
-        return try commandOutput(response)
+        try commandOutput(await request(.command(change), location: location))
     }
 
     static func configuration(_ value: JSONValue, location: ServerLocation = .shared) async throws -> Data {
-        let response = try await request(.configuration(value), location: location)
-        return Data(try commandOutput(response).utf8)
+        Data(try commandOutput(await request(.configuration(value), location: location)).utf8)
     }
 
-    private static func commandOutput(_ response: ServerReply) throws -> String {
-        guard case .command(_, let output, let stderr, let code) = response else {
+    private static func commandOutput(_ reply: ServerReply) throws -> String {
+        guard case .command(_, let code, _, let output, let stderr) = reply else {
             throw RegistryQueryError("Server command outcome unknown; inspect the affected work before retrying")
         }
         guard code == 0 else { throw RegistryQueryError(stderr, stdout: output) }
         return output
     }
 
-    private static func request(_ operation: ServerOperation, location: ServerLocation = .shared) async throws -> ServerReply {
+    private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> ServerReply {
         try Task.checkCancellation()
-        let path = try await location.path()
-        try Task.checkCancellation()
-        let request = ServerRequestConnection()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                Thread.detachNewThread {
-                    do {
-                        let connection = try ServerSocket(path: path)
-                        defer { connection.close() }
-                        try request.connect(connection)
-                        let id = UUID().uuidString
-                        try connection.send(JSONEncoder().encode(ServerRequest(version: 1, id: id, operation: operation)))
-                        let reply = try connection.receive(id: id).result
-                        try request.checkCancellation()
-                        continuation.resume(returning: reply)
-                    } catch {
-                        do { try request.checkCancellation() }
-                        catch { continuation.resume(throwing: error); return }
-                        continuation.resume(throwing: error)
-                    }
-                }
-            }
-        } onCancel: {
-            request.cancel()
-        }
+        let link = try await links.link(for: location)
+        return try await link.request(operation)
     }
 
+    /// A subscription on the location's connection; `send` carries checkpoints,
+    /// `cancel` ends it. The watch fails when the server ends it or disconnects.
     static func watch(_ query: ServedRead, location: ServerLocation = .shared) -> LineWatch {
-        let watch = ServerWatch(query, location: location)
-        return LineWatch(lines: watch.lines, send: watch.send, cancel: watch.cancel)
+        // Never drop a checkpoint silently. A slow consumer reconnects with a
+        // fresh reading, using the existing WorkObservation recovery path.
+        let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream(bufferingPolicy: .bufferingOldest(8))
+        let subscription = ServerSubscription(continuation)
+        Task {
+            do {
+                try Task.checkCancellation()
+                let link = try await links.link(for: location)
+                try subscription.start(on: link, query: query)
+            } catch { subscription.finish(throwing: error) }
+        }
+        return LineWatch(lines: lines, send: subscription.send, cancel: subscription.cancel)
     }
+
+    private static let links = ServerLinks()
 }
 
-/// Cancellation releases this viewer's wait, never the command's execution.
-private final class ServerRequestConnection: @unchecked Sendable {
-    private let lock = NSLock()
-    private var socket: ServerSocket?
-    private var cancelled = false
+/// One live connection per server location, reopened on demand with bounded
+/// backoff after consecutive failures to open.
+private actor ServerLinks {
+    private var links: [ObjectIdentifier: Task<ServerLink, any Error>] = [:]
+    private var failures: [ObjectIdentifier: Int] = [:]
 
-    func connect(_ socket: ServerSocket) throws {
-        try lock.withLock {
-            guard !cancelled else { throw CancellationError() }
-            self.socket = socket
+    func link(for location: ServerLocation) async throws -> ServerLink {
+        let key = ObjectIdentifier(location)
+        while let opening = links[key] {
+            if let link = try? await opening.value, !link.isClosed { return link }
+            if links[key] == opening { links[key] = nil }
         }
-    }
-
-    func checkCancellation() throws {
-        try lock.withLock {
-            if cancelled { throw CancellationError() }
+        let attempt = failures[key] ?? 0
+        let opening = Task {
+            if attempt > 0 { try await Task.sleep(for: .milliseconds(min(100 << (attempt - 1), 3200))) }
+            let path = try await location.path()
+            return try await ServerLink.open(path: path)
         }
-    }
-
-    func cancel() {
-        lock.withLock {
-            cancelled = true
-            socket?.shutdown()
+        links[key] = opening
+        do {
+            let link = try await opening.value
+            failures[key] = 0
+            return link
+        } catch {
+            failures[key] = attempt + 1
+            if links[key] == opening { links[key] = nil }
+            throw error
         }
     }
 }
@@ -115,7 +112,6 @@ actor ServerLocation {
                 struct Status: Decodable {
                     let socket: String
                     let ready: Bool
-                    let instance: String?
                     let error: String?
                 }
                 let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
@@ -142,23 +138,182 @@ actor ServerLocation {
     }
 }
 
-/// One bounded stream and a single reader. Shutdown interrupts the read; only
-/// the reader closes its descriptor, so cancellation cannot race descriptor reuse.
-private final class ServerSocket: @unchecked Sendable {
+/// One server connection: hello and welcome once, then requests, subscriptions
+/// and cancels by id. One reader thread demultiplexes answers; writes serialize.
+/// Losing the connection fails every pending request and subscription.
+final class ServerLink: @unchecked Sendable {
+    let welcome: ServerWelcome
     private let fd: Int32
-    private let writes = NSLock()
     private let state = NSLock()
-    private var closed = false
-    static let maxFrame = 32 * 1024 * 1024
+    private let writes = NSLock()
+    private var pending: [String: CheckedContinuation<ServerReply, any Error>] = [:]
+    private var subscriptions: [String: ServerSubscription] = [:]
+    private var failure: (any Error)?
+    private var reader: LineReader
 
-    init(path: String) throws {
+    /// Connect, say hello and read welcome off the caller's executor.
+    static func open(path: String) async throws -> ServerLink {
+        try await withCheckedThrowingContinuation { continuation in
+            Thread.detachNewThread {
+                do { continuation.resume(returning: try ServerLink(path: path)) } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    /// How long the server has to welcome the connection; the session's reads
+    /// are then unbounded, so a stalled open releases `ServerLinks` to back off.
+    static let handshakeSeconds = 10
+
+    private init(path: String) throws {
+        fd = try Self.connect(path)
+        var reader = LineReader(fd: fd)
+        do {
+            Self.setReceiveTimeout(fd, seconds: Self.handshakeSeconds)
+            let hello = ServerHello(revision: ServerProtocol.revision, minRevision: ServerProtocol.minRevision, client: ServerClientIdentity(
+                kind: "desktop", platform: "macos", name: "Loopflow", version: LaunchJournal.appVersion))
+            try Self.write(fd, Self.line(.hello(hello)))
+            guard let first = try reader.next() else {
+                throw RegistryQueryError("Loopflow server closed the connection without answering; it may speak an older protocol; update the selected installation")
+            }
+            switch try JSONDecoder().decode(ServerMessage.self, from: first) {
+            case .welcome(let welcome): self.welcome = welcome
+            case .error(_, let code, let message): throw RegistryQueryError("\(code): \(message)")
+            default: throw RegistryQueryError("Server did not welcome the connection")
+            }
+            Self.setReceiveTimeout(fd, seconds: 0)
+        } catch {
+            Darwin.close(fd)
+            throw error
+        }
+        self.reader = reader
+        Thread.detachNewThread { [self] in run() }
+    }
+
+    var isClosed: Bool { state.withLock { failure != nil } }
+
+    /// One request and its answer. Cancelling the task sends `cancel` and
+    /// releases the wait; a command already dispatched may still complete.
+    func request(_ operation: ServerOperation) async throws -> ServerReply {
+        let id = UUID().uuidString
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let refused: (any Error)? = state.withLock {
+                    if let failure { return failure }
+                    if Task.isCancelled { return CancellationError() }
+                    pending[id] = continuation
+                    return nil
+                }
+                if let refused { continuation.resume(throwing: refused); return }
+                do { try send(.request(id: id, operation: operation)) } catch {
+                    if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: error) }
+                }
+            }
+        } onCancel: {
+            if let waiting = state.withLock({ pending.removeValue(forKey: id) }) {
+                try? send(.cancel(id: id))
+                waiting.resume(throwing: CancellationError())
+            }
+        }
+    }
+
+    fileprivate func subscribe(_ subscription: ServerSubscription, query: ServedRead) throws {
+        let refused: (any Error)? = state.withLock {
+            if let failure { return failure }
+            subscriptions[subscription.id] = subscription
+            return nil
+        }
+        if let refused { throw refused }
+        do { try send(.request(id: subscription.id, operation: .subscribe(query, generation: 1))) } catch {
+            _ = state.withLock { subscriptions.removeValue(forKey: subscription.id) }
+            throw error
+        }
+    }
+
+    fileprivate func unsubscribe(_ id: String) {
+        let alive = state.withLock {
+            subscriptions.removeValue(forKey: id)
+            return failure == nil
+        }
+        if alive { try? send(.cancel(id: id)) }
+    }
+
+    fileprivate func send(_ message: ServerClientMessage) throws {
+        let line = try Self.line(message)
+        try writes.withLock {
+            if let failure = state.withLock({ failure }) { throw failure }
+            try Self.write(fd, line)
+        }
+    }
+
+    private func run() {
+        let ended: any Error
+        do {
+            while let line = try reader.next() { try dispatch(line) }
+            ended = RegistryQueryError("Server disconnected; refresh state before retrying a command")
+        } catch { ended = error }
+        fail(ended)
+    }
+
+    private func dispatch(_ line: Data) throws {
+        switch try JSONDecoder().decode(ServerMessage.self, from: line) {
+        case .response(let id, let result):
+            if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(returning: result) }
+            // `subscribed` confirms a registered subscription; anything else is
+            // a late answer to a forgotten request.
+        case .reading(let id, _, let frame):
+            state.withLock { subscriptions[id] }?.receive(frame)
+        case .error(let id?, let code, let message):
+            let refusal = RegistryQueryError("\(code): \(message)")
+            if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: refusal); return }
+            state.withLock { subscriptions.removeValue(forKey: id) }?.finish(throwing: refusal)
+        case .error(nil, let code, let message):
+            throw RegistryQueryError("\(code): \(message)")
+        case .welcome, .status:
+            throw RegistryQueryError("Server repeated its greeting; update the client")
+        }
+    }
+
+    private func fail(_ error: any Error) {
+        let (waiting, watching) = state.withLock {
+            failure = error
+            defer { pending = [:]; subscriptions = [:] }
+            return (Array(pending.values), Array(subscriptions.values))
+        }
+        // Outcomes of requests in flight are unknown, not failed.
+        let unknown = RegistryQueryError("Server disconnected; refresh state before retrying a command")
+        for continuation in waiting { continuation.resume(throwing: unknown) }
+        for subscription in watching { subscription.finish(throwing: error) }
+        writes.withLock { Darwin.close(fd) }
+    }
+
+    private static func line(_ message: ServerClientMessage) throws -> Data {
+        var line = try JSONEncoder().encode(message)
+        guard line.count <= ServerProtocol.maxMessage else { throw RegistryQueryError("Server request exceeds 32 MiB") }
+        line.append(10)
+        return line
+    }
+
+    private static func write(_ fd: Int32, _ bytes: Data) throws {
+        try bytes.withUnsafeBytes { buffer in
+            var offset = 0
+            while offset < buffer.count {
+                let sent = Darwin.write(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
+                if sent < 0 && errno == EINTR { continue }
+                guard sent > 0 else { throw RegistryQueryError("Server send failed; delivery is unknown") }
+                offset += sent
+            }
+        }
+    }
+
+    /// A same-account peer; the socket's directory is private.
+    private static func connect(_ path: String) throws -> Int32 {
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         guard path.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else {
             throw RegistryQueryError("Server socket path is too long")
         }
         withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path.utf8) }
-        fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw RegistryQueryError("Cannot open Server socket") }
         let connected = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -175,143 +330,126 @@ private final class ServerSocket: @unchecked Sendable {
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
         var timeout = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        return fd
     }
 
-    func send(_ body: Data) throws {
-        try writes.withLock {
-            guard !state.withLock({ closed }) else { throw RegistryQueryError("Server connection is closed") }
-            guard body.count <= Self.maxFrame else { throw RegistryQueryError("Server request exceeds 32 MiB") }
-            var length = UInt32(body.count).bigEndian
-            var bytes = withUnsafeBytes(of: &length) { Data($0) }
-            bytes.append(body)
-            try bytes.withUnsafeBytes { buffer in
-                var offset = 0
-                while offset < buffer.count {
-                    let sent = Darwin.write(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
-                    if sent < 0 && errno == EINTR { continue }
-                    guard sent > 0 else { throw RegistryQueryError("Server send failed; delivery is unknown") }
-                    offset += sent
+    /// Zero seconds waits without limit.
+    private static func setReceiveTimeout(_ fd: Int32, seconds: Int) {
+        var timeout = timeval(tv_sec: seconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+    }
+}
+
+/// Newline-delimited messages read from one descriptor by one thread.
+private struct LineReader {
+    let fd: Int32
+    private var buffer = Data()
+    /// Bytes already searched for a newline.
+    private var scanned = 0
+    private var ended = false
+
+    init(fd: Int32) { self.fd = fd }
+
+    /// The next message, or nil once the peer closed after a whole message.
+    mutating func next() throws -> Data? {
+        while true {
+            if let newline = buffer[(buffer.startIndex + scanned)...].firstIndex(of: 10) {
+                let line = buffer.subdata(in: buffer.startIndex..<newline)
+                buffer.removeSubrange(buffer.startIndex...newline)
+                scanned = 0
+                return line
+            }
+            scanned = buffer.count
+            guard buffer.count <= ServerProtocol.maxMessage else { throw RegistryQueryError("Server message exceeds 32 MiB") }
+            if ended {
+                guard buffer.isEmpty else { throw RegistryQueryError("Server disconnected mid-message; refresh state before retrying a command") }
+                return nil
+            }
+            var chunk = [UInt8](repeating: 0, count: 65536)
+            let received = chunk.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress!, $0.count) }
+            if received < 0 {
+                if errno == EINTR { continue }
+                if errno == EAGAIN || errno == EWOULDBLOCK {
+                    throw RegistryQueryError("Loopflow server did not answer within \(ServerLink.handshakeSeconds)s; check `lf server status`")
                 }
+                throw RegistryQueryError("Server disconnected; refresh state before retrying a command")
             }
-        }
-    }
-
-    func receive(id: String) throws -> ServerResponse {
-        let header = try read(4)
-        let length = header.reduce(0) { ($0 << 8) | Int($1) }
-        guard length <= Self.maxFrame else { throw RegistryQueryError("Server frame exceeds limit") }
-        let response = try JSONDecoder().decode(ServerResponse.self, from: read(length))
-        guard response.id == id else { throw RegistryQueryError("Server response identity mismatch") }
-        if case .error(let code, let message) = response.result { throw RegistryQueryError("\(code): \(message)") }
-        return response
-    }
-
-    private func read(_ count: Int) throws -> Data {
-        var bytes = Data(count: count)
-        try bytes.withUnsafeMutableBytes { buffer in
-            var offset = 0
-            while offset < count {
-                let received = Darwin.read(fd, buffer.baseAddress!.advanced(by: offset), count - offset)
-                if received < 0 && errno == EINTR { continue }
-                guard received > 0 else { throw RegistryQueryError("Server disconnected; refresh state before retrying a command") }
-                offset += received
-            }
-        }
-        return bytes
-    }
-
-    func shutdown() { state.withLock { if !closed { _ = Darwin.shutdown(fd, SHUT_RDWR) } } }
-    func close() {
-        writes.withLock {
-            state.withLock {
-                if !closed { closed = true; Darwin.close(fd) }
-            }
+            if received == 0 { ended = true; continue }
+            buffer.append(contentsOf: chunk[..<received])
         }
     }
 }
 
-private final class ServerWatch: @unchecked Sendable {
-    let lines: AsyncThrowingStream<Data, any Error>
+/// One subscription's frames; checkpoints before the connection is ready wait.
+private final class ServerSubscription: @unchecked Sendable {
+    let id = UUID().uuidString
     private let continuation: AsyncThrowingStream<Data, any Error>.Continuation
     private let lock = NSLock()
-    private var connection: ServerSocket?
-    private var pending: [Data] = []
+    private var link: ServerLink?
+    private var queued: [Data] = []
     private var stopped = false
-    private var queuedWrites = 0
-    private let writer = DispatchQueue(label: "studio.loopflow.server-checkpoints")
 
-    init(_ query: ServedRead, location: ServerLocation) {
-        // Never drop a checkpoint silently. A slow consumer reconnects with a
-        // fresh reading, using the existing WorkObservation recovery path.
-        (lines, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingOldest(8))
-        continuation.onTermination = { [weak self] _ in self?.stop() }
-        Task {
-            do {
-                let path = try await location.path()
-                Thread.detachNewThread { self.run(path: path, query: query) }
-            } catch { continuation.finish(throwing: error) }
-        }
+    init(_ continuation: AsyncThrowingStream<Data, any Error>.Continuation) {
+        self.continuation = continuation
+        continuation.onTermination = { [weak self] _ in self?.stop(nil) }
     }
 
-    private func run(path: String, query: ServedRead) {
-        do {
-            let socket = try ServerSocket(path: path)
-            defer { socket.close() }
-            let id = UUID().uuidString
-            try socket.send(JSONEncoder().encode(ServerRequest(version: 1, id: id, operation: .subscribe(query, generation: 1))))
-            let start = try lock.withLock {
-                guard !stopped else { return false }
-                connection = socket
-                for frame in pending { try socket.send(frame) }
-                pending = []
-                return true
-            }
-            guard start else { return }
-            while true {
-                let response = try socket.receive(id: id)
-                guard case .reading(let generation, let frame) = response.result, generation == 1 else {
-                    throw RegistryQueryError("Unexpected Server subscription generation")
-                }
-                if case .dropped = continuation.yield(try JSONEncoder().encode(frame)) {
-                    throw RegistryQueryError("Server subscription fell behind; reconnect for current Work")
-                }
-            }
-        } catch { continuation.finish(throwing: error) }
-        stop()
+    func start(on link: ServerLink, query: ServedRead) throws {
+        guard !lock.withLock({ stopped }) else { return }
+        try link.subscribe(self, query: query)
+        let queued: [Data] = lock.withLock {
+            guard !stopped else { return [] }
+            self.link = link
+            defer { self.queued = [] }
+            return self.queued
+        }
+        for line in queued { send(line) }
     }
 
-    func send(_ data: Data) {
-        let admitted = lock.withLock {
-            guard !stopped, queuedWrites + pending.count < 64 else { return false }
-            queuedWrites += 1
-            return true
-        }
-        guard admitted else {
-            continuation.finish(throwing: RegistryQueryError("Server checkpoints exceeded limit or connection closed"))
-            stop()
+    func send(_ line: Data) {
+        let frame: JSONValue
+        do { frame = try JSONDecoder().decode(JSONValue.self, from: line) } catch {
+            finish(throwing: RegistryQueryError("Invalid watch request: \(error.localizedDescription)"))
             return
         }
-        writer.async {
-            let socket: ServerSocket? = self.lock.withLock {
-                self.queuedWrites -= 1
-                guard !self.stopped else { return nil }
-                if let socket = self.connection { return socket }
-                self.pending.append(data)
-                return nil
-            }
-            do { try socket?.send(data) }
-            catch { self.continuation.finish(throwing: error); self.stop() }
+        let (target, overflow): (ServerLink?, Bool) = lock.withLock {
+            guard !stopped else { return (nil, false) }
+            if let link { return (link, false) }
+            guard queued.count < 64 else { return (nil, true) }
+            queued.append(line)
+            return (nil, false)
         }
+        if overflow {
+            finish(throwing: RegistryQueryError("Server checkpoints exceeded limit before the connection opened"))
+            return
+        }
+        guard let target else { return }
+        do { try target.send(.checkpoint(id: id, frame: frame)) } catch { finish(throwing: error) }
     }
-    func cancel() async { stop() }
-    private func stop() {
-        lock.withLock {
-            stopped = true
-            connection?.shutdown()
-            connection = nil
-            pending = []
+
+    /// From the reader thread: one complete reading.
+    func receive(_ frame: JSONValue) {
+        do {
+            if case .dropped = continuation.yield(try JSONEncoder().encode(frame)) {
+                finish(throwing: RegistryQueryError("Server subscription fell behind; reconnect for current Work"))
+            }
+        } catch { finish(throwing: error) }
+    }
+
+    /// The server ended this subscription, or the connection failed.
+    func finish(throwing error: any Error) { stop(error) }
+
+    func cancel() async { stop(nil) }
+
+    /// The first end wins; the server hears `cancel` once and the stream ends once.
+    private func stop(_ error: (any Error)?) {
+        let (first, link): (Bool, ServerLink?) = lock.withLock {
+            defer { stopped = true }
+            return (!stopped, self.link)
         }
-        continuation.finish()
+        guard first else { return }
+        link?.unsubscribe(id)
+        continuation.finish(throwing: error)
     }
 }
 #endif

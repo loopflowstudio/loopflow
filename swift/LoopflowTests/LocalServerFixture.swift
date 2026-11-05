@@ -6,12 +6,15 @@ import Testing
 /// A source-built server in a private Machine; never registers a system service.
 actor LocalServerFixture {
     let lf: BuiltLf
+    /// Where the server's debug diagnostics go, when a test counts them.
+    let diagnostics: URL?
     private var process: Process?
     private var exits: AsyncStream<Void>?
     private var startup: Task<String, any Error>?
 
-    init(_ lf: BuiltLf) {
+    init(_ lf: BuiltLf, diagnostics: URL? = nil) {
         self.lf = lf
+        self.diagnostics = diagnostics
     }
 
     deinit { if let process, process.isRunning { process.terminate() } }
@@ -25,7 +28,12 @@ actor LocalServerFixture {
         let child = lf.process(["server", "run"])
         child.standardInput = FileHandle.nullDevice
         child.standardOutput = FileHandle.nullDevice
-        child.standardError = FileHandle.nullDevice
+        if let diagnostics {
+            child.environment = lf.environment.merging(["RUST_LOG": "loopflow::server=debug"]) { $1 }
+            child.standardError = try FileHandle(forWritingTo: diagnostics)
+        } else {
+            child.standardError = FileHandle.nullDevice
+        }
         let (exits, ended) = AsyncStream<Void>.makeStream()
         child.terminationHandler = { _ in ended.finish() }
         try child.run()
@@ -46,6 +54,12 @@ actor LocalServerFixture {
     }
 
     var processID: Int32? { process?.processIdentifier }
+
+    /// Connections the server admitted so far, from its debug diagnostics.
+    nonisolated func admittedConnections() throws -> Int {
+        let log = try String(contentsOf: #require(diagnostics), encoding: .utf8)
+        return log.components(separatedBy: "Server connection admitted").count - 1
+    }
 
     func stop() async {
         let process = process

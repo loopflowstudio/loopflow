@@ -54,8 +54,8 @@ lf install ─ selected artifacts + OS registration of server
 lf desktop ─ app-owned automation socket ─ windows / panes
 ```
 
-The server owns client admission, compatibility, framing, bounded delivery and
-connection diagnostics. Shared commands own resolution, defaults, mutation,
+The server owns client admission, revision negotiation, framing, bounded
+delivery and connection diagnostics. Shared commands own resolution, defaults, mutation,
 attribution and recoverable outcomes. Session owners own providers, PTYs,
 terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
@@ -117,17 +117,20 @@ lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.
 
 Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
-under `tests/fixtures/dto/server/` retain revision 1. Machine identity fields,
-`LF_HOME`, SSH routing and Work ownership are unchanged. Native terminal relays
-use `LF_SERVER` and `LF_SERVER_STATUS`.
+under `tests/fixtures/dto/server/` speak revision 2: one connection per client,
+a negotiated revision, requests multiplexed by id, newline-delimited JSON on the
+Unix socket. A revision-1 client is answered in its own framing with
+`incompatible` and nothing else. Machine identity fields, `LF_HOME`, SSH routing
+and Work ownership are unchanged. Native terminal relays use `LF_SERVER` and
+`LF_SERVER_STATUS`.
 
 Installation retires the old supervisor job before registering the server job.
 The old bundled plist is only an SMAppService migration descriptor: inspect
 approval, then unregister; never register it from new code. Disabled choices
 remain respected. Custom-home jobs and systemd units migrate their hashed labels;
-the revision-1 `machine.sock` address and singleton lock stay stable. Relays from
-before the namespace change can recover to the same listener; old and new
-executables cannot listen concurrently. No socket alias or second path exists.
+the `machine.sock` address and singleton lock stay stable. Relays from before
+the namespace change can recover to the same listener; old and new executables
+cannot listen concurrently. No socket alias or second path exists.
 No Work, credential or remote-setting files move in this local cutover.
 
 LOO-718 must move remote admission/pairing commands under `lf server` while

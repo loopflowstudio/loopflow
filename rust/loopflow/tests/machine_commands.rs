@@ -2578,9 +2578,9 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
 #[test]
 fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     use loopflow::lf::commands::write::Write as Mutation;
-    use loopflow::server::wire::{Operation, Reply, Request, Response, VERSION};
+    use loopflow::server::client::Connection;
+    use loopflow::server::wire::{Operation, Reply};
     use std::io::Read;
-    use std::os::unix::net::UnixStream;
     use std::time::{Duration, Instant};
 
     struct Server(std::process::Child);
@@ -2610,31 +2610,19 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
         std::thread::sleep(Duration::from_millis(20));
     };
     let send = |claimed| {
-        let mut connection = UnixStream::connect(&socket).unwrap();
+        let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
         connection
             .set_read_timeout(Some(Duration::from_secs(20)))
             .unwrap();
-        let request = Request {
-            version: VERSION,
-            id: "owner".into(),
-            operation: Operation::Command {
+        connection
+            .request(Operation::Command {
                 change: Mutation::TaskOwnership {
                     directory: plan.local_path.clone(),
                     issue: task.to_string(),
                     claimed,
                 },
-            },
-        };
-        let request = serde_json::to_vec(&request).unwrap();
-        connection
-            .write_all(&(request.len() as u32).to_be_bytes())
-            .unwrap();
-        connection.write_all(&request).unwrap();
-        let mut size = [0; 4];
-        connection.read_exact(&mut size).unwrap();
-        let mut reply = vec![0; u32::from_be_bytes(size) as usize];
-        connection.read_exact(&mut reply).unwrap();
-        serde_json::from_slice::<Response>(&reply).unwrap().result
+            })
+            .unwrap()
     };
     let local = plan.local.task_ownership(&task).unwrap();
     let Reply::Command {

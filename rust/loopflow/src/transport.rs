@@ -2223,7 +2223,7 @@ fn reconnect_server(
         }
         match crate::server::client::bridge_existing(id) {
             Ok(socket) => return Ok(Some(socket)),
-            Err(error) if error.is::<crate::server::client::BridgeRefused>() => {
+            Err(error) if error.is::<crate::server::client::ServerError>() => {
                 return Err(error);
             }
             Err(error) => write_output(

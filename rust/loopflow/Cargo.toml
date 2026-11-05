@@ -151,7 +151,7 @@ fs2 = "0.4"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
 tokio-tungstenite = "0.30"
 tempfile = "3.27"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }

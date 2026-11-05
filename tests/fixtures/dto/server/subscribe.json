@@ -1,1 +1,1 @@
-{"version":1,"id":"tasks-1","operation":{"kind":"subscribe","query":{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":7}}
+{"type":"request","id":"tasks-1","operation":{"kind":"subscribe","query":{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true},"generation":7}}

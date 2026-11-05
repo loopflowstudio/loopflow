@@ -633,6 +633,14 @@ impl Recorder {
             source,
             "Codex conversation changed; following it"
         );
+        // Bound before the person's first turn there can reach a hook.
+        if let Err(error) = crate::context_block::follow_codex_session(
+            &crate::store::lf_home_dir(),
+            self.observer.thread.as_str(),
+            thread.as_str(),
+        ) {
+            tracing::warn!(%error, "Codex conversation's hooks have no lf context");
+        }
         self.observer.thread = thread;
         self.selection = Some(source);
         self.select();

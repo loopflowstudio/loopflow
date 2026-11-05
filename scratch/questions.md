@@ -1,11 +1,17 @@
 # Open questions
 
 - Codex `/new` and `/fork`: the Session follows the new thread the way Claude's
-  `/clear` does (implemented 2026-11-05). Concept review 2 found that the missing lf
-  context on a thread the person starts comes from lf configuring per thread, not from
-  a Codex limit. The fix is to move the configuration onto the private app-server (see
-  the plan). Option (b), an observer interjection, is no longer needed. If Codex turns
-  out to ignore `sessionFlags` for client-started threads, the question returns.
+  `/clear` does, and the thread has lf's instructions and hooks because they are the
+  private app-server's configuration (implemented 2026-11-05; sessionFlags verified on
+  0.166.0). Option (b), an observer interjection, is not needed.
+- lf's ~10 KB instructions now ride argv as `-c developer_instructions=...` on
+  `codex app-server`. #1552 (Jack Heart, 2026-10-14) moved instructions off argv because
+  large arguments slowed terminal wrappers; its target was mainly the first request
+  (hundreds of KB), which still never rides argv. Codex 0.166.0 has no file form for
+  developer instructions (`model_instructions_file` replaces the base prompt). Assumed
+  acceptable: Linux caps one argument at 128 KiB, so instructions near that size would
+  fail to spawn. `native_codex.py` now allows 64 KiB per server argument, 1 KiB per
+  client argument.
 - Killing the terminal owner still ends the TUI: it holds the PTY, for Claude too.
   The brief's "kill the lf owner" demo is met for the launcher and observer, which
   are the processes that hosted the relay.

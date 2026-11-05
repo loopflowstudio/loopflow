@@ -1,7 +1,8 @@
 # Codex Sessions talk to app-server directly (430c74)
 
 Status: implemented, compressed, synced onto main through #1826, thread following
-implemented and compressed (no cuts), realigned 2026-11-05; concept review 2 moved lf's configuration onto the app-server (next implement).
+implemented and compressed (no cuts), realigned 2026-11-05; concept review 2 moved lf's
+configuration onto the app-server (implemented 2026-11-05; gate next).
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -79,43 +80,38 @@ selections in history, as Claude's `/clear` does through `SessionStart`.
   its own `thread/start`, so a thread the person starts runs without lf's instructions
   and hooks. The gap is lf's: see the next section.
 
-## lf's configuration belongs to the private app-server (concept review 2, next implement)
+## lf's configuration belongs to the private app-server (concept review 2, implemented 2026-11-05)
 
-lf puts its whole configuration on `thread/start` (`harness/codex.rs` ~L1003-1080:
-shell policy, writable roots, hooks, instructions). The reason in the comment at
-~L657-666 is that "the app-server can host another conversation" and must not lend
-the configuration to a "newly admitted sibling". That was relay-era sharing. Now a
-Session's app-server is private to it (docs/architecture/execution.md L179), so every
-thread on it belongs to the same Session.
+A Session's app-server is private to it (docs/architecture/execution.md), so lf's
+configuration is the server's own, not each thread's. The relay-era "sibling" reason
+for per-thread config is deleted.
 
-Evidence (codex-cli 0.166.0, private CODEX_HOME): `codex -c developer_instructions="X"
-app-server --listen ...` makes `config/read` report `developer_instructions: X`, set
-in the `sessionFlags` layer. The current code already reads the wrapper's hooks from
-that layer. The defaults for every thread on the server, including one a client starts
-without `config`, come from that layer.
+- Native launch passes shell policy, writable roots, hooks and `developer_instructions`
+  as `-c` overrides on `codex app-server`, before the subcommand and after the route's
+  and any wrapper's own overrides. lf's thread request carries no `config` and no
+  `developerInstructions`. A reconnect joins a server that already has them.
+- Writable roots and hooks extend what the server would inherit. lf reads that from a
+  short-lived stdio `codex app-server` started with the same command (`config/read`,
+  ~0.25 s on 0.166.0), before spawning the real one.
+- Hook trust: Codex trusts each handler separately, key `:{group}:{handler}`, hashed
+  with `async` (false) and `timeout` (600) defaults filled in (verified with
+  `hooks/list`). lf trusted only handler 0, so its async `task-updates` handlers
+  needed review; as server config the TUI showed a review dialog. Fixed in
+  `codex_config`.
+- The observer copies the Session's context binding to a `/new` or `/fork` thread
+  before selecting it (`context_block::follow_codex_session`).
+- Headless Codex keeps its config on `thread/start` (out of scope; its fakes read it).
 
-Next implement:
-- For the native client, pass lf's thread configuration as `-c` flags on `codex
-  app-server`, placed before the subcommand with the account route's own flags (the
-  comment at ~L1005 notes that a repeat after `app-server` replaces the wrapper's
-  overrides). `open_thread` sends no `config` of its own. Delete the "sibling" comment.
-- When the observer selects a `/new` or `/fork` thread, it also binds the thread for
-  hooks (`bind_codex_session`), as `open_codex_native` does for the first thread.
-- Prove it with `codex_terminal.py --new-thread`: a marker in lf's instructions reaches
-  the fake Responses server on the person's new thread.
-- Before implementing, check that a TUI-started thread's request carries the
-  `sessionFlags` instructions. If it doesn't, the Codex limit stands and the old note
-  returns, with that evidence.
-- Headless Codex is out of scope unless the same move costs nothing there.
-
-This settles open question (b) in scratch/questions.md without a new choice: the
-Session follows the thread (accepted), and lf adds context to it (Jack Heart's steer:
-"context adder and hook interjector"). The thread gets context from its configuration,
-not from an observer interjection, so no turn starts that the person didn't send.
+Evidence (codex-cli 0.166.0): a client-started thread with no `config` on an app-server
+run with `-c developer_instructions=X` sends X to the Responses server. Real
+`codex_terminal.py --new-thread` passes plain and wrapped: the request after `/new`
+carries lf's instructions (an `LF_USER_NAME` marker) and its SessionStart hook context.
 
 ## Remaining
 
-- Implement the section above, then gate: affected suites once.
+- Gate: affected suites once (integration `context_launch_tests::`, `session_launch_contract`,
+  `session_lifecycle_tests`, `agent_tests`, `settings_launch_tests`, `session_cli_tests`,
+  `transport_tests` reach `native_codex.py`; lib `harness::`, `context_block::`).
 
 ## Related work
 
@@ -133,8 +129,10 @@ Checks: real Codex 0.166.0 `codex_terminal.py` plain, `--transport-failure` and
 `--new-thread` (plain and wrapped) passed, as did the demo below and `codex_connect.py
 --launch --graph-decision-retry replace` after merging main. Two real-Codex fixtures
 fail for reasons that predate this Task; see scratch/questions.md.
-Realign 2026-11-05: `cargo test -p loopflow --lib -- harness::codex_connection` 6 passed,
-`cargo fmt --check` clean; gate owns the affected suites.
+Implement 2026-11-05: `codex_terminal.py --new-thread` (real 0.166.0) plain+wrapped pass;
+`--lib harness::` 186 passed; `context_launch_tests::` 13 passed; `session_launch_contract`
+26 passed twice (two earlier runs each had two different load-flaky failures, Pi/Claude
+included, each passing alone); lifecycle `personal_task_launch_resume...` passed; clippy, fmt clean.
 
 ## Demo
 

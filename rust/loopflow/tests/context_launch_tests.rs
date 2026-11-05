@@ -189,18 +189,23 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         "the terminal must answer, not a headless auto-approver"
     );
     let config = read("native-config.json");
+    let server = read("native-server-config.json");
     let capture = fs::read_to_string(home.path().join("launched")).unwrap();
     let key = capture.lines().next().unwrap();
     let shard = &key.strip_prefix("run_").unwrap_or(key)[..2];
     let manifest = read(&format!("runs/{shard}/{key}/manifest.json"));
+    // lf's configuration is the private app-server's, so a conversation the
+    // person starts in the client has it too; lf's own thread adds none.
     assert_eq!(
-        config["developerInstructions"],
+        server["developer_instructions"],
         manifest["exec"]["system_prompt"]
     );
+    assert!(config.get("developerInstructions").is_none());
+    assert!(config.get("config").is_none());
     assert!(config.get("baseInstructions").is_none());
     assert!(config.get("approvalPolicy").is_none());
     assert_eq!(config["threadSource"], "user");
-    let hooks = &config["config"]["hooks"];
+    let hooks = &server["hooks"];
     assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
     let state = hooks["state"].as_object().unwrap();
     assert_eq!(

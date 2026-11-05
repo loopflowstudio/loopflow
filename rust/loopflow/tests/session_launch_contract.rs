@@ -96,6 +96,10 @@ elif os.path.basename(sys.argv[0]) == 'codex':
         let machine = self.home.path().join("machine");
         if let Ok(params) = fs::read(machine.join("native-config.json")) {
             received["params"] = serde_json::from_slice(&params).unwrap();
+            received["server"] = serde_json::from_slice(
+                &fs::read(machine.join("native-server-config.json")).unwrap(),
+            )
+            .unwrap();
             received["turns"] =
                 serde_json::from_slice(&fs::read(machine.join("native-turns.json")).unwrap())
                     .unwrap();
@@ -931,7 +935,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         for received in [first, resumed] {
             let arguments = args(&received);
             let root = if provider == "codex" {
-                received["params"]["config"]["sandbox_workspace_write.writable_roots"]
+                received["server"]["sandbox_workspace_write.writable_roots"]
                     .as_array()
                     .unwrap()
                     .iter()

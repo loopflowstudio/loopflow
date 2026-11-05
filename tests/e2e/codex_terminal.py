@@ -26,6 +26,9 @@ from pathlib import Path
 import tomllib
 
 
+INSTRUCTIONS_MARKER = "Instructions Marker 430c74"
+
+
 class Model(http.server.BaseHTTPRequestHandler):
     requests: list[bytes] = []
 
@@ -369,6 +372,8 @@ trust_level="trusted"
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "TERM": "xterm-256color",
         "RUST_LOG": "warn",
+        # lf's instructions name the person; the name marks them in requests.
+        "LF_USER_NAME": INSTRUCTIONS_MARKER,
         "CMUX_WORKSPACE_ID": "fixture",
         "CMUX_SURFACE_ID": "fixture",
     }
@@ -535,6 +540,16 @@ def _follow_new_thread(
             "AND json_extract(payload,'$.text')='NEW_THREAD_DONE'",
             (session_id,),
         ).fetchone()[0]
+    # lf's instructions and hooks are the Session's app-server's, so the person's
+    # own conversation has them: the request after /new carries both.
+    after_new = [request for request in Model.requests if b"AFTER_NEW_PROMPT" in request]
+    assert after_new, "the new conversation sent no request"
+    assert all(INSTRUCTIONS_MARKER.encode() in request for request in after_new), (
+        "the new conversation lacks lf's instructions"
+    )
+    assert any(b"NATIVE_CONTEXT_AFTER_RESUME" in request for request in after_new), (
+        "the new conversation lacks lf's hook context"
+    )
     assert selected != first, ("Session still selects the first conversation", selected)
     assert (first, selected, "new") in moves, moves
     assert answered == 1, answered

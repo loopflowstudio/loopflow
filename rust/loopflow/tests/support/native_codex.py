@@ -142,6 +142,55 @@ def _client(endpoint: str, home: Path, thread: str) -> None:
                 return
 
 
+def _inherited(home: Path) -> dict:
+    """What a host wrapper and the user's config give every app-server."""
+    return {
+        "layers": [{"name": {"type": "sessionFlags"}, "config": {
+            "hooks": {"SessionStart": [{"matcher": "startup", "hooks": [
+                {"type": "command", "command": "host-hook"}
+            ]}], "state": {"host-trust": {"trusted_hash": "unchanged"}}}
+        }}],
+        "config": {
+            "sandbox_workspace_write": {"writable_roots": [str(home / "configured-root")]}
+        },
+    }
+
+
+def _stdio(home: Path) -> None:
+    """A short-lived app-server on stdio, as lf reads inherited configuration."""
+    for line in sys.stdin:
+        rpc = json.loads(line)
+        if "id" not in rpc:
+            continue
+        result = _inherited(home) if rpc["method"] == "config/read" else {}
+        print(json.dumps({"id": rpc["id"], "result": result}), flush=True)
+
+
+def _inline_toml(value: str) -> object:
+    """lf's TOML inline values are JSON with `=` between a key and its value."""
+    text, quoted, escaped = [], False, False
+    for char in value:
+        if quoted:
+            quoted = escaped or char != '"'
+            escaped = not escaped and char == "\\"
+        elif char == '"':
+            quoted = True
+        elif char == "=":
+            char = ":"
+        text.append(char)
+    return json.loads("".join(text))
+
+
+def _overrides(args: list[str]) -> dict:
+    """The `-c` values before the subcommand, as Codex reads them."""
+    overrides = {}
+    for flag, pair in zip(args, args[1:]):
+        if flag == "-c":
+            key, value = pair.split("=", 1)
+            overrides[key] = _inline_toml(value)
+    return overrides
+
+
 def _server(endpoint: str, home: Path) -> None:
     turns_file = home / "native-turns.json"
     turns = json.loads(turns_file.read_text()) if turns_file.exists() else []
@@ -221,7 +270,7 @@ def _server(endpoint: str, home: Path) -> None:
                             )
                             continue
                         result = {"thread": {"id": thread, "turns": turns}}
-                        if "developerInstructions" in params:
+                        if "serviceTier" in params:  # lf's own request, not a client's
                             (home / "native-config.json").write_text(json.dumps(params))
                         with lock:
                             subscribers.append(stream)
@@ -236,18 +285,7 @@ def _server(endpoint: str, home: Path) -> None:
                     elif method == "thread/loaded/list":
                         result = {"data": [thread] if thread else [], "nextCursor": None}
                     elif method == "config/read":
-                        result = {
-                            "layers": [{"name": {"type": "sessionFlags"}, "config": {
-                                "hooks": {"SessionStart": [{"matcher": "startup", "hooks": [
-                                    {"type": "command", "command": "host-hook"}
-                                ]}], "state": {"host-trust": {"trusted_hash": "unchanged"}}}
-                            }}],
-                            "config": {
-                                "sandbox_workspace_write": {
-                                    "writable_roots": [str(home / "configured-root")]
-                                }
-                            }
-                        }
+                        result = _inherited(home)
                     elif method == "turn/start":
                         with lock:
                             turn = {
@@ -297,8 +335,11 @@ def _server(endpoint: str, home: Path) -> None:
 def main() -> None:
     args = sys.argv[1:]
     home = Path(os.environ["LF_HOME"])
-    # A wrapper can reject long argv without ever seeing the large payload.
-    assert all(len(arg.encode()) < 1024 for arg in args), args
+    # A wrapper can reject long argv without ever seeing the large payload: a
+    # first request never rides argv. The server's configuration, instructions
+    # included, does.
+    limit = 1024 if "--remote" in args else 64 * 1024
+    assert all(len(arg.encode()) < limit for arg in args), args
     assert "CODEX_ACCESS_TOKEN" not in os.environ
     with (home / "native-argv.jsonl").open("a") as file:
         file.write(json.dumps(args) + "\n")
@@ -316,7 +357,12 @@ def main() -> None:
             raise SystemExit(23)
         if (home / "stall-server").exists():
             threading.Event().wait(60)
+        (home / "native-server-config.json").write_text(
+            json.dumps(_overrides(args[: args.index("app-server")]))
+        )
         _server(args[args.index("--listen") + 1].removeprefix("unix://"), home)
+    elif "app-server" in args:
+        _stdio(home)
 
 
 if __name__ == "__main__":

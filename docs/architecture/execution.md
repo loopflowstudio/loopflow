@@ -177,10 +177,14 @@ coverage; this source path does not establish configured resume acceptance.
 ## Connect and transfer attachment
 
 The Codex terminal talks to its app-server directly, on the private Unix WebSocket
-the AgentProcess opened; lf carries none of its bytes. The launcher starts or
-resumes the thread with prepared instructions and configuration, names a new thread
-so it has a rollout to resume (Codex 0.166.0 has none until a first turn or a name),
-then execs into `codex --remote <endpoint> resume <thread>`. The app-server's
+the AgentProcess opened; lf carries none of its bytes. lf's instructions, hooks,
+shell policy and writable roots are `-c` overrides on that private `codex app-server`,
+so every thread on it has them, including one the person starts with `/new` or
+`/fork`; they extend what the account route, a wrapper and the user's config already
+give it, read first from a short-lived stdio app-server started the same way. The
+launcher starts or resumes the thread, names a new thread so it has a rollout to
+resume (Codex 0.166.0 has none until a first turn or a name), then execs into
+`codex --remote <endpoint> resume <thread>`. The app-server's
 lifeline writer crosses the exec, so the client holds the provider alive and no lf
 process has to. The execution owner settles the client's exit from a `NativeExit`
 marked as a client, which leaves the AgentProcess's own exit to attachment close.
@@ -193,6 +197,9 @@ subscriber and the first answer wins; the observer never answers, and Codex repl
 a pending approval to a client that joins mid-turn. Store errors are recording gaps:
 the observer logs one per outage, retries the store, and history recovery fills the
 gap at the next launch. Stopping the observer stops recording, not the conversation.
+When the person starts or forks a conversation, the observer selects it as the
+Session's AgentSession and binds it to the Session's context, so lf's hooks answer
+there too.
 
 Attachment alone does not revoke the old client's writes, and with no lf in the path
 no dispatch can check them. The observer ends the exact client its attachment opened

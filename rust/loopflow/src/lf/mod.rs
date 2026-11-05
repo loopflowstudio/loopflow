@@ -1980,9 +1980,6 @@ pub enum TaskCommand {
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
-        /// Look for an uncertain issue creation now, ahead of its window, and re-send it with its saved ID
-        #[arg(long)]
-        retry_creation: bool,
         /// Retry uncertain saved field/state updates after observing current Linear values
         #[arg(long)]
         retry_updates: bool,

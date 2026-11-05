@@ -1968,7 +1968,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsResult<String> {
+pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -1989,12 +1989,9 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
                 .clone()
                 .map(crate::durable::WorkRef::Project);
             let work = crate::durable::WorkRef::Task(task.id.clone());
+            // The person's explicit look: ahead of the pass window if need be.
             for work in project.iter().chain([&work]) {
-                if retry_creation {
-                    super::planning_export::retry_export(&store, repo, work).await?;
-                } else {
-                    super::planning_export::sync_export(&store, repo, work).await?;
-                }
+                super::planning_export::export(&store, repo, work, true).await?;
             }
         }
         let task = store

@@ -40,8 +40,8 @@ times ~11 concurrent lf processes.
    within the window before building a client; a look that finds the issue
    absent re-sends the create with its saved id (idempotent) and logs it.
    Window = max(10 min, `delta_fresh_secs()`): longer as the budget tightens,
-   until reset inside the reserve. `lf task sync` reports "looked Ns ago, next
-   look in Ms" inside the window; `--retry-creation` looks now and re-sends.
+   until reset inside the reserve. A pass logs "looked Ns ago, next look in Ms"
+   inside the window; `lf task sync ISSUE` is the person's look and ignores it.
 4. **Timeouts name the step.** "Export timed out while sending the creation;
    creation identity and uncertainty retained."
 
@@ -52,11 +52,13 @@ Pass cost over N pending exports when nothing changed: 0 requests. Documented in
 
 - `check_before_write` call inside `LinearClient::graphql`. Its one remaining
   caller is `deliver_task_state`.
-- `retry_task_export` → `retry_export(store, repo, work)` (Projects too).
+- `retry_task_export`, then `retry_export` and the `--retry-creation` flag
+  (`retry_creation` in `lf/mod.rs`, `bin/lf.rs`, `task_sync`): `lf task sync`
+  calls `planning_export::export(…, force=true)` for the Task and its Project.
 - `task_sync_does_not_claim_success_for_uncertain_publication` → replaced by
-  `uncertain_creation_is_resent_once_per_window_and_on_explicit_retry`.
+  `uncertain_creation_is_resent_once_per_window_and_on_task_sync`.
 - The fake Linear server now refuses a creation whose client id already exists,
-  as Linear does; hidden-lookup recoveries in two tests use `retry_export`.
+  as Linear does; hidden-lookup recoveries in two tests use `export(…, true)`.
 - Compress (2026-11-05): the SQL `observed_since` filter on
   `planning_export_owners` (the Rust check is the one window rule), the
   `CASE` clearing the stamp on first attempt, `LinearClient::endpoint()` and the
@@ -74,7 +76,8 @@ Pass cost over N pending exports when nothing changed: 0 requests. Documented in
 - Fixture server answering after a realistic delay, ~1,000 Tasks and 20 uncertain
   exports: `task_create` sends `DeliverTaskCreation` and binds; fails on today's code.
 - A pass with 20 uncertain exports inside the window: ≤1 `ListTeams`, 0 `FindExportIssue`.
-- `--retry-creation` sends the create or names the blocked step.
+- `lf task sync ISSUE` sends the create or names the blocked step (the flag
+  the Task names was deleted at concept review; the plain command meets it).
 - After `lf install`: the 19 listed Tasks get identifiers (demo step; record in PR).
 
 ## Checks
@@ -112,17 +115,18 @@ restart the drain; the window stays on passes, which are the automatic callers.
 The Task's acceptance line for `--retry-creation` ("sends the create or names
 the blocked step") is met by `lf task sync` itself.
 
-Implement direction:
-- `export(store, repo, work, force)` keeps `force`; `sync_export` passes false
-  (passes), and `lf task sync` calls it with true for the Task and its Project.
-  Delete `retry_export` and the `retry_creation` field/flag in `lf/mod.rs`,
-  `bin/lf.rs` and `task_sync`. `--retry-updates` stays: uncertain field writes
-  are still not retried automatically.
-- The in-window refusal keeps its "looked Ns ago, next look in Ms" text for
-  `lf task status`/logs but no longer names a flag.
-- docs/work.md "Sync" paragraph, `ops/README.md` table and policy, and the test
-  `uncertain_creation_is_resent_once_per_window_and_on_explicit_retry` follow
-  (explicit = plain `lf task sync`).
+Implemented (2026-11-05): `planning_export::export(store, repo, work, force)`
+wraps the urgent budget; `sync_export` is the pass (false) and `task_sync` calls
+`export(…, true)` for the Task and its Project. `retry_export`, the
+`retry_creation` field and the `--retry-creation` option are gone; `--retry-updates`
+stays because uncertain field writes are still not retried automatically. The
+in-window refusal reads "looked Ns ago, next look in Ms" and names no flag; a pass
+logs it at debug. docs/work.md, `ops/README.md` and the renamed test
+`uncertain_creation_is_resent_once_per_window_and_on_task_sync` follow, with the
+in-window wait asserted on `sync_export` and the look on `task_sync`.
+Check: `cargo test -p loopflow --lib -- uncertain_creation task_sync
+planning_export_lost` 7 passed; clippy clean; `grep retry_creation` over
+`rust/loopflow/src docs` empty.
 
 Kept as recorded assumptions, not blocking: the ten-minute healthy window and
 auto-retry for Projects (`scratch/questions.md`). Vocabulary split between

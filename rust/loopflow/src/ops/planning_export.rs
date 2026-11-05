@@ -52,15 +52,21 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
     Ok(())
 }
 
+/// A pass: waits out the window after an uncertain creation was looked for.
 pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> OpsResult<()> {
-    // Creations spend the reserved Linear budget so they never fail behind sync.
-    crate::linear::urgent(export(store, repo, work, false)).await
+    export(store, repo, work, false).await
 }
 
-/// `lf task sync --retry-creation`: look for the creation now, however recently
-/// a pass looked, and re-send it when it is absent.
-pub(crate) async fn retry_export(store: &Store, repo: &Path, work: &WorkRef) -> OpsResult<()> {
-    crate::linear::urgent(export(store, repo, work, true)).await
+/// Deliver one pending export. `force` looks for an uncertain creation now,
+/// however recently a pass looked, and re-sends it when absent (`lf task sync`).
+pub(crate) async fn export(
+    store: &Store,
+    repo: &Path,
+    work: &WorkRef,
+    force: bool,
+) -> OpsResult<()> {
+    // Creations spend the reserved Linear budget so they never fail behind sync.
+    crate::linear::urgent(deliver(store, repo, work, force)).await
 }
 
 /// What the store knows before the provider is asked.
@@ -133,7 +139,7 @@ async fn prepare(
     }))
 }
 
-async fn export(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsResult<()> {
+async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsResult<()> {
     if !super::planning_client::connected(&repo.to_string_lossy()) {
         return Ok(());
     }
@@ -161,8 +167,7 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsR
             .filter(|ago| *ago < window)
         {
             return Err(message(format!(
-                "Creation remains uncertain; looked {ago}s ago, next look in {}s \
-                 (`lf task sync --retry-creation` looks now)",
+                "Creation remains uncertain; looked {ago}s ago, next look in {}s",
                 window - ago
             )));
         }

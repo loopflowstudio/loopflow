@@ -3887,12 +3887,12 @@ fn task_sync_explicit_updates_retry_saved_state_and_fields_without_execution() {
         .unwrap();
         crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
         runtime.block_on(state.lock()).field_reject_write = false;
-        let pending = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap();
+        let pending = crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         assert!(
             pending.contains("confirmation") || pending.contains("uncertain"),
             "{pending}"
         );
-        crate::ops::task::task_sync(task.id.as_str(), false, true).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), true).unwrap();
         runtime.block_on(async {
             let provider = state.lock().await;
             assert_eq!(provider.issues[0]["title"], "Saved new title");
@@ -3923,7 +3923,7 @@ fn task_sync_explicit_retry_still_adopts_a_newer_linear_state() {
             provider.issues[0]["state"] = json!({"type":"started"});
             mark_issue_updated(&mut provider.issues[0]);
         });
-        crate::ops::task::task_sync(task.id.as_str(), false, true).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), true).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -3984,7 +3984,7 @@ fn historical_comment_delivery_retains_local_identity_after_linear_readback() {
 fn task_sync_publishes_saved_task_and_reuses_its_identity() {
     with_export_plan(|runtime, fixture, _repo, task, state| {
         assert!(task.linear_id.is_none());
-        let result = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap();
+        let result = crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -3992,13 +3992,13 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
         assert!(saved.linear_id.is_some());
         assert!(result.contains(&saved.identifier));
         assert!(!saved.identifier.starts_with("lf-"));
-        crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
     });
 }
 
 #[test]
-fn uncertain_creation_is_resent_once_per_window_and_on_explicit_retry() {
+fn uncertain_creation_is_resent_once_per_window_and_on_task_sync() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             crate::ops::planning_export::sync_export(
@@ -4028,18 +4028,24 @@ fn uncertain_creation_is_resent_once_per_window_and_on_explicit_retry() {
         };
         // The lost reply earns one look on the next sync, which re-sends the
         // saved id; Linear refuses the duplicate, so nothing is created twice.
-        let error = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap_err();
+        let error = crate::ops::task::task_sync(task.id.as_str(), false).unwrap_err();
         assert!(error.to_string().contains("already exists"), "{error}");
         assert_eq!(sent("DeliverTaskCreation"), 2);
         assert_eq!(sent("FindExportIssue"), 2);
-        // Inside the window a plain sync asks Linear nothing and says when it will.
-        let error = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap_err();
+        // Inside the window a pass asks Linear nothing and says when it will.
+        let error = runtime
+            .block_on(crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Task(task.id.clone()),
+            ))
+            .unwrap_err();
         assert!(error.to_string().contains("next look"), "{error}");
         assert_eq!(sent("DeliverTaskCreation"), 2);
         assert_eq!(sent("FindExportIssue"), 2);
-        // `--retry-creation` looks now.
+        // `lf task sync` is the person's look: it looks now.
         runtime.block_on(async { state.lock().await.hide_exports = false });
-        crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         assert_eq!(sent("FindExportIssue"), 3);
         assert_eq!(sent("DeliverTaskCreation"), 2);
         let saved = runtime
@@ -4088,7 +4094,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
         });
         // The next sync looks once and re-sends; a rate-limited retry cannot
         // disprove the earlier uncertain attempt.
-        assert!(crate::ops::task::task_sync(task.id.as_str(), false, false).is_err());
+        assert!(crate::ops::task::task_sync(task.id.as_str(), false).is_err());
         assert!(
             fixture
                 .store
@@ -4102,10 +4108,16 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
         runtime.block_on(async {
             tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
         });
-        // That look spent the window; a plain sync waits, an explicit retry does not.
-        let error = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap_err();
+        // That look spent the window; a pass waits, `lf task sync` does not.
+        let error = runtime
+            .block_on(crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Task(task.id.clone()),
+            ))
+            .unwrap_err();
         assert!(error.to_string().contains("next look"), "{error}");
-        crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -4121,7 +4133,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
             .unwrap();
         assert_eq!(saved.linear_id.unwrap().as_str(), receipt.id);
         assert_eq!(saved.id, task.id);
-        crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 3);
     });
 }
@@ -4407,10 +4419,10 @@ fn standalone_export_recovers_and_moves_without_duplicate_issues() {
                 &crate::store::StorageConfig::sqlite(fixture.database.clone()),
             ))
             .unwrap();
-        // The hidden look spent this window; an explicit retry looks now.
+        // The hidden look spent this window; `lf task sync` looks now.
         runtime
-            .block_on(crate::ops::planning_export::retry_export(
-                &reopened, repo, &work,
+            .block_on(crate::ops::planning_export::export(
+                &reopened, repo, &work, true,
             ))
             .unwrap();
         let saved = reopened.sqlite.task(&task.id).unwrap().unwrap();
@@ -4496,23 +4508,23 @@ fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effect
                     &crate::store::StorageConfig::sqlite(fixture.database.clone()),
                 ))
                 .unwrap();
-            // The hidden look spent this window; explicit retries look now.
+            // The hidden look spent this window; `lf task sync` looks now.
             if owner == &project {
                 state.blocking_lock().lose_attachment_reply = true;
                 assert!(runtime
-                    .block_on(crate::ops::planning_export::retry_export(
-                        &reopened, repo, owner
+                    .block_on(crate::ops::planning_export::export(
+                        &reopened, repo, owner, true,
                     ))
                     .is_err());
             }
             runtime
-                .block_on(crate::ops::planning_export::retry_export(
-                    &reopened, repo, owner,
+                .block_on(crate::ops::planning_export::export(
+                    &reopened, repo, owner, true,
                 ))
                 .unwrap();
             runtime
-                .block_on(crate::ops::planning_export::retry_export(
-                    &reopened, repo, owner,
+                .block_on(crate::ops::planning_export::export(
+                    &reopened, repo, owner, true,
                 ))
                 .unwrap();
         }

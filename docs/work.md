@@ -385,10 +385,10 @@ and keeps the Session, checkout, PR and graph.
 position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 
-**Sync.** `lf task sync LOO-12` reports where its tracker creation stands; an
-uncertain creation is looked for once per window and re-sent with its saved ID
-when absent. `--retry-creation` looks now, ahead of the window; `--retry-updates`
-retries saved field changes after reading the tracker again. `lf wave status
+**Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
+it with its saved ID when absent; between syncs, every `lf` command looks for an
+uncertain creation once per window. `--retry-updates` retries saved field
+changes after reading the tracker again. `lf wave status
 --sync` refreshes from Linear first.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).

@@ -15,8 +15,7 @@ re-sent create carries the same id, which Linear accepts at most once.
 ```text
 lf task create            prepare receipt → look (FindExportIssue) → create (DeliverTaskCreation)
 any lf command (a pass)   for each pending export: skip inside the window, else look, else re-send
-lf task sync ISSUE        this Task's pass, reporting where it stands
-lf task sync --retry-creation   look now, ahead of the window, and re-send if absent
+lf task sync ISSUE        look now, ahead of the window, and re-send if absent
 ```
 
 **Pass cost.** A pass over N pending exports costs no requests when nothing
@@ -34,9 +33,9 @@ finds the issue, the pass binds it (no second send). If it finds nothing, the
 pass re-sends the creation with its saved id and logs that it did. A creation
 that stays uncertain after that is looked for once per window: ten minutes while
 the Linear budget is healthy, one pacing interval while it is paced, and not
-until reset inside the reserve (`max(600, delta_fresh_secs())`). `lf task sync`
-reports "looked Ns ago, next look in Ms" inside the window; `--retry-creation`
-ignores it.
+until reset inside the reserve (`max(600, delta_fresh_secs())`). A pass logs
+"looked Ns ago, next look in Ms" inside the window; `lf task sync ISSUE` is the
+person's own look and ignores it.
 
 **Deadline.** Each export has its own five-second deadline covering only the
 provider path: Team validation, the look, the workflow state and the send. No

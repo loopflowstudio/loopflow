@@ -238,9 +238,10 @@ the API noun open. These supersede the alignment table above where they differ.
    doctor portfolio` show the noun path with the root form as alias.
 9. **`ops` dissolves.** `checkout.*` is a noun (`checkout.commit sync create`;
    `lf commit`, `lf sync`, `lf wt`); `repository.release`, `repository.ci`,
-   `repository.people`, `repository.tokens`; `account.*`; `pr.*` and `machine.*`
+   `repository.people`, `repository.tokens`; `account.*` as `lf account`; `pr.*` and `machine.*`
    already at the root. Nothing is left under `ops`.
-10. **Accounts and auth are one noun**, `account.*`, `lf auth` its shorthand.
+10. **Accounts and auth are one noun**, `account.*`, and the CLI is `lf account`
+    (singular, like every noun); `lf auth` is a one-release alias, not a shorthand.
     Account selection is user-scope config, never the repository file:
     `wave.<name>.account`, and the same key shape for a repository or skill.
     The catalogue carries each key's scope.

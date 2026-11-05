@@ -280,6 +280,14 @@ fn run_ssh_io(
         | Some(crate::lf::Commands::Desktop {
             cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
         }) => true,
+        Some(crate::lf::Commands::Task {
+            cmd:
+                crate::lf::TaskCommand::Create {
+                    request: None,
+                    notes: None,
+                    ..
+                },
+        }) => true,
         Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::NewChapter { plan, .. },
         }) => plan == std::path::Path::new("/dev/stdin"),

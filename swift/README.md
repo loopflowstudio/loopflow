@@ -772,8 +772,9 @@ Its response trace correlates diagnostics and effects in `logs/lf.log`; it grant
 no execution ownership or permission to retry. Canceling releases the client's
 wait, but an admitted mutation may still complete. A lost response is an unknown
 outcome: refresh authoritative state before another deliberate edit. Desktop
-never automatically resubmits it. Task creation/start and other execution
-launches retain their ordinary CLI path and existing Session/Graph owners;
+never automatically resubmits it. Session-to-Task adoption uses this shared write
+path without launching work. Create-and-run and other execution launches retain
+their ordinary CLI path and existing Session/Graph owners;
 remote Machine streams retain their CLI transports. Desktop's UI automation
 remains app-owned.
 

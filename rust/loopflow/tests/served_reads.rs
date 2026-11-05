@@ -66,12 +66,7 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
-    let _server = Server(isolated_lf(repo.path(), home.path(), &["server", "run"]));
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    while loopflow::server::client::connect(Operation::Status).is_err() {
-        assert!(std::time::Instant::now() < deadline, "server did not start");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let _server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
     fs::write(&database, "unreadable Work registry").unwrap();
     let before = fs::read(&database).unwrap();
@@ -141,6 +136,208 @@ fn configuration_edits_use_the_server_without_work_processes() {
         "Hearth"
     );
     assert_eq!(fs::read(&database).unwrap(), before);
+}
+
+#[test]
+fn served_binding_returns_directory_diagnostics_and_selects_the_conversation() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::{Operation, Reply};
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: codex\n");
+    repo.stage_all();
+    repo.commit("Binding fixture");
+    let destination = repo
+        .create_named_worktree("delivery")
+        .canonicalize()
+        .unwrap();
+    let task: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--worktree",
+            destination.to_str().unwrap(),
+            "--title",
+            "Delivery",
+            "--json",
+        ],
+        None,
+    ))
+    .unwrap();
+    let session: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["session", "resume", "--prepare", "--json"],
+        None,
+    ))
+    .unwrap();
+    assert_ne!(session["cwd"], destination.to_str().unwrap());
+    let _server = Server::start(repo.path(), home.path());
+    let before = processes(&home.path().join("loopflow.db"));
+    let (_, response) = loopflow::server::client::connect(Operation::Command {
+        change: Write::SessionBind {
+            directory: repo.path().to_owned(),
+            id: session["id"].as_str().unwrap().into(),
+            task: task["id"].as_str().unwrap().into(),
+        },
+    })
+    .unwrap();
+    let Reply::Command {
+        output,
+        stderr,
+        code,
+        ..
+    } = response.result
+    else {
+        panic!("binding did not return a command result")
+    };
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "Conversation directory set to {}.",
+            destination.display()
+        )),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("Already-running clients may keep their original directory."),
+        "{stderr}"
+    );
+    let bound: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(bound["id"], session["id"]);
+    assert_eq!(bound["cwd"], destination.to_str().unwrap());
+    assert_eq!(bound["task_primary"], true);
+    assert_eq!(processes(&home.path().join("loopflow.db")), before);
+}
+
+#[test]
+fn served_session_adoption_matches_cli_without_new_execution() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::{Operation, Reply};
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let host = TestRepo::new();
+    let server = Server::start(host.path(), home.path());
+    let database = home.path().join("loopflow.db");
+    // Exercise both initial creation and repeat adoption through each carrier.
+    for served_first in [true, false] {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/config.yaml", "default_agent: codex\n");
+        repo.stage_all();
+        repo.commit("Adoption fixture");
+        let session: Value = serde_json::from_str(&read(
+            repo.path(),
+            home.path(),
+            &["session", "resume", "--prepare", "--json"],
+            None,
+        ))
+        .unwrap();
+        let id = session["id"].as_str().unwrap();
+        let change = Write::TaskFromSession {
+            directory: repo.path().to_owned(),
+            id: id.into(),
+            title: "Keep the conversation".into(),
+        };
+        let cli = || {
+            let args = change.argv();
+            let args: Vec<_> = args.iter().map(String::as_str).collect();
+            let before = processes(&database);
+            let output = read(repo.path(), home.path(), &args, None);
+            assert!(processes(&database) > before, "CLI lost its real Process");
+            serde_json::from_str::<Value>(&output).unwrap()
+        };
+        let served = |change| {
+            let before = processes(&database);
+            let (_, response) =
+                loopflow::server::client::connect(Operation::Command { change }).unwrap();
+            let Reply::Command {
+                output,
+                stderr,
+                code,
+                trace_id,
+            } = response.result
+            else {
+                panic!("adoption did not return a command receipt")
+            };
+            assert_eq!(processes(&database), before, "request fabricated execution");
+            let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
+            assert!(log.lines().any(|line| line.contains(trace_id.as_str())
+                && line.contains("request finished")
+                && line.contains(id)
+                && line.contains(&format!("pid={}", server.0.id()))));
+            (code, output, stderr)
+        };
+        let adopt = || {
+            let (code, output, stderr) = served(change.clone());
+            assert_eq!(code, 0, "{stderr}");
+            serde_json::from_str::<Value>(&output).unwrap()
+        };
+        let first = if served_first { adopt() } else { cli() };
+        let second = if served_first { cli() } else { adopt() };
+        assert_eq!(without_revision(first.clone()), without_revision(second));
+        assert_eq!(first["title"], "Keep the conversation");
+        assert!(first["project_id"].is_null());
+        assert!(
+            first["worktree"].is_null(),
+            "repository conversation must not adopt the shared checkout"
+        );
+        let bound: Value = serde_json::from_str(&read(
+            repo.path(),
+            home.path(),
+            &["session", "resume", id, "--prepare", "--json"],
+            None,
+        ))
+        .unwrap();
+        assert_eq!(bound["id"], session["id"]);
+        assert_eq!(bound["cwd"], session["cwd"]);
+        assert_eq!(bound["agent_process_id"], session["agent_process_id"]);
+        assert_eq!(bound["task_primary"], true);
+        assert_eq!(bound["work"]["id"], first["id"]);
+        assert_eq!(bound["task_ids"], serde_json::json!([first["id"]]));
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        let owner: String = connection
+            .query_row(
+                "SELECT person_key FROM task_ownership WHERE task_id=?1",
+                [first["id"].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            owner, "test@test.com",
+            "claim must use the Task repository identity"
+        );
+        let task_count: i64 = connection
+            .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap();
+        // A failed request has its own trace, changes no Task and launches nothing.
+        let (code, _, error) = served(Write::TaskFromSession {
+            directory: repo.path().to_owned(),
+            id: id.into(),
+            title: " ".into(),
+        });
+        assert_ne!(code, 0);
+        assert!(!error.is_empty());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            task_count
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM task_graphs", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
 }
 
 #[test]
@@ -427,12 +624,7 @@ fn server_operations_match_their_lf_commands() {
             ],
         ),
     };
-    let server = Server(isolated_lf(repo.path(), home.path(), &["server", "run"]));
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    while loopflow::server::client::connect(loopflow::server::wire::Operation::Bootstrap).is_err() {
-        assert!(std::time::Instant::now() < deadline, "server did not start");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
     // A server read changes no Work and records no Process.
     let unchanged = |argv: &[&str], serve: &mut dyn FnMut()| {
@@ -555,7 +747,9 @@ fn server_operations_match_their_lf_commands() {
         directory: directory.clone(),
         issue: "INF-123".into(),
     }) {
-        Write::TaskComplete { .. }
+        // Creation has its own two-order comparison in served_session_adoption_matches_cli_without_new_execution.
+        Write::TaskFromSession { .. }
+        | Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
         | Write::TaskNotes { .. }
@@ -903,6 +1097,7 @@ fn server_operations_match_their_lf_commands() {
     // Concurrent edits name distinct durable Sessions and never create an OS
     // Process per request. Each returned trace resolves to only its own target.
     let other_repo = TestRepo::new();
+    other_repo.create_file(".lf/config.yaml", "default_agent: codex\n");
     let other: Value = serde_json::from_str(&read(
         other_repo.path(),
         home.path(),
@@ -1111,10 +1306,13 @@ fn without_save_time(mut value: Value) -> Value {
 
 /// The `processes` revision: every Process recorded or forgotten moves it.
 fn processes(database: &Path) -> i64 {
-    let (revisions, _) = changes(database);
-    revisions
-        .into_iter()
-        .find_map(|(domain, revision)| (domain == "processes").then_some(revision))
+    rusqlite::Connection::open(database)
+        .unwrap()
+        .query_row(
+            "SELECT revision FROM store_revisions WHERE domain='processes'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap()
 }
 
@@ -1155,6 +1353,20 @@ fn without_clock(mut value: Value) -> Value {
 }
 
 struct Server(std::process::Child);
+
+impl Server {
+    fn start(repo: &Path, home: &Path) -> Self {
+        let server = Self(isolated_lf(repo, home, &["server", "run"]));
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while loopflow::server::client::connect(loopflow::server::wire::Operation::Status).is_err()
+        {
+            assert!(std::time::Instant::now() < deadline, "server did not start");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        server
+    }
+}
+
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = self.0.kill();

@@ -74,6 +74,13 @@ struct ServerProtocolTests {
         #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(encoded)) == value)
     }
 
+    @Test func sessionAdoptionSharesTheRustWriteContract() throws {
+        let request = ServerRequest(version: 1, id: "adopt-1", operation: .command(
+            .taskFromSession(directory: "/repo", id: "session_5e55105e000040008000000000000001",
+                             title: "Keep the conversation")))
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("task_from_session")))
+    }
+
     @Test func missingRequiredReplyDoesNotBecomeAnEmptyReading() {
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerResponse.self, from: Data(#"{"id":"x","instance":"i","result":{"kind":"reading","generation":1}}"#.utf8))

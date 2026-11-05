@@ -403,7 +403,7 @@ impl Read {
                 graph,
                 step,
             } => pretty(&crate::config::api::inspect(
-                directory,
+                &crate::repo::working_directory_in(directory)?,
                 wave.as_deref(),
                 skill.as_deref(),
                 graph.as_deref(),

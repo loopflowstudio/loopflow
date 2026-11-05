@@ -10,7 +10,7 @@ for CLI and server, request-scoped telemetry, and deletion of the embedded Work
 library. Publication of PR #1813 and interactive demo are authorized; merge,
 Auto-Ship and Task completion are not. The existing feature Graph owns delivery.
 
-### Implemented through `0e597c17a1`
+### Implemented through `041ca8f1c5`, with binding and adoption repairs below
 
 Every shared native `Read`, `Write` and `Subscription` uses the local server.
 `rust/loopflow-ffi/`, its C ABI/Cargo entries, `LoopflowLibrary.swift`, the Swift
@@ -22,17 +22,19 @@ launches, remote streams and existing Session/Graph owners retain their roles.
 The FFI deletion was present at `59287ba3ed`; `2d9c295d8a` checkpoints the
 shared direct-write implementation and removes the full-CLI adapter.
 
-Desktop Task creation still uses `RegistryQuery.createTask` → ordinary
-`task create --run --json`; it is an execution launch, not a `Write` variant.
-The required native create/open/rename/save demo spans both that launch path and
-served mutations. Removing ordinary served-write subprocesses does not move
-provider or Graph lifetime into the server.
+Desktop `RegistryQuery.createTask` still uses ordinary `task create --run --json`;
+that execution launch retains its owners. The required native create/open/rename/save
+demo spans launches and served mutations. Non-launching `createTaskFromSession`
+now uses the shared `task_from_session` Write contract.
 
 Main's #1815 installation coherence entered at `59287ba3ed`. Merge `ee4eee8dd8`
 then integrated `6f0d98e016`, including #1818 Session reattachment and #1820
 opt-in output cleanup. `0e597c17a1` retains terminal fixture cleanup while waiting
 for upgraded owners. Base conflicts are resolved locally; publication remains.
-The shared dispatcher and complete FFI deletion survived the merge.
+Merges `000c88709f` and `041ca8f1c5` subsequently integrated #1805 file settings
+and #1807 Session adoption through `c59cfcc631`. The shared dispatcher and complete
+FFI deletion survived both. Saved settings/compression checks precede #1807;
+no full merged-build pass is established.
 
 Infrastructure's November 4 memory now identifies SQLite contention blocking
 owner control, with nonblocking input/retry regression coverage. It does not
@@ -57,35 +59,21 @@ its existing timestamp without an OS Process. The Task's single migration adds
 `ship_stopped_person`, preserving the person at admission rather than inferring
 historical authorship from later Machine settings; older unknown names stay unknown.
 
-### Delete — do not maintain
+### Removed mechanisms
 
-- `server/service.rs`'s CLI spawn and `read_command_output`: removed; framing
-  limits, output/error/exit status, no replay and unknown outcomes remain.
-- Task/Wave mutation branches in `bin/lf.rs`, Session rename/bind orchestration,
-  and Desktop saved-write branches: moved to shared command handling, retaining
-  CLI flags/defaults and app-owned automation.
-- Process-count equivalence in `served_reads`: replaced with effect equivalence
-  and proof that requests create no Process rows, including every wire variant,
-  large saves, and arrangement's no-Process behavior.
-- Redundant Session/Desktop mutation re-entry and `portfolio::run`: removed;
-  CLI dispatch already selects the shared executor before reaching those handlers.
-  Request entry and nested workers use the same unwind-safe scope restoration.
-- Desktop FFI crate/adapter/module-map/linking/packaging are deleted. Provider
-  launches and remote streams retain their existing owners.
-- Portfolio's ambient-cwd mutation wrapper is removed; CLI/server and fake-world
-  callers use one explicit-directory API. Settings requests build `JSONValue`
-  directly, removing the old untyped dictionary/serialization round trip. The
-  migrated configuration tests share one module and restore environment on unwind.
-
-Pre-sync parity and routing evidence is retained at
-`b702602ee1:scratch/mobile-backend.md`; it predates the settings merge and does
-not establish current-build acceptance.
+The CLI-child adapter, duplicate `Write::perform`, embedded FFI executor and
+exclusive build wiring are gone. CLI Task/Wave mutations, Session rename/bind,
+preparation and saved Desktop writes share dispatch; ordinary provider launches
+and remote streams retain their owners. `served_reads` compares effects and proves
+requests create no Process rows, including large saves and arrangement. Portfolio
+uses one explicit-directory API; native settings construct `JSONValue` directly.
+Pre-settings parity evidence remains at `b702602ee1:scratch/mobile-backend.md`.
 
 ### Settings merge continuation — November 4
 
 The resolved merge of `a5000ef889` adds a file-backed settings resolver and native
-Configuration/Appearance consumers. Keep its declarations, migrations, UI and
-behavior tests; remove its newly added FFI carrier with the existing deletion.
+Configuration/Appearance consumers. Its declarations, migrations, UI and
+behavior tests survive; its added FFI carrier is removed with the existing deletion.
 `config::api` remains the common CLI/server file owner. The additive local
 `configuration` operation uses the same command telemetry/error/no-replay receipt.
 A lightweight `status` operation establishes transport readiness without opening
@@ -97,11 +85,34 @@ workers carry the complete request selection, and SSH derives profiles from the
 request directory. Native settings/theme saves await acknowledgement without
 blocking the UI or overwriting a newer selection with an older read.
 
-The added FFI destination/launch tests move to `config::api`; focused server
+The added FFI destination/launch tests moved to `config::api`; focused server
 coverage checks configuration with an unreadable registry and preserves its bytes.
-Gate additionally owns settings consumers, Swift themes/configuration/protocol,
-server transport/status and packaging on the merged tree. Publication and
-interactive demo remain the existing Graph's later steps.
+Served settings inspection now resolves the CLI's repository directory too,
+preserving identical provenance paths through macOS symlinks and subdirectories.
+Gate owns merged settings consumers, themes, transport and packaging.
+
+### Session adoption merge — November 4
+
+#1807 now makes explicit bind select the Task's primary conversation and set its
+recorded directory immediately. It retains live attachment and historical capture
+ownership, allows done Tasks without reopening them, and rejects closed/headless
+Sessions. Prepared/opened Sessions retain bound directories. These semantics are
+upstream behavior, not permission for the server to restart a provider.
+
+Source inspection found one bounded integration regression: adoption's directory
+warning bypassed the request error stream through `eprintln!`. The local repair
+uses `journal::request::diagnostic`, preserving CLI stderr and returning the warning
+in the served bind receipt. A real-server regression checks the destination,
+primary selection, retained Session identity and absence of fabricated Processes.
+
+### Delete — do not maintain
+
+The non-launching `RegistryQuery.createTaskFromSession` CLI call and inline
+creation executor in `bin/lf.rs` are removed. Rust/Swift `TaskFromSession` writes
+share `task_create::create`; creation and preview share report parsing, and graph
+validation runs directly before creation. Terminal input stays optional; piped
+reports and remote forwarding retain stdin. Create-and-run keeps
+`task_create::start` and its owners. Unknown outcomes never replay.
 
 ### Documentation and surviving-path reductions
 
@@ -112,21 +123,20 @@ a lost rename reply never authorizes overwriting a later edit, and a lost takeov
 reply never authorizes reclaiming a newer viewer's control. No rollback or
 exactly-once promise is added. Documentation changes introduce no wire change.
 
-The ordinary Session launcher no longer contains unreachable `--prepare`
-branches; shared mutation dispatch owns preparation and its output. Transport
-subscription coverage no longer asserts the retired CLI child's Process journal
-or duplicates concurrent write parity: `served_reads` owns those effects and
-request-log assertions. The transport test retains live watch invalidation and
-primary-Session resolution. No remaining FFI or subprocess executor is retained.
-The availability fixture holds its fake provider until cleanup instead of letting
-a 60-second sleep expire during concurrent tests.
+Shared dispatch owns Session preparation; unreachable launcher `--prepare`
+branches are gone. `served_reads` owns write parity and request-log assertions,
+with one server-readiness fixture and a direct Process-revision query. Transport
+tests retain watch invalidation and primary-Session resolution; their fake
+provider lives until cleanup. No FFI or subprocess executor remains.
 
 ### Remaining proof and delivery
 
-Gate owns affected correctness/packaging checks on the merged implementation,
-including clippy, full Desktop and bounded Xcode builds. The #1818 overlap changes
-Session admission and owner input/lifetime, so the merged transport/recovery path
-needs applicable coverage beyond the saved pre-sync direct-write checks. Final
+Gate owns affected correctness/packaging checks, including direct-write parity/isolation, adoption/binding, settings consumers,
+full Desktop and bounded Xcode builds. This extraction also reaches `binary(lf)`,
+`session_lifecycle_tests::promotion_*`, CLI create-and-run and SSH stdin forwarding.
+#1818 and #1807 both change Session admission
+and owner input/lifetime; the merged transport/recovery path needs coverage beyond
+saved pre-sync checks. Older binding parity never exercised a directory transfer. Final
 installed-helper replacement proof still requires an owner and unfinished Graph
 launched through the replaced installed executable, recovery acknowledgement,
 editing/submitting the same retained draft, and subsequent Graph progress.
@@ -136,12 +146,10 @@ remain explicitly unestablished. The existing Graph owns publication of PR #1813
 and the interactive demo boundary. Merge, Auto-Ship and Task completion remain
 unauthorized.
 
-The [direct-write demo](direct-write-demo.md) proves native Task creation,
-conversation, rename, file save and description save with persisted-state receipts.
-The contributing conversation's bundle predates the final cwd/error/stop repairs;
-focused checks cover those changes, not a fabricated final-build screenshot claim.
-Its attempted autonomous research Graph lacked a managed Codex account; native
-conversation worked. This is operator evidence, not Jack Heart's acceptance.
+The [direct-write demo](direct-write-demo.md) retains native creation, conversation,
+rename and save receipts. Its bundle predates final repairs. The research Graph
+lacked a managed Codex account; conversation worked. This operator evidence is
+not Jack Heart's acceptance or proof of the final build.
 
 [Matched measurements](server-performance/results.md) retain raw samples:
 subprocess → direct rename median/p95 87.38/105.30 → 10.77/20.63 ms; read
@@ -324,4 +332,8 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Check (November 4 settings merge): `config::api::` (3), `journal::request::` (3), server wire round-trip (1), `served_reads configuration_` (2), focused Swift configuration/protocol/theme suites (35), Swift boundaries, `cargo fmt`, `git diff --check`, and `cargo clippy --all-targets --jobs 4 -- -D warnings` passed. Logs: `/tmp/loo593-settings-{api,request-reuse,wire,server,swift,clippy}.log`. An unchanged library-test rebuild was stopped after prolonged compilation; request/wire checks reused the binary built by the passing API check. After reduction, `config::api::` (3), `portfolio::` (3), `swift build --build-tests`, headless `ConfigurationSettingsTests` (2), Swift boundaries, formatting and Clippy passed; logs: `/tmp/loo593-compress-*.log`. Gate owns full merged suites/packaging; demo owns rendered and installed-replacement acceptance.
+Pre-merge settings/compression evidence is retained at
+`041ca8f1c5:scratch/mobile-backend.md`; the full Desktop failure remains unresolved.
+Binding repair and pre-adoption Clippy passed in `/tmp/loo593-realign-{bind,clippy}.log`.
+
+Checks: `cargo test -p loopflow --test served_reads` passed (5), `cargo clippy --all-targets -- -D warnings` passed; `/tmp/loo593-compress-{served,adoption-clippy}.log`. Saved native adoption checks passed (3): `scripts/test_desktop.sh --filter 'servedSessionAdoption|sessionAdoptionSharesTheRustWriteContract|createOrBindConversation' -Xswiftc -gnone`, `/tmp/loo593-adoption-swift.log`. Gate owns remaining affected suites/packaging; demo owns rendered continuity.

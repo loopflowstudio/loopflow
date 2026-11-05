@@ -22,7 +22,11 @@ pub fn accepts(cli: &Cli) -> bool {
     match &cli.command {
         Some(Commands::Task { cmd }) => matches!(
             cmd,
-            TaskCommand::Claim { .. }
+            TaskCommand::Create {
+                session: Some(_),
+                run: false,
+                ..
+            } | TaskCommand::Claim { .. }
                 | TaskCommand::Unassign { .. }
                 | TaskCommand::Reopen { .. }
                 | TaskCommand::Complete { .. }
@@ -180,6 +184,7 @@ fn local(
 
 fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()> {
     match command {
+        TaskCommand::Create { .. } => super::task_create::create(repo, command, io).map(drop),
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
             use crate::ops::task_ownership::{change, render, OwnershipChange};
             let requested = match command {

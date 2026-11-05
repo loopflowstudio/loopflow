@@ -4,8 +4,8 @@ Jack Heart selected direct server writes in [server-write-direction.md](server-w
 This supersedes the full-CLI subprocess design. Accepted delivery remains the
 existing feature Graph and PR #1813 through publication and interactive demo;
 no merge, Auto-Ship or Task completion. Direct execution is committed at
-`2d9c295d8a`; `ee4eee8dd8` integrates main through `6f0d98e016`, followed by
-the terminal fixture repair at `0e597c17a1`.
+`2d9c295d8a`; main is integrated through `c59cfcc631` at `041ca8f1c5`, including
+settings and Session adoption. The working design tracks their integration gaps.
 
 The [working design](mobile-backend.md) owns the deletion list, invariants and
 remaining proof. LOO-718 owns remote admission, pairing and iOS; do not edit its
@@ -22,7 +22,8 @@ a memory-savings claim.
 
 GUI-less distribution, before-login hosting, removal during active work and the
 phone takeover gesture remain separate product decisions. No new assumption
-about them is needed for the accepted local cutover.
+about them is needed for the accepted local cutover. Session-to-Task adoption now
+shares creation dispatch; ordinary create-and-run retains its execution owners.
 
 ## Continuation decision — November 4, 2026
 

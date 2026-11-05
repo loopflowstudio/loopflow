@@ -10,6 +10,12 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Write {
+    /// `lf task create --session <id> --title <title> --json`, without launching.
+    TaskFromSession {
+        directory: PathBuf,
+        id: String,
+        title: String,
+    },
     /// `lf task complete <issue>`.
     TaskComplete { directory: PathBuf, issue: String },
     /// `lf task reopen <issue>`.
@@ -157,6 +163,17 @@ impl Write {
         let mut argv = vec!["--cwd".to_owned(), self.directory().display().to_string()];
         let (notes_flag, revision_flag, query, path);
         let words: Vec<&str> = match self {
+            Self::TaskFromSession { id, title, .. } => {
+                vec![
+                    "task",
+                    "create",
+                    "--session",
+                    id,
+                    "--title",
+                    title,
+                    "--json",
+                ]
+            }
             Self::TaskComplete { issue, .. } => vec!["task", "complete", issue],
             Self::TaskReopen { issue, .. } => vec!["task", "reopen", issue],
             Self::TaskAbandon { issue, .. } => vec!["task", "abandon", issue],
@@ -335,7 +352,8 @@ impl Write {
 
     pub(crate) fn directory(&self) -> &Path {
         match self {
-            Self::TaskComplete { directory, .. }
+            Self::TaskFromSession { directory, .. }
+            | Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
             | Self::TaskNotes { directory, .. }
@@ -460,6 +478,11 @@ mod tests {
     fn every_write_parses_as_the_lf_command_it_names() {
         let directory = PathBuf::from("/tmp/repo");
         let writes = [
+            Write::TaskFromSession {
+                directory: directory.clone(),
+                id: "session_1".into(),
+                title: "Adopt work".into(),
+            },
             Write::TaskComplete {
                 directory: directory.clone(),
                 issue: "FIX-1".into(),

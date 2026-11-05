@@ -76,9 +76,10 @@ Canceling releases the client's wait, but an admitted mutation may still complet
 A lost reply means outcome unknown: refresh authoritative state before another
 deliberate edit, and never automatically replay the request.
 
-Task creation/start and other execution launches keep their ordinary CLI path
-and existing Session/Graph owners. Ghostty rendering and app-owned automation
-keep their existing boundaries.
+Session-to-Task adoption uses served mutation dispatch without launching work.
+Create-and-run and other execution launches retain their ordinary CLI path and
+existing Session/Graph owners. Ghostty rendering and app-owned automation retain
+their boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
 
 Local peer credentials apply only to the private Unix socket. Remote access needs

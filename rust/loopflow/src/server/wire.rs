@@ -111,6 +111,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/session_owner.json"),
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
             include_str!("../../../../tests/fixtures/dto/server/status_request.json"),
         ] {
             let request: Request = serde_json::from_str(raw).unwrap();

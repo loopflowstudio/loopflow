@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{IsTerminal, Read};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -11,9 +11,7 @@ use tracing_subscriber::EnvFilter;
 use loopflow::context_block::ContextMoment;
 use loopflow::definition::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::commands::mutation::{
-    regressed_in_arg, selected_task_repository, task_edit_update,
-};
+use loopflow::lf::commands::mutation::{selected_task_repository, task_edit_update};
 use loopflow::lf::{
     Cli, Commands, GraphCommand, InstallCommand, OpsCommand, SkillCommand, TaskCommand, WaveCommand,
 };
@@ -1043,53 +1041,27 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Create {
-            session,
-            worktree,
             request,
-            no_wave,
-            wave,
-            title,
-            notes,
-            regressed_in,
             run,
             graph,
             json,
+            ..
         } => {
-            if let Some(graph) = graph {
-                loopflow::lf::commands::task_create::check_graph(repo, graph)?;
-            }
-
-            let report = match request.as_ref().or(notes.as_ref()) {
-                Some(text) => Some(text.clone()),
-                None => piped_task_report()?,
-            };
-            let issue = loopflow::ops::task::task_create(
+            let mut stdin = std::io::stdin();
+            let mut empty = std::io::empty();
+            let issue = loopflow::lf::commands::task_create::create(
                 repo,
-                if *no_wave { None } else { wave.as_deref() },
-                title.clone(),
-                report,
-                regressed_in_arg(regressed_in),
-                loopflow::ops::task::TaskAdoptionOptions {
-                    session: session.clone(),
-                    worktree: worktree.clone(),
+                command,
+                &mut loopflow::lf::commands::mutation::CommandIo {
+                    input: if stdin.is_terminal() {
+                        &mut empty
+                    } else {
+                        &mut stdin
+                    },
+                    output: &mut std::io::stdout(),
+                    error: &mut std::io::stderr(),
                 },
             )?;
-            match (*json, *run) {
-                (false, _) => println!("{} · {}", issue.title, issue.identifier),
-                (true, false) => println!("{}", serde_json::to_string_pretty(&issue)?),
-                // `--run --json` prints one receipt once the run settles.
-                (true, true) => {}
-            }
-            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
-                .planning_transport()
-                .remote_name()
-                .filter(|_| issue.linear_id.is_none())
-            {
-                eprintln!(
-                    "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
-                    issue.identifier
-                );
-            }
             if *run {
                 loopflow::lf::commands::task_create::start(
                     cli,
@@ -1377,15 +1349,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             print_task(&task, *json)
         }
     }
-}
-
-fn piped_task_report() -> anyhow::Result<Option<String>> {
-    if std::io::stdin().is_terminal() {
-        return Ok(None);
-    }
-    let mut report = String::new();
-    std::io::stdin().read_to_string(&mut report)?;
-    Ok((!report.trim().is_empty()).then_some(report))
 }
 
 fn main() -> std::process::ExitCode {
@@ -2115,7 +2078,9 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }) => {
             piped_notes = match request {
                 Some(request) => Some(request.clone()),
-                None if notes.is_none() => piped_task_report()?,
+                None if notes.is_none() && !std::io::stdin().is_terminal() => {
+                    loopflow::lf::commands::task_create::read_report(&mut std::io::stdin())?
+                }
                 None => None,
             };
             Some((
@@ -2324,12 +2289,25 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             };
         }
         journal::admit_process(&directory, args);
+        let mut stdin = std::io::stdin();
+        let mut empty = std::io::empty();
+        let terminal_create = stdin.is_terminal()
+            && matches!(
+                cli.command,
+                Some(Commands::Task {
+                    cmd: TaskCommand::Create { .. }
+                })
+            );
         return loopflow::lf::commands::mutation::run(
             &cli,
             args,
             &directory,
             &mut loopflow::lf::commands::mutation::CommandIo {
-                input: &mut std::io::stdin(),
+                input: if terminal_create {
+                    &mut empty
+                } else {
+                    &mut stdin
+                },
                 output: &mut std::io::stdout(),
                 error: &mut std::io::stderr(),
             },

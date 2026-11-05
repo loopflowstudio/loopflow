@@ -68,6 +68,8 @@ setup delegates to the promoted installation; source builds use an explicit
 - `command {change}` accepts the shared `Write` shape. The server calls the same
   Rust mutation dispatcher as the CLI, with the request's directory and streams.
   `command {trace_id,output,stderr,code}` returns its output and exit status.
+  `task_from_session {directory,id,title}` adopts the selected conversation and
+  returns the Task without launching work; CLI and server share its creation handler.
   Ordinary writes start no CLI child. Machine routing still uses SSH and never
   falls back to local execution. Requests create no Process rows. A lost response means
   outcome unknown; inspect state before retrying. IDs correlate diagnostics and

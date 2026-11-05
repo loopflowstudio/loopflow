@@ -7,6 +7,35 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Session adoption returns the served Task and preserves uncertain failure")
+    func servedSessionAdoption() async throws {
+        actor Adoption {
+            var attempts = 0
+            func submit(title: String) throws -> String {
+                attempts += 1
+                if title == "Uncertain" { throw RegistryQueryError("Outcome unknown") }
+                return #"{"id":"task-retained","identifier":"FIX-1","title":"Keep the conversation"}"#
+            }
+        }
+        let adoption = Adoption()
+        let query = RegistryQuery(write: { change in
+            guard case .taskFromSession(_, _, let title) = change else {
+                throw RegistryQueryError("Unexpected write")
+            }
+            return try await adoption.submit(title: title)
+        }) { _, _ in throw RegistryQueryError("Unexpected execution launch") }
+        let task = try await query.createTaskFromSession(id: "session-retained", title: "Keep the conversation", cwd: "/repo")
+        #expect(task.id == "task-retained")
+        #expect(task.title == "Keep the conversation")
+        do {
+            _ = try await query.createTaskFromSession(id: "session-retained", title: "Uncertain", cwd: "/repo")
+            Issue.record("An uncertain adoption succeeded")
+        } catch {
+            #expect(error.localizedDescription == "Outcome unknown")
+        }
+        #expect(await adoption.attempts == 2)
+    }
+
     @Test("Settings inspection retains skill and authored occurrence selectors")
     func settingsInspection() throws {
         let read = ServedRead.settings(directory: "/r", wave: nil, skill: nil, graph: "release", step: "write-code")

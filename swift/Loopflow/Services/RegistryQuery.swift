@@ -228,9 +228,10 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 }
 
 /// A write Loopflow makes inside the app, encoded as its Rust `Write`: what
-/// `argv` does in `cwd`, given `input` on stdin. A Work change records its
-/// Process as that `lf` command would.
+/// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
+/// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
+    case taskFromSession(directory: String, id: String, title: String)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
@@ -261,6 +262,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
         switch self {
+        case .taskFromSession(_, let id, let title): ["task", "create", "--session", id, "--title", title, "--json"]
         case .taskComplete(_, let issue): ["task", "complete", issue]
         case .taskReopen(_, let issue): ["task", "reopen", issue]
         case .taskAbandon(_, let issue): ["task", "abandon", issue]
@@ -327,6 +329,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
+        case .taskFromSession(let directory, let id, let title):
+            TaggedFields("task_from_session", ["directory": directory, "id": id, "title": title])
         case .taskComplete(let directory, let issue):
             TaggedFields("task_complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
@@ -976,8 +980,8 @@ public struct RegistryQuery: Sendable {
 
     /// Create a Task around the selected conversation without launching work.
     public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
-        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await run(
-            ["task", "create", "--session", id, "--title", title, "--json"], cwd))
+        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await write(
+            .taskFromSession(directory: cwd ?? "/", id: id, title: title)))
     }
 
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {

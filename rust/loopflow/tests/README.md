@@ -75,7 +75,7 @@ responsive, no unrecorded bytes reach the provider, and unlocking resumes delive
 without replay. `transport::input_retry_tests` bounds polling through a failed
 store and verifies recovery through the real descriptor loop.
 
-`transport_tests::unanswering_superseded_owners_preserve_work` pauses superseded
+`transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
 owners while resuming their Sessions. Drafts, pending requests, turns, Graph
 ancestry/steps and Runs retain the same provider, attachment and capture; no new
 provider launches. A completed Session is unknown, not work: its unanswering owner

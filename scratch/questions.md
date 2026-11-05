@@ -42,7 +42,7 @@ because its hooks proved bounded. See [the receipt](loo-725.md#cleanup-proof-rec
 2 of 9 parallel focused runs during the #1818 sync (load average 40-70) and 0 of 3 alone.
 Its logic matches main's; the cause is unknown, and four diagnostic runs did not repeat it.
 Gate or CI should show whether it recurs; a viewer leaving during takeover would be a
-product bug, not only a test race.
+product bug, not only a test race. The gate passed it once at load above 100.
 
 No step of `auto`, `pursue`, `refresh` or `deliver` calls for Wave memory upkeep, yet earlier
 passes on this branch edited it, including condensing unrelated sections. The November 4 sixth

@@ -829,7 +829,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut ownership = Ownership::default();
     let mut size = (24, 80);
     let mut pending_input = PendingInput::default();
-    let mut ending_failure = None;
+    let mut ending_failure = crate::store::RecordingGap::default();
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -1391,8 +1391,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if let Ok(ending) = ending.try_recv() {
             let event = lifetime::report_result(
                 &mut ending_failure,
-                &id,
-                "confirm Session ending",
+                "Session ending",
                 ending.confirm(&id, observed, pending_input.holds_owner()),
             )
             .flatten();

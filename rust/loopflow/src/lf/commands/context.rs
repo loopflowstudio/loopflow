@@ -15,6 +15,7 @@ use serde::Serialize;
 use crate::prompt::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
 use crate::prompt::{gather_documents, GatherSpec};
 use crate::steer::NativeBoundary;
+use crate::store::RecordingGap;
 
 #[derive(Debug, Serialize)]
 struct ContextReport {
@@ -303,6 +304,7 @@ pub fn emit_block(
             .as_array()
             .zip(input["session_crons"].as_array())
             .map(|(tasks, crons)| tasks.len() + crons.len());
+        let mut gap = recording_gap(&delivery.home, thread);
         let recorded = hook_store(&delivery.home).and_then(|store| {
             store.record_native_turn(adapter, thread, yielded, open_tools)?;
             if let Some(prompt_id) = input["prompt_id"].as_str().filter(|id| !id.is_empty()) {
@@ -312,11 +314,10 @@ pub fn emit_block(
                     store.acknowledge_native_input(adapter, thread, prompt_id, Some(prompt))?;
                 }
             }
-            Ok(())
+            close_gap(&store, &adapter.session, &mut gap)
         });
-        match recorded {
-            Ok(()) => store_recovered(&delivery.home, thread),
-            Err(error) => store_gap(&delivery.home, thread, "turn evidence", &error),
+        if let Err(error) = recorded {
+            gap.note("turn evidence", &error);
         }
     }
     if moment == crate::context_block::ContextMoment::Stop {
@@ -334,38 +335,45 @@ fn hook_store(
     crate::store::sqlite::SqliteStore::open_for_hook(&home.join("loopflow.db"))
 }
 
-/// The marker that says this native conversation's hooks already logged a
-/// store gap; cleared when a later boundary records again.
-fn gap_marker(home: &std::path::Path, thread: &str) -> std::path::PathBuf {
-    crate::context_block::codex_delivery_path(home, thread).with_extension("store-gap")
+/// Every hook is a fresh process, so the native conversation keeps its open gap
+/// beside its delivery file.
+fn recording_gap(home: &std::path::Path, thread: &str) -> RecordingGap {
+    RecordingGap::marked(
+        crate::context_block::native_delivery_path(home, thread).with_extension("store-gap"),
+    )
 }
 
-/// A store the hook cannot use is a recording gap logged once per native
-/// conversation; the turn or tool goes on without lf's records.
-fn store_gap(home: &std::path::Path, thread: &str, what: &str, error: &dyn std::fmt::Display) {
-    let marker = gap_marker(home, thread);
-    if marker.exists() {
-        tracing::debug!(thread, "{what} not recorded: {error}");
-        return;
+/// A boundary lf could not record enters the Session.s history as unknown at the
+/// next one that succeeds (Jack Heart, 2026-11-05): one observation per gap,
+/// written before the gap closes so a failed write keeps it open.
+fn close_gap(
+    store: &crate::store::sqlite::SqliteStore,
+    session: &str,
+    gap: &mut RecordingGap,
+) -> crate::store::StoreResult<()> {
+    if let Some(span) = gap.span() {
+        let session = store
+            .session(session)?
+            .ok_or(crate::store::StoreError::NotFound)?;
+        let input = session
+            .input_key()
+            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?
+            .clone();
+        store.retain_session_observation(
+            &session,
+            &crate::session::SessionObservation {
+                artifact_key: input,
+                source: format!("store-gap:{}:{}", span.first_miss, span.last_miss),
+                observed_at: span.first_miss,
+                task_id: session.task_id.clone(),
+                wave_id: session.wave_id.clone(),
+                payload: serde_json::json!({"source":"store-gap",
+                    "first_miss":span.first_miss,"last_miss":span.last_miss}),
+            },
+        )?;
     }
-    tracing::warn!(
-        thread,
-        "{what} not recorded; the conversation continues without lf's records: {error}"
-    );
-    if let Some(parent) = marker.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&marker, b"");
-}
-
-fn store_recovered(home: &std::path::Path, thread: &str) {
-    let marker = gap_marker(home, thread);
-    if marker.exists() && std::fs::remove_file(&marker).is_ok() {
-        tracing::info!(
-            thread,
-            "store reachable again; lf records this conversation from here"
-        );
-    }
+    gap.recovered();
+    Ok(())
 }
 
 fn read_callback() -> Result<serde_json::Value> {
@@ -393,7 +401,7 @@ fn load_delivery(
         .or_else(|| std::env::var_os(crate::context_block::CONTEXT_DELIVERY_ENV).map(Into::into))
         .or_else(|| {
             input["session_id"].as_str().map(|session| {
-                crate::context_block::codex_delivery_path(&crate::store::lf_home_dir(), session)
+                crate::context_block::native_delivery_path(&crate::store::lf_home_dir(), session)
             })
         })
         .ok_or_else(|| {
@@ -411,7 +419,7 @@ fn load_delivery(
         })?;
     if let Err(error) = delivery.relocate() {
         let thread = input["session_id"].as_str().unwrap_or_default();
-        store_gap(&delivery.home, thread, "checkout relocation", &error);
+        recording_gap(&delivery.home, thread).note("checkout relocation", &error);
     }
     Ok(delivery)
 }
@@ -479,6 +487,7 @@ fn deliver_steers(
             "OpenCodeMessagesTransform" | "PiContext" => NativeBoundary::Activate { source: event },
             _ => NativeBoundary::Turn,
         };
+        let mut gap = recording_gap(&delivery.home, thread);
         let delivered = hook_store(&delivery.home).and_then(|store| {
             store.recover_prepared_steers(&adapter.session)?;
             store.with_provider_context(adapter, thread, boundary, || {
@@ -514,12 +523,13 @@ fn deliver_steers(
                     write(&render("")?)?;
                 }
                 Ok(())
-            })
+            })?;
+            close_gap(&store, &adapter.session, &mut gap)
         });
         match delivered {
-            Ok(()) => store_recovered(&delivery.home, thread),
+            Ok(()) => {}
             Err(error) => {
-                store_gap(&delivery.home, thread, "steers and turn boundary", &error);
+                gap.note("steers and turn boundary", &error);
                 // The native thread still gets its context from the delivery file alone.
                 if !wrote.get() {
                     write(&render("")?)?;
@@ -680,8 +690,57 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_delivery;
+    use super::{close_gap, load_delivery, recording_gap};
     use crate::context_block::{ContextDelivery, ContextMoment};
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn a_recovered_gap_enters_the_sessions_history_once() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let observations = || -> i64 {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM session_events WHERE session_id='session'
+                     AND kind='observed' AND json_extract(payload,'$.source')='store-gap'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        // A boundary that records with no gap open writes nothing extra.
+        close_gap(&store, "session", &mut recording_gap(home.path(), "thread")).unwrap();
+        assert_eq!(observations(), 0);
+        // Two hook processes miss the store; the next one that reaches it records
+        // the hole once, and later boundaries have nothing left to say.
+        recording_gap(home.path(), "thread").note("turn evidence", &"database is locked");
+        recording_gap(home.path(), "thread").note("steers", &"database is locked");
+        let mut gap = recording_gap(home.path(), "thread");
+        let span = gap.span().unwrap();
+        close_gap(&store, "session", &mut gap).unwrap();
+        assert!(gap.span().is_none());
+        assert_eq!(observations(), 1);
+        let payload: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM session_events WHERE kind='observed'
+                 AND json_extract(payload,'$.source')='store-gap'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["first_miss"], span.first_miss);
+        assert_eq!(payload["last_miss"], span.last_miss);
+        close_gap(&store, "session", &mut recording_gap(home.path(), "thread")).unwrap();
+        assert_eq!(observations(), 1);
+    }
 
     #[test]
     fn missing_and_invalid_delivery_name_the_source_without_printing_contents() {

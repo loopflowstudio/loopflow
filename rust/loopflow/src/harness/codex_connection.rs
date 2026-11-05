@@ -4,7 +4,6 @@
 //! it during attachment settlement, under the ownership fence.
 
 use crate::id::AgentSessionId;
-use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -209,22 +208,6 @@ impl RelayOperation {
             operation,
             direction,
         }
-    }
-}
-
-/// One warning per changed store failure, however often the relay meets it.
-/// The conversation keeps flowing; only its records are lost.
-fn store_unavailable(previous: &mut Option<String>, operation: &str, error: &dyn Display) {
-    let message = format!("cannot record {operation}; the conversation continues: {error}");
-    if previous.as_ref() != Some(&message) {
-        tracing::warn!("{message}");
-        *previous = Some(message);
-    }
-}
-
-fn store_recovered(previous: &mut Option<String>) {
-    if previous.take().is_some() {
-        tracing::info!("store recovered; the conversation's records resume");
     }
 }
 
@@ -486,7 +469,7 @@ impl CodexConnection {
         // The store records this conversation; it never carries it. Every store
         // failure below except a lost attachment is logged once and relaying
         // continues. Only the saved initial input keeps waiting for its receipt.
-        let mut store_failure: Option<String> = None;
+        let mut store_failure = crate::store::RecordingGap::default();
         let mut history = super::codex::CodexStream::new(super::fact_writer::FactWriter::new(
             self.store.clone(),
             self.session_id.to_string(),
@@ -510,7 +493,7 @@ impl CodexConnection {
                     updates.pending(&self.store, &self.session_id)
                 }) {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
-                Err(error) => store_unavailable(&mut store_failure, "task updates", &error),
+                Err(error) => store_failure.note("task updates", &error),
             }
         }
         let disconnected_deadline = tokio::time::sleep(Duration::from_secs(15));
@@ -520,7 +503,7 @@ impl CodexConnection {
         let saved = match self.store.session_thread(&self.session_id) {
             Ok(saved) => saved,
             Err(error) => {
-                store_unavailable(&mut store_failure, "conversation lookup", &error);
+                store_failure.note("conversation lookup", &error);
                 None
             }
         };
@@ -548,12 +531,12 @@ impl CodexConnection {
                     };
                     let pending = match pending {
                         Ok(pending) => {
-                            store_recovered(&mut store_failure);
+                            store_failure.recovered();
                             pending
                         }
                         Err(StoreError::InvalidAuthority(_)) => None,
                         Err(error) => {
-                            store_unavailable(&mut store_failure, "task updates", &error);
+                            store_failure.note("task updates", &error);
                             None
                         }
                     };
@@ -565,7 +548,7 @@ impl CodexConnection {
                         }});
                         if let Err(error) = history.outbound(&request).await {
                             if !matches!(error.downcast_ref::<StoreError>(), Some(StoreError::InvalidAuthority(_))) {
-                                store_unavailable(&mut store_failure, "task update history", &error);
+                                store_failure.note("task update history", &error);
                             }
                             continue;
                         }
@@ -577,7 +560,7 @@ impl CodexConnection {
                                 update_request = Some((id, update));
                             }
                             Ok(false) | Err(StoreError::InvalidAuthority(_)) => {}
-                            Err(error) => store_unavailable(&mut store_failure, "task update dispatch", &error),
+                            Err(error) => store_failure.note("task update dispatch", &error),
                         }
                     }
                 }
@@ -602,7 +585,7 @@ impl CodexConnection {
                         thread = match self.store.session_thread(&self.session_id) {
                             Ok(saved) => saved.or(thread),
                             Err(error) => {
-                                store_unavailable(&mut store_failure, "conversation lookup", &error);
+                                store_failure.note("conversation lookup", &error);
                                 thread
                             }
                         };
@@ -661,7 +644,7 @@ impl CodexConnection {
                                 reject(&mut client, &rpc, reason).await?;
                                 continue;
                             }
-                            _ => store_unavailable(&mut store_failure, "client request history", &error),
+                            _ => store_failure.note("client request history", &error),
                         }
                     }
                     if rpc["method"] == "turn/start" { busy = true; client_turn_request = rpc.get("id").cloned(); }
@@ -694,7 +677,7 @@ impl CodexConnection {
                                 if rpc.get("error").is_some() && thread.is_none() {
                                     if let Some(key) = input_key {
                                         if let Err(error) = self.record_submission(key, NativeSubmission::ThreadRejected) {
-                                            store_unavailable(&mut store_failure, "thread rejection receipt", &error);
+                                            store_failure.note("thread rejection receipt", &error);
                                         }
                                     }
                                     if let Some(initial) = &initial {
@@ -725,7 +708,7 @@ impl CodexConnection {
                                     if let Some(attachment) = &self.attachment {
                                         if let Err(error) = self.store.record_session_connection(&self.session_id, attachment,
                                             &endpoint.to_string_lossy(), &selected_thread) {
-                                            store_unavailable(&mut store_failure, "conversation selection", &error);
+                                            store_failure.note("conversation selection", &error);
                                         }
                                     }
                                 }
@@ -745,7 +728,7 @@ impl CodexConnection {
                                                     initial.context = None;
                                                 }
                                                 Err(error @ StoreError::InvalidAuthority(_)) => return Err(error.into()),
-                                                Err(error) => store_unavailable(&mut store_failure, "hook context binding", &error),
+                                                Err(error) => store_failure.note("hook context binding", &error),
                                             }
                                         }
                                     }
@@ -761,7 +744,7 @@ impl CodexConnection {
                                         Ok(())
                                     })();
                                     if let Err(error) = written {
-                                        store_unavailable(&mut store_failure, "provider session record", &error);
+                                        store_failure.note("provider session record", &error);
                                     }
                                 }
                             }
@@ -776,13 +759,13 @@ impl CodexConnection {
                                     .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"));
                             }
                             if let Err(error) = history.inbound(&rpc, thread.as_ref()).await.1 {
-                                store_unavailable(&mut store_failure, "provider history", &error);
+                                store_failure.note("provider history", &error);
                             }
                             if update_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, update) = update_request.take().expect("matched update request");
                                 let state = if rpc.get("error").is_some() { busy = false; "rejected" } else { "accepted" };
                                 if let Err(error) = self.store.record_task_update(&self.session_id, &update.key, state, &update.observation) {
-                                    store_unavailable(&mut store_failure, "task update receipt", &error);
+                                    store_failure.note("task update receipt", &error);
                                 }
                                 continue;
                             }
@@ -791,7 +774,7 @@ impl CodexConnection {
                                 let key = input_key.expect("saved input dispatches only with its receipt key");
                                 if let Some(error) = rpc.get("error") {
                                     if let Err(error) = self.record_submission(key, NativeSubmission::InputRejected) {
-                                        store_unavailable(&mut store_failure, "input rejection receipt", &error);
+                                        store_failure.note("input rejection receipt", &error);
                                     }
                                     if let Some(initial) = &initial {
                                         initial.lock().await.text = Some(text);
@@ -799,7 +782,7 @@ impl CodexConnection {
                                     return Err(anyhow!("Codex rejected the initial request: {error}; saved input is available on reconnect"));
                                 }
                                 if let Err(error) = self.record_submission(key, NativeSubmission::InputAccepted) {
-                                    store_unavailable(&mut store_failure, "input acceptance receipt", &error);
+                                    store_failure.note("input acceptance receipt", &error);
                                 }
                                 continue;
                             }
@@ -822,11 +805,11 @@ impl CodexConnection {
                             match (self.submission(), input_key) {
                                 (Ok(Some(NativeSubmission::InputDispatched)), Some(key)) => {
                                     if let Err(error) = self.record_submission(key, NativeSubmission::InputAccepted) {
-                                        store_unavailable(&mut store_failure, "input acceptance receipt", &error);
+                                        store_failure.note("input acceptance receipt", &error);
                                     }
                                 }
                                 (Ok(_), _) => {}
-                                (Err(error), _) => store_unavailable(&mut store_failure, "submission receipt", &error),
+                                (Err(error), _) => store_failure.note("submission receipt", &error),
                             }
                         }
                         if let Some(text) = initial.text.take() {
@@ -835,7 +818,7 @@ impl CodexConnection {
                                 "threadId":thread,"input":[{"type":"text","text":&text}]
                             }});
                             if let Err(error) = history.outbound(&request).await {
-                                store_unavailable(&mut store_failure, "initial request history", &error);
+                                store_failure.note("initial request history", &error);
                             }
                             let outcome;
                             (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into()),
@@ -1017,7 +1000,7 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
 #[cfg(test)]
 mod tests {
     use super::{CodexConnection, NativeInput};
-    use crate::context_block::{codex_delivery_path, ContextDelivery};
+    use crate::context_block::{native_delivery_path, ContextDelivery};
     use crate::id::LfProcessId;
     use crate::provider_account::ProviderAccountRoute;
     use crate::provider_auth::Provider;
@@ -1423,7 +1406,7 @@ mod tests {
             submitted_docs: None,
             references: Vec::new(),
         };
-        let binding = codex_delivery_path(home.path(), "native-thread");
+        let binding = native_delivery_path(home.path(), "native-thread");
         for resume in [false, true] {
             let endpoint = home
                 .path()

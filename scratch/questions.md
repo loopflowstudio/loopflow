@@ -1,9 +1,11 @@
 # e46a80 open questions and assumptions
 
-- Stop records that fail are logged and marked (`<delivery>.store-gap`); Jack's
-  steer asked for them to be "recorded as unknown at the next successful
-  boundary". Settled by the 2026-11-05 concept review: the marker drives one
-  Session observation on recovery (design item 2); the implement pass adds it.
+- Stop records that fail are marked (`<delivery>.store-gap`) and, per Jack's
+  steer, recorded as unknown at the next successful boundary: the hook writes one
+  `store-gap` observation (first and last miss) into the Session's history before
+  clearing the marker. The observation is stored, not yet rendered by `lf session`
+  or Desktop; readers dispatch on payload `source`, so it is inert to them until
+  one chooses to show it.
 - `lf resume` on a superseded idle owner still ends that owner and reopens the
   Session on the installed lf (`ops/human_session.rs attaches`). Read as "lf
   resume taking it over", one of the endings Jack kept; the integration test

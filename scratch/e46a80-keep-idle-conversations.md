@@ -60,10 +60,24 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
 - Hook store budget (Jack's steer 5): `SqliteStore::open_for_hook` waits at
   most 1 s (`HOOK_BUSY_TIMEOUT`) for a locked store; `__context-block`, Pi's
   `pi-event` and the checkout relocation use it. On any store error the hook
-  emits the context block without steers, exits 0 and logs once per native
-  conversation (`<delivery>.store-gap` marker, cleared on the next recorded
-  boundary). SessionStart with no store still selects the thread from the
-  delivery file alone. Planning refresh at Stop also fits the 1 s budget.
+  emits the context block without steers, exits 0 and notes the gap once per
+  native conversation. SessionStart with no store still selects the thread from
+  the delivery file alone. Planning refresh at Stop also fits the 1 s budget.
+- One recording-gap concept: `store::RecordingGap` (`note(what, error)` logs once
+  per changed failure, `recovered()` once) is the owner's input path, the
+  lifetime policy, the relay, the Claude task-update watcher and the hooks.
+  Hooks are a fresh process per boundary, so theirs is `RecordingGap::marked`
+  on the `<delivery>.store-gap` file, which carries the first and last miss.
+  When a hook reaches the store again it writes one `store-gap` observation
+  (`session_events`, source `store-gap:<first>:<last>`, payload first/last miss)
+  before clearing the marker, so a Stop lf never recorded reads as unknown in
+  the Session's history (Jack's steer). A failed write keeps the gap open.
+- Pi and OpenCode match Claude: an lf they cannot run shows nothing in the
+  conversation. Pi's extension appends one line per changed failure and one on
+  recovery to `logs/pi-extension.log` (its UI toasts are gone); OpenCode's
+  plugin does the same on its stderr, kept beside the capture, instead of a
+  line on every prompt. The delivery file is `native_delivery_path`: it names
+  Claude, Pi, OpenCode and Codex threads alike.
 - Owner lifetime (Jack Heart, 2026-11-05, "kill it"): a removed, rebuilt or
   superseded lf executable ends nothing. The only endings are the person
   quitting, `lf resume` taking the owner over, `lf monitor rollover`, the
@@ -98,7 +112,8 @@ change, the contract holds at each layer:
   retention read retries at the next poll, and `lf resume` is the only thing
   that ends an idle superseded owner.
 
-Settled by the accepted decisions, for the next implement pass (no code here):
+Settled by the accepted decisions and built in the implement pass that followed
+(each item is now in Decisions above; kept here as the trace):
 
 1. **One recording-gap concept.** "Log once per changed failure, log recovery"
    now has four bodies: `lifetime::warn_changed` (input and lifetime),
@@ -142,8 +157,11 @@ follows from Jack's steers and the written principle.
 
 ## Delete — do not maintain
 
-All done; nothing left to remove. Gone: the relay's fatal `return Err` arms on
-store errors, the `input_retry_tests` assertion that unrecorded input never
+All done; nothing left to remove. Gone: `transport::lifetime::warn_changed`,
+`codex_connection::store_unavailable`/`store_recovered`, `context::store_gap`/
+`store_recovered`/`gap_marker`, Pi's toast-raising `recordingGap` and its
+task-update toasts, `codex_delivery_path` (now `native_delivery_path`), the
+relay's fatal `return Err` arms on store errors, the `input_retry_tests` assertion that unrecorded input never
 reaches the provider, `transport/lifetime.rs` `Executable`/`Change` and its
 two-second grace, `Event::Control.successor`, `transport::follow`,
 `journal::current_executable`, and the `sessions_end_when_their_lf_executable_goes`
@@ -151,8 +169,10 @@ and `successor_handoff_*` integration tests. Surviving behavior is pinned by
 `sessions_keep_serving_when_their_lf_executable_goes`,
 `control_handoff_restores_the_terminal_and_prints_the_notice`,
 `idle_relay_survives_store_failure_and_accepts_a_reconnect`,
-`settlement_without_a_store_keeps_the_providers_own_exit` and
-`failed_input_store_delivers_the_queued_bytes_unrecorded`.
+`settlement_without_a_store_keeps_the_providers_own_exit`,
+`failed_input_store_delivers_the_queued_bytes_unrecorded`,
+`a_recovered_gap_enters_the_sessions_history_once` and
+`a_marked_gap_survives_processes_and_closes_with_its_file`.
 
 ## Not changed
 
@@ -174,5 +194,8 @@ Not runnable headless here; fixtures below stand in.
 
 ## Checks
 
-Compress pass, unchanged since (tree identical, no upstream drift at realign on
-2026-11-05): `cargo test -p loopflow --lib -- transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::native_exit:: store::sqlite::wal_tests:: lf::commands::context::` 29 passed; `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. Gate owns the affected suites.
+Implement pass (RecordingGap, gap observation, native_delivery_path, quiet Pi/OpenCode):
+`cargo test -p loopflow --lib -- store::recording_gap:: lf::commands::context:: transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::task_updates::` 34 passed;
+`cargo test -p loopflow --test integration context_block_tests::` 2 passed;
+`cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed;
+`node --check` on both JS hooks; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. Gate owns the affected suites.

@@ -6,13 +6,14 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crate::id::LfProcessId;
+use crate::store::RecordingGap;
 
 #[derive(Debug, Default)]
 pub(super) struct PendingInput {
     bytes: VecDeque<u8>,
     recorded: usize,
     retry_at: Option<Instant>,
-    failure: Option<String>,
+    failure: RecordingGap,
     /// Bytes reached the provider without a retention record. The owner holds
     /// them in memory until the native client ends, since the store cannot.
     unrecorded: bool,
@@ -62,11 +63,7 @@ impl PendingInput {
         }
         if terminal && self.recorded < self.bytes.len() {
             match self.retain(owner) {
-                Retained::Recorded => {
-                    if self.failure.take().is_some() {
-                        tracing::info!(%owner, "terminal input store recovered; recording input again");
-                    }
-                }
+                Retained::Recorded => self.failure.recovered(),
                 Retained::Busy => {
                     self.retry_at = Some(Instant::now() + Duration::from_millis(100));
                     return;
@@ -97,9 +94,8 @@ impl PendingInput {
             Ok(true) => Retained::Recorded,
             Ok(false) => Retained::Busy,
             Err(error) => {
-                let message =
-                    format!("cannot retain terminal input; delivering it unrecorded: {error}");
-                super::lifetime::warn_changed(&mut self.failure, owner, message);
+                self.failure
+                    .note("terminal input, delivered unrecorded", &error);
                 Retained::Failed
             }
         }

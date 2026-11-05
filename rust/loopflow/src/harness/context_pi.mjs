@@ -2,9 +2,9 @@ import { createBashToolDefinition, createLocalBashOperations } from "@earendil-w
 import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, mkdtempSync, openSync, rmSync } from "node:fs";
+import { appendFileSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // Keep Pi's shell backend, rendering and settings. Only the built-in bash tool
 // is wrapped; extension-provided tools retain their own execution ownership.
@@ -63,7 +63,7 @@ export default function (pi) {
       { stdio: ["pipe", "pipe", "ignore"] });
     updates = child;
     child.stdin.on("error", () => {});
-    child.on("error", (error) => ctx.ui.notify(`Task updates unavailable: ${error.message}`, "error"));
+    child.on("error", (error) => recordingGap("Task updates", error));
     child.stdin.end(JSON.stringify({ session_id: session, hook_event_name: "PiTaskUpdates" }));
     createInterface({ input: child.stdout }).on("line", (line) => {
       // A queued line from the previous selection must not reach a new Session.
@@ -73,7 +73,7 @@ export default function (pi) {
         if (update.session !== session) return;
         pi.sendMessage({ customType: "loopflow-task-update", content: update.text, display: false },
           { triggerTurn: true, deliverAs: "followUp" });
-      } catch (error) { ctx.ui.notify(`Task update failed: ${error.message}`, "error"); }
+      } catch (error) { recordingGap("Task update", error); }
     });
   };
   const tools = new Set();
@@ -89,23 +89,37 @@ export default function (pi) {
     stopUpdates();
     ctx.abort(); process.exitCode = 1; ctx.shutdown();
   };
-  // lf's records are best-effort: a store lf cannot reach is a gap it logs
-  // itself, never a failed turn. One notice per change, then quiet.
+  // lf's records are best-effort: an lf the extension cannot run is a recording
+  // gap, never a failed turn or a notice in the conversation. Like Claude's
+  // hooks, it shows nothing: one line per changed failure in the extension log
+  // (lf's own process records the gap in logs/lf.log when it runs), then quiet
+  // until the next success closes it.
   let gap;
-  const recordingGap = (ctx, what, error) => {
+  const log = (line) => {
+    try {
+      mkdirSync(dirname(spec.log), { recursive: true });
+      appendFileSync(spec.log, `${new Date().toISOString()} ${line}\n`);
+    } catch { /* A log lf cannot keep is no reason to stop the conversation. */ }
+  };
+  const recordingGap = (what, error) => {
     const message = `${what}: ${error.message.split("\n")[0]}`;
     if (gap === message) return;
     gap = message;
-    ctx.ui.notify(`Loopflow is not recording this conversation (${message})`, "warning");
+    log(`recording gap: ${message}; the conversation goes on without lf's records`);
+  };
+  const recovered = () => {
+    if (gap === undefined) return;
+    log(`recording gap closed (${gap}); lf records from here`);
+    gap = undefined;
   };
   const report = (event, ctx, extra = {}) => {
     if (!spec.native || (!started && event.type !== "session_start")) return;
     try {
       invoke("__context-block", { ...event, ...extra, sessionFile: ctx.sessionManager.getSessionFile(),
         turn, openTools: tools.size, pendingInput }, ["--moment", "pi-event"]);
-      gap = undefined;
+      recovered();
     } catch (error) {
-      recordingGap(ctx, "turn record", error);
+      recordingGap("turn record", error);
     }
   };
   pi.on("session_start", async (event, ctx) => {
@@ -128,8 +142,9 @@ export default function (pi) {
       try {
         context = readContext(ctx, refreshMoment, "PiContext");
         refreshMoment = undefined;
+        recovered();
       } catch (error) {
-        recordingGap(ctx, "context refresh", error);
+        recordingGap("context refresh", error);
       }
     }
     try {
@@ -150,13 +165,14 @@ export default function (pi) {
       steering = setInterval(() => {
         try {
           const content = readContext(ctx, "tool", "PiSteer");
+          recovered();
           if (content) {
             // With triggerTurn omitted, Pi queues during streaming and only
             // stores if idle. A settlement race must never start another run.
             pi.sendMessage({ customType: "loopflow-steer", content, display: true }, { deliverAs: "steer" });
           }
         } catch (error) {
-          recordingGap(ctx, "steering", error);
+          recordingGap("steering", error);
         }
       }, 1000);
       steering.unref();

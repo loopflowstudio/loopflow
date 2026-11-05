@@ -24,6 +24,8 @@ use anyhow::Result;
 use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
+use crate::store::sqlite::sessions::OwnerRetention;
+use crate::store::RecordingGap;
 
 /// How often an owner looks at the clock.
 const POLL: Duration = Duration::from_secs(2);
@@ -142,11 +144,12 @@ fn watch(
     mut waker: &UnixStream,
 ) {
     let mut store = None;
-    let mut store_failure = None;
+    let mut store_failure = RecordingGap::default();
     let mut recorded_viewed = None;
-    let mut viewer_failure = None;
-    let mut repository_failure = None;
-    let mut decision = None;
+    let mut viewer_failure = RecordingGap::default();
+    let mut repository_failure = RecordingGap::default();
+    let mut retention_failure = RecordingGap::default();
+    let mut retained: Option<OwnerRetention> = None;
     let mut next_poll = Instant::now() + POLL;
     let mut grace = Grace {
         limit: None,
@@ -168,8 +171,7 @@ fn watch(
         if store.is_none() {
             store = report_result(
                 &mut store_failure,
-                owner,
-                "open Session store",
+                "Session store",
                 crate::journal::process_ledger(),
             );
         }
@@ -180,8 +182,7 @@ fn watch(
         if recorded_viewed != Some(viewed)
             && report_result(
                 &mut viewer_failure,
-                owner,
-                "record Session viewers",
+                "Session viewers",
                 store.record_owner_viewers(owner, viewed),
             )
             .is_some()
@@ -191,8 +192,7 @@ fn watch(
         if terminal && grace.limit.is_none() {
             grace.limit = report_result(
                 &mut repository_failure,
-                owner,
-                "load Session repository",
+                "Session repository",
                 store.process(owner),
             )
             .flatten()
@@ -203,20 +203,22 @@ fn watch(
             continue;
         }
         match store.owner_retention(owner) {
-            Ok(None) => decision = None,
+            Ok(None) => {
+                retention_failure.recovered();
+                retained = None;
+            }
             // Retained work counts as activity: the grace runs again from here.
             Ok(Some(reason)) => {
-                warn_changed(
-                    &mut decision,
-                    owner,
-                    format!("retaining detached Session past its limit: {reason}"),
-                );
+                retention_failure.recovered();
+                if retained != Some(reason) {
+                    tracing::info!(%owner, "retaining detached Session past its limit: {reason}");
+                    retained = Some(reason);
+                }
                 grace.quiet_since = now;
                 continue;
             }
             Err(error) => {
-                let message = format!("cannot judge Session retention; retrying: {error}");
-                warn_changed(&mut decision, owner, message);
+                retention_failure.note("Session retention, retrying", &error);
                 continue;
             }
         }
@@ -234,32 +236,17 @@ fn watch(
     }
 }
 
-/// Keep each operation's warning until that operation succeeds. Other policy
-/// work can succeed during an outage without making the same error log again.
+/// Each operation keeps its own gap until that operation succeeds. Other policy
+/// work can succeed during an outage without closing or reopening it.
 pub(super) fn report_result<T>(
-    previous: &mut Option<String>,
-    owner: &LfProcessId,
-    operation: &str,
+    gap: &mut RecordingGap,
+    what: &str,
     result: Result<T, impl std::fmt::Display>,
 ) -> Option<T> {
     result
-        .inspect(|_| *previous = None)
-        .inspect_err(|error| {
-            warn_changed(
-                previous,
-                owner,
-                format!("cannot {operation}; retrying: {error}"),
-            );
-        })
+        .inspect(|_| gap.recovered())
+        .inspect_err(|error| gap.note(what, error))
         .ok()
-}
-
-/// One line per changed condition, however often a poll or retry repeats it.
-pub(super) fn warn_changed(previous: &mut Option<String>, owner: &LfProcessId, message: String) {
-    if previous.as_ref() != Some(&message) {
-        tracing::warn!(%owner, "{message}");
-        *previous = Some(message);
-    }
 }
 
 /// The detached limit configured for `repo`. An unreadable configuration

@@ -119,10 +119,8 @@ generation. Decisions taken in this slice:
 
 Checks (November 5, concept-review fixes): `cargo test -p loopflow --lib server::`
 20 pass; `--test transport_tests server_` 17 pass (includes the portfolio-scoped
-`view.select` watch); `--test served_reads` 4 pass, 1 fail
-(`server_operations_match_their_lf_commands`: served `task.hold` names
-"Jack Heart", the CLI "Jack"; fails identically on unmodified `c866a09fbb`,
-unresolved, owner gate); Desktop `--filter 'ServerClient|ServerProtocol|Registry'`
+`view.select` watch); `--test served_reads` 5 pass (realign rerun; the earlier `task.hold`
+name mismatch no longer reproduces); Desktop `--filter 'ServerClient|ServerProtocol|Registry'`
 42 pass; iOS `LoopflowiOSTests` 81 pass, 2 skipped; clippy clean.
 The host-Tailscale acceptance (`transport_tests mobile_native_acceptance`) and
 physical-device proofs belong to demo.

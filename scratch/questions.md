@@ -34,9 +34,6 @@ connection. Assumptions made while implementing, each reversible:
   fixture client is unchanged; only the remote client closes a connection.
 - The opt-in host-Tailscale acceptance was not rerun here: it needs the host's
   private certificate and a dedicated Simulator, and belongs to demo.
-- `lf context` reports `.lf/wave/product/MEMORY.md` 30 tokens over its 16000
-  target (still so after the November 5 realign). Wave memory is read-only here; the Wave operator
-  owns that trim.
 - The phone and this checkout speak the revision 2 PR #1813 (LOO-593) shape
   as approved on November 5: dotted operation kinds, `response {result}` typed
   per kind, `subscribe` as its own message, `u64` checkpoints, no `generation`

@@ -5,6 +5,22 @@ Full record of the November 4 failed reviews, corrections and earlier candidates
 `questions.md`; the design is `loo-672-ready-conversations.md`; the runbook is
 `demo.html`.
 
+## Jack Heart’s feedback — November 5
+
+Jack: “otherwise looks good” for the repaired Task demo. The selected repository
+in Jack’s screenshot still showed No session open / Open conversation. Jack
+requested the same behavior for Waves and repositories, then clarified “auto
+open everything *AND* prefetch everything”. Implement the expanded scope in
+`loo-672-load-prefetch.md`; return for demo. No shipping approval.
+
+## Current open candidate — November 5
+
+Jack Heart requested launch. Rebuilt Desktop at `eae0d31694` and prepared fresh
+private data at `/private/tmp/loo-672-redemo-346bmcxn`. Launched and raised its
+window through native UI. Before any Task selection, all four sidebar rows
+reported Working and `current-load-ps.json` recorded four live providers.
+Manifest: `demo-evidence/current-manifest.json`. No human acceptance yet.
+
 ## Store-launch proof — November 5, 2026, 05:41–05:55 PST
 
 **Result: load alone starts every working Task conversation, and they stay warm

@@ -10,6 +10,17 @@ check evidence: `78f4d8e6c0:scratch/loo-672-ready-conversations.md` and
 The pre-infrastructure plan is superseded and preserved at
 `a32c385044:scratch/research/loo-672-pre-infrastructure-plan.md`.
 
+## Latest accepted scope — November 5 review
+
+Jack Heart accepted the demonstrated Task behavior as an improvement and expanded
+the same automatic opening and prefetch requirement to repository and Wave
+Sessions: “auto open everything *AND* prefetch everything”. The earlier Task-only
+and started-only scope below is superseded by `loo-672-load-prefetch.md`
+(Expanded review direction). No normal selected No session/Open session gate;
+initialize absent primary Sessions/history, with loading or actionable failures
+shown honestly. Automatic startup is a reading pass for every primary scope,
+not permission to run its operator.
+
 ## Accepted outcome and constraints
 
 Task conversations open without a Start or Open click after launch, selection and

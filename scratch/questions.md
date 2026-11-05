@@ -91,3 +91,9 @@ The launcher is an explicit `GhosttyManager?` dependency (the app passes `.share
 tests and headless registries pass none), so a prepared fixture never spawns a real
 `lf` in a test. `.hidden()` never attaches NSViewRepresentable views to a window, so
 no hidden host can launch; launching from the model replaces it.
+
+November 5 review expansion from Jack Heart: the repaired Task behavior “otherwise
+looks good”; repository and Wave conversations must also open on selection and
+prefetch. “auto open everything *AND* prefetch everything”. No normal selected
+No session/Open session gate. Supersedes the Task-only and started-only discovery
+restrictions. Accepted scope and constraints: `loo-672-load-prefetch.md`.

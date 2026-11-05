@@ -288,7 +288,7 @@ pub struct CodexObserver {
 /// Start the observer beside the native client, subscribed before the first
 /// turn. It outlives this process and never holds the provider's lifeline.
 pub(crate) fn spawn_observer(observer: &CodexObserver) -> Result<()> {
-    let mut command = Command::new(std::env::current_exe()?);
+    let mut command = Command::new(crate::os_process::resolve_lf_binary()?);
     command
         .arg("__codex-observe")
         .stdin(Stdio::piped())

@@ -596,9 +596,40 @@ fn render_report(report: &RolloverReport) -> String {
     lines.join("\n")
 }
 
-/// Shown after a promote: which processes still run what it replaced. A promote
-/// that replaced Loopflow.app already moved Desktop's bundled lf.
-pub fn report_after_promote(replaced_app: bool) {
+/// Every live lf process by binary, for an install that has not changed anything
+/// yet. Each keeps its binary through the install and reads the store the install
+/// leaves behind; `lf install` prints this so the person sees what will meet the
+/// new schema before it commits, then proceeds.
+pub fn report_before_promote() {
+    match inventory() {
+        Ok(inventory) => {
+            let total = inventory
+                .binaries
+                .iter()
+                .map(|binary| binary.processes.len())
+                .sum::<usize>();
+            if total == 0 {
+                println!("no live lf process runs on this Machine");
+                return;
+            }
+            let parts = inventory
+                .binaries
+                .iter()
+                .map(|binary| format!("{} on {}", binary.processes.len(), binary.describe()))
+                .collect::<Vec<_>>();
+            println!(
+                "{total} live lf process(es) keep their binary through this install: {}",
+                parts.join("; ")
+            );
+        }
+        Err(error) => eprintln!("warning: could not list live lf processes ({error:#})"),
+    }
+}
+
+/// Shown last after a promote: which processes still run what it replaced, and
+/// the pre-migration clone kept while they do. A promote that replaced
+/// Loopflow.app already moved Desktop's bundled lf.
+pub fn report_after_promote(replaced_app: bool, store: &Path) {
     match inventory() {
         Ok(inventory) => {
             if let Some(summary) = superseded_summary(&inventory) {
@@ -609,11 +640,17 @@ pub fn report_after_promote(replaced_app: bool) {
                     );
                 }
                 println!(
-                    "each ends as its Session goes idle and `lf resume` reopens it on this lf; `lf monitor rollover` moves the idle ones now (`--dry-run` lists them)"
+                    "each ends as its Session goes idle; a Session on one comes back through `lf resume` once its client is stopped (Ctrl-C) and that lf has exited; `lf monitor rollover` moves the idle ones now (`--dry-run` lists them)"
                 );
             }
         }
         Err(error) => eprintln!("warning: could not list processes on the previous lf ({error:#})"),
+    }
+    for backup in crate::store::migrations::migration_backups(store) {
+        println!(
+            "pre-migration clone kept while they run: {}",
+            backup.display()
+        );
     }
 }
 

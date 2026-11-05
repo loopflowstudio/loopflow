@@ -346,7 +346,8 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
     result
 }
 
-/// Observe an early command without creating a Machine, migrating, or requiring Git.
+/// Observe a command without creating a Machine, migrating, or requiring Git:
+/// doctor before admission, and an install once its store has committed.
 /// Failure to observe never prevents help or installation recovery.
 pub fn observe_process(command: &[String]) {
     let wait = receipt_wait();
@@ -373,7 +374,7 @@ pub fn observe_process(command: &[String]) {
         Ok(())
     };
     if let Err(error) = observe() {
-        debug!(%error, "early Process observation unavailable");
+        warn!(%error, "Process observation unavailable; this command is not recorded");
     }
 }
 

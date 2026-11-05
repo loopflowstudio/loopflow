@@ -552,22 +552,18 @@ original-reset repair. Live/unknown providers grant no duplicate launch or signa
 
 ## Storage footprint (LOO-390, 2026-10-07)
 
-Jack Heart authorized investigation, cleanup and delivery.
-`session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
-also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
-measured): new captures keep 28% of rows and 72% of bytes, preflight validates
-an exact store in place (1.0 s, no copy), WAL holds 64 MiB, two fingerprinted
-migration backups remain (13.6 → 5.9 GiB). Old rows are not rewritten.
-PR #1501 merged as `812d8cc55` (installation unproved): promotion appended every
-release to `retained_published_sets`; a settled install now retains its fallback and the
-prior one, then removes unnamed content-addressed binaries/bundles no live
-process executes.
-Store growth stays unbounded, about 1.7 MB per capture. Next condition is Jack's
-retention choice: system of record (SQLite or `events.jsonl`) and capture expiry;
-then sizes in `lf home doctor`. Left intact: 23 GiB of
-unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
-`/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
-`session_record` with `LF_*` cleared.
+Jack Heart authorized cleanup and delivery. `session_events` was
+92% of a 2.6 GiB store: each streamed token two rows, also in `runs/*/events.jsonl`.
+PR #1474 (v0.13.9): new captures keep 28% of rows and 72% of
+bytes, preflight validates the exact store in place, WAL holds 64 MiB; 13.6 → 5.9
+GiB, old rows unrewritten. PR #1501 (`812d8cc55`, installation unproved): a settled
+install retains its fallback and the prior one, then removes unnamed
+content-addressed binaries/bundles no live process executes. Growth stays
+unbounded (~1.7 MB per capture) until Jack chooses the system of record (SQLite
+or `events.jsonl`) and capture expiry; then sizes in `lf home doctor`. Left
+intact: 23 GiB of unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's
+40 GiB of `/private/tmp` fixtures. Unknown ownership is not permission to delete.
+Migration clone retention: MIGRATIONS.md (843f5c).
 
 Earlier cleanup: `66da3fdf7:wave/infrastructure/MEMORY.md`, “Retained capture
 storage and autonomous cleanup”; current direction: Capture cutover.
@@ -1034,14 +1030,13 @@ telemetry red; fresh failures join existing work.
 - **Commit failures need both Git streams** (2026-10-11). Shared diagnostics
   retain stdout and stderr or a silent failure's exit status; scratch exclusion
   belongs only to persistent workspaces.
-- **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners; `--all` excludes explicit-only `--ui-host`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas.
+- **Desktop gates are headless** (rechecked at `bc6d11661`); flags live in `scripts/testing.md`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
-  ledger before ratifying history. Unmerged-migration candidates cannot promote;
-  schema-complete exact-frontier repairs need no migration. The July 20 recovery
-  and #1123 evidence remain at `ec126964d:wave/infrastructure/MEMORY.md` under Gotchas.
-- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in `tests/e2e/README.md`: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
+  ledger before ratifying history. Exact-frontier repairs need no migration. July 20
+  recovery and #1123 evidence: `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas.
+- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks in `tests/e2e/README.md` (getpwuid bypasses HOME/LF_HOME); PR #1444's disposable-account proofs stay with isolated CI until integrated.
 - **One writer owns a checkout and its Git sequencer.** Concurrent-edit/rebase incident: `6016eca30585:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Canonical local
   Project fields own content; optional Linear bindings and observations retain

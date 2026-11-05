@@ -1,4 +1,5 @@
-//! Real detached owner and Session attachment; no provider credentials or display.
+//! Real detached owner and Session attachment. Ordinary tests need no provider
+//! account or display; ignored native acceptance explicitly opts into them.
 #![cfg(unix)]
 
 mod support;
@@ -28,6 +29,33 @@ struct Fixture {
 }
 
 struct PausedOwner(libc::pid_t);
+
+struct StopOwner<'a>(&'a Fixture, String);
+
+impl Drop for StopOwner<'_> {
+    fn drop(&mut self) {
+        // Sessionless completed Processes can already have been collected.
+        let running = self
+            .0
+            .sql()
+            .query_row(
+                "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+                [&self.1],
+                |r| r.get::<_, bool>(0),
+            )
+            .optional()
+            .unwrap()
+            .unwrap_or(false);
+        if running {
+            self.0.stop(&self.1);
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while self.0.endpoint(&self.1).exists() {
+                assert!(Instant::now() < deadline, "fixture owner did not stop");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+}
 
 impl Drop for PausedOwner {
     fn drop(&mut self) {
@@ -167,12 +195,7 @@ impl Fixture {
     }
     #[track_caller]
     fn attach(&self, id: &str, request: Value) -> Viewer {
-        let mut viewer = self.connect(id);
-        viewer.request(request);
-        let attached = viewer.until_reply();
-        assert_eq!(attached["kind"], "attached", "{attached}");
-        viewer.accept(&attached);
-        viewer
+        self.connect(id).attach(request)
     }
     fn connect(&self, id: &str) -> Viewer {
         let socket = UnixStream::connect(self.endpoint(id)).unwrap_or_else(|e| {
@@ -182,19 +205,7 @@ impl Fixture {
                 self.home.path().display()
             )
         });
-        socket
-            .set_read_timeout(Some(Duration::from_secs(15)))
-            .unwrap();
-        Viewer {
-            socket,
-            token: None,
-            id: String::new(),
-            reconnect: String::new(),
-            nonce: String::new(),
-            received: 0,
-            wire: 0,
-            ids: 0,
-        }
+        Viewer::new(socket)
     }
     fn sql(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
@@ -221,9 +232,12 @@ impl Fixture {
     }
     /// Install a stand-in first on PATH without invoking a Machine provider.
     fn provider(&self, script: &str) -> String {
+        self.named_provider("claude", script)
+    }
+    fn named_provider(&self, name: &str, script: &str) -> String {
         let bin = self.home.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let provider = bin.join("claude");
+        let provider = bin.join(name);
         std::fs::write(&provider, script).unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
         format!(
@@ -362,14 +376,17 @@ read -r answer < /dev/tty
     }
     /// Signal an owner the test leaves running.
     fn stop(&self, owner: &str) {
-        let pid: i64 = self
+        let pid: Option<i64> = self
             .sql()
             .query_row("SELECT pid FROM processes WHERE id=?1", [owner], |r| {
                 r.get(0)
             })
+            .optional()
             .unwrap();
-        // SAFETY: test-owned owner PID recorded by this fixture's store.
-        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        if let Some(pid) = pid {
+            // SAFETY: test-owned owner PID recorded by this fixture's store.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        }
     }
     fn wait_file(&self, name: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -440,6 +457,31 @@ struct Viewer {
     ids: u64,
 }
 impl Viewer {
+    fn new(socket: UnixStream) -> Self {
+        socket
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        Self {
+            socket,
+            token: None,
+            id: String::new(),
+            reconnect: String::new(),
+            nonce: String::new(),
+            received: 0,
+            wire: 0,
+            ids: 0,
+        }
+    }
+
+    #[track_caller]
+    fn attach(mut self, request: Value) -> Self {
+        self.request(request);
+        let attached = self.until_reply();
+        assert_eq!(attached["kind"], "attached", "{attached}");
+        self.accept(&attached);
+        self
+    }
+
     fn request(&mut self, mut value: Value) -> u64 {
         self.ids += 1;
         value["id"] = json!(self.ids);
@@ -1655,6 +1697,12 @@ fn a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait() {
         "a delayed acknowledgement restored a waiting launcher"
     );
     assert_eq!(events(&frames, "child_exited").last().unwrap()["code"], 0);
+    let reports = events(&frames, "program_status");
+    assert!(reports.last().unwrap()["status"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|report| report["state"] == "done"));
     let settlements: i64 = fixture.sql().query_row(
         "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.source')='terminal.json'",
         [], |row| row.get(0),
@@ -1682,6 +1730,12 @@ exit 99
     let mut viewer = fixture.viewer(&owner, true);
     let frames = viewer.until_event("child_exited");
     assert_eq!(events(&frames, "child_exited").last().unwrap()["code"], 1);
+    let reports = events(&frames, "program_status");
+    assert!(reports.last().unwrap()["status"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|report| report["state"] == "error"));
     fixture.ends(&owner);
     assert!(!fixture.home.path().join("launches").exists());
     let sql = fixture.sql();
@@ -2631,10 +2685,10 @@ while True:
             "Uncertain"
         );
         let paused = fixture.pause(&owner);
-        let failed = resume();
-        let output = wait_for_viewer(failed.child, Duration::from_secs(20));
+        let mut failed = resume();
+        let status = failed.wait_exit();
         drop(paused);
-        assert!(!output.status.success(), "{output:?}");
+        assert!(!status.success(), "{status:?}");
         assert_eq!(
             attachment(),
             before,
@@ -2673,8 +2727,8 @@ while True:
         // moves the idle conversation onto the installed lf.
         assert!(fixture.running(&owner), "a superseded owner ended itself");
         terminal.input(b"\x1d");
-        let output = wait_for_viewer(terminal.child, Duration::from_secs(10));
-        assert!(output.status.success(), "{output:?}");
+        let status = terminal.wait_exit();
+        assert!(status.success(), "{status:?}");
         terminal = resume();
         fixture.wait_file("ready-2");
         fixture.ends(&owner);
@@ -2690,8 +2744,8 @@ while True:
     };
     assert_eq!(continuity(), original);
     terminal.input(b"\x1d");
-    let output = wait_for_viewer(terminal.child, Duration::from_secs(10));
-    assert!(output.status.success(), "{output:?}");
+    let status = terminal.wait_exit();
+    assert!(status.success(), "{status:?}");
 
     let mut returned = resume();
     fixture.wait_controlled(&replacement);
@@ -2714,8 +2768,8 @@ while True:
         ])
     );
     returned.input(b"\x04");
-    let output = wait_for_viewer(returned.child, Duration::from_secs(10));
-    assert!(output.status.success(), "{output:?}");
+    let status = returned.wait_exit();
+    assert!(status.success(), "{status:?}");
     fixture.ends(&replacement);
 }
 
@@ -3000,8 +3054,24 @@ struct Terminal {
     screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 impl Terminal {
-    fn input(&mut self, bytes: &[u8]) {
-        self.child.stdin.as_mut().unwrap().write_all(bytes).unwrap();
+    /// A byte-stream relay, with neither an owner PTY nor a local terminal.
+    fn stream(mut command: Command) -> Self {
+        let (mut reader, writer) = UnixStream::pair().unwrap();
+        command
+            .stdin(Stdio::piped())
+            .stdout(std::os::fd::OwnedFd::from(writer.try_clone().unwrap()))
+            .stderr(std::os::fd::OwnedFd::from(writer));
+        let child = command.spawn().unwrap();
+        drop(command);
+        let screen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = screen.clone();
+        std::thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            while let Ok(read @ 1..) = reader.read(&mut buffer) {
+                written.lock().unwrap().extend_from_slice(&buffer[..read]);
+            }
+        });
+        Self { child, screen }
     }
 
     fn spawn(command: Command) -> Self {
@@ -3069,6 +3139,44 @@ impl Terminal {
     fn stop(mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+    }
+
+    fn input(&mut self, bytes: &[u8]) {
+        self.child.stdin.as_mut().unwrap().write_all(bytes).unwrap();
+    }
+
+    fn wait_text(&mut self, text: &str) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let screen = self.screen.lock().unwrap().clone();
+            if String::from_utf8_lossy(&screen).contains(text) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "missing {text:?}: {}",
+                String::from_utf8_lossy(&screen)
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn wait_exit(&mut self) -> std::process::ExitStatus {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(Instant::now() < deadline, "relay did not exit");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -4103,5 +4211,2132 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
         viewer.wire < 1024 * 1024 * 11 / 10,
         "{} bytes on the wire",
         viewer.wire
+    );
+}
+
+// Server adapter proofs keep the existing owner/provider fixture and its
+// protocol. The service must never become another execution authority.
+struct ServerProof<'a> {
+    remote_address: Option<std::net::SocketAddr>,
+    fixture: &'a Fixture,
+    child: Option<Child>,
+    supervised: bool,
+    executable: PathBuf,
+}
+
+impl<'a> ServerProof<'a> {
+    fn start(fixture: &'a Fixture, supervised: bool) -> Self {
+        // The server observes an installed Machine; startup creates no Work.
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loopflow::store::open_ephemeral_store(
+                &loopflow::store::StorageConfig::sqlite(fixture.home.path().join("loopflow.db")),
+            ))
+            .unwrap();
+        let mut service = Self {
+            fixture,
+            child: None,
+            supervised,
+            remote_address: None,
+            executable: env!("CARGO_BIN_EXE_lf").into(),
+        };
+        if supervised {
+            let mut child = Command::new("uv")
+                .args([
+                    "run",
+                    "python",
+                    "scripts/test_server_registration.py",
+                    "--lf",
+                    env!("CARGO_BIN_EXE_lf"),
+                    "--home",
+                ])
+                .arg(fixture.home.path())
+                .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap();
+            let mut ready = String::new();
+            BufReader::new(child.stdout.as_mut().unwrap())
+                .read_line(&mut ready)
+                .unwrap();
+            service.executable = ready.trim().into();
+            assert!(
+                service.executable.is_file(),
+                "Signed helper not ready: {ready}"
+            );
+            service.child = Some(child);
+        } else {
+            service.child = Some(service.launch());
+        }
+        let instance = service.ready();
+        if supervised {
+            // Concurrent Desktop/CLI setup must obtain the same installed helper.
+            let results = std::thread::scope(|scope| {
+                let ensure = || service.command(&["install", "server"]).output().unwrap();
+                let first = scope.spawn(ensure);
+                let second = scope.spawn(ensure);
+                [first.join().unwrap(), second.join().unwrap()]
+            });
+            for result in results {
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                let reading: Value = serde_json::from_slice(&result.stdout).unwrap();
+                assert_eq!(
+                    reading["instance"], instance,
+                    "Setup must not replace a ready helper"
+                );
+            }
+        }
+        service
+    }
+
+    // Every part of the installed proof uses the executable being replaced,
+    // including subprocesses that resolve the public lf entry through LF_BIN.
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = self.fixture.command_from(&self.executable, args);
+        command.env("LF_BIN", &self.executable);
+        command
+    }
+
+    fn relay_command(&self, owner: &str) -> (Command, PathBuf) {
+        let status = self.fixture.home.path().join("connection.json");
+        let mut command = self.command(&["session", "attach", owner]);
+        command
+            .env("LF_SERVER", "1")
+            .env("LF_SERVER_STATUS", &status);
+        (command, status)
+    }
+
+    fn launch(&self) -> Child {
+        let mut command = self.command(&["server", "run"]);
+        let tailscale = self.fixture.home.path().join("bin/tailscale");
+        if tailscale.exists() {
+            command.env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", tailscale.parent().unwrap().display()),
+            );
+        }
+        command
+            .env_remove("RUST_LOG")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    fn ready(&self) -> String {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Ok(connection) =
+                loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
+            {
+                if self.remote_address.is_none_or(|address| {
+                    std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100))
+                        .is_ok()
+                }) {
+                    return connection.welcome().instance.clone();
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Server service did not become ready: {:?}",
+                std::fs::read_to_string(self.fixture.home.path().join("installed-helper.log"))
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn restart(&mut self) {
+        if self.supervised {
+            let child = self.child.as_mut().unwrap();
+            child
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(b"replace\n")
+                .unwrap();
+            let mut ready = String::new();
+            BufReader::new(child.stdout.as_mut().unwrap())
+                .read_line(&mut ready)
+                .unwrap();
+            assert_eq!(ready.trim(), "replaced");
+        } else {
+            self.stop();
+            self.child = Some(self.launch());
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            if !self.supervised {
+                let _ = child.kill();
+            }
+            drop(child.stdin.take());
+            let _ = child.wait();
+        }
+    }
+
+    fn connect(&self) -> loopflow::server::client::Connection {
+        let connection =
+            loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
+                .unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        connection
+    }
+
+    fn request(&self, operation: Value) -> Value {
+        self.connect()
+            .request(serde_json::from_value(operation).unwrap())
+            .unwrap()
+            .result
+    }
+
+    fn mobile_status(&self) -> Value {
+        self.request(json!({"kind":"mobile.status"}))
+    }
+
+    fn configure_remote(&self, configuration: Value) -> Value {
+        self.request(json!({"kind":"mobile.configure","configuration":configuration}))
+            ["configuration"]
+            .clone()
+    }
+
+    fn viewer(&self, owner: &str) -> Viewer {
+        let socket = loopflow::server::client::attach(
+            &self.fixture.endpoint("machine"),
+            &serde_json::from_value(json!(owner)).unwrap(),
+        )
+        .unwrap();
+        Viewer::new(socket).attach(
+            json!({"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80}),
+        )
+    }
+}
+
+#[test]
+fn server_task_watch_replaces_readings_across_repositories() {
+    let fixture = Fixture::new();
+    let portfolio = |args: &[&str]| {
+        let output = fixture
+            .command(&[&["portfolio"], args].concat())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    portfolio(&["manual"]);
+    portfolio(&["add", fixture.repo.path().to_str().unwrap()]);
+    let task = support::register_task_without_pr(
+        fixture.home.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
+        "mobile-watch",
+        &fixture.repo.head_sha(),
+    );
+    let service = ServerProof::start(&fixture, false);
+    let query = json!({"kind":"view.select","expression":"kind:task state:open"});
+    let mut watch = service.connect();
+    let tasks = watch
+        .subscribe(serde_json::from_value(query.clone()).unwrap())
+        .unwrap();
+    let first = watch.reading(&tasks).unwrap();
+    let contents = |frame: &Value| -> Vec<Value> {
+        frame["body"]
+            .as_array()
+            .unwrap_or_else(|| panic!("Expected a complete Task reading: {frame}"))
+            .iter()
+            .flat_map(|plan| plan["contents"].as_array().unwrap().clone())
+            .collect()
+    };
+    assert_eq!(contents(&first).len(), 1);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE tasks SET issue_title='Renamed on Desktop' WHERE id=?1",
+            [task.task.id.as_str()],
+        )
+        .unwrap();
+    let updated = watch.reading(&tasks).unwrap();
+    assert_eq!(contents(&updated)[0]["title"], "Renamed on Desktop");
+
+    // A Task outside the portfolio is absent, as from Desktop's sidebar.
+    let second = TestRepo::new();
+    support::register_task_without_pr(
+        fixture.home.path(),
+        &second.path().canonicalize().unwrap(),
+        "other-repository",
+        &second.head_sha(),
+    );
+    watch.checkpoint(&tasks, 11).unwrap();
+    loop {
+        let reading = watch.reading(&tasks).unwrap();
+        if reading["answers"] == 11 {
+            assert_eq!(contents(&reading).len(), 1);
+            break;
+        }
+    }
+    portfolio(&["add", second.path().to_str().unwrap()]);
+    loop {
+        if contents(&watch.reading(&tasks).unwrap()).len() == 2 {
+            break;
+        }
+    }
+    watch.checkpoint(&tasks, 12).unwrap();
+    loop {
+        let reading = watch.reading(&tasks).unwrap();
+        if reading["answers"] == 12 {
+            assert_eq!(contents(&reading).len(), 2);
+            break;
+        }
+    }
+    drop(watch);
+    // The one-shot read shares the subscription's query and projection.
+    let plans = service.request(query);
+    assert_eq!(plans.as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn task_creation_opens_one_retained_terminal_and_recovers_it_after_exit() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    fixture
+        .repo
+        .create_file(".lf/config.yaml", "agent: claude\n");
+    fixture
+        .repo
+        .create_file(".lf/graphs/mobile.yaml", "- interactive: demo\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Mobile creation fixture");
+    fixture.repo.push();
+    let gh = fixture.home.path().join("bin/gh");
+    std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let args = [
+        "task",
+        "create",
+        "Start from the phone",
+        "--run",
+        "--graph",
+        "mobile",
+        "--json",
+        "--request-id",
+        &id,
+        "--terminal",
+    ];
+    let create = || {
+        let output = fixture
+            .command(&args)
+            .env("PATH", &path)
+            .env("HTTPS_PROXY", "http://127.0.0.1:1")
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["state"], "started", "{result}");
+        result
+    };
+    let created = create();
+    let owner = created["owner"].as_str().unwrap().to_string();
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let session = created["receipt"]["session_id"].as_str().unwrap();
+    assert_eq!(fixture.session_of_owner(&owner), session);
+    fixture.launches(1);
+    let mut observer = fixture.viewer(&owner, false);
+    until_out(&mut observer, "ready for");
+    assert!(observer.token.is_none());
+    assert_eq!(create(), created);
+    let mut controller = fixture.viewer(&owner, true);
+    controller.input("done\n");
+    controller.finish();
+    fixture.ends(&owner);
+    assert_eq!(create(), created);
+    assert_eq!(fixture.launches(1).len(), 1);
+}
+
+#[test]
+fn start_only_opens_one_session_without_taking_existing_viewer_claims() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap();
+    let open = || {
+        fixture
+            .command(&["resume", session, "--start-only", "--json"])
+            .env("PATH", &path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let first = open();
+    let second = open();
+    for child in [first, second] {
+        let result = wait_for_viewer(child, Duration::from_secs(30));
+        assert!(result.status.success(), "{result:?}");
+        let returned: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(returned["id"], session);
+    }
+    let owner: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let launches = fixture.launches(1);
+    let mut desktop = fixture.attach(
+        &owner,
+        json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99
+        }),
+    );
+    until_out(&mut desktop, "ready for");
+    let service = ServerProof::start(&fixture, false);
+    let started = service.request(json!({"kind":"session.start", "id":session}));
+    assert_eq!(started["id"], session, "{started}");
+    let mut observer = fixture.connect(&owner);
+    observer
+        .request(json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}));
+    let reply = observer.until_reply();
+    assert_eq!(reply["owner"], desktop.id);
+    assert!(reply["token"].is_null());
+    desktop.request(json!({"kind":"controlled"}));
+    assert_eq!(desktop.until_reply()["held"], true);
+    desktop.input("still mine\n");
+    desktop.finish();
+    fixture.ends(&owner);
+    assert_eq!(fixture.launches(1), launches);
+}
+
+#[test]
+fn start_only_lost_reply_preserves_the_started_session_for_passive_inspection() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let record: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = record["id"].as_str().unwrap();
+    let service = ServerProof {
+        fixture: &fixture,
+        supervised: false,
+        remote_address: None,
+        executable: env!("CARGO_BIN_EXE_lf").into(),
+        child: Some(
+            fixture
+                .command(&["server", "run"])
+                .env("PATH", &path)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        ),
+    };
+    service.ready();
+    let mut abandoned = service.connect();
+    abandoned
+        .send(serde_json::from_value(json!({"kind":"session.start", "id":session})).unwrap())
+        .unwrap();
+    // Confirm admission before losing the response, not before the request arrives.
+    let launches = fixture.launches(1);
+    drop(abandoned);
+    let resolved = service.request(json!({"kind":"session.owner", "session":session}));
+    let owner = resolved["owner"]
+        .as_str()
+        .expect("the lost reply's Session kept its owner");
+    let _cleanup = StopOwner(&fixture, owner.into());
+    let observer = fixture.viewer(owner, false);
+    assert!(observer.token.is_none());
+    // An explicit later open shares that live owner, even after service restart.
+    drop(service);
+    let reopened = fixture
+        .command(&["resume", session, "--start-only", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(reopened.status.success(), "{reopened:?}");
+    assert_eq!(returned_session(&reopened)["id"], session);
+    let mut controller = fixture.viewer(owner, true);
+    controller.input("done\n");
+    controller.finish();
+    fixture.ends(owner);
+    assert_eq!(fixture.launches(1), launches);
+}
+
+#[test]
+fn start_only_refuses_runs_and_incompatible_options_without_launching() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let record: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = record["id"].as_str().unwrap();
+    for extra in ["--prepare", "--fork", "-b"] {
+        let output = fixture
+            .command(&["resume", session, "--start-only", extra])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{extra}: {output:?}");
+    }
+    for missing in ["--fork", "session_00000000000040008000000000000000"] {
+        let output = fixture
+            .command(&["resume", "--start-only", "--json", "--", missing])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "An unknown Session cannot start: {output:?}"
+        );
+    }
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+            [session],
+        )
+        .unwrap();
+    let result = fixture
+        .command(&["resume", session, "--start-only", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("is a Run"),
+        "{result:?}"
+    );
+    assert!(!fixture.home.path().join("launches").exists());
+}
+
+#[test]
+fn simultaneous_session_openers_share_one_retained_owner() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap();
+    let open = || {
+        let mut command = fixture.command(&["resume", session]);
+        command.env("PATH", &path);
+        Terminal::spawn(command)
+    };
+    let mut first = open();
+    let mut second = open();
+    let launches = fixture.launches(1);
+    let owner: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    // One opener may replace the other's input before the first screen is
+    // drawn. Both must settle into viewing or a clean control-handoff exit.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    for terminal in [&mut first, &mut second] {
+        loop {
+            if String::from_utf8_lossy(&terminal.screen.lock().unwrap()).contains("ready for") {
+                break;
+            }
+            if let Some(status) = terminal.child.try_wait().unwrap() {
+                assert!(status.success(), "{:?}", terminal.screen.lock().unwrap());
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "concurrent opener did not settle"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    assert_eq!(fixture.launches(1), launches);
+    let owners: i64 = fixture
+        .sql()
+        .query_row(
+            "SELECT count(*) FROM processes WHERE command LIKE '%serve%' AND completed_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owners, 1);
+    let mut viewer = fixture.viewer(&owner, true);
+    viewer.input("done\n");
+    viewer.finish();
+    fixture.ends(&owner);
+}
+
+/// Cross-language acceptance, explicitly opted into an already configured private
+/// Tailscale host and installed Simulator. Ordinary CI never needs either.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires LOOPFLOW_MOBILE_SIMULATOR, ENDPOINT, STATUS_FILE and CERTIFICATE_FILE; host identity is a fixture"]
+fn mobile_machine_native_acceptance() {
+    mobile_native_acceptance(None);
+}
+
+/// Uses the installed Claude account for a new, tool-free test conversation.
+/// No existing conversation is resumed and the Machine registry stays isolated.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires mobile host fixtures plus LOOPFLOW_MOBILE_CLAUDE pointing to the signed-in Claude executable"]
+fn mobile_machine_claude_acceptance() {
+    let claude = PathBuf::from(std::env::var("LOOPFLOW_MOBILE_CLAUDE").unwrap());
+    assert!(claude.is_absolute() && claude.is_file());
+    mobile_native_acceptance(Some(("claude", &claude)));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires mobile host fixtures plus LOOPFLOW_MOBILE_CODEX pointing to the signed-in Codex executable"]
+fn mobile_machine_codex_acceptance() {
+    let codex = PathBuf::from(std::env::var("LOOPFLOW_MOBILE_CODEX").unwrap());
+    assert!(codex.is_absolute() && codex.is_file());
+    mobile_native_acceptance(Some(("codex", &codex)));
+}
+
+#[cfg(target_os = "macos")]
+fn mobile_native_acceptance(provider: Option<(&str, &Path)>) {
+    let simulator = std::env::var("LOOPFLOW_MOBILE_SIMULATOR").unwrap();
+    let endpoint = std::env::var("LOOPFLOW_MOBILE_ENDPOINT").unwrap();
+    let host_status: Value = serde_json::from_slice(
+        &std::fs::read(std::env::var("LOOPFLOW_MOBILE_STATUS_FILE").unwrap()).unwrap(),
+    )
+    .unwrap();
+    let certificate =
+        std::fs::read_to_string(std::env::var("LOOPFLOW_MOBILE_CERTIFICATE_FILE").unwrap())
+            .unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let fixture = Fixture::new();
+    fixture
+        .repo
+        .create_file(".lf/config.yaml", "agent: claude\ngraph: mobile\n");
+    fixture
+        .repo
+        .create_file(".lf/graphs/mobile.yaml", "- interactive: demo\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Mobile acceptance defaults");
+    fixture.repo.push();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty echo icanon < /dev/tty
+printf '%s\n' "$$" >> "$HOME/launches"
+printf '\033[?2004hmobile-owner-ready\r\n> '
+printf '\033]7501;id=proof:state=blocked:kind=question:app=fixture\033\\'
+read -r answer < /dev/tty
+printf '%s\n' "$answer" >> "$HOME/answers"
+printf '\r\naccepted: %s\r\n' "$answer"
+"#,
+    );
+    let path = if let Some((name, executable)) = provider {
+        let options = match name {
+            "claude" => "--safe-mode --strict-mcp-config --tools ''",
+            // Both the app-server and its native TUI use this wrapper. Each
+            // remains fixture-owned; neither attaches to the user's daemon.
+            "codex" => "--disable daemon_auto_start --disable hooks --disable plugins --disable apps --disable multi_agent --disable shell_tool --disable browser_use --disable computer_use",
+            _ => unreachable!("the opt-in tests name their provider"),
+        };
+        fixture.named_provider(name, &format!(
+            "#!/bin/sh\nif [ \"$1\" != --version ]; then printf '%s\\n' \"$$\" >> \"$LF_HOME/launches\"; fi\nexec {} {options} \"$@\"\n",
+            shlex::try_quote(executable.to_str().unwrap()).unwrap()
+        ))
+    } else {
+        path
+    };
+    let gh = fixture.home.path().join("bin/gh");
+    std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mode = fixture.command(&["portfolio", "manual"]).output().unwrap();
+    assert!(mode.status.success());
+    let portfolio = fixture
+        .command(&["portfolio", "add", fixture.repo.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        portfolio.status.success(),
+        "{}",
+        String::from_utf8_lossy(&portfolio.stderr)
+    );
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-i",
+            "-a",
+            provider.map_or("claude", |(name, _)| name),
+            ":",
+            if provider.is_some() {
+                "Do not use any tools. Reply only with the concatenation of MOBILE and _READY."
+            } else {
+                "Mobile acceptance"
+            },
+        ],
+    );
+    command.env("PATH", &path);
+    if provider.is_some() {
+        // The CLI uses its normal account without copying or inspecting secrets.
+        // LF_HOME still isolates every Loopflow record and process.
+        command.env("HOME", std::env::var_os("HOME").unwrap());
+        command.env_remove("CLAUDECODE");
+    }
+    let owner = fixture.owner(command);
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let expected_launches = if provider.is_some_and(|(name, _)| name == "codex") {
+        2
+    } else {
+        1
+    };
+    let first_launch = fixture.launches(expected_launches);
+    assert_eq!(first_launch.len(), expected_launches);
+    let session = fixture.session_of_owner(&owner);
+    let task = support::register_task_without_pr(
+        fixture.home.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
+        "mobile-proof",
+        &fixture.repo.head_sha(),
+    );
+    fixture
+        .sql()
+        .execute(
+            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            rusqlite::params![task.task.id.as_str(), session],
+        )
+        .unwrap();
+
+    let mut desktop = fixture.viewer(&owner, true);
+    if provider.is_none() {
+        desktop.input("desktop draft");
+        // Wait for echo before the phone takes its snapshot.
+        until_out(&mut desktop, "desktop draft");
+    }
+
+    // Pace 32 MiB with the active phone while a second phone stops reading.
+    // The retained owner, not an unbounded phone queue, owns slow-viewer policy.
+    std::fs::write(fixture.home.path().join("output-chunk"), vec![b'x'; 65536]).unwrap();
+    let output_owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        r#"stty -echo < /dev/tty
+printf 'output-ready\r\n'
+read -r start < /dev/tty
+printf '\033]7501;id=proof:state=working:app=proof\033\\'
+i=0
+while [ "$i" -lt 512 ]; do
+  cat "$HOME/output-chunk"
+  read -r next < /dev/tty
+  printf '%s\n' "$next" >> "$HOME/output-acks"
+  [ "$next" = next ] || exit 1
+  i=$((i+1))
+done
+printf '\r\noutput-complete\r\n'
+printf '\033]7501;id=proof:state=done:app=proof\033\\'
+read -r finish < /dev/tty
+printf 'output-final\r\n'
+"#,
+    ]);
+    let _output_cleanup = StopOwner(&fixture, output_owner.clone());
+    let output_session = fixture.session(&output_owner);
+    let ip: std::net::IpAddr = host_status["Self"]["TailscaleIPs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|ip| !ip.contains(':'))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let remote_address = std::net::SocketAddr::new(
+        ip,
+        reqwest::Url::parse(&endpoint)
+            .unwrap()
+            .port_or_known_default()
+            .unwrap(),
+    );
+    mobile_host(&fixture, &host_status, &certificate);
+    let config = json!({"enabled":true,"endpoint":endpoint,"owner":{
+        "node":host_status["Self"]["ID"],"user":host_status["Self"]["UserID"]}});
+    let config_path = fixture.home.path().join("config.yaml");
+    let mut saved: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    saved["mobile"] = serde_yaml_ng::to_value(config).unwrap();
+    std::fs::write(config_path, serde_yaml_ng::to_string(&saved).unwrap()).unwrap();
+    let mut service = ServerProof {
+        fixture: &fixture,
+        child: None,
+        supervised: false,
+        remote_address: Some(remote_address),
+        executable: env!("CARGO_BIN_EXE_lf").into(),
+    };
+    let launch = || {
+        fixture
+            .command(&["server", "run"])
+            .env("PATH", &path)
+            .env("HTTPS_PROXY", "http://127.0.0.1:1")
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+    service.child = Some(launch());
+    let first_instance = service.ready();
+
+    let integration_directory = || {
+        let container = Command::new("xcrun")
+            .args([
+                "simctl",
+                "get_app_container",
+                &simulator,
+                "com.loopflow.ios.dev",
+                "data",
+            ])
+            .output()
+            .unwrap();
+        assert!(container.status.success());
+        PathBuf::from(String::from_utf8(container.stdout).unwrap().trim())
+            .join("Documents/LoopflowIntegration")
+    };
+    let mut setup_dir = integration_directory();
+    std::fs::create_dir_all(&setup_dir).unwrap();
+    let setup = setup_dir.join("address.txt");
+    std::fs::write(&setup, &endpoint).unwrap();
+    let control_name = format!("service-{}", uuid::Uuid::new_v4());
+    let mut control = setup_dir.join(&control_name);
+    std::fs::create_dir(&control).unwrap();
+    std::fs::write(
+        setup_dir.join("session.json"),
+        json!({"session":session,"outputSession":provider.is_none().then_some(output_session),"creationRepository":provider.is_none().then(|| fixture.repo.path().canonicalize().unwrap()),"serviceControl":control_name,"realProvider":provider.is_some()})
+            .to_string(),
+    )
+    .unwrap();
+
+    let log_path = root.join("swift/.build/mobile-acceptance.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut test = Command::new("xcodebuild");
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("LF_") {
+            test.env_remove(key);
+        }
+    }
+    let mut native = test
+        .current_dir(root)
+        .args([
+            "test",
+            "-project",
+            "swift/LoopflowMobile.xcodeproj",
+            "-scheme",
+            "LoopflowiOS",
+            "-destination",
+            &format!("platform=iOS Simulator,id={simulator}"),
+            "-derivedDataPath",
+            "swift/.build/ios",
+            "-skipPackagePluginValidation",
+            "-parallel-testing-enabled",
+            "NO",
+            "-only-testing:LoopflowiOSTests/MachineConnectionIntegrationTests",
+            "CODE_SIGNING_ALLOWED=YES",
+            "CODE_SIGN_IDENTITY=-",
+        ])
+        .stdin(Stdio::null())
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut stopped = false;
+    let mut restarted = false;
+    let mut locate_after = Instant::now();
+    let result = loop {
+        if let Some(result) = native.try_wait().unwrap() {
+            break result;
+        }
+        // Xcode may reinstall the app into a new data container while preserving
+        // its Documents. Follow that move instead of retaining the pre-build path.
+        if !control.exists() && Instant::now() >= locate_after {
+            setup_dir = integration_directory();
+            control = setup_dir.join(&control_name);
+            locate_after = Instant::now() + Duration::from_secs(1);
+        }
+        if control.join("stop").exists() && !stopped {
+            let mut child = service.child.take().unwrap();
+            child.kill().unwrap();
+            child.wait().unwrap();
+            stopped = true;
+            std::fs::write(control.join("stopped"), "").unwrap();
+        }
+        if control.join("start").exists() && !restarted {
+            assert!(stopped);
+            service.child = Some(launch());
+            assert_ne!(service.ready(), first_instance);
+            restarted = true;
+            std::fs::write(control.join("started"), "").unwrap();
+        }
+        if Instant::now() >= deadline {
+            native.kill().unwrap();
+            break native.wait().unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // Do not leave fixture setup/control state for another test.
+    let _ = std::fs::remove_file(setup);
+    let _ = std::fs::remove_file(setup_dir.join("address.txt"));
+    let _ = std::fs::remove_file(setup_dir.join("session.json"));
+    let _ = std::fs::remove_dir_all(control);
+    let created_owners: Vec<String> = fixture.sql()
+        .prepare("SELECT DISTINCT transport_lf_process_id FROM agent_sessions WHERE transport_lf_process_id IS NOT NULL")
+        .unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+    let _created_cleanup: Vec<_> = created_owners
+        .iter()
+        .map(|owner| StopOwner(&fixture, owner.clone()))
+        .collect();
+    assert!(
+        result.success(),
+        "Native acceptance failed; inspect {}",
+        log_path.display()
+    );
+    assert!(
+        stopped && restarted,
+        "Native proof must cross a real service interruption"
+    );
+    if provider.is_some() {
+        assert!(fixture.running(&owner));
+        assert_eq!(fixture.session_of_owner(&owner), session);
+        assert_eq!(
+            fixture.launches(expected_launches),
+            first_launch,
+            "Recovery must keep the same actual provider"
+        );
+        return;
+    }
+    fixture.ends(&owner);
+    assert_eq!(
+        fixture.launches(3).len(),
+        first_launch.len() + 2,
+        "Only explicit Session opening and new Task creation may launch another provider"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
+        "desktop draft + phone + desktop\ncontinued from phone\ncreated from phone\n",
+        "Input must reach the child exactly once"
+    );
+    let acknowledgements =
+        std::fs::read_to_string(fixture.home.path().join("output-acks")).unwrap();
+    assert_eq!(
+        acknowledgements,
+        "next\n".repeat(512),
+        "Native edits must reach the busy terminal exactly once"
+    );
+}
+
+impl Drop for ServerProof<'_> {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn wait_server_status(path: &Path, state: &str, input: bool, generation: u64) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let reading = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        if reading.as_ref().is_some_and(|reading| {
+            reading["state"] == state
+                && reading["input"] == input
+                && reading["generation"].as_u64().unwrap() >= generation
+        }) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Expected {state}/{input}, got {reading:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn request_server_move(status: &Path) {
+    let reading: Value = serde_json::from_slice(&std::fs::read(status).unwrap()).unwrap();
+    assert_eq!(reading["state"], "connected");
+    assert_eq!(reading["input"], false);
+    let pending = status.with_extension("action-pending");
+    std::fs::write(&pending, reading["generation"].to_string()).unwrap();
+    std::fs::rename(pending, status.with_extension("move")).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "uses the login launchd domain with isolated development jobs"]
+fn server_registration_migrates_old_job_and_respects_disabled_choice() {
+    struct Jobs(Vec<String>);
+    impl Drop for Jobs {
+        fn drop(&mut self) {
+            for target in &self.0 {
+                for action in ["bootout", "enable"] {
+                    let _ = Command::new("/bin/launchctl")
+                        .args([action, target])
+                        .output();
+                }
+            }
+        }
+    }
+    let fixture = Fixture::new();
+    let home = fixture.home.path().canonicalize().unwrap();
+    let digest = hex::encode(Sha256::digest(home.as_os_str().as_encoded_bytes()));
+    // SAFETY: geteuid has no preconditions.
+    let domain = format!("gui/{}", unsafe { libc::geteuid() });
+    let old_label = format!("com.loopflow.machine.{}", &digest[..16]);
+    let new_label = format!("com.loopflow.server.{}", &digest[..16]);
+    let old = format!("{domain}/{old_label}");
+    let new = format!("{domain}/{new_label}");
+    let _jobs = Jobs(vec![old.clone(), new.clone()]);
+    let launchctl = |args: &[&str]| {
+        let output = Command::new("/bin/launchctl").args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    launchctl(&["disable", &old]);
+    let refused = fixture.command(&["install", "server"]).output().unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("disabled"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(!fixture.endpoint("machine").exists());
+    launchctl(&["enable", &old]);
+    let owner = fixture.owner(fixture.command(&["session", "serve", "--", "/bin/cat"]));
+    let _owner = StopOwner(&fixture, owner.clone());
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let legacy_plist = home.join("server.plist");
+    std::fs::write(
+        &legacy_plist,
+        format!(
+            r#"<?xml version="1.0"?>
+<plist version="1.0"><dict><key>Label</key><string>{old_label}</string>
+<key>ProgramArguments</key><array><string>/bin/sleep</string><string>120</string></array>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>"#
+        ),
+    )
+    .unwrap();
+    launchctl(&["bootstrap", &domain, legacy_plist.to_str().unwrap()]);
+    std::fs::write(fixture.endpoint("machine"), "retired endpoint").unwrap();
+    let results = std::thread::scope(|scope| {
+        let ensure = || fixture.command(&["install", "server"]).output().unwrap();
+        let first = scope.spawn(ensure);
+        let second = scope.spawn(ensure);
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    let readings = results.map(|result| {
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<Value>(&result.stdout).unwrap()
+    });
+    assert_eq!(readings[0]["ready"], true);
+    assert_eq!(readings[0]["instance"], readings[1]["instance"]);
+    assert!(!Command::new("/bin/launchctl")
+        .args(["print", &old])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    launchctl(&["print", &new]);
+    assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+    assert!(!legacy_plist.exists());
+    assert!(fixture.endpoint("machine").exists());
+    // The retired executable's lock cannot admit a second listener.
+    let lock = std::fs::File::open(fixture.endpoint("machine").with_extension("lock")).unwrap();
+    assert!(fs2::FileExt::try_lock_exclusive(&lock).is_err());
+}
+
+#[test]
+fn server_status_does_not_install_or_create_work() {
+    let fixture = Fixture::new();
+    let result = fixture.command(&["server", "status"]).output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let status: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(status["ready"], false);
+    assert!(status["instance"].is_null());
+    assert!(!fixture.endpoint("machine").exists());
+    assert!(!fixture.home.path().join("server.plist").exists());
+    assert!(!fixture.home.path().join("loopflow.db").exists());
+}
+
+// The host CLI is the network-identity boundary. Fixtures supply its responses;
+// TLS, HTTP/WebSocket, service dispatch and owner lifetimes remain real.
+fn mobile_host(fixture: &Fixture, status: &Value, pem: &str) {
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let cli = bin.join("tailscale");
+    std::fs::write(
+        &cli,
+        r#"#!/bin/sh
+case "$1" in
+status) cat "$HOME/tailscale-status.json" ;;
+cert)
+  if [ -f "$HOME/hold-certificate" ]; then
+    printf ready > "$HOME/certificate-requested"
+    while [ -f "$HOME/hold-certificate" ]; do sleep 0.02; done
+  fi
+  cat "$HOME/tailscale-certificate.pem" ;;
+
+whois) cat "$HOME/tailscale-peer.json" ;;
+*) exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        fixture.home.path().join("tailscale-status.json"),
+        status.to_string(),
+    )
+    .unwrap();
+    let certificate = fixture.home.path().join("tailscale-certificate.pem");
+    std::fs::write(&certificate, pem).unwrap();
+    std::fs::set_permissions(certificate, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(
+        fixture.home.path().join("tailscale-peer.json"),
+        json!({
+            "Node":{"StableID":"fixture-phone", "User":status["Self"]["UserID"]},
+            "UserProfile":{"ID":status["Self"]["UserID"]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
+    use tokio_rustls::rustls::{
+        self,
+        pki_types::{pem::PemObject, CertificateDer, ServerName},
+    };
+    use tokio_tungstenite::tungstenite::Message;
+    let fixture = Fixture::new();
+    let certificate =
+        rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+    let pem = certificate.cert.pem();
+    let status = json!({"BackendState":"Running", "Self":{"ID":"node1", "DNSName":"fixture.tail.ts.net.", "UserID":1, "TailscaleIPs":["127.0.0.1", "2001:db8::1"]}, "User":{"1":{"LoginName":"owner@example.com"}}});
+    mobile_host(
+        &fixture,
+        &status,
+        &format!("{pem}{}", certificate.signing_key.serialize_pem()),
+    );
+    let mut service = ServerProof::start(&fixture, false);
+    let instance = service.ready();
+    let roadmap = json!({"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true});
+    let mut watch = service.connect();
+    let watched = watch
+        .subscribe(serde_json::from_value(roadmap.clone()).unwrap())
+        .unwrap();
+    let initial = watch.reading(&watched).unwrap();
+    assert!(initial["unavailable"].is_null(), "{initial}");
+    let proposed = json!({"enabled":true,"endpoint":"https://fixture.tail.ts.net:0","owner":{"node":"node1","user":1}});
+    // Delay the external certificate response so the caller can disconnect
+    // after admission, before setup finishes. Closing before admission would
+    // merely drop an unauthenticated request, not lose an admitted result.
+    let hold = fixture.home.path().join("hold-certificate");
+    std::fs::write(&hold, "").unwrap();
+    let mut abandoned = service.connect();
+    abandoned
+        .send(
+            serde_json::from_value(json!({"kind":"mobile.configure","configuration":proposed}))
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(fixture.wait_file("certificate-requested"), "ready");
+    drop(abandoned);
+    std::fs::remove_file(hold).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let config = loop {
+        let status = service.mobile_status();
+        if status["ready"] == true {
+            assert!(status["error"].is_null());
+            break status["configuration"].clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Lost reply left setup unavailable: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let saved = fixture.home.path().join("config.yaml");
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"], config);
+    let port = reqwest::Url::parse(config["endpoint"].as_str().expect("enabled endpoint"))
+        .unwrap()
+        .port()
+        .unwrap();
+    let connect = || {
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(CertificateDer::from_pem_slice(pem.as_bytes()).unwrap())
+            .unwrap();
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let client = rustls::ClientConnection::new(
+            std::sync::Arc::new(config),
+            ServerName::try_from("fixture.tail.ts.net").unwrap(),
+        )
+        .unwrap();
+        let socket = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        let tls = rustls::StreamOwned::new(client, socket);
+        tokio_tungstenite::tungstenite::client("wss://fixture.tail.ts.net/v1/machine", tls)
+            .map_err(|error| error.to_string())
+    };
+    // One text frame per message: hello, then a subscription on the same connection.
+    let text = |reader: &mut tokio_tungstenite::tungstenite::WebSocket<_>| -> Value {
+        match reader.read().unwrap() {
+            Message::Text(text) => serde_json::from_str(text.as_str()).unwrap(),
+            other => panic!("expected a text frame: {other:?}"),
+        }
+    };
+    let remote_watch = |reader: &mut tokio_tungstenite::tungstenite::WebSocket<_>| {
+        reader
+            .send(Message::Text(
+                json!({"type":"hello","revision":2,"min_revision":2,"client":{
+                    "kind":"test","platform":"test","name":"proof","version":"0"}})
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+        assert_eq!(text(reader)["type"], "welcome");
+        reader
+            .send(Message::Text(
+                json!({"type":"subscribe","id":"remote-watch","operation":roadmap})
+                    .to_string()
+                    .into(),
+            ))
+            .unwrap();
+        assert_eq!(text(reader)["result"], Value::Null);
+        assert_eq!(text(reader)["type"], "reading");
+    };
+    let closed = |reader: &mut tokio_tungstenite::tungstenite::WebSocket<_>| loop {
+        match reader.read() {
+            Ok(Message::Close(_)) | Err(_) => break,
+            Ok(_) => {}
+        }
+    };
+    let (mut reader, _) = connect().unwrap();
+    remote_watch(&mut reader);
+    assert_eq!(service.configure_remote(config.clone()), config);
+    service.configure_remote(Value::Null);
+    closed(&mut reader);
+    let off = service.mobile_status();
+    assert_eq!(off["ready"], false);
+    assert_eq!(off["configuration"]["enabled"], false);
+    watch.checkpoint(&watched, 9).unwrap();
+    assert_eq!(watch.reading(&watched).unwrap()["answers"], 9);
+    assert_eq!(
+        service.ready(),
+        instance,
+        "Setup must not restart the local service"
+    );
+    service.configure_remote(config.clone());
+    let (mut reader, _) = connect().unwrap();
+    remote_watch(&mut reader);
+    let status_path = fixture.home.path().join("tailscale-status.json");
+    std::fs::write(&status_path, r#"{"BackendState":"NeedsLogin"}"#).unwrap();
+    // Logout must close existing remote connections.
+    closed(&mut reader);
+    watch.checkpoint(&watched, 10).unwrap();
+    assert_eq!(watch.reading(&watched).unwrap()["answers"], 10);
+    assert_eq!(service.ready(), instance);
+    let unavailable = service.mobile_status();
+    assert_eq!(unavailable["ready"], false);
+    assert_eq!(unavailable["configuration"]["enabled"], true);
+    assert!(unavailable["error"].is_string());
+    std::fs::write(&status_path, status.to_string()).unwrap();
+    // The original saved approval recovers automatically; the caller does not
+    // need to turn access on again after a transient Tailscale outage.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if service.mobile_status()["ready"] == true {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Same-account connection did not recover"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    service.restart();
+    service.ready();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Saved mobile listener was not restored"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(connect().is_ok());
+    // Foreign device identity is rejected even with a valid HTTPS connection.
+    std::fs::write(
+        fixture.home.path().join("tailscale-peer.json"),
+        r#"{"Node":{"StableID":"foreign","User":2},"UserProfile":{"ID":2}}"#,
+    )
+    .unwrap();
+    assert!(connect().is_err());
+    service.configure_remote(Value::Null);
+    service.restart();
+    service.ready();
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+    // A saved approval does not migrate to a new Tailscale owner after restart.
+    service.configure_remote(config.clone());
+    let mut changed = status;
+    changed["Self"]["UserID"] = json!(2);
+    changed["User"]["2"] = json!({"LoginName":"other@example.com"});
+    std::fs::write(status_path, changed.to_string()).unwrap();
+    service.restart();
+    service.ready();
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let mobile = service.mobile_status();
+        if let Some(error) = mobile["error"].as_str() {
+            assert!(error.contains("Tailscale account changed"), "{error}");
+            assert_eq!(mobile["ready"], false);
+            assert_eq!(mobile["configuration"]["owner"]["user"], 1);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Changed account was not reported"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(service);
+    let offline = fixture
+        .command(&["server", "mobile", "--status"])
+        .output()
+        .unwrap();
+    assert!(offline.status.success());
+    let offline: Value = serde_json::from_slice(&offline.stdout).unwrap();
+    assert_eq!(offline["configuration"]["enabled"], true);
+    assert_eq!(offline["ready"], false);
+    assert!(offline["error"].is_string());
+    assert!(fixture
+        .command(&["server", "mobile", "--off"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"]["enabled"], false);
+    assert!(!fixture.home.path().join("server.plist").exists());
+}
+
+#[test]
+fn server_mobile_setup_repairs_obsolete_settings_and_occupied_ports() {
+    let fixture = Fixture::new();
+    let certificate =
+        rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+    let status = json!({"BackendState":"Running", "Self":{"ID":"node1", "DNSName":"fixture.tail.ts.net.", "UserID":1, "TailscaleIPs":["127.0.0.1"]}, "User":{"1":{"LoginName":"owner@example.com"}}});
+    mobile_host(
+        &fixture,
+        &status,
+        &format!(
+            "{}{}",
+            certificate.cert.pem(),
+            certificate.signing_key.serialize_pem()
+        ),
+    );
+    let saved = fixture.home.path().join("config.yaml");
+    let unrelated = json!({"shell":"/bin/zsh"});
+    let mut settings = unrelated.clone();
+    settings["mobile"] = json!({"enabled":true,"endpoint":"https://obsolete.tail.ts.net:8443"});
+    std::fs::write(&saved, serde_yaml_ng::to_string(&settings).unwrap()).unwrap();
+    let service = ServerProof::start(&fixture, false);
+    let instance = service.ready();
+    let initial = service.mobile_status();
+    assert_eq!(initial["ready"], false);
+    assert!(initial["error"].is_string());
+    let setup = || {
+        let output = fixture
+            .command(&["server", "mobile"])
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin",
+                    fixture.home.path().join("bin").display()
+                ),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let first = setup();
+    assert_eq!(service.ready(), instance);
+    assert_eq!(first["owner"], json!({"node":"node1","user":1}));
+    let mut persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"], first);
+    persisted.as_object_mut().unwrap().remove("mobile");
+    assert_eq!(persisted, unrelated);
+
+    let port = reqwest::Url::parse(first["endpoint"].as_str().unwrap())
+        .unwrap()
+        .port()
+        .unwrap();
+    drop(service);
+    let occupied = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let service = ServerProof::start(&fixture, false);
+    let instance = service.ready();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let mobile = service.mobile_status();
+        if mobile["error"].is_string() {
+            assert_eq!(mobile["ready"], false);
+            assert_eq!(
+                mobile["configuration"], first,
+                "Restoration must keep the saved address"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Occupied port was not reported: {mobile}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let repaired = setup();
+    assert_ne!(repaired["endpoint"], first["endpoint"]);
+    assert_eq!(repaired["owner"], first["owner"]);
+    assert_eq!(service.ready(), instance);
+    let ready = service.mobile_status();
+    assert_eq!(ready["ready"], true);
+    assert_eq!(ready["configuration"], repaired);
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(persisted["mobile"], repaired);
+    assert_eq!(occupied.local_addr().unwrap().port(), port);
+
+    drop(service);
+    std::fs::write(&saved, serde_yaml_ng::to_string(&settings).unwrap()).unwrap();
+    let off = fixture
+        .command(&["server", "mobile", "--off"])
+        .output()
+        .unwrap();
+    assert!(
+        off.status.success(),
+        "{}",
+        String::from_utf8_lossy(&off.stderr)
+    );
+    let persisted: Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+    assert_eq!(
+        persisted, unrelated,
+        "Offline disable removes only obsolete mobile settings"
+    );
+    assert!(!fixture.home.path().join("server.plist").exists());
+
+    // A damaged whole file cannot be repaired without losing unrelated data.
+    let invalid = "shell: [unfinished";
+    std::fs::write(&saved, invalid).unwrap();
+    let off = fixture
+        .command(&["server", "mobile", "--off"])
+        .output()
+        .unwrap();
+    assert!(!off.status.success());
+    assert_eq!(std::fs::read_to_string(saved).unwrap(), invalid);
+}
+
+#[test]
+fn server_subscriptions_refresh_work_and_resolve_primary_session() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let session = fixture.session(&owner);
+    let service = ServerProof::start(&fixture, false);
+    let query = json!({"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true});
+    let mut watch = service.connect();
+    let tasks = watch
+        .subscribe(serde_json::from_value(query).unwrap())
+        .unwrap();
+    let initial = watch.reading(&tasks).unwrap();
+    assert!(initial["unavailable"].is_null(), "{initial}");
+    watch.checkpoint(&tasks, 17).unwrap();
+    let confirmed = watch.reading(&tasks).unwrap();
+    assert_eq!(confirmed["answers"], 17);
+
+    // Write parity, concurrent traces and no request Process rows are covered
+    // by served_reads. This proof owns live subscription invalidation.
+    // A changed Task reading uses the shared invalidation path, with no polling
+    // projection or shadow Task store in the service.
+    let registered = support::register_task_with_pr(
+        fixture.home.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
+        "server-proof",
+        &fixture.repo.head_sha(),
+    );
+    let db = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), session],
+    )
+    .unwrap();
+    // The read shares the watch's connection.
+    let socket_plan = watch
+        .request(
+            serde_json::from_value(json!({"kind":"view.get","directory":fixture.repo.path(),"expression":"task:INF-123"}))
+                .unwrap(),
+        )
+        .unwrap()
+        .result;
+    let cli = service
+        .command(&["desktop", "view", "task:INF-123", "--plan", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let cli_plan: Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(socket_plan, cli_plan);
+    assert_eq!(socket_plan["contents"][0]["primary_session"], session);
+    watch.checkpoint(&tasks, 18).unwrap();
+    loop {
+        let changed = watch.reading(&tasks).unwrap();
+        if changed["answers"] == 18 {
+            assert!(changed["body"].to_string().contains("INF-123"), "{changed}");
+            break;
+        }
+    }
+    drop(watch);
+}
+
+#[test]
+fn server_preserves_owner_and_graph_across_restart() {
+    server_continuity(false, false);
+}
+
+#[test]
+fn server_reconnect_preserves_newer_viewers_input_and_geometry() {
+    // Exercise both byte-counted Resume and fresh terminal-screen recovery.
+    for terminal in [false, true] {
+        let fixture = Fixture::new();
+        let owner = fixture.owner(fixture.serve(terminal, &[
+            "/bin/sh", "-c",
+            "printf 'ready-for-input\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ]));
+        let _cleanup = StopOwner(&fixture, owner.clone());
+        let mut service = ServerProof::start(&fixture, false);
+        let (command, status) = service.relay_command(&owner);
+        let mut relay = if terminal {
+            Terminal::spawn(command)
+        } else {
+            Terminal::stream(command)
+        };
+        relay.wait_text("ready-for-input");
+        service.stop();
+        wait_server_status(&status, "reconnecting", false, 2);
+
+        let mut newer = fixture.attach(
+            &owner,
+            json!({
+                "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+            }),
+        );
+        relay.input(b"uncertain typing");
+        service.child = Some(service.launch());
+        service.ready();
+        wait_server_status(&status, "connected", false, 2);
+        relay.assert_viewing("Recovered observer");
+        relay.input(b"must not reach the provider\n");
+        let mut observer = fixture.connect(&owner);
+        observer.request(
+            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
+        );
+        let reply = observer.until_reply();
+        assert_eq!(reply["owner"], newer.id, "reconnect cannot steal geometry");
+        assert!(reply["token"].is_null());
+        newer.input("newer viewer\n");
+        newer.finish();
+        assert_eq!(fixture.wait_file("answer"), "newer viewer");
+        assert!(relay.wait_exit().success());
+        if !terminal {
+            let screen = relay.screen.lock().unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&screen)
+                    .matches("ready-for-input")
+                    .count(),
+                1,
+                "Resume must continue at the received byte, not replay the initial output"
+            );
+        }
+    }
+}
+
+#[test]
+fn server_move_here_lost_ack_preserves_newer_claim_and_discards_input() {
+    for terminal in [false, true] {
+        server_move_lost_ack(terminal);
+    }
+}
+
+fn server_move_lost_ack(terminal: bool) {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        terminal,
+        &[
+            "/bin/sh",
+            "-c",
+            "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let mut service = ServerProof::start(&fixture, false);
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = if terminal {
+        Terminal::spawn(command)
+    } else {
+        Terminal::stream(command)
+    };
+    wait_server_status(&status, "connected", true, 1);
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    let _other = fixture.viewer(&owner, true);
+
+    // Intercept the real owner's takeover acknowledgement, after it has applied
+    // the claim. Recovery will go directly to that same owner again.
+    let endpoint = fixture.endpoint(&owner);
+    let retained = endpoint.with_extension("retained");
+    std::fs::rename(&endpoint, &retained).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    let (ack_send, ack_receive) = std::sync::mpsc::sync_channel(1);
+    let (close_send, close_receive) = std::sync::mpsc::sync_channel(1);
+    std::thread::scope(|scope| {
+        let proxy_retained = retained.clone();
+        let proxy = scope.spawn(move || {
+            let (mut downstream, _) = listener.accept().unwrap();
+            let mut upstream = UnixStream::connect(&proxy_retained).unwrap();
+            for socket in [&downstream, &upstream] {
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(15)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(15)))
+                    .unwrap();
+            }
+            let mut requests = downstream.try_clone().unwrap();
+            let mut destination = upstream.try_clone().unwrap();
+            let forward = scope.spawn(move || {
+                let _ = std::io::copy(&mut requests, &mut destination);
+            });
+            while let Some((tag, payload)) = read_frame(&mut upstream) {
+                if tag == REPLY {
+                    let reply: Value = serde_json::from_slice(&payload).unwrap();
+                    if reply["kind"] == "attached" && reply["token"].is_string() {
+                        ack_send.send(()).unwrap();
+                        close_receive.recv_timeout(Duration::from_secs(15)).unwrap();
+                        break;
+                    }
+                }
+                downstream.write_all(&frame(tag, &payload)).unwrap();
+            }
+            downstream.shutdown(std::net::Shutdown::Both).unwrap();
+            upstream.shutdown(std::net::Shutdown::Both).unwrap();
+            forward.join().unwrap();
+        });
+        service.child = Some(service.launch());
+        service.ready();
+        wait_server_status(&status, "connected", false, 2);
+        request_server_move(&status);
+        ack_receive.recv_timeout(Duration::from_secs(15)).unwrap();
+        wait_server_status(&status, "moving", false, 3);
+        relay.input(b"must not be replayed");
+        let mut newer = Viewer::new(UnixStream::connect(&retained).unwrap()).attach(json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+        }));
+        std::fs::remove_file(&endpoint).unwrap();
+        std::fs::rename(&retained, &endpoint).unwrap();
+        // Even a delayed duplicate of the consumed action cannot cross recovery.
+        std::fs::write(status.with_extension("move"), "2").unwrap();
+        close_send.send(()).unwrap();
+        proxy.join().unwrap();
+        wait_server_status(&status, "connected", false, 4);
+        assert!(!status.with_extension("move").exists());
+        let mut observer = fixture.connect(&owner);
+        observer.request(
+            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
+        );
+        assert_eq!(observer.until_reply()["owner"], newer.id);
+        assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+        newer.input("newer viewer\n");
+        newer.finish();
+        assert_eq!(fixture.wait_file("answer"), "newer viewer");
+        assert!(relay.wait_exit().success());
+    });
+}
+
+#[test]
+fn server_move_here_pending_action_is_cancelled_by_pane_closure() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "read -r answer"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let directory = fixture.home.path().join("pane");
+    std::fs::create_dir(&directory).unwrap();
+    let status = directory.join("status.json");
+    let (mut command, _) = service.relay_command(&owner);
+    command.env("LF_SERVER_STATUS", &status);
+    let mut relay = Terminal::stream(command);
+    wait_server_status(&status, "connected", true, 1);
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    let mut newer = fixture.attach(
+        &owner,
+        json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+        }),
+    );
+    service.child = Some(service.launch());
+    service.ready();
+    wait_server_status(&status, "connected", false, 2);
+    let pid = relay.child.id() as libc::pid_t;
+    // SAFETY: stop only this fixture's relay so closure precedes consumption.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+    let paused = PausedOwner(pid);
+    let mut stopped = 0;
+    // SAFETY: waitpid observes our child's stop; stopped is writable.
+    assert_eq!(
+        unsafe { libc::waitpid(pid, &mut stopped, libc::WUNTRACED) },
+        pid
+    );
+    request_server_move(&status);
+    let closed = directory.with_extension("closed");
+    std::fs::rename(&directory, &closed).unwrap();
+    std::fs::remove_dir_all(closed).unwrap();
+    drop(paused);
+    assert!(relay.wait_exit().success());
+    let mut observer = fixture.connect(&owner);
+    observer
+        .request(json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}));
+    assert_eq!(observer.until_reply()["owner"], newer.id);
+    newer.input("still controlled\n");
+    newer.finish();
+}
+
+#[test]
+fn server_reconnect_refreshes_expired_output_without_replaying_input() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            r#"
+printf 'ready-for-outage\n'
+while [ ! -f "$HOME/release" ]; do sleep 0.02; done
+dd if=/dev/zero bs=65536 count=20 2>/dev/null | tr '\000' x
+printf '\ncurrent-output\n'
+printf done > "$HOME/filled"
+read -r answer
+printf '%s' "$answer" > "$HOME/answer"
+"#,
+        ],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = Terminal::stream(command);
+    relay.wait_text("ready-for-outage");
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    std::fs::write(fixture.home.path().join("release"), "go").unwrap();
+    fixture.wait_file("filled");
+    relay.input(b"discarded");
+    service.child = Some(service.launch());
+    service.ready();
+    wait_server_status(&status, "connected", true, 2);
+    relay.wait_text("current-output");
+    relay.input(b"fresh input\n");
+    assert_eq!(fixture.wait_file("answer"), "fresh input");
+    assert!(relay.wait_exit().success());
+}
+
+#[test]
+fn server_reconnect_reports_unavailable_without_starting_another() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s\n' "$$" >> "$HOME/launches"
+printf 'provider-ready\n'
+read -r answer < /dev/tty
+"#,
+    );
+    let owner = fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "hello"));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let first = fixture.launches(1);
+    let mut service = ServerProof::start(&fixture, false);
+    let (mut command, status) = service.relay_command(&owner);
+    command.env("PATH", &path);
+    let mut relay = Terminal::spawn(command);
+    relay.wait_text("provider-ready");
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    fixture.stop(&owner);
+    fixture.ends(&owner);
+    service.child = Some(service.launch());
+    service.ready();
+    wait_server_status(&status, "unavailable", false, 2);
+    relay.assert_viewing("Unavailable keeps the last screen");
+    relay.input(&[0x1d]);
+    assert!(relay.wait_exit().success());
+    assert_eq!(
+        fixture.launches(1),
+        first,
+        "connection recovery cannot launch or resume a provider"
+    );
+}
+
+#[test]
+fn server_reconnect_retries_after_exhaustion_without_sending_retry_to_provider() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = Terminal::stream(command);
+    relay.wait_text("ready");
+    service.stop();
+    wait_server_status(&status, "unavailable", false, 2);
+    relay.input(b"discarded");
+    service.child = Some(service.launch());
+    service.ready();
+    std::fs::write(status.with_extension("retry"), "").unwrap();
+    wait_server_status(&status, "connected", true, 2);
+    relay.input(b"submitted\n");
+    assert_eq!(fixture.wait_file("answer"), "submitted");
+    assert!(relay.wait_exit().success());
+}
+
+#[test]
+fn server_failed_setup_retry_only_reconnects_and_preserves_newer_claims() {
+    for terminal in [false, true] {
+        let fixture = Fixture::new();
+        let owner = fixture.owner(fixture.serve(terminal, &[
+            "/bin/sh", "-c",
+            "printf '%s\\n' \"$$\" >> \"$HOME/launches\"; printf 'retained-owner-screen\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+        ]));
+        let _cleanup = StopOwner(&fixture, owner.clone());
+        let provider = fixture.launches(1);
+        let owner_pid = pid_of_process(&fixture, &owner);
+        let mut service = ServerProof::start(&fixture, false);
+        service.stop();
+        let installer = fixture.home.path().join("installer");
+        std::fs::write(
+            &installer,
+            r#"#!/bin/sh
+printf 'attempt\n' >> "$HOME/setup-attempts"
+if [ -f "$HOME/setup-allowed" ]; then
+    touch "$HOME/registered-again"
+    exit 0
+fi
+echo 'fixture Background Items disabled' >&2
+exit 1
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (mut command, status) = service.relay_command(&owner);
+        command.env("LF_BIN", installer);
+        let mut relay = if terminal {
+            Terminal::spawn(command)
+        } else {
+            Terminal::stream(command)
+        };
+        wait_server_status(&status, "unavailable", false, 1);
+        assert!(std::fs::read_to_string(&status)
+            .unwrap()
+            .contains("fixture Background Items disabled"));
+
+        // Setup would now succeed, but Retry must not invoke it. Another viewer
+        // takes both claims before this pane has ever connected successfully.
+        std::fs::write(fixture.home.path().join("setup-allowed"), "").unwrap();
+        let mut newer = fixture.attach(
+            &owner,
+            json!({
+                "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+            }),
+        );
+        relay.input(b"discarded during failed setup");
+        std::fs::write(status.with_extension("retry"), "").unwrap();
+        wait_server_status(&status, "reconnecting", false, 1);
+        wait_server_status(&status, "unavailable", false, 1);
+        assert!(std::fs::read_to_string(&status)
+            .unwrap()
+            .contains("fixture Background Items disabled"));
+        assert_eq!(fixture.wait_file("setup-attempts"), "attempt\n");
+        assert!(!fixture.home.path().join("registered-again").exists());
+
+        // An independent installation repair starts the service. The same pane
+        // recovers the exact owner, without repeating setup or taking control.
+        service.child = Some(service.launch());
+        service.ready();
+        std::fs::write(status.with_extension("retry"), "").unwrap();
+        wait_server_status(&status, "connected", false, 1);
+        relay.wait_text("retained-owner-screen");
+        relay.assert_viewing("Failed initial setup recovers read-only");
+        relay.input(b"discarded after recovery\n");
+        let mut observer = fixture.connect(&owner);
+        observer.request(
+            json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}),
+        );
+        let reply = observer.until_reply();
+        assert_eq!(reply["owner"], newer.id);
+        assert!(reply["token"].is_null());
+        assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+        newer.input("newer viewer\n");
+        newer.finish();
+        assert_eq!(fixture.wait_file("answer"), "newer viewer");
+        assert!(relay.wait_exit().success());
+        assert_eq!(fixture.launches(1), provider);
+        assert_eq!(fixture.wait_file("setup-attempts"), "attempt\n");
+        assert!(!fixture.home.path().join("registered-again").exists());
+    }
+}
+
+#[test]
+fn server_startup_cancels_its_pending_installer_when_pane_closes() {
+    let fixture = Fixture::new();
+    let directory = fixture.home.path().join("native-pane");
+    std::fs::create_dir(&directory).unwrap();
+    let installer = fixture.home.path().join("installer");
+    std::fs::write(
+        &installer,
+        "#!/bin/sh\nprintf '%s' \"$$\" > \"$HOME/installer-pid\"\nexec sleep 60\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let owner = uuid::Uuid::new_v4().to_string();
+    let mut command = fixture.command(&["session", "attach", &owner]);
+    command
+        .env("LF_BIN", &installer)
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", directory.join("status.json"));
+    let mut relay = Terminal::stream(command);
+    let pid = fixture.wait_file("installer-pid").parse::<i32>().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    assert!(relay.wait_exit().success());
+    // SAFETY: signal zero only inspects the fixture's recorded installer PID.
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        -1,
+        "cancelled setup must be reaped"
+    );
+}
+
+#[test]
+fn server_reconnect_cancels_when_native_pane_closes() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &["/bin/sh", "-c", "printf 'ready\\n'; read -r answer"],
+    ));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut service = ServerProof::start(&fixture, false);
+    let directory = fixture.home.path().join("native-pane");
+    std::fs::create_dir(&directory).unwrap();
+    let status = directory.join("status.json");
+    let mut command = fixture.command(&["session", "attach", &owner]);
+    command
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", &status);
+    let mut relay = Terminal::stream(command);
+    wait_server_status(&status, "connected", true, 1);
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, 2);
+    let closed = directory.with_extension("closed");
+    std::fs::rename(&directory, &closed).unwrap();
+    std::fs::remove_dir_all(closed).unwrap();
+    assert!(relay.wait_exit().success());
+    // The pane owns cancellation, never the provider's lifetime.
+    assert!(pid_of_process(&fixture, &owner) > 0);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "registers and removes an isolated launchd job; run explicitly outside network sandbox"]
+fn installed_server_preserves_owner_and_graph_across_replacement() {
+    server_continuity(true, false);
+}
+
+#[test]
+fn server_move_here_preserves_draft_provider_and_graph() {
+    server_continuity(false, true);
+}
+
+fn server_continuity(supervised: bool, takeover: bool) {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'server-proof-provider-ready\n'
+read -r answer < /dev/tty
+printf '%s\n' "$answer" >> "$HOME/answers"
+"#,
+    );
+    fixture
+        .repo
+        .create_file(".lf/skills/probe.md", "Do the fixture work.");
+    fixture
+        .repo
+        .create_file(".lf/graphs/server-proof.yaml", "- probe\n- probe\n");
+    let mut service = ServerProof::start(&fixture, supervised);
+    let mut command = service.command(&["session", "serve", "--terminal", "--"]);
+    command
+        .arg(&service.executable)
+        .args(["-i", "-a", "claude", "graph", "server-proof"])
+        .env("PATH", path);
+    let owner = fixture.owner(command);
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let first = fixture.launches(1);
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let session = fixture.session_of_owner(&owner);
+    let first_instance = service.ready();
+    let resolved = service.request(json!({"kind":"session.owner","session":session}));
+    assert_eq!(resolved["owner"], owner);
+    let mut viewer = service.viewer(&owner);
+    viewer.input("draft");
+    drop(viewer); // Desktop quit: the owner keeps its native editor.
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = Terminal::spawn(command);
+    relay.wait_text("server-proof-provider-ready");
+    fixture.wait_controlled(&owner);
+    let newer =
+        if takeover {
+            service.stop();
+            wait_server_status(&status, "reconnecting", false, 2);
+            Some(fixture.attach(&owner, json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
+        })))
+        } else {
+            None
+        };
+    service.restart();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while service.ready() == first_instance {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+    assert_eq!(
+        fixture.launches(1),
+        first,
+        "reconnect must not launch another provider"
+    );
+    wait_server_status(&status, "connected", !takeover, 2);
+    if takeover {
+        relay.input(b"discard this uncertain input");
+        request_server_move(&status);
+        wait_server_status(&status, "connected", true, 3);
+        let mut observer = fixture.connect(&owner);
+        observer.request(json!({
+            "kind":"attach", "control":false, "replace":false, "rows":24, "cols":80,
+        }));
+        let reply = observer.until_reply();
+        assert!(reply["owner"].is_string());
+        assert_ne!(reply["owner"], newer.as_ref().unwrap().id);
+        assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+        assert_eq!(fixture.launches(1), first);
+    }
+    let screen = relay.screen.lock().unwrap().clone();
+    assert!(!String::from_utf8_lossy(&screen).contains("Server connection lost"));
+    relay.input(b" kept\n");
+    fixture.launches(2); // The existing Graph advanced exactly once.
+    relay.input(b"done\n");
+    fixture.ends(&owner);
+    assert!(relay.wait_exit().success());
+    assert_eq!(fixture.launches(2).len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
+        "draft kept\ndone\n"
     );
 }

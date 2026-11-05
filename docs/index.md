@@ -123,7 +123,7 @@ including headless work. A running Graph is one lf process and the step processe
 it starts. A conversation can outlive its command. A Graph whose
 command stopped stays as history; fresh work is launched explicitly.
 
-Read the [contract and cutover status](architecture/reference-cutover.md#cutover-status)
+Read the [contract and cutover status](dev/reference-cutover.md#cutover-status)
 for the accepted model and remaining implementation, or the [Glossary](glossary.md)
 for a term. The Mac app and CLI read the same owners.
 
@@ -138,6 +138,7 @@ Read in order; each page starts from what the one before it left you with.
 | Come back to any conversation, after a crash or from another terminal | [Sessions](sessions.md) |
 | Land, repair CI, release, and run on other machines and logins | [Ops](ops.md) |
 | See Work in Desktop, cmux, Herdr, tmux or your own UI | [Surfaces](surfaces.md) |
+| Connect Desktop, check its server, and recover after an update | [Connect clients](server.md) |
 | See what agents did and what it cost | [Telemetry](telemetry.md) |
 | Write Skills and Graphs and pick the agent for each step | [Orchestration](orchestration.md) |
 | Fix something that went wrong | [Troubleshooting](troubleshooting.md) |

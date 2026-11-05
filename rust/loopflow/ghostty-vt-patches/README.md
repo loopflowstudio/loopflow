@@ -14,8 +14,7 @@ builds and pins. Requires Zig 0.16.x (`LOOPFLOW_ZIG` or `zig` on PATH) and netwo
 for Ghostty's dependency fetch. Zig cross-compiles every target from one machine.
 
 `build.rs` downloads the pinned archive for its target with `curl` into `OUT_DIR`,
-verifies the checksum, and links it statically into `lf`, the test binaries and
-`loopflow-ffi`; no Zig on a machine that builds or runs `lf`. `LOOPFLOW_GHOSTTY_VT_DIR`
+verifies the checksum, and links it statically into `lf` and the test binaries; no Zig on a machine that builds or runs `lf`. `LOOPFLOW_GHOSTTY_VT_DIR`
 names a directory holding a local `libghostty-vt.a` instead (offline work, or
 trying a Ghostty bump before publishing). A published name is immutable (the
 bucket's edge caches it for a year, and a miss for four hours, so never fetch a
@@ -50,9 +49,8 @@ previous flags. The build runs the cursor/stack round trip, pin-map check, and
 existing terminal/keyboard formatter tests before publishing archives.
 
 `0004-vt-darwin-runtime.patch`: the ReleaseFast Darwin archive omits bundled
-UBSan handlers and the memset override, avoiding duplicate runtime symbols when
-Desktop links GhosttyKit and `loopflow-ffi` together. libSystem supplies memset;
-the compiler intrinsics remain bundled. Linux archives keep their runtime.
-After changing the archive, verify both `scripts/test_desktop.sh` and
-`uv run python scripts/test.py --loopflow`: CLI linking alone cannot catch
-collisions with GhosttyKit or failures in Xcode's build phases.
+UBSan handlers and the memset override. libSystem supplies memset; the compiler
+intrinsics remain bundled. Linux archives keep their runtime.
+Desktop links its independent GhosttyKit renderer; the CLI archive is not linked
+into the app. After changing the archive, run the terminal parser and transport
+tests.

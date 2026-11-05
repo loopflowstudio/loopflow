@@ -864,6 +864,11 @@ fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
     assert!(reports[3].action.is_none());
     assert!(reports[3].state.is_none());
     assert!(reports[3].actions.is_empty());
+    assert!(reports[5].action.as_ref().unwrap().start_only);
+    assert_eq!(
+        reports[5].action.as_ref().unwrap().intent,
+        SessionResumeIntent::Reuse
+    );
     assert_eq!(serde_json::to_value(&reports).unwrap(), wire);
     for field in ["resolution", "actions", "impediments", "unavailable"] {
         let mut missing = wire[0].clone();
@@ -1270,6 +1275,26 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
     assert_eq!(renamed.summary.len(), 1);
     assert_eq!(
         serde_json::to_value(&renamed).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn task_create_outcome_preserves_recovery_states() {
+    use loopflow::lf::commands::task_create::{TaskCreateOutcome, TaskCreateState};
+    let json = include_str!("../../../tests/fixtures/dto/task_create_outcome.json");
+    let outcomes: Vec<TaskCreateOutcome> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        outcomes.iter().map(|o| o.state).collect::<Vec<_>>(),
+        [
+            TaskCreateState::InProgress,
+            TaskCreateState::Started,
+            TaskCreateState::Failed,
+            TaskCreateState::Unknown
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(outcomes).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }

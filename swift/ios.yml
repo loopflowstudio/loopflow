@@ -1,0 +1,71 @@
+include:
+  - project.yml
+name: LoopflowMobile
+options:
+  postGenCommand: ""
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    revision: 5d14406844143538cd8f8851d2d8a67c1fe443e5
+targets:
+  LoopflowiOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: LoopflowiOS
+        excludes: [README.md]
+      - path: ../third_party/notices/swiftterm.txt
+        buildPhase: resources
+      - path: ../third_party/notices/app-fonts.txt
+        buildPhase: resources
+    dependencies:
+      - target: Loopflow
+      - package: SwiftTerm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.ios.dev
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Loopflow
+        INFOPLIST_KEY_NSCameraUsageDescription: Scan the Machine address shown by Loopflow on your computer.
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+  LoopflowiOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LoopflowiOSTests
+      - path: ../tests/fixtures/dto/server
+        type: folder
+        buildPhase: resources
+      - path: ../tests/fixtures/dto/owner
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: LoopflowiOS
+      - package: ViewInspector
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  LoopflowiOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: LoopflowiOSUITests
+    dependencies:
+      - target: LoopflowiOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: LoopflowiOS
+schemes:
+  LoopflowiOS:
+    build:
+      targets:
+        LoopflowiOS: all
+    run:
+      commandLineArguments:
+        "--fixture": true
+    test:
+      targets: [LoopflowiOSTests, LoopflowiOSUITests]

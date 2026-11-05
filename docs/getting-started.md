@@ -134,7 +134,10 @@ lf doctor                        # installation, store and process health
 
 Prefer cargo? `cargo install --git https://github.com/loopflowstudio/loopflow --bin lf`.
 The Mac app, [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg),
-bundles `lf`.
+bundles `lf` and its local client server. Installation prepares Desktop's
+connection automatically. Check it with `lf server status`; use `lf install` for
+updates. Machine commands still select where work runs. [Connect clients](server.md)
+explains the distinction and what happens during a connection loss.
 
 | Flag | What it does |
 |---|---|

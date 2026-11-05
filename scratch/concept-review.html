@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-718 · concept review · the key bar</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292724;--muted:#68625b;--line:#d7d0c5;--panel:#f1ede6;--accent:#76513a;--new:#3f6b4a}
+@media(prefers-color-scheme:dark){:root{--bg:#201e1c;--fg:#eee7dd;--muted:#bdb3a6;--line:#514940;--panel:#2c2824;--accent:#e2b797;--new:#9ccaa6}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 system-ui,sans-serif}
+main{max-width:760px;margin:auto;padding:48px 24px 80px}header{font-size:13px;color:var(--muted)}
+h1,h2{font-family:Georgia,serif;line-height:1.15;font-weight:normal}h1{font-size:clamp(30px,7vw,44px);margin:28px 0 20px}h2{font-size:28px;margin-top:48px}
+code,pre{font:13px/1.6 ui-monospace,monospace}code{overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.example{background:var(--panel);border-left:3px solid var(--line);padding:20px;margin:20px 0}.example.proposed{border-left-color:var(--new)}
+.example strong{display:block;margin-bottom:10px}.tag{font-style:italic;color:var(--muted)}.proposed .tag{color:var(--new)}
+li{margin-bottom:14px}.muted{color:var(--muted)}footer{border-top:1px solid var(--line);margin-top:44px;padding-top:12px;font-size:14px;color:var(--muted)}
+@media(max-width:420px){main{padding:28px 18px 60px}.example{padding:16px}}
+</style></head><body><main>
+<header>LOO-718 · concept-review (headless) · November 5, 2026<br>
+Built from <code>scratch/mobile-ios.md</code>, <code>swift/LoopflowiOS/SessionTerminalView.swift</code>, commit <code>7e745926e3</code>, Jack Heart's key-bar steer (comment d72340bb), <code>4070315ab3:scratch/mobile-native-demo.md</code></header>
+
+<h1>Which keys sit under the terminal until contextual controls exist?</h1>
+<p><strong>Outcome: an open product choice; this step returns Blocked.</strong> The previous review's four items (portfolio scope, <code>portfolio.get</code>, <code>task.start</code>, the operation table) are in code. Nothing else in the implemented change contradicts an accepted decision.</p>
+
+<h2>The mismatch</h2>
+<div class="example"><strong>Accepted <span class="tag">Jack Heart's steer</span></strong>
+<pre>Default row      Paste · New line · keyboard
+With a prompt    + choices · Cancel / Confirm
+While working    + Stop
+Superseded       Ctrl/Opt/Shift/Tab and the four-arrow strip</pre></div>
+<div class="example"><strong>Shipped <span class="tag">existing behavior, November 4</span></strong>
+<pre>Default row      Paste · New line · Keys · keyboard
+Keys             ← ↑ ↓ → · Tab · Esc · back to typing
+Contextual       none: provider state isn't trustworthy yet</pre></div>
+<p>Keys came in as the stand-in for the deferred contextual controls. Today it is the only software way to send Escape (interrupt an agent) or to arrow through a provider menu. Typing a digit and Return already answers numbered prompts. No recorded review approved it, and the working design had listed it as part of Jack's reduced row. That record is now corrected.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<p><b>Answer a prompt.</b> Typed input to the Session owner, through the existing input claim. It works without Keys for numbered choices.</p>
+<p><b>Interrupt the agent.</b> Escape byte through the same claim. Without Keys or a Stop control, there is no way to send it from the software keyboard.</p>
+<p><b>Contextual choices and Stop.</b> These need program-state semantics from the backend that don't exist yet (remaining work item 5). No API change follows from any answer below.</p>
+
+<h2>Challenge</h2>
+<p>Normal path: Claude asks to trust a repository. You type <code>1</code> and Return, or open Keys and press Return. Failure: the agent runs away mid-task. With (b) below you can't stop it from the phone, only watch. Counterexample to (a): Jack's steer said a generic shell needs the bigger bar and an agent Session doesn't. Keys brings that bar back one tap away.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>Until contextual controls exist:
+ (a) keep Keys in the default row as the interim ·
+ (b) remove Keys and answer prompts by typing only, with no software interrupt ·
+ (c) remove Keys and add only an Escape/Stop control to the row.</li>
+</ol>
+<footer>Design record updated in <code>scratch/mobile-ios.md</code> (Unresolved product choice). Code unchanged; no tests run. Page not visually inspected.</footer>
+</main></body></html>

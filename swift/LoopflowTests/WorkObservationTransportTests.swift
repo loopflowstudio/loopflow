@@ -1,35 +1,37 @@
 #if os(macOS)
-import Darwin
 import Foundation
 import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// A window's watches, served by stand-ins or by Loopflow's library in the app.
+/// A window's watches, served by stand-ins or by a private Loopflow server.
 /// Every window starts with the plan and the live-process watch.
 @Suite("Workspace watch transport", .serialized)
 struct WorkObservationTransportTests {
-    @Test("A native library write completes from an async caller")
+    @Test("A server command completes from an async caller")
     func writeFromAsyncCaller() async throws {
-        setenv("LF_HOME", Self.home.path, 1)
-        defer { unsetenv("LF_HOME") }
         let repo = Self.home.appendingPathComponent("write-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: repo) }
         let lf = try BuiltLf(home: Self.home, cwd: repo)
         _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
 
-        let printed = try #require(try await LoopflowLibrary.write(.graphCustomize(directory: repo.path, name: "code")))
-        let path = printed.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try await lf.run(["config", "repository", "--json"])
+        let server = LocalServerFixture(lf)
+        let printed = try await ServerClient.write(.graphCustomize(directory: repo.path, name: "code"), location: server.location())
+        await server.stop()
+        let path = try #require(try JSONSerialization.jsonObject(with: Data(printed.utf8)) as? [String: String])["path"]!
         let graph = try String(contentsOfFile: path, encoding: .utf8)
         #expect(graph.contains("implement"))
     }
 
-    @Test("Loopflow's library serves a read in the app and ends it on cancel")
-    func servedInProcess() async throws {
-        setenv("LF_HOME", Self.home.path, 1)
-        defer { unsetenv("LF_HOME") }
-        let watch = try LoopflowLibrary.watch(.allPlans)
+    @Test("The server serves a read and ends it on cancel")
+    func servedOverSocket() async throws {
+        let lf = try BuiltLf(home: Self.home)
+        _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
+        _ = try await lf.run(["config", "repository", "--json"])
+        let server = LocalServerFixture(lf)
+        let watch = ServerClient.watch(.allPlans, location: server.location())
         var lines = watch.lines.makeAsyncIterator()
         let first = try #require(try await lines.next())
         let frame = try #require(try JSONSerialization.jsonObject(with: first) as? [String: Any])
@@ -38,14 +40,17 @@ struct WorkObservationTransportTests {
         let answered = try #require(try await lines.next())
         #expect((try JSONSerialization.jsonObject(with: answered) as? [String: Any])?["answers"] as? Int == 7)
         await watch.cancel()
+        await server.stop()
         #expect(try await lines.next() == nil)
     }
 
     @Test("A read Loopflow does not serve fails its watch")
     func unservedRead() async throws {
-        setenv("LF_HOME", Self.home.path, 1)
-        defer { unsetenv("LF_HOME") }
-        let watch = try LoopflowLibrary.watch(.desktopTask(directory: "/", issue: "NONE-404"))
+        let lf = try BuiltLf(home: Self.home)
+        _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
+        _ = try await lf.run(["config", "repository", "--json"])
+        let server = LocalServerFixture(lf)
+        let watch = ServerClient.watch(.machineId, location: server.location())
         do {
             for try await _ in watch.lines {}
             Issue.record("An unserved read finished successfully")
@@ -53,6 +58,7 @@ struct WorkObservationTransportTests {
             #expect(error is RegistryQueryError)
         }
         await watch.cancel()
+        await server.stop()
     }
 
     @Test("A scope change keeps a watch whose read is unchanged and starts the new ones")
@@ -151,8 +157,7 @@ struct WorkObservationTransportTests {
         #expect(!process.isRunning)
     }
 
-    /// One Machine for the library's reads: Loopflow may keep its store open
-    /// for the rest of this process.
+    /// One private Machine for this serialized suite.
     private static let home: URL = {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

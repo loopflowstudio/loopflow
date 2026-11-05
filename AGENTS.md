@@ -200,6 +200,12 @@ When editing `*.rs` files:
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
 - Never use `()` as an error type
+- Served mutations take a directory and `CommandIo`; never redirect process cwd,
+  env or file descriptors. Nested blocking operations use
+  `journal::request::spawn_blocking` to retain request attribution and diagnostics.
+  A request trace is not an OS Process; execution launches retain their owners.
+- Forward stdin only for commands that consume it; a mutation with no body must
+  finish while terminal stdin remains open.
 - SQLite read helpers that join statements use savepoints so they compose inside
   the Work reader's pinned snapshot as well as standalone. Keep write transactions
   at their existing command boundaries.
@@ -220,6 +226,10 @@ When editing Rust tests:
   replay a migration with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` (standalone binaries included) for the old name.
 - Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
+- macOS SMAppService fixtures register temporary bundles with LaunchServices and
+  launch bundle-owned update code through LaunchServices. An external test runner
+  writing a registered app can fail App Management; it does not model an app update.
+  Cleanup unregisters the unique service job and LaunchServices entry.
 - Lifetime tests start a terminal owner with `Fixture::serve(true, …)`: a `--json` viewer on a pipe gets a pipe owner that dies with its stdin, so a retirement bug passes unseen. With `RUST_LOG` set, diagnostics go to stderr (`logs/transport.log` there), not `logs/lf.log`.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 
@@ -324,8 +334,8 @@ are separate: a fresh claim token fences every attachment and release, including
 A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
 The full contract lives in
-[Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
-the [Architecture Reference](docs/architecture-reference.md) indexes the rest,
+[Core models and APIs](docs/dev/reference-models.md#core-models-and-apis);
+the [Architecture Reference](docs/dev/reference.md) indexes the rest,
 including cutover status.
 
 # Development Environment
@@ -507,6 +517,10 @@ Aim for a mix:
 
 ## Verification Cadence
 
+Swift async process fixtures install `terminationHandler` before `run()` and
+await its completion. Do not call blocking `waitUntilExit()` on a cooperative
+executor; it can remain in Foundation's run loop after the child has exited.
+
 - **Implement/compress:** build changed code and run its focused test. Skip
   builds for prose-only edits; no change or still-applicable pass means no rerun.
 - **Realign:** reconcile the plan; test only a repair or a concrete uncertainty.
@@ -529,6 +543,11 @@ requires `@Environment` Observation objects; ViewInspector cannot inject those
 objects. Keep existing leaf views internal for `@testable` access rather than
 adding test-only constructors or mounting a window.
 Keep mounted terminal frame checks in `.requiresDisplay` suites.
+
+iOS UIKit input tests use the `LoopflowiOSTests` simulator target in `swift/ios.yml`.
+Mount the terminal controller in a UIWindow so keyboardLayoutGuide has valid
+geometry; these app-hosted simulator tests run headless. They verify UIKit input
+effects, not physical keyboard, dictation or VoiceOver interaction quality.
 
 ## When to Mock
 

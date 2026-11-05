@@ -92,6 +92,9 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("not found")]
     NotFound,
+    /// A compare-and-swap named a revision that is no longer current.
+    #[error("{0}")]
+    Stale(String),
     #[error("invalid data: {0}")]
     InvalidData(String),
     #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]
@@ -173,20 +176,6 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     // Schema compatibility, not build provenance, decides whether a CLI can
     // use this Machine. Ordinary opens still cannot advance its schema.
     Ok(default_db_path())
-}
-
-static IN_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// This process is an app serving Loopflow through its library: it opens only
-/// the store `lf` prepared at this build's schema, and never creates or
-/// migrates one. `lf` owns that, run once when the app starts. Set once by the
-/// app's library; never cleared.
-pub fn serve_in_app() {
-    IN_APP.store(true, std::sync::atomic::Ordering::Relaxed);
-}
-
-pub(crate) fn serves_in_app() -> bool {
-    IN_APP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Whether an open is the authorized owner of the shared migration frontier.
@@ -307,7 +296,7 @@ where
     F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
 {
     let store = store.clone();
-    tokio::task::spawn_blocking(move || func(store))
+    crate::journal::request::spawn_blocking(move || func(store))
         .await
         .map_err(|err| StoreError::InvalidData(err.to_string()))?
 }
@@ -1299,6 +1288,36 @@ mod tests {
             vec![
                 PathBuf::from("/repo.running"),
                 PathBuf::from("/repo.unknown")
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn reads_released_task_placement_without_migrating_the_machine() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("released.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/task_placement_released.sql"
+            ))
+            .unwrap();
+        drop(connection);
+        let before = std::fs::read(&path).unwrap();
+        let mut ownership: Vec<_> = super::sqlite::read_task_worktree_ownership(&path)
+            .unwrap()
+            .into_iter()
+            .map(|owner| (owner.task, owner.completed, owner.unfinished))
+            .collect();
+        ownership.sort();
+        assert_eq!(
+            ownership,
+            vec![
+                ("local-done".into(), true, false),
+                ("remote-done".into(), false, false),
+                ("running".into(), false, true),
+                ("unknown".into(), false, true),
             ]
         );
         assert_eq!(std::fs::read(&path).unwrap(), before);

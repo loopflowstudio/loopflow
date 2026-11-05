@@ -295,6 +295,16 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
+        if matches!(
+            &self.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Create { terminal: true, .. }
+            })
+        ) && (self.batch || self.interactive)
+        {
+            return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                "task create --terminal acknowledges interactive startup without a viewer; omit -b and -i\n"));
+        }
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }
@@ -498,6 +508,9 @@ pub enum Commands {
         /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
         #[arg(long)]
         stop: bool,
+        /// With --stop, print the Task and whether it was shipping
+        #[arg(long, requires = "stop")]
+        json: bool,
     },
     /// Inspect and continue Sessions
     Session {
@@ -705,6 +718,11 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: WtCommand,
     },
+    /// Serve Desktop and other clients on this host
+    Server {
+        #[command(subcommand)]
+        cmd: ServerCommand,
+    },
     /// Name, connect, pool and rent Machines
     Machine {
         #[command(subcommand)]
@@ -757,6 +775,12 @@ pub enum DesktopCommand {
     },
     /// Print the repository's default and saved Dashboard plans as JSON
     Plans {
+        /// Apply one selection across every portfolio repository
+        #[arg(long)]
+        all: bool,
+        /// Selection to apply with --all; omitted uses each repository's default
+        #[arg(long, requires = "all")]
+        expression: Option<String>,
         #[arg(long, required = true)]
         json: bool,
         /// Print a JSON line now and each time the plans change, until stdin closes
@@ -1285,7 +1309,9 @@ impl OpsCommand {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
+            Self::Server { .. } | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => {
+                false
+            }
             Self::Commit { .. } | Self::Sync(_) => true,
         }
     }
@@ -1350,6 +1376,23 @@ impl WtCommand {
     }
 }
 
+#[derive(Debug, Subcommand)]
+pub enum ServerCommand {
+    /// Serve the private socket in the foreground (for the OS supervisor).
+    Run,
+    /// Report local readiness without registering or starting anything.
+    Status,
+    /// Configure private mobile access using this host's signed-in Tailscale installation.
+    Mobile {
+        /// Stop remote access without stopping local Sessions.
+        #[arg(long, conflicts_with = "status")]
+        off: bool,
+        /// Report saved approval and live mobile readiness without enabling access.
+        #[arg(long)]
+        status: bool,
+    },
+}
+
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
@@ -1403,7 +1446,7 @@ impl SelfCommand {
         match self {
             Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
-                Some(InstallCommand::Preflight { .. }) => false,
+                Some(InstallCommand::Server | InstallCommand::Preflight { .. }) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
@@ -1516,7 +1559,12 @@ pub enum GraphCommand {
     },
     /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
-    Customize { name: String },
+    Customize {
+        name: String,
+        /// Print `{"path": …}`
+        #[arg(long)]
+        json: bool,
+    },
     /// Carry a Task's Graph from where its `lf task run` set out; that run starts it
     #[command(hide = true)]
     Run,
@@ -1686,7 +1734,7 @@ pub enum SessionCommand {
     List(SessionListArgs),
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nWith --start-only, reuse or start its retained terminal and return without attaching. Existing viewers keep input and geometry; harness and account options apply only when starting an owner. A lost reply requires inspection before another explicit open.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID
@@ -1697,6 +1745,9 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
+        /// Start or reuse the terminal owner, then return without taking control
+        #[arg(long, conflicts_with_all = ["fork", "prepare", "message"])]
+        start_only: bool,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness
@@ -2045,16 +2096,22 @@ until `lf ship`."
         /// Why, kept in the Task's completion request
         #[arg(long)]
         reason: Option<String>,
+        /// Print the completed Task
+        #[arg(long)]
+        json: bool,
     },
     /// Reopen local planning without moving its Graph or replacing the PR
     Reopen {
         issue: String,
         #[arg(long)]
         reason: Option<String>,
+        /// Print the reopened Task
+        #[arg(long)]
+        json: bool,
     },
     /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
+        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine.\n\nWith --request-id, repeat identical arguments to recover the original Task. JSON state is in_progress, started, failed, or unknown; admitted results exit zero. Unknown means launch was interrupted: inspect the Task before explicitly starting it again. Retries never advance its Graph. A changed request must use a new ID."
     )]
     Create {
         /// Existing conversation to promote without replaying its input
@@ -2085,6 +2142,12 @@ until `lf ship`."
         /// The graph it takes up in place of the default
         #[arg(long, requires = "run")]
         graph: Option<String>,
+        /// Recover the same create/start request after a lost reply; reuse with identical arguments
+        #[arg(long, requires_all = ["run", "json"])]
+        request_id: Option<crate::id::TaskCreateRequestId>,
+        /// Start the primary Session's terminal and acknowledge its owner without attaching a viewer
+        #[arg(long, requires = "request_id")]
+        terminal: bool,
         #[arg(long)]
         json: bool,
     },
@@ -2215,6 +2278,9 @@ until `lf ship`."
         assignee: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Print the edited Task's ID and planning sync
+        #[arg(long)]
+        json: bool,
     },
     /// Change Task membership, or move the Task to another Machine, preserving its recorded work
     #[command(
@@ -2336,6 +2402,9 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
+    /// Reconcile the selected installation's local server for a client.
+    #[command(hide = true)]
+    Server,
     /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux)
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
@@ -3251,6 +3320,40 @@ mod tests {
     }
 
     #[test]
+    fn server_access_is_separate_from_machine_routing_and_installation() {
+        let args = crate::lf::navigation::normalize_args(
+            ["lf", "server", "status"].map(str::to_owned).to_vec(),
+        )
+        .unwrap();
+        assert_eq!(args, ["lf", "ops", "server", "status"]);
+        let command = Cli::try_parse_from(args).unwrap().command.unwrap();
+        assert!(!command.changes_work());
+        assert!(matches!(
+            command,
+            Commands::Ops {
+                cmd: OpsCommand::Server {
+                    cmd: ServerCommand::Status
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["lf", "ops", "machine", "service", "run"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "server", "ensure"]).is_err());
+        let tree = crate::lf::navigation::command_tree();
+        let install = tree
+            .find_subcommand("self")
+            .unwrap()
+            .find_subcommand("install")
+            .unwrap();
+        assert!(install.find_subcommand("server").unwrap().is_hide_set());
+        let remote = crate::lf::navigation::machine_invocation(
+            &["lf", "--machine", "worker", "server", "status"].map(str::to_owned),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(remote.1, ["ops", "server", "status"]);
+    }
+
+    #[test]
     fn install_exposes_refresh_and_schedule_but_hides_transaction_commands() {
         let mut command = Cli::command();
         let installation = command.find_subcommand_mut("self").unwrap();
@@ -3783,7 +3886,7 @@ mod tests {
             Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
                 .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason } })
+            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason, .. } })
                 if issue == "LOO-42" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",

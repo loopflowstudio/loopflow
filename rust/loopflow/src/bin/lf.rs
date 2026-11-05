@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{IsTerminal, Read};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -11,6 +11,7 @@ use tracing_subscriber::EnvFilter;
 use loopflow::context_block::ContextMoment;
 use loopflow::definition::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
+use loopflow::lf::commands::mutation::{selected_task_repository, task_edit_update};
 use loopflow::lf::{
     Cli, Commands, GraphCommand, InstallCommand, OpsCommand, SkillCommand, TaskCommand, WaveCommand,
 };
@@ -790,6 +791,7 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
         } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         OpsCommand::People { json } => loopflow::lf::commands::people::run(*json),
         OpsCommand::Tokens { json, days } => loopflow::lf::commands::tokens::run(*json, *days),
+        OpsCommand::Server { cmd } => loopflow::lf::commands::server::run(cmd),
         OpsCommand::Machine { cmd } => loopflow::lf::commands::machine::run(cmd, cli.batch),
         OpsCommand::Pr { cmd } => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
@@ -874,46 +876,8 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             })
         }
 
-        WaveCommand::NewChapter {
-            wave,
-            name,
-            plan,
-            dry_run,
-            json,
-            ..
-        } => {
-            let rotation = loopflow::ops::chapter::new_chapter(
-                repo,
-                name,
-                &std::fs::read(plan)?,
-                wave.as_deref(),
-                *dry_run,
-            )?;
-            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
-                .planning_transport()
-                .remote_name()
-                .filter(|_| !dry_run)
-            {
-                eprintln!("Saved locally; pending {provider} sync.");
-            }
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&rotation)?);
-            } else {
-                println!("Chapter {}", rotation.name);
-                for wave in rotation.waves {
-                    println!(
-                        "  {} → {} ({})",
-                        wave.wave, rotation.name, wave.successor_id
-                    );
-                    for task in wave.tasks {
-                        println!(
-                            "    {}  {:?}  {}",
-                            task.task.identifier, task.disposition, task.reason
-                        );
-                    }
-                }
-            }
-            Ok(())
+        WaveCommand::NewChapter { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         WaveCommand::Connect {
             wave,
@@ -928,21 +892,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             team_name.as_deref(),
         ),
         WaveCommand::Reteam { apply } => loopflow::lf::commands::ops::reteam(repo, *apply),
-        WaveCommand::Add {
-            wave,
-            objective,
-            json,
-        } => {
-            let added = tokio::runtime::Runtime::new()?.block_on(
-                loopflow::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
-            )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&added)?);
-            } else {
-                println!("{}", loopflow::ops::wave_lifecycle::render_added(&added));
-            }
-            Ok(())
-        }
+        WaveCommand::Add { .. } => unreachable!("shared mutation dispatch precedes this command"),
         WaveCommand::Remove {
             wave,
             preview,
@@ -1024,30 +974,13 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
 }
 
 fn read_task_draft() -> anyhow::Result<String> {
-    let limit = loopflow::ops::task::MAX_FILE_BYTES;
-    let mut bytes = Vec::new();
-    std::io::stdin()
-        .take(limit as u64 + 1)
-        .read_to_end(&mut bytes)?;
-    anyhow::ensure!(bytes.len() <= limit, "Draft exceeds 1 MB");
-    Ok(String::from_utf8(bytes)?)
+    loopflow::lf::commands::mutation::read_task_draft(&mut std::io::stdin().lock())
 }
 
 fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use loopflow::ops::task_ownership::{change, render, OwnershipChange};
-            let requested = match command {
-                TaskCommand::Claim { .. } => OwnershipChange::Claim,
-                _ => OwnershipChange::Unassign,
-            };
-            let ownership = change(repo, issue, requested)?;
-            if *json {
-                println!("{}", serde_json::to_string(&ownership)?);
-            } else {
-                println!("{}", render(&ownership));
-            }
-            Ok(())
+        TaskCommand::Claim { .. } | TaskCommand::Unassign { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
@@ -1104,62 +1037,47 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Reopen { issue, reason } => {
-            loopflow::ops::task::task_reopen(issue, reason.as_deref())?;
-            println!("{issue}: reopened; its Graph unchanged");
-            Ok(())
-        }
-        TaskCommand::Complete { issue, reason } => {
-            loopflow::ops::task::task_complete(repo, issue, reason.as_deref())?;
-            println!("{issue}: completed");
-            Ok(())
+        TaskCommand::Reopen { .. } | TaskCommand::Complete { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Create {
-            session,
-            worktree,
             request,
-            no_wave,
-            wave,
-            title,
             notes,
             run,
             graph,
+            request_id,
+            terminal: _,
             json,
+            ..
         } => {
-            if let Some(graph) = graph {
-                loopflow::lf::commands::task_create::check_graph(repo, graph)?;
-            }
-
-            let report = match request.as_ref().or(notes.as_ref()) {
-                Some(text) => Some(text.clone()),
-                None => piped_task_report()?,
+            let mut stdin = std::io::stdin();
+            let mut empty = std::io::empty();
+            let input: &mut dyn std::io::Read = if stdin.is_terminal() {
+                &mut empty
+            } else {
+                &mut stdin
             };
-            let issue = loopflow::ops::task::task_create(
+            if let Some(id) = request_id {
+                // Admission survives a lost reply: the request ID names the
+                // reserved Task and the one launch it may make.
+                let report = match request.as_ref().or(notes.as_ref()) {
+                    Some(text) => Some(text.clone()),
+                    None => loopflow::lf::commands::task_create::read_report(input)?,
+                };
+                let outcome =
+                    loopflow::lf::commands::task_create::recoverable(cli, repo, id, report)?;
+                println!("{}", serde_json::to_string_pretty(&outcome)?);
+                return Ok(());
+            }
+            let issue = loopflow::lf::commands::task_create::create(
                 repo,
-                if *no_wave { None } else { wave.as_deref() },
-                title.clone(),
-                report,
-                loopflow::ops::task::TaskAdoptionOptions {
-                    session: session.clone(),
-                    worktree: worktree.clone(),
+                command,
+                &mut loopflow::lf::commands::mutation::CommandIo {
+                    input,
+                    output: &mut std::io::stdout(),
+                    error: &mut std::io::stderr(),
                 },
             )?;
-            match (*json, *run) {
-                (false, _) => println!("{} · {}", issue.title, issue.identifier),
-                (true, false) => println!("{}", serde_json::to_string_pretty(&issue)?),
-                // `--run --json` prints one receipt once the run settles.
-                (true, true) => {}
-            }
-            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
-                .planning_transport()
-                .remote_name()
-                .filter(|_| issue.linear_id.is_none())
-            {
-                eprintln!(
-                    "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
-                    issue.identifier
-                );
-            }
             if *run {
                 loopflow::lf::commands::task_create::start(
                     cli,
@@ -1336,29 +1254,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Save {
-            issue,
-            path,
-            revision,
-            json,
-        } => {
-            let content = read_task_draft()?;
-            let saved = loopflow::ops::task::task_save(issue, path, revision, &content)?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&saved)?);
-            } else {
-                println!("{}", saved.message);
-            }
-            Ok(())
-        }
-        TaskCommand::Abandon { issue, force, json } => {
-            let identifier = loopflow::ops::task::task_abandon(repo, issue.as_deref(), *force)?;
-            if *json {
-                println!("{}", serde_json::to_string(&identifier)?);
-            } else {
-                println!("{identifier}: canceled; PRs and branches removed");
-            }
-            Ok(())
+        TaskCommand::Save { .. } | TaskCommand::Abandon { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Sweep { apply, json } => {
             let entries = loopflow::ops::task::task_sweep(repo, *apply)?;
@@ -1396,41 +1293,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Edit {
-            issue,
-            title,
-            notes,
-            rank,
-            assignee,
-            wave,
-        } => {
-            let result = loopflow::ops::task::task_edit(
-                repo,
-                issue,
-                wave.as_deref(),
-                task_edit_update(title, notes, *rank, assignee),
-            )?;
-            println!("{}: updated", result.id);
-            print_planning_sync(&result.sync);
-            Ok(())
-        }
-        TaskCommand::Move {
-            issue,
-            machine: Some(machine),
-            json,
-            ..
-        } => {
-            let ownership = loopflow::lf::commands::session_move::move_task(issue, machine)?;
-            if *json {
-                println!("{}", serde_json::to_string(&ownership)?);
-            }
-            Ok(())
-        }
-        TaskCommand::Move { issue, wave, .. } => {
-            let result = loopflow::ops::task::task_move_membership(repo, issue, wave.as_deref())?;
-            println!("{}: membership saved", result.id);
-            print_planning_sync(&result.sync);
-            Ok(())
+        TaskCommand::Edit { .. } | TaskCommand::Move { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Comment {
             issue,
@@ -1500,29 +1364,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
     }
 }
 
-fn task_edit_update(
-    title: &Option<String>,
-    notes: &Option<String>,
-    rank: Option<u32>,
-    assignee: &Option<String>,
-) -> loopflow::work::task::TaskUpdate {
-    loopflow::work::task::TaskUpdate {
-        title: title.clone(),
-        description: notes.clone(),
-        rank,
-        assignee: assignee.clone().map(Some),
-    }
-}
-
-fn piped_task_report() -> anyhow::Result<Option<String>> {
-    if std::io::stdin().is_terminal() {
-        return Ok(None);
-    }
-    let mut report = String::new();
-    std::io::stdin().read_to_string(&mut report)?;
-    Ok((!report.trim().is_empty()).then_some(report))
-}
-
 fn main() -> std::process::ExitCode {
     loopflow::transport::initialize();
     let _measurement = loopflow::performance::ProcessMeasurement::start();
@@ -1557,7 +1398,7 @@ fn init_tracing(verbose: bool) {
         return;
     }
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("warn"))
+        .with_env_filter(EnvFilter::new("warn,loopflow::server=info"))
         .with_ansi(false)
         .with_writer(|| loopflow::diagnostic_log::DiagnosticLog)
         .event_format(loopflow::diagnostic_log::IdentifiedLines)
@@ -1993,6 +1834,14 @@ fn run() -> anyhow::Result<()> {
         return loopflow::lf::commands::doctor::run(*json);
     }
 
+    // Availability and bootstrap are observational; no Work admission or repair.
+    if let Some(Commands::Ops {
+        cmd: OpsCommand::Server { cmd },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::server::run(cmd);
+    }
+
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
@@ -2023,6 +1872,14 @@ fn run() -> anyhow::Result<()> {
             ),
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
+            }
+            Some(InstallCommand::Server) => {
+                loopflow::installation::server::delegate_selected()?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&loopflow::installation::server::ensure()?)?
+                );
+                Ok(())
             }
             Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
             Some(InstallCommand::RecoverSwitch { switch }) => {
@@ -2216,7 +2073,9 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }) => {
             piped_notes = match request {
                 Some(request) => Some(request.clone()),
-                None if notes.is_none() => piped_task_report()?,
+                None if notes.is_none() && !std::io::stdin().is_terminal() => {
+                    loopflow::lf::commands::task_create::read_report(&mut std::io::stdin())?
+                }
                 None => None,
             };
             Some((
@@ -2305,6 +2164,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 id,
                 connection,
                 fork,
+                start_only,
             },
     }) = &cli.command
     {
@@ -2312,6 +2172,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             connection.target(cli, id.as_deref())?,
             *fork,
             connection.prepare,
+            *start_only,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2375,24 +2236,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn selected_task_repository(
-    cli: &Cli,
-    directory: &Path,
-    selector: Option<&str>,
-) -> anyhow::Result<std::path::PathBuf> {
-    let repo = loopflow::ops::task::task_repository(directory, selector)?;
-    if cli.repo.is_some() {
-        anyhow::ensure!(
-            loopflow::repository::CanonicalRepo::discover(directory)?
-                == loopflow::repository::CanonicalRepo::discover(&repo)?,
-            "Task {} does not belong to selected repository {}",
-            selector.unwrap_or("in this checkout"),
-            directory.display()
-        );
-    }
-    Ok(repo)
-}
-
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Own direct conversations and Graphs. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
@@ -2415,6 +2258,52 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     );
     if execution && loopflow::transport::delegate_current(cli.batch)? {
         return Ok(());
+    }
+    if loopflow::lf::commands::mutation::accepts(&cli) {
+        let directory = match cli.wt.as_deref() {
+            Some(name) => loopflow::lf::commands::ops::resolve_worktree(name)?,
+            None => std::env::current_dir()?,
+        };
+        if matches!(&cli.command, Some(Commands::Ship { stop: true, .. })) && cli.task.is_none() {
+            let resolution = loopflow::lf::commands::context::explain_in(
+                &directory,
+                cli.wave.as_deref(),
+                None,
+                None,
+                None,
+            )?;
+            cli.task = match resolution.task {
+                loopflow::ops::context::ContextFact::Bound { value, .. } => Some(value),
+                loopflow::ops::context::ContextFact::Unavailable { reason } => {
+                    anyhow::bail!(reason)
+                }
+                _ => anyhow::bail!("No Task selected; name a Task or run from its checkout"),
+            };
+        }
+        journal::admit_process(&directory, args);
+        let mut stdin = std::io::stdin();
+        let mut empty = std::io::empty();
+        let terminal_create = stdin.is_terminal()
+            && matches!(
+                cli.command,
+                Some(Commands::Task {
+                    cmd: TaskCommand::Create { .. }
+                })
+            );
+        return loopflow::lf::commands::mutation::run(
+            &cli,
+            args,
+            &directory,
+            &mut loopflow::lf::commands::mutation::CommandIo {
+                input: if terminal_create {
+                    &mut empty
+                } else {
+                    &mut stdin
+                },
+                output: &mut std::io::stdout(),
+                error: &mut std::io::stderr(),
+            },
+        );
     }
     // Display location is not execution placement. Opening reads Work here;
     // the retained Desktop owners prepare/connect only the requested view.
@@ -2631,19 +2520,12 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Ship {
         graph,
         reason,
-        stop,
+        stop: false,
         ..
     }) = &cli.command
     {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
-        if *stop {
-            print!(
-                "{}",
-                loopflow::lf::commands::ship::stop(&issue, reason.as_deref())?
-            );
-            return Ok(());
-        }
         let directory = loopflow::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
         return loopflow::lf::commands::ship::run(
@@ -2784,7 +2666,9 @@ fn execute_command(
         Some(Commands::Desktop { .. } | Commands::Open(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }
-        Some(Commands::Portfolio { cmd, json }) => loopflow::portfolio::run(cmd.as_ref(), *json),
+        Some(Commands::Portfolio { .. }) => {
+            unreachable!("shared mutation dispatch precedes this command")
+        }
         Some(Commands::Config { cmd }) => match cmd {
             loopflow::lf::ConfigCommand::Import {
                 path,

@@ -562,7 +562,7 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
 
 /// One exit status for every `lf desktop` command: 2 bad arguments, 3 missing or
 /// ambiguous target, 4 Desktop unreachable, otherwise 1. Clap exits 2 and Ctrl-C 130.
-fn exit_status(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn exit_status(error: anyhow::Error) -> anyhow::Error {
     use crate::work::selection::SelectionError;
     let selection = error
         .chain()
@@ -715,6 +715,59 @@ pub(crate) fn watch_plans(
     )
 }
 
+/// The portfolio's repositories as canonical paths: the set Desktop's sidebar
+/// lists and the phone creates Tasks in. Unreadable members have no Work.
+fn portfolio_repos() -> Result<Vec<String>> {
+    let mut repos = Vec::new();
+    for member in crate::portfolio::read()?.repos {
+        if member.error.is_some() {
+            continue;
+        }
+        if let Some(repo) =
+            crate::repository::CanonicalRepo::containing(std::path::Path::new(&member.path))?
+        {
+            repos.push(repo.to_string());
+        }
+    }
+    Ok(repos)
+}
+
+pub(crate) fn read_all_view_plans(
+    expression: Option<&str>,
+) -> Result<Vec<crate::work::selection::ViewPlan>> {
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    Ok(store
+        .sqlite
+        .all_view_plans(expression, &portfolio_repos()?)?)
+}
+
+pub(crate) fn watch_all_view_plans(
+    expression: Option<String>,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    #[derive(Debug, Clone, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Arguments {
+        expression: Option<String>,
+    }
+    let watched = super::watch::Watched::every(super::watch::ACTIVITY_CLOCK).probing(|store| {
+        Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
+    });
+    super::watch::start(
+        Arguments { expression },
+        watched,
+        |store, args| async move {
+            let store = super::watch::require_store(store)?;
+            Ok(store
+                .sqlite
+                .all_view_plans(args.expression.as_deref(), &portfolio_repos()?)?)
+        },
+        transport,
+    )
+}
+
 /// `lf desktop view [expression] --plan`: what a view shows, in `selected`
 /// or the repository containing `directory`.
 pub fn plan_view(
@@ -839,21 +892,21 @@ pub fn saved_layout(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
     work: &str,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::work::selection::DashboardId;
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
     Ok(match work.strip_prefix("query:") {
-        Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
+        Some(id) => serde_json::to_value(DesktopLayoutRecord::Dashboard(
             &reader
                 .sqlite
                 .read_dashboard(&repository, &DashboardId(id.into()))?
                 .ok_or(crate::store::StoreError::NotFound)?
                 .saved,
         ))?,
-        None => serde_json::to_string(&DesktopLayoutRecord::Work(
+        None => serde_json::to_value(DesktopLayoutRecord::Work(
             &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
         ))?,
     })
@@ -869,7 +922,7 @@ pub fn save_arrangement(
     directory: &std::path::Path,
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::lf::DesktopCommand;
     if let DesktopCommand::Query { .. }
     | DesktopCommand::Pin { .. }
@@ -888,12 +941,31 @@ pub fn save_arrangement(
     bail!("not a saved arrangement: name a tile as -p <board>/<tile>")
 }
 
+/// `lf desktop <verb> -p <board>/<tile>` on a saved board, without Desktop:
+/// `hide`, `show` or `move` (with `destination`). Returns the record it wrote.
+pub(crate) fn save_tile(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    board: &str,
+    tile: &str,
+    verb: &str,
+    args: &std::collections::BTreeMap<String, String>,
+) -> Result<serde_json::Value> {
+    let path = format!("{board}/{tile}");
+    let (board, tile) = saved_tile(verb, Some(&path)).ok_or_else(|| {
+        DesktopError::Argument(format!(
+            "`{verb}` names no saved board in {path}; nothing changed."
+        ))
+    })?;
+    edit_saved_tile(selected, directory, board, tile, verb, args)
+}
+
 fn saved_intent(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::lf::DesktopCommand;
     use crate::work::selection::{DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
@@ -998,7 +1070,7 @@ fn saved_intent(
         }
         _ => unreachable!("saved intent command"),
     };
-    Ok(serde_json::to_string(&result)?)
+    Ok(result)
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
@@ -1062,26 +1134,30 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             println!("{record}");
             return Ok(());
         }
-        DesktopCommand::Query { .. }
-        | DesktopCommand::Pin { .. }
-        | DesktopCommand::Unpin { .. }
-        | DesktopCommand::Rename { .. }
-        | DesktopCommand::Layout { .. } => {
-            let saved = save_arrangement(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                command,
-                &mut std::io::stdin().lock(),
-            )?;
-            println!("{saved}");
-            return Ok(());
-        }
         DesktopCommand::View {
             expression,
             plan,
             json,
         } => return view_plan(cli, expression.as_deref(), *plan, *json || cli.json),
-        DesktopCommand::Plans { watch, .. } => return plans(cli, *watch),
+        DesktopCommand::Plans {
+            all,
+            expression,
+            watch,
+            ..
+        } => {
+            if !all {
+                return plans(cli, *watch);
+            }
+            return if *watch {
+                watch_all_view_plans(expression.clone(), Transport::Stdio).map(drop)
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string(&read_all_view_plans(expression.as_deref())?)?
+                );
+                Ok(())
+            };
+        }
         DesktopCommand::Plan {
             wave,
             task,
@@ -1131,20 +1207,6 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     }
     // Arguments are checked before Desktop is contacted.
     let verb = Verb::parse(command)?;
-    if let VerbKind::Action { name, args } = &verb.kind {
-        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
-            let record = edit_saved_tile(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                board,
-                tile,
-                name,
-                args,
-            )?;
-            println!("{record}");
-            return Ok(());
-        }
-    }
     require_supported()?;
     let json = cli.json || verb.target.json;
     let mut desktop = DesktopConnection::open()?;
@@ -1795,7 +1857,7 @@ fn edit_saved_tile(
     tile: &str,
     name: &str,
     args: &std::collections::BTreeMap<String, String>,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     let repository = {
         let reader = crate::store::read_existing_registry()?
             .ok_or(crate::store::StoreError::NotFound)
@@ -1809,7 +1871,7 @@ fn edit_saved_tile(
         edit: TileEdit::parse(name, args, key)?,
     };
     let record = edit_tiles(&repository, &request)?;
-    Ok(serde_json::to_string(&DesktopTileOutput::Record(&record))?)
+    Ok(serde_json::to_value(DesktopTileOutput::Record(&record))?)
 }
 
 fn edit_shown_tile(
@@ -1980,7 +2042,7 @@ fn edit_tiles(
 fn stream_events(desktop: DesktopConnection, json: bool) -> Result<()> {
     use std::io::Write;
     let mut events = desktop.events()?;
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = std::io::stdout();
     while let Some(change) = events.next(None)? {
         if json {
             writeln!(stdout, "{}", serde_json::to_string(&change)?)?;
@@ -3307,6 +3369,37 @@ impl DesktopTextUnavailable {
             }
             Self::NotTerminal => "The addressed pane is not a terminal.",
         }
+    }
+}
+
+pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
+    use crate::lf::DesktopCommand;
+    if matches!(
+        command,
+        DesktopCommand::Query { .. }
+            | DesktopCommand::Pin { .. }
+            | DesktopCommand::Unpin { .. }
+            | DesktopCommand::Rename { .. }
+            | DesktopCommand::Layout { save: true, .. }
+    ) {
+        return true;
+    }
+    if !matches!(
+        command,
+        DesktopCommand::Hide { .. }
+            | DesktopCommand::Show { .. }
+            | DesktopCommand::Move { .. }
+            | DesktopCommand::Do { .. }
+    ) {
+        return false;
+    }
+    match Verb::parse(command) {
+        Ok(Verb {
+            kind: VerbKind::Action { name, .. },
+            target,
+            ..
+        }) => saved_tile(&name, target.pane.as_deref()).is_some(),
+        _ => false,
     }
 }
 

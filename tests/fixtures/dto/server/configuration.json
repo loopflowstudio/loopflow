@@ -1,0 +1,14 @@
+{
+  "type": "request",
+  "id": "config-1",
+  "operation": {
+    "kind": "config.file",
+    "request": {
+      "action": "declaration",
+      "destination": { "kind": "personal_global" },
+      "key": "theme",
+      "value": "Hearth",
+      "unset": false
+    }
+  }
+}

@@ -3,6 +3,8 @@
 //! Release receipts live outside the data directory. Ordinary commands share
 //! the main Machine; explicit experiments never change installed artifact selection.
 
+pub mod server;
+
 use std::collections::HashSet;
 #[cfg(unix)]
 use std::ffi::{CStr, OsString};
@@ -906,9 +908,17 @@ pub(crate) fn superseded(executable: &Path) -> bool {
 /// The executable a launch through the entry runs now: the gate's selected CLI
 /// artifact, else the file the entry names after following symlinks.
 pub(crate) fn launch_target() -> Result<PathBuf> {
-    let entry = crate::os_process::resolve_lf_binary()?;
-    let canonical = fs::canonicalize(&entry)
-        .with_context(|| format!("resolve lf entry {}", entry.display()))?;
+    resolve_entry_target(&crate::os_process::resolve_lf_binary()?)
+}
+
+/// The account's promoted CLI, independent of a development app's helper.
+pub(crate) fn installed_cli() -> Result<PathBuf> {
+    resolve_entry_target(&account_home()?.join(".local/bin/lf"))
+}
+
+fn resolve_entry_target(entry: &Path) -> Result<PathBuf> {
+    let canonical =
+        fs::canonicalize(entry).with_context(|| format!("resolve lf entry {}", entry.display()))?;
     let root = root()?;
     let gate = entry_gate_path(&root, &ArtifactRole::Cli)?;
     if !fs::canonicalize(&gate).is_ok_and(|gate| gate == canonical) {

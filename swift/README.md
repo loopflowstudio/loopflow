@@ -643,7 +643,7 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WaveDetailPane.swift` — streamed Project plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
-- `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
+- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; CLI execution launches
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
 `LoopflowMac` target contains AppKit, process management, menus, and other
@@ -755,20 +755,29 @@ lf desktop sessions --json --watch         # the repository's Sessions as Deskto
 lf planning status --json --watch          # stored sync receipts
 ```
 
-A window serves these `--watch` reads inside the app, one subscription per
-part, through `RegistryQuery.watchWork()` and Loopflow's Rust library
-(`rust/loopflow-ffi/include/loopflow.h`): no `lf` process runs. Each part names
-its `ServedRead`, the `lf` command above that prints the same frames. Task
-file and diff reads, the Wave list, this Machine's identity, the portfolio, a
-Work's saved panes, Task owners and the Graph catalog are `ServedRead`s too,
-read once and served the same way, so opening a window starts no `lf`.
-Completing, reopening, deferring, moving and editing a Task, saving a Task
-file, renaming or binding a Session, ensuring a Wave's Project, the planning
-refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
-library calls the function their `lf` command calls and records the same
-Process; arrangement records none, as its command does. Other writes, the
-commands that start work (`task create --run`, `task run`, `ship`, `resume`,
-`session connect`) and other Machines' reads still run the bundled `lf`. The parts: the plan, the repository's Dashboard plans
+A window observes these reads through `RegistryQuery.watchWork()`, one server
+subscription per part. All `ServedRead` and `ServedWrite` operations cross the
+same local protocol, including Task files, diffs, Waves, Machine identity,
+Portfolio, saved panes, Task ownership and Graphs. Desktop links no Loopflow Rust
+library; GhosttyKit remains its native renderer.
+
+The [server boundary](../docs/dev/server.md) puts registration and updates under
+installation. First connection obtains the selected helper; later connections
+only reconnect. CLI commands and served writes use the same Rust mutation
+dispatcher for routing, defaults, effects and formatting, with an explicit
+directory and input/output/error streams. Each served write runs in a
+request-scoped worker, starts no ordinary CLI child and creates no Process row.
+Its response trace correlates diagnostics and effects in `logs/lf.log`; it grants
+no execution ownership or permission to retry. Canceling releases the client's
+wait, but an admitted mutation may still complete. A lost response is an unknown
+outcome: refresh authoritative state before another deliberate edit. Desktop
+never automatically resubmits it. Session-to-Task adoption uses this shared write
+path without launching work. Create-and-run and other execution launches retain
+their ordinary CLI path and existing Session/Graph owners;
+remote Machine streams retain their CLI transports. Desktop's UI automation
+remains app-owned.
+
+The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
@@ -794,9 +803,11 @@ Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never
 automatically repeated.
 
-Each watch's pipes drain off the main actor. A watch speaks only on change, so
-silence is not a stall; cancellation closes stdin, then terminates and reaps only
-the owned process if necessary.
+Local subscriptions use server sockets off the main actor. Cancellation closes
+the connection; reconnect opens a fresh subscription without replaying revisions.
+Remote Task file watches retain their CLI pipes, drained off the main actor;
+cancellation closes stdin, then terminates and reaps only the owned reader if
+necessary. A watch that speaks only on change is not stalled merely by silence.
 
 ## Headless checks
 
@@ -908,7 +919,9 @@ exact window and pane, and `lf desktop` resolves those from one inspection (see 
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,
 same-uid peers, a stale file unlinked) and answers newline-delimited JSON:
 `inspect`, `perform`, `read_text` and `events`. It serves only `lf desktop` and
-hosts no Sessions. An unknown action or bad argument throws `DesktopArgumentError`
+hosts no Sessions. This app-owned automation endpoint closes with Desktop; the
+shared client API server has an independent lifetime and serves Work/terminal
+access. An unknown action or bad argument throws `DesktopArgumentError`
 (code `argument`, exit 2); a stale or missing target throws `DesktopTargetError`
 (`target`, exit 3); another API version answers `version`. The receipt carries the
 window's destination and the affected workspace in the same MainActor turn, so it
@@ -964,6 +977,21 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 ## Testing
 
+Test shared Work through the [server protocol](../rust/loopflow/src/server/README.md).
+Rust's `served_reads` verifies CLI/server mutation parity, input/output/errors,
+concurrent request traces in `logs/lf.log`, and no request Process rows or global
+context changes. Native cancellation releases the client's wait; a lost reply
+remains unknown without replay.
+
+Terminal recovery must preserve the exact owner, draft and newer control claims.
+Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
+one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
+ended. Installed-helper replacement must preserve the Session and Graph owners
+and prove continued input and Graph progress; a socket restart alone is insufficient.
+`scripts/test_desktop.sh --filter ServerProtocolTests` builds the consumer and
+checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
+source experiments select a separate `LF_HOME`.
+
 Desktop's `swift` suite builds the app through the test-target dependency and
 runs model and production-view tests through `scripts/test_desktop.sh`, which
 denies WindowServer connections even on a logged-in host. No Automation
@@ -984,7 +1012,6 @@ for optional hosted execution and cleanup.
 
 ```bash
 cargo build -p loopflow --bin lf # Real CLI transport proofs
-uv run python scripts/loopflow-dev.py ffi # The Rust library the app links; test_desktop.sh builds it too
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered
@@ -1114,3 +1141,16 @@ A delayed restore keeps newer tabs and edits. Conflicts leave local content inta
 and show an error; **Reload saved intent** reconciles retained content before another
 save. File drafts compare their saved base with disk before editing. Restored shell
 intent has no launch command: a saved tab alone does not reattach a Process.
+
+## iOS client
+
+```sh
+xcodegen generate --spec swift/ios.yml
+open swift/LoopflowMobile.xcodeproj
+```
+
+The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
+Disable its `--fixture` argument to connect a Machine over host Tailscale.
+[Native client and focused input tests](LoopflowiOS/README.md) describe its build,
+renderer choice and remaining device/live-integration proof. Desktop's project
+and package remain unchanged.

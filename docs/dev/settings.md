@@ -1,0 +1,223 @@
+# Configuration ownership and resolution
+
+```text
+Files + invocation inputs
+          │
+          ▼
+Typed declarations ── catalogue validation
+          │
+          ▼
+One resolver ───────── effective values + explanation
+          │                         │
+          ▼                         ▼
+Launch / domain consumer       CLI / Desktop inspection
+
+CLI / Desktop edits ── catalogue validation ── authoritative file writer
+```
+
+[Configuration](../config.md) defines the user-visible behavior. This document
+specifies its ownership and implementation boundaries. Both are the LOO-714
+implementation contract; the checked inventory in the
+[architecture reference](reference.md#complete-ownership-map)
+records the current owners. The LOO-714 plan retains outstanding acceptance work.
+
+Desktop sends configuration operations to the local server. The server calls the
+same Rust file owner as the CLI; no embedded C/Swift Work bridge remains.
+Transport readiness does not open the Work database, so file settings remain
+available when Work cannot be read. Appearance saves asynchronously and keeps
+its preview until the server acknowledges or reports an error.
+
+## Independent dimensions
+
+```rust
+ConfigSource { Builtin, Repository, Personal, Environment, CommandLine }
+SettingScope { Global, Repository, Wave }
+SettingTarget { General, Skill, GraphOccurrence }
+```
+
+These are the conceptual variants; payloads carry the appropriate identities.
+Source expresses authority, scope expresses where a declaration applies, and
+target selects work within that scope. A separate locator identifies the file
+and authored key or invocation input. Choice versus fallback comes from the
+setting definition (`agent` or `default_agent`). It does not depend on storage.
+
+`Personal / Global` identifies a general declaration from the personal global
+file. `Personal / Wave` identifies a private Wave declaration. Both use the
+same source authority. Committed repository and Wave files share the Repository
+source and differ in scope. Personal skill definitions also use Personal source.
+A Graph occurrence keeps its defining Graph and authored local step ID through
+composition, repetition and capture.
+
+ConfigSource replaces ConfigLayer's Global-versus-Personal file/DB split and its
+Repo-versus-Wave source split. Consumers, serializers and DTOs use the independent
+dimensions. No legacy alias or second rank table preserves the old distinctions.
+A source name means the same thing in Rust, Swift, inspection, help and documentation.
+
+## One settings catalogue
+
+A setting definition owns:
+
+- Its typed value codec, validation, default and description.
+- Applicability over source, scope and target, with reasons for exclusions.
+- Combination behavior: replace, append/reset, keyed merge or choice/fallback.
+- Persistence binding, lifecycle and portability, including local dependencies.
+
+Declarations carry their address, authored value and locator. Resolution carries
+effective values, contributing declarations and the reason for each disposition.
+The resolver is the only owner of precedence; inspection must not infer a winner
+from array position or reimplement comparison logic.
+
+The catalogue derives schemas, discovery and interface metadata from the same
+typed declarations. Dynamic keys use typed selectors. Private Config bookkeeping,
+Graph topology and delegated provider fields are not generic preferences.
+A tagged provider configuration is one validated value; editing it cannot combine
+incompatible fields from different providers.
+
+Remove parallel key lists, ad hoc scope checks, separately mirrored client schemas,
+and schema inference from serialized defaults. A domain-specific editor remains
+appropriate when it performs a domain operation; ordinary preference values still
+use the common validation and file writer. Missing interface coverage needs a real
+applicability/lifecycle reason, not an adapter that advertises an omission.
+
+## Preference ownership
+
+| Content | Authority |
+| --- | --- |
+| Personal global declarations | Personal config.yaml |
+| Private repository and Wave declarations | Main checkout's lf.config.local.yaml, shared across linked worktrees |
+| Shared repository and Wave declarations | Committed repository/Wave files |
+| Skill and Graph occurrence declarations | Their authored definitions |
+| Explicit CLI and environment choices | The invocation; never persisted as preferences |
+| Account identity, credentials and observed availability | Existing account/secret domain owners |
+| Current machine identity and observed process/execution state | Runtime domain owners |
+| Reusable layout templates and selected defaults | Configuration |
+| Actual saved Task layout | Persisted live workspace state |
+| Remote delivery origin/version/last-applied evidence | Operational metadata, never a preference override |
+
+Ordinary edits carry one typed destination: personal global, personal/shared
+repository or personal/shared Wave, with the checkout and Wave selector where
+needed. The file owner derives the path, source, scope and key prefix together.
+CLI and Desktop share it for read, write and unset; explanation uses the same
+selection and work target. Clients display the resolved locator but cannot assert
+an independent file path or scope. Appearance retains its configured theme-file
+transaction through the common writer; recovery imports retain explicit file access.
+
+File edits preserve unrelated keys/comments, validate before replacement and
+serialize compare-and-write. The same invalidation path covers CLI, Desktop and
+external file edits. Resolve private files through Git metadata, not a database
+registry of whichever checkouts happened to be observed. Wave selectors preserve
+Wave identity through rename/relocation and distinguish reuse of an old name.
+
+Subscriptions capture the configuration files their reading uses, including absent
+paths, definition directories and bounded Task workers. The shared watch reader
+checks those inputs on its one-second observation clock. Content comparison detects
+hand edits, atomic replacement and removal without a store commit or Git change.
+Only changed inputs schedule another Work reading, through the existing coalescing
+and cost-based rest policy; unchanged results emit no frame. The planning refresh
+clock remains separate.
+
+No DB preference reader remains after migration. Configuration and bootstrap
+inspection work without a compatible store. A missing runtime account or machine
+is reported as resource availability, not as a missing preference source.
+
+## Resolution and invocation
+
+Agent choices precede all fallbacks. Within either class, compare source, then
+scope, then target. For other settings, apply the catalogue's combination policy.
+Keep false, explicit empty, omission and unset distinct. Lists can have multiple
+contributors and resets; an explanation need not invent one winning declaration.
+
+A Session's explicit agent selects that conversation. A Graph's explicit agent
+selects its steps. Neither a resolved value nor historical execution attribution
+becomes new preference authority for unrelated work. User-supplied environment
+is explicit input; internally generated process plumbing is not.
+
+## Remote requests and retained files
+
+A remote request selects one personal profile: its initiating LF instance's
+portable declarations across config files, LF skill metadata and Graph occurrence
+metadata. Select that ownership before collecting/ranking preference candidates;
+no executor portable definition metadata participates as another exception.
+Executor-local bindings and runtime facts come from the executor, including when
+the work uses captured origin instructions. Do not merge the destination's competing portable personal profile as
+an unnamed precedence tier. Repository inputs retain their ordinary authority.
+
+Transport preserves scope, target, authored key and source locator. A resolved
+snapshot cannot preserve these semantics and must not be serialized into CLI
+flags or saved as a personal file. Explicit invocation choices remain separate.
+Placement resolves once to a durable destination identity; the current identity
+executes locally. Preserve native provider/account continuity constraints.
+
+Execution and retention have independent outcomes. A request may execute with
+its originating profile while retaining neither it nor its changes because the
+remote file was independently edited. Subsequent direct work uses the saved
+remote file. Inspection exposes both outcomes and the profile actually used.
+
+Retention refreshes only an unchanged last-applied portable projection or an
+already equal one. Local deletions count as edits. Initial differing preferences
+need explicit adoption. File writers check versions atomically; old deliveries
+and competing origins cannot silently overwrite newer or independent changes.
+Do not auto-merge ordered account lists or related configuration fields.
+
+Host-local bindings are outside the portable projection. Partial payloads carry
+coverage so an omitted field is not confused with a deletion. Saved delivery
+metadata is evidence, not another writable configuration source. Direct remote
+work while offline uses its saved declarations. No automatic reverse propagation
+or global Home authority follows from retention.
+
+Definition transport contains preference projections and locators, never bodies or
+topology. Named Graph occurrences use their authored ID; unnamed metadata uses
+its position within the defining Graph. Capture preserves those addresses and
+source authority through composition. Retention uses the same compare/write
+policy for config mappings and definition projections. Existing definition files
+keep comments, native declarations, instructions and topology; a missing asset or
+occurrence requires explicit reconciliation. Removing an origin declaration is
+covered by the complete profile and follows the same deletion/conflict rules.
+
+## Migration and code parity
+
+A migration preserves authored declarations, account order and identity bindings.
+Exporting effective values destroys fallback and provenance. Before retiring DB
+values, inventory collisions with files and the behavior of a former DB-global
+override against a more specific file value. Coordinate database and file cutover
+with recoverable receipts; neither partial failure nor an unavailable checkout
+may discard the sole copy of a preference.
+
+Repository-scoped private preferences belong to a clone and its linked worktrees,
+not every clone with the same remote. Jack Heart accepted this scope change on
+November 3. A canonical remote identifies the project but does not select a private
+file from an arbitrary checkout registry. Runtime reads use the addressed checkout.
+
+For migration, preserve the old origin-wide account policy as a recoverable export,
+then materialize its declarations into explicitly identified existing clones after
+checking file collisions. Copies become independent clone policies at cutover. A
+route with no available checkout remains recoverable, not an active fallback.
+Future clones do not automatically inherit it; explicit import can adopt it later.
+Registration is not a prerequisite for ordinary config reads or writes. Migration
+must report missing or ambiguous destinations without choosing one silently.
+
+Delete replaced DB preference owners, key lists, parsers, rank logic and stale
+compatibility paths in the same cut. Preserve required behavior through the
+surviving owner. Keep the checked architecture inventory synchronized with actual
+code; it must not claim a table is deleted while runtime consumers still use it.
+
+Contract tests exercise file/CLI/UI parity, declaration provenance and actual launch
+preparation. Include worktree sharing, hand edits, default/choice conflicts,
+false/empty/unset, Wave identity changes, migration interruptions, origin-versus-remote
+profiles and retention conflicts. Avoid tests that merely mirror the catalogue or
+assert mock wiring. Documentation examples and code must agree before publication.
+
+## Context namespace
+
+`Config.context` owns docs, exclude, diff, diff_files, paste and budgets. The
+catalogue defines the parent mapping and each leaf together with its typed
+value, default, applicability, merge policy and portability. Longest-prefix
+lookup selects the leaf policy for validation, resolution, editing and display.
+The mapping merges; docs/exclude append and an empty list clears. Remote
+projection walks declared child settings so context.paste remains host-local.
+
+CLI flags produce canonical context paths. Authored Skill metadata uses the same
+shape; the existing durable Skill.docs capture field projects to context.docs
+without duplicating it in Skill.settings. A temporary normalization boundary
+reads the released flat keys and old context list; Task 807ef7 owns its removal.
+No branch installation or automatic rewriting of shared live files is implied.

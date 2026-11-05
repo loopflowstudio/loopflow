@@ -102,21 +102,20 @@ enum ThemeConfig {
         return .pair(light: light, dark: dark)
     }
 
-    /// Read and edit the same typed declaration as the CLI.
-    static func read(_ url: URL) -> String? {
-        guard let data = try? LoopflowLibrary.configuration(request(url, value: nil)),
-              let result = try? JSONDecoder().decode(ConfigurationFileValue.self, from: data),
-              case .string(let value) = result.value else { return nil }
+    /// Read and edit the same typed declaration as the CLI through the server.
+    static func read(_ url: URL, location: ServerLocation = .shared) async throws -> String? {
+        let data = try await ServerClient.configuration(request(url, value: nil), location: location)
+        let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: data)
+        guard case .string(let value) = result.value else { return nil }
         return value
     }
 
-    static func write(_ value: String, to url: URL) throws {
+    static func write(_ value: String, to url: URL, location: ServerLocation = .shared) async throws {
         let encoded = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
-        _ = try LoopflowLibrary.configuration(request(url, value: encoded))
+        _ = try await ServerClient.configuration(request(url, value: encoded), location: location)
     }
 
-    private static func request(_ url: URL, value: String?) -> [String: Any] {
-        ["action": "theme", "path": url.path, "value": value as Any? ?? NSNull()]
+    private static func request(_ url: URL, value: String?) -> JSONValue {
+        .object(["action": .string("theme"), "path": .string(url.path), "value": value.map(JSONValue.string) ?? .null])
     }
-
 }

@@ -502,7 +502,7 @@ suite does not check those additions.
 `docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
 appends the command tree from `lf help --all --json`, so a command or help-text
 change needs no reference update.
-Keep README and docs/index openings identical and regenerate docs/architecture.html
+Keep README and docs/index openings identical and regenerate docs/dev/index.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.
 
@@ -878,3 +878,58 @@ fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
+
+## Client API server
+
+The [server boundary](../../../docs/dev/server.md) assigns socket behavior
+to client access; OS registration/replacement belongs to installation. Their
+composed test must continue to prove both with existing execution owners live.
+
+```bash
+cargo test -p loopflow --lib server::
+cargo test -p loopflow --test served_reads
+cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
+cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
+cargo test -p loopflow --test transport_tests server_subscriptions_refresh_work_and_resolve_primary_session
+cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
+cargo test -p loopflow --test transport_tests server_reconnect_
+cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
+cargo test -p loopflow --test transport_tests server_move_here_
+cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
+```
+
+The development registration proof uses two isolated launchd labels: disabled
+legacy setup refuses; enabling it lets concurrent readiness requests retire the
+old job and obtain one server while preserving a live owner. The installed socket
+address/lock remain stable so old relays can reconnect while an obsolete server
+executable cannot open a competing listener.
+The bundled registrar harness separately proves SMAppService label migration.
+
+`served_reads` covers CLI/server effect parity and concurrent request traces
+without request Process rows. The transport subscription proof covers live Task
+changes and authoritative primary-Session selection.
+Separate lifecycle proofs keep the real relay connected through server restart,
+installed replacement and explicit takeover with an editable draft and live Graph.
+Recovery tests cover byte-position continuation, fresh terminal screens, newer
+viewers retaining input/geometry, expired output and owner exit without relaunch.
+Failed-start recovery consumes readiness once, preserves its diagnostic across
+Retry, and observes independent installation repair without replacing newer claims.
+`ServerClientTests` covers the same registration boundary for Work read refresh
+and reopened watches, including failed subprocess and unready status responses.
+Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
+acknowledgement before a newer claim, reject stale actions and cancel a queued
+action on pane closure. Native mailbox tests cover presentation until acknowledgement;
+rendered copy/Find/scroll and the visible action remain interactive demo evidence.
+The opt-in macOS variant creates an isolated signed app bundle, starts the owner
+and Graph from its installed helper, replaces that executable inode with identically
+signed bytes, verifies the bundle seal and invokes the production SMAppService
+replacement registrar while
+the draft remains held. A fresh relay acknowledgement must precede submission;
+the exact owner/provider survives and the Graph advances. Cleanup unregisters the
+unique job and LaunchServices registration. The updater runs as the signed app
+through LaunchServices; no UI or App Management permission changes are needed.
+Run outside the network sandbox. The underlying registrar harness is
+`scripts/test_server_registration.py`; its default mode separately checks
+idempotent registration without Work. Native rendered continuity remains demo.
+Linux supervisor replacement remains a Linux installation check; this service
+starts no providers or Graphs, and keeps systemd's control-group cleanup.

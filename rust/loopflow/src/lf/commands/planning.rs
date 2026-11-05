@@ -149,15 +149,13 @@ fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
 }
 
 /// What `lf --cwd <directory> config planning status --json` prints.
-pub(crate) fn status_json(directory: &Path) -> Result<String> {
+pub(crate) fn status_json(directory: &Path) -> Result<serde_json::Value> {
     let repo = status_repository(directory)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
-        Ok(serde_json::to_string(
-            &status(Some(&store), &repo.to_string_lossy())
-                .await?
-                .to_json(),
-        )?)
+        Ok(status(Some(&store), &repo.to_string_lossy())
+            .await?
+            .to_json())
     })
 }
 

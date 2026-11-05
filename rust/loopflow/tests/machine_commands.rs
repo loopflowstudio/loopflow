@@ -2574,3 +2574,107 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
         "clone-demo"
     );
 }
+
+#[test]
+fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::client::Connection;
+    use loopflow::server::wire::{Operation, ServerError};
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    struct Server(std::process::Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.remote.claim_task(&task).unwrap().unwrap();
+    plan.to_local();
+    let server = Server(fixture.command(&["server", "run"]).spawn().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let socket = loop {
+        let output = fixture.run(&["server", "status"]);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if status["ready"] == true {
+            break status["socket"].as_str().unwrap().to_owned();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "server did not become ready: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let send = |claimed| {
+        let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        connection.request(Operation::Write(if claimed {
+            Mutation::TaskClaim {
+                directory: plan.local_path.clone(),
+                issue: task.to_string(),
+            }
+        } else {
+            Mutation::TaskUnassign {
+                directory: plan.local_path.clone(),
+                issue: task.to_string(),
+            }
+        }))
+    };
+    let local = plan.local.task_ownership(&task).unwrap();
+    let ownership = send(true).unwrap().result;
+    assert_eq!(
+        ownership["owner"]["machine"]["id"],
+        plan.remote.local_machine().unwrap().id.as_str()
+    );
+    assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
+    // A CLI mutation that takes no body must finish with stdin still open,
+    // as it is at a terminal. Sharing request I/O must not wait for EOF.
+    let mut cli = Server(
+        fixture
+            .command(&["task", "claim", task.as_str(), "--json"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let _input = cli.0.stdin.take().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(status) = cli.0.try_wait().unwrap() {
+            let mut error = String::new();
+            cli.0
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_string(&mut error)
+                .unwrap();
+            assert!(status.success(), "{error}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "remote claim waited for stdin EOF"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(cli);
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\necho 'peer unavailable' >&2\nexit 255\n",
+    );
+    let refused = send(false).unwrap_err().downcast::<ServerError>().unwrap();
+    assert!(
+        refused.message.contains("peer unavailable") || refused.message.contains("unavailable"),
+        "{refused:?}"
+    );
+    assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
+    assert!(plan.remote.task_ownership(&task).unwrap().owner.is_some());
+    drop(server);
+}

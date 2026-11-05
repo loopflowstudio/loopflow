@@ -165,7 +165,7 @@ public struct WorkLink: Codable, Equatable, Sendable {
 }
 
 public enum SessionResumeIntent: String, Codable, Equatable, Sendable {
-    case start, resume
+    case start, resume, reuse
     case takeOver = "take_over"
     case newThread = "new_thread"
 }
@@ -177,10 +177,12 @@ public struct SessionResumeAction: Codable, Equatable, Sendable {
     /// A new conversation continues from this one; its holder keeps it.
     public let fork: Bool
     public let prepareOnly: Bool
+    public let startOnly: Bool
 
     enum CodingKeys: String, CodingKey {
         case intent, agent, fork
         case prepareOnly = "prepare_only"
+        case startOnly = "start_only"
     }
 }
 

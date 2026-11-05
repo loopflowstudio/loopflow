@@ -173,6 +173,7 @@ struct LoopflowApp: App {
                     .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
                 ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
+                MobileSettings().tabItem { Label("Mobile", systemImage: "iphone") }
             }.modifier(AppAppearance(appearance: appearance))
         }
         Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }

@@ -2447,6 +2447,9 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
         let fixture = Fixture::new(true);
         fixture
             .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
+        fixture
+            .repo
             .create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
         fixture.repo.stage_all();
         fixture
@@ -3573,6 +3576,9 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
 fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
     for wave in [false, true] {
         let fixture = Fixture::new(false);
+        fixture
+            .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
         let scope = if wave {
             let task_path = fixture.repo.create_named_worktree("other-task");
             support::register_task_with_pr(

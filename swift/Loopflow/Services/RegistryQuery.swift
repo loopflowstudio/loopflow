@@ -4,7 +4,7 @@
 // current by the same reads `--watch` streams, one served watch per part.
 //
 // On macOS the Work watches, `ServedRead` reads and `ServedWrite` writes run
-// inside the app through Loopflow's Rust library; other commands run the `lf`
+// through the local server; other commands run the `lf`
 // shipped inside the app.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
@@ -37,6 +37,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public enum ServedRead: Equatable, Sendable, Encodable {
     case monitorPs
     case desktopPlans(directory: String)
+    case allViewPlans(expression: String?)
     case desktopSessions(directory: String, headless: Bool)
     case desktopTask(directory: String, issue: String)
     case taskChanges(issue: String, base: String)
@@ -63,11 +64,13 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case workLink(directory: String, url: String)
     case repositoryPath(id: String)
     case waveGraph(directory: String, wave: String?)
-    case sessionPage(directory: String, headless: Bool, after: String?)
+    case sessionPage(directory: String, headless: Bool, after: String?, task: String?)
     case tokens(directory: String, days: Int?)
     case retention
     case doctor
-    case bindPreview(session: String, task: String)
+
+    /// Rows in one `sessionPage`.
+    static let sessionPageLimit = 100
 
     /// `lf desktop plan --all`: every repository's Waves and Tasks.
     public static let allPlans = ServedRead.roadmap(directory: "/", wave: nil, task: nil, all: true)
@@ -79,6 +82,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["monitor", "ps", "--json"]
         case .desktopPlans:
             return ["desktop", "plans", "--json"]
+        case .allViewPlans(let expression):
+            return ["desktop", "plans", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopSessions(_, let headless):
             return ["desktop", "sessions"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
         case .desktopTask(_, let issue):
@@ -136,17 +141,16 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["--repository", id, "config", "repository", "--path"]
         case .waveGraph(_, let wave):
             return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
-        case .sessionPage(_, let headless, let after):
+        case .sessionPage(_, let headless, let after, let task):
             return ["desktop", "sessions", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
-                + ["--limit", "100"] + (after.map { ["--after", $0] } ?? [])
+                + ["--limit", String(Self.sessionPageLimit)] + (after.map { ["--after", $0] } ?? [])
+                + (task.map { ["--task", $0] } ?? [])
         case .tokens(_, let days):
             return ["ops", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
         case .retention:
             return ["history", "retention", "--json"]
         case .doctor:
             return ["doctor", "--json"]
-        case .bindPreview(let session, let task):
-            return ["session", "bind", "--dry-run", "--json", "--task", task, "--", session]
         }
     }
 
@@ -167,70 +171,72 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
-        case .monitorPs: TaggedFields("monitor_ps")
-        case .desktopPlans(let directory): TaggedFields("desktop_plans", ["directory": directory])
+        case .monitorPs: TaggedFields("process.list")
+        case .desktopPlans(let directory): TaggedFields("view.list", ["directory": directory])
+        case .allViewPlans(let expression): TaggedFields("view.select", ["expression": expression])
         case .desktopSessions(let directory, let headless):
-            TaggedFields("desktop_sessions", ["directory": directory, "headless": headless])
+            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": nil, "limit": nil, "task": nil])
         case .desktopTask(let directory, let issue):
-            TaggedFields("desktop_task", ["directory": directory, "issue": issue])
+            TaggedFields("task.get", ["directory": directory, "issue": issue])
         case .taskChanges(let issue, let base):
-            TaggedFields("task_changes", ["issue": issue, "base": base])
+            TaggedFields("task.changes", ["issue": issue, "base": base])
         case .taskDiff(let issue, let path, let base, let draft):
-            TaggedFields("task_diff", ["issue": issue, "path": path, "base": base, "draft": draft])
+            TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "draft": draft])
         case .taskFile(let issue, let path):
-            TaggedFields("task_file", ["issue": issue, "path": path])
-        case .waves: TaggedFields("waves")
-        case .machineId: TaggedFields("machine_id")
-        case .portfolio: TaggedFields("portfolio")
+            TaggedFields("task.file", ["issue": issue, "path": path])
+        case .waves: TaggedFields("wave.list")
+        case .machineId: TaggedFields("machine.self")
+        case .portfolio: TaggedFields("portfolio.get")
         case .settings(let directory, let wave, let skill, let graph, let step):
-            TaggedFields("settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
+            TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .paneLayout(let directory, let work):
-            TaggedFields("pane_layout", ["directory": directory, "work": work])
-        case .people(let directory): TaggedFields("people", ["directory": directory])
-        case .graphs(let directory): TaggedFields("graphs", ["directory": directory])
+            TaggedFields("desktop.layout", ["directory": directory, "work": work])
+        case .people(let directory): TaggedFields("repository.people", ["directory": directory])
+        case .graphs(let directory): TaggedFields("graph.list", ["directory": directory])
         case .viewPlan(let directory, let expression):
-            TaggedFields("view_plan", ["directory": directory, "expression": expression])
+            TaggedFields("view.get", ["directory": directory, "expression": expression])
         case .graphProcesses(let directory, let task, let after):
-            TaggedFields("graph_processes", ["directory": directory, "task": task, "after": after])
-        case .graphProcess(let id): TaggedFields("graph_process", ["id": id])
+            TaggedFields("task.runs", ["directory": directory, "task": task, "after": after])
+        case .graphProcess(let id): TaggedFields("graph.run", ["id": id])
         case .usage(let days, let wave, let project, let task):
-            TaggedFields("usage", ["days": days, "wave": wave, "project": project, "task": task])
-        case .taskContext(let task): TaggedFields("task_context", ["task": task])
+            TaggedFields("usage.get", ["days": days, "wave": wave, "project": project, "task": task])
+        case .taskContext(let task): TaggedFields("task.context", ["task": task])
         case .waveDetail(let directory, let wave):
-            TaggedFields("wave_detail", ["directory": directory, "wave": wave])
+            TaggedFields("wave.get", ["directory": directory, "wave": wave])
         case .closedTasks(let directory, let wave, let after):
-            TaggedFields("closed_tasks", ["directory": directory, "wave": wave, "after": after])
-        case .machines: TaggedFields("machines")
+            TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
+        case .machines: TaggedFields("machine.list")
         case .history(let since, let limit, let wave, let project, let task):
-            TaggedFields("history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
+            TaggedFields("history.list", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
         case .roadmap(let directory, let wave, let task, let all):
-            TaggedFields("roadmap", ["directory": directory, "wave": wave, "task": task, "all": all])
-        case .planningStatus(let directory): TaggedFields("planning_status", ["directory": directory])
+            TaggedFields("plan.get", ["directory": directory, "wave": wave, "task": task, "all": all])
+        case .planningStatus(let directory): TaggedFields("repository.planning", ["directory": directory])
         case .workLink(let directory, let url):
-            TaggedFields("work_link", ["directory": directory, "url": url])
-        case .repositoryPath(let id): TaggedFields("repository_path", ["id": id])
+            TaggedFields("work.resolve", ["directory": directory, "url": url])
+        case .repositoryPath(let id): TaggedFields("repository.path", ["id": id])
         case .waveGraph(let directory, let wave):
-            TaggedFields("wave_graph", ["directory": directory, "wave": wave])
-        case .sessionPage(let directory, let headless, let after):
-            TaggedFields("session_page", ["directory": directory, "headless": headless, "after": after])
+            TaggedFields("wave.graph", ["directory": directory, "wave": wave])
+        case .sessionPage(let directory, let headless, let after, let task):
+            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after,
+                                          "limit": Self.sessionPageLimit, "task": task])
         case .tokens(let directory, let days):
-            TaggedFields("tokens", ["directory": directory, "days": days])
-        case .retention: TaggedFields("retention")
-        case .doctor: TaggedFields("doctor")
-        case .bindPreview(let session, let task):
-            TaggedFields("bind_preview", ["session": session, "task": task])
+            TaggedFields("repository.tokens", ["directory": directory, "days": days])
+        case .retention: TaggedFields("history.retention")
+        case .doctor: TaggedFields("machine.doctor")
         }
     }
 
     public func encode(to encoder: any Encoder) throws {
-        try tagged.encode(to: encoder, tag: "read")
+        try tagged.encode(to: encoder, tag: "kind")
     }
 }
 
 /// A write Loopflow makes inside the app, encoded as its Rust `Write`: what
-/// `argv` does in `cwd`, given `input` on stdin. A Work change records its
-/// Process as that `lf` command would.
+/// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
+/// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
+    case taskStart(directory: String, requestID: UUID, request: String, wave: String?, graph: String?, terminal: Bool)
+    case taskFromSession(directory: String, id: String, title: String)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
@@ -240,7 +246,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     case sessionRename(directory: String, id: String, name: String)
-    case sessionBind(directory: String, id: String, task: String)
+    /// With `preview`, the Task a bind would assign, assigning nothing.
+    case sessionBind(directory: String, id: String, task: String, preview: Bool)
+    /// Start the Session's provider process as its own `lf` process, assigning nothing.
+    case sessionStart(id: String)
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
     case sessionNew(directory: String, id: String, agent: String?)
@@ -261,18 +270,25 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
         switch self {
-        case .taskComplete(_, let issue): ["task", "complete", issue]
-        case .taskReopen(_, let issue): ["task", "reopen", issue]
-        case .taskAbandon(_, let issue): ["task", "abandon", issue]
-        case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
+        case .taskStart(_, let id, let request, let wave, let graph, let terminal):
+            ["task", "create", "--run", "--json", "--request-id", id.uuidString.lowercased()]
+                + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
+                + Self.option("--graph", graph) + (terminal ? ["--terminal"] : []) + ["--", request]
+        case .taskFromSession(_, let id, let title): ["task", "create", "--session", id, "--title", title, "--json"]
+        case .taskComplete(_, let issue): ["task", "complete", issue, "--json"]
+        case .taskReopen(_, let issue): ["task", "reopen", issue, "--json"]
+        case .taskAbandon(_, let issue): ["task", "abandon", issue, "--json"]
+        case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)", "--json"]
         case .taskOwnership(_, let issue, let claimed): ["task", claimed ? "claim" : "unassign", issue, "--json"]
-        case .shipStop(_, let issue): ["--task", issue, "ship", "--stop"]
+        case .shipStop(_, let issue): ["--task", issue, "ship", "--stop", "--json"]
         case .taskMove(_, let issue, let wave):
-            ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
+            ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
         case .taskSave(_, let issue, let path, let revision, _):
             ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
-        case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
+        case .sessionBind(_, let id, let task, let preview):
+            ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
+        case .sessionStart(let id): ["session", "resume", "--start-only", "--json", "--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent):
             Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
                 + Self.option("--task", task) + Self.option("--wave", wave),
@@ -283,7 +299,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
         case .newChapter(_, let name, _, let preview):
             ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"] + (preview ? ["--dry-run"] : [])
-        case .graphCustomize(_, let name): ["graph", "customize", name]
+        case .graphCustomize(_, let name): ["graph", "customize", name, "--json"]
         case .portfolio(let change): ["portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
             ["desktop", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
@@ -299,6 +315,21 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["desktop", "move", "-p", "\(board)/\(member)", "--destination", destination]
         case .paneLayout(_, let work, _): ["desktop", "layout", work, "--save"]
         }
+    }
+
+    /// `lf portfolio <change>`'s words as Rust's `PortfolioCommand`, tagged by
+    /// `action`: `folder [path]`, `manual`, `add|import <paths…>`, `remove <path>`.
+    private static func portfolioChange(_ words: [String]) -> JSONValue {
+        let action = words.first ?? ""
+        let rest = Array(words.dropFirst())
+        var fields: [String: JSONValue] = ["action": .string(action)]
+        switch action {
+        case "folder": fields["path"] = rest.first.map(JSONValue.string) ?? .null
+        case "add", "import": fields["paths"] = .array(rest.map(JSONValue.string))
+        case "remove": fields["path"] = rest.first.map(JSONValue.string) ?? .null
+        default: break
+        }
+        return .object(fields)
     }
 
     /// `lf [--repo <repo>] [--agent <agent>] <command> --prepare --json`.
@@ -327,63 +358,72 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
+        case .taskStart(let directory, let id, let request, let wave, let graph, let terminal):
+            TaggedFields("task.start", ["directory": directory, "request_id": id.uuidString.lowercased(),
+                                        "request": request, "wave": wave, "graph": graph, "terminal": terminal])
+        case .taskFromSession(let directory, let id, let title):
+            TaggedFields("task.create", ["directory": directory, "id": id, "title": title])
         case .taskComplete(let directory, let issue):
-            TaggedFields("task_complete", ["directory": directory, "issue": issue])
+            TaggedFields("task.complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
-            TaggedFields("task_reopen", ["directory": directory, "issue": issue])
+            TaggedFields("task.reopen", ["directory": directory, "issue": issue])
         case .taskAbandon(let directory, let issue):
-            TaggedFields("task_abandon", ["directory": directory, "issue": issue])
+            TaggedFields("task.abandon", ["directory": directory, "issue": issue])
         case .taskNotes(let directory, let issue, let notes):
-            TaggedFields("task_notes", ["directory": directory, "issue": issue, "notes": notes])
+            TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes])
         case .taskOwnership(let directory, let issue, let claimed):
-            TaggedFields("task_ownership", ["directory": directory, "issue": issue, "claimed": claimed])
+            TaggedFields(claimed ? "task.claim" : "task.unassign", ["directory": directory, "issue": issue])
         case .shipStop(let directory, let issue):
-            TaggedFields("ship_stop", ["directory": directory, "issue": issue])
+            TaggedFields("task.hold", ["directory": directory, "issue": issue])
         case .taskMove(let directory, let issue, let wave):
-            TaggedFields("task_move", ["directory": directory, "issue": issue, "wave": wave])
+            TaggedFields("task.move", ["directory": directory, "issue": issue, "wave": wave])
         case .taskSave(let directory, let issue, let path, let revision, let content):
-            TaggedFields("task_save", ["directory": directory, "issue": issue, "path": path,
+            TaggedFields("task.save", ["directory": directory, "issue": issue, "path": path,
                                        "revision": revision, "content": content])
         case .sessionRename(let directory, let id, let name):
-            TaggedFields("session_rename", ["directory": directory, "id": id, "name": name])
-        case .sessionBind(let directory, let id, let task):
-            TaggedFields("session_bind", ["directory": directory, "id": id, "task": task])
+            TaggedFields("session.rename", ["directory": directory, "id": id, "name": name])
+        case .sessionBind(let directory, let id, let task, let preview):
+            TaggedFields("session.bind", ["directory": directory, "id": id, "task": task, "preview": preview])
+        case .sessionStart(let id):
+            TaggedFields("session.start", ["id": id])
         case .sessionResume(let directory, let id, let task, let wave, let agent):
-            TaggedFields("session_resume", ["directory": directory, "id": id, "task": task, "wave": wave,
+            TaggedFields("session.resume", ["directory": directory, "id": id, "task": task, "wave": wave,
                                             "agent": agent])
         case .sessionNew(let directory, let id, let agent):
-            TaggedFields("session_new", ["directory": directory, "id": id, "agent": agent])
+            TaggedFields("session.new", ["directory": directory, "id": id, "agent": agent])
         case .waveAdd(let directory, let wave, let objective):
-            TaggedFields("wave_add", ["directory": directory, "wave": wave, "objective": objective])
+            TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .planningRefresh(let directory, let wave):
-            TaggedFields("planning_refresh", ["directory": directory, "wave": wave])
+            TaggedFields("wave.sync", ["directory": directory, "wave": wave])
         case .newChapter(let directory, let name, let plan, let preview):
-            TaggedFields("new_chapter", ["directory": directory, "name": name, "plan": plan, "preview": preview])
+            TaggedFields("chapter.start", ["directory": directory, "name": name, "plan": plan, "preview": preview])
         case .graphCustomize(let directory, let name):
-            TaggedFields("graph_customize", ["directory": directory, "name": name])
+            TaggedFields("graph.customize", ["directory": directory, "name": name])
         case .portfolio(let change):
-            TaggedFields("portfolio", ["change": change])
+            TaggedFields("portfolio.set", ["change": Self.portfolioChange(change)])
         case .dashboardQuery(let directory, let id, let expression, let revision):
-            TaggedFields("dashboard_query", ["directory": directory, "id": id, "expression": expression,
+            TaggedFields("desktop.dashboard.query", ["directory": directory, "id": id, "expression": expression,
                                              "revision": revision])
         case .dashboardPin(let directory, let id, let pinned, let revision):
-            TaggedFields("dashboard_pin", ["directory": directory, "id": id, "pinned": pinned, "revision": revision])
+            TaggedFields(pinned ? "desktop.dashboard.pin" : "desktop.dashboard.unpin",
+                         ["directory": directory, "id": id, "revision": revision])
         case .dashboardRename(let directory, let id, let name, let revision):
-            TaggedFields("dashboard_rename", ["directory": directory, "id": id, "name": name, "revision": revision])
+            TaggedFields("desktop.dashboard.rename", ["directory": directory, "id": id, "name": name, "revision": revision])
         case .dashboardTile(let directory, let id, let member, let hidden):
-            TaggedFields("dashboard_tile", ["directory": directory, "id": id, "member": member, "hidden": hidden])
+            TaggedFields(hidden ? "desktop.dashboard.hide" : "desktop.dashboard.show",
+                         ["directory": directory, "id": id, "member": member])
         case .dashboardSlots(let directory, let id, let revision, let slots):
-            TaggedFields("dashboard_slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
+            TaggedFields("desktop.dashboard.slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
         case .tileMove(let directory, let board, let member, let destination):
-            TaggedFields("tile_move", ["directory": directory, "board": board, "member": member,
+            TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
                                        "destination": destination])
         case .paneLayout(let directory, let work, let layout):
-            TaggedFields("pane_layout", ["directory": directory, "work": work, "layout": layout])
+            TaggedFields("desktop.layout.save", ["directory": directory, "work": work, "layout": layout])
         }
     }
 
     public func encode(to encoder: any Encoder) throws {
-        try tagged.encode(to: encoder, tag: "write")
+        try tagged.encode(to: encoder, tag: "kind")
     }
 }
 
@@ -642,7 +682,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.
-    /// Registration writes the store, so `lf` runs it, not the app's library.
+    /// Registration runs the complete CLI command.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
         try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
     }
@@ -798,7 +838,8 @@ public struct RegistryQuery: Sendable {
 
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         // Without a repository it customizes from `/`, where the app runs.
-        try await write(.graphCustomize(directory: cwd ?? "/", name: name)).trimmingCharacters(in: .whitespacesAndNewlines)
+        struct Customized: Decodable { let path: String }
+        return try Self.decode(Customized.self, from: await write(.graphCustomize(directory: cwd ?? "/", name: name))).path
     }
 
     /// Run the Task's graph until its next interactive step; returns once it
@@ -927,7 +968,7 @@ public struct RegistryQuery: Sendable {
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
         try Self.decode(SessionPage.self, from: await serve(
-            .sessionPage(directory: cwd ?? "/", headless: includingHeadless, after: after)))
+            .sessionPage(directory: cwd ?? "/", headless: includingHeadless, after: after, task: nil)))
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -976,16 +1017,16 @@ public struct RegistryQuery: Sendable {
 
     /// Create a Task around the selected conversation without launching work.
     public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
-        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await run(
-            ["task", "create", "--session", id, "--title", title, "--json"], cwd))
+        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await write(
+            .taskFromSession(directory: cwd ?? "/", id: id, title: title)))
     }
 
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {
-        try Self.decode(SessionBindingPreview.self, from: await serve(.bindPreview(session: id, task: task)))
+        try Self.decode(SessionBindingPreview.self, from: await write(.sessionBind(directory: "/", id: id, task: task, preview: true)))
     }
 
     public func bindSession(id: String, taskId: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await write(.sessionBind(directory: cwd ?? "/", id: id, task: taskId))
+        let stdout = try await write(.sessionBind(directory: cwd ?? "/", id: id, task: taskId, preview: false))
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
@@ -1047,8 +1088,8 @@ public struct RegistryQuery: Sendable {
 /// `lf task create REQUEST --run --json`: the created Task, the graph it took
 /// up and its admitted conversation, nil after a headless run. Both are nil
 /// when the run failed after the Task was filed.
-public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
-    public struct CreatedTask: Decodable, Sendable, Hashable {
+public struct TaskCreateReceipt: Codable, Sendable, Hashable {
+    public struct CreatedTask: Codable, Sendable, Hashable {
         public let id: String
         public let identifier: String
         public let title: String
@@ -1060,6 +1101,25 @@ public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case task, graph
         case sessionId = "session_id"
+    }
+}
+
+/// Shared CLI admission. Retain the same request ID and payload until settled.
+/// `unknown` never means that starting the Graph again is safe.
+public struct TaskCreateOutcome: Codable, Sendable, Hashable {
+    public enum State: String, Codable, Sendable {
+        case inProgress = "in_progress"
+        case started, failed, unknown
+    }
+    public let taskId: String
+    public let state: State
+    public let receipt: TaskCreateReceipt?
+    public let message: String?
+    public let owner: String?
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case state, receipt, message, owner
     }
 }
 

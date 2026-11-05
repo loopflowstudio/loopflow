@@ -1495,10 +1495,35 @@ pub fn task_create(
     report: Option<String>,
     adoption: TaskAdoptionOptions,
 ) -> OpsResult<Task> {
+    task_create_with_id(
+        repo,
+        wave,
+        title,
+        report,
+        adoption,
+        crate::durable::TaskId::new(),
+    )
+}
+
+/// Creation under a reserved Task ID: a repeated request returns the Task it
+/// already filed instead of a second one.
+pub(crate) fn task_create_with_id(
+    repo: &Path,
+    wave: Option<&str>,
+    title: Option<String>,
+    report: Option<String>,
+    adoption: TaskAdoptionOptions,
+    id: crate::durable::TaskId,
+) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
+        // A shared command reservation already checked the full request. Keep
+        // its original Task and Project even if defaults changed after filing.
+        if let Some(task) = store.get_task(&id).await.map_err(task_error)? {
+            return Ok(task);
+        }
         if let Err(error) =
             super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
         {
@@ -1551,7 +1576,7 @@ pub fn task_create(
             .map_err(task_error)?;
         let creation = crate::work::task::NewTask {
             due_date: None,
-            id: crate::durable::TaskId::new(),
+            id,
             repository_id,
             project_id: creation_project,
             title: input.title,
@@ -2272,7 +2297,7 @@ pub(crate) async fn reconcile_task_completion(
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct TaskEdit {
     pub id: String,
     pub sync: crate::store::planning_sync::PlanningSyncStatus,

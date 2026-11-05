@@ -794,6 +794,10 @@ impl Drop for InvocationSettings {
     }
 }
 
+pub(crate) fn replace_invocation(value: Value) -> InvocationSettings {
+    InvocationSettings(INVOCATION.with(|current| current.replace(value)))
+}
+
 pub fn select_invocation(value: Value) -> InvocationSettings {
     fn overlay(current: &mut Value, value: Value) {
         if let Value::Mapping(values) = value {
@@ -815,7 +819,7 @@ pub fn select_invocation(value: Value) -> InvocationSettings {
     }))
 }
 
-fn invocation_values() -> Value {
+pub(crate) fn invocation_values() -> Value {
     INVOCATION.with(|current| current.borrow().clone())
 }
 
@@ -831,6 +835,9 @@ pub(super) fn explicit_agent() -> Result<Option<String>, LoadError> {
 }
 
 fn environment() -> Result<Value, LoadError> {
+    if crate::journal::request::active() {
+        return Ok(Value::Mapping(Default::default()));
+    }
     let mut values = Value::Mapping(Default::default());
     if let Ok(text) = std::env::var("LF_SETTINGS") {
         values = serde_yaml_ng::from_str(&text)

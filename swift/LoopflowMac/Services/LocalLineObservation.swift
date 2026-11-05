@@ -5,7 +5,7 @@ import Loopflow
 
 /// One owned `lf` reader speaking newline-delimited JSON over its pipes: a
 /// remote Task's file watch, which runs on another Machine. Local reads run in
-/// the app through `LoopflowLibrary`. All mutable state and pipe I/O belong to
+/// the server through `ServerClient`. All mutable state and pipe I/O belong to
 /// queue. No callback touches AppKit.
 final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private let queue: DispatchQueue

@@ -30,6 +30,7 @@ pub mod platform;
 pub mod portfolio;
 pub mod process;
 pub mod prompt;
+pub mod server;
 pub mod skills;
 pub(crate) mod startup;
 pub mod task_graph;

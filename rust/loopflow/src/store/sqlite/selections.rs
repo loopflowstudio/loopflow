@@ -94,8 +94,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             activity_known: false,
         });
     }
-    let mut tasks = super::children::tasks_in(conn, None)?;
-    tasks.retain(|task| &task.repository_id == repository);
+    let mut tasks = super::children::repository_tasks_in(conn, repository)?;
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
     let sessions = super::sessions::session_summaries_in(
         conn,
@@ -367,6 +366,26 @@ fn plan_in(
     })
 }
 
+fn plan_selection_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    selection: Selection,
+) -> StoreResult<crate::work::selection::ViewPlan> {
+    let catalog = catalog_in(conn, repository)?;
+    let work = work_in(conn, repository)?;
+    let saved = selection
+        .referenced_query()
+        .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
+    plan_in(
+        conn,
+        repository,
+        saved.map_or(selection, |saved| saved.selection.clone()),
+        saved,
+        &definitions(&catalog),
+        &work,
+    )
+}
+
 impl SqliteStore {
     /// Resolve text/defaults and saved intent without creating Work or acquiring a client.
     pub fn view_plan(
@@ -388,19 +407,33 @@ impl SqliteStore {
     ) -> StoreResult<crate::work::selection::ViewPlan> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let catalog = catalog_in(&snapshot, repository)?;
-        let work = work_in(&snapshot, repository)?;
-        let saved = selection
-            .referenced_query()
-            .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
-        plan_in(
-            &snapshot,
-            repository,
-            saved.map_or(selection, |saved| saved.selection.clone()),
-            saved,
-            &definitions(&catalog),
-            &work,
-        )
+        plan_selection_in(&snapshot, repository, selection)
+    }
+
+    /// One consistent reading of the same selection across `repos` (canonical
+    /// repository paths); a repository with no recorded Work identity has no plan.
+    pub fn all_view_plans(
+        &self,
+        source: Option<&str>,
+        repos: &[String],
+    ) -> StoreResult<Vec<crate::work::selection::ViewPlan>> {
+        let selection = match source {
+            Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
+            None => repository_default(),
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let mut plans = Vec::new();
+        for repo in repos {
+            if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
+                plans.push(plan_selection_in(
+                    &snapshot,
+                    &repository,
+                    selection.clone(),
+                )?);
+            }
+        }
+        Ok(plans)
     }
 
     /// The observer and one-shot plans expose the same repository/default and saved views.
@@ -468,7 +501,9 @@ impl SqliteStore {
             .into_iter()
             .find(|saved| &saved.id == id);
         if previous.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let mut selection =
             Selection::parse(source, previous.as_ref().map(|saved| &saved.selection))
@@ -558,7 +593,9 @@ impl SqliteStore {
         let catalog = catalog_in(&tx, repository)?;
         let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
         if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let work = work_in(&tx, repository)?;
         let mut definitions = definitions(&catalog);
@@ -620,7 +657,9 @@ impl SqliteStore {
         let changed = tx.execute("UPDATE dashboards SET name=coalesce(?1,name),pinned=coalesce(?2,pinned),revision=revision+1 WHERE repository_id=?3 AND id=?4 AND revision=?5",
             params![name,pinned,repository.as_str(),id.0,expected_revision])?;
         if changed == 0 {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let saved = catalog_in(&tx, repository)?
             .into_iter()
@@ -647,7 +686,9 @@ impl SqliteStore {
         let changed = tx.execute("UPDATE dashboards SET slots_json=?1,revision=revision+1 WHERE repository_id=?2 AND id=?3 AND revision=?4",
             params![json,repository.as_str(),id.0,expected_revision])?;
         if changed == 0 {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let saved = catalog_in(&tx, repository)?
             .into_iter()
@@ -728,7 +769,9 @@ impl SqliteStore {
             params![repository.as_str(), id.0, expected_revision],
         )?;
         if deleted == 0 {
-            return Err(invalid("Dashboard changed; read it again before deleting"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before deleting".into(),
+            ));
         }
         Ok(())
     }

@@ -58,6 +58,7 @@ pub(crate) mod task_ownership;
 mod steers;
 mod task_comments;
 mod task_content;
+mod task_create_requests;
 mod task_details;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
@@ -269,8 +270,16 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
         [],
         |row| row.get(0),
     )?;
-    let local = if placed {
+    let (local_flag, local_route): (bool, bool) = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='route')",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let local = if placed && local_flag {
         "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
+    } else if placed && local_route {
+        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
     } else {
         "0"
     };
@@ -553,37 +562,7 @@ impl SqliteStore {
     }
 
     fn open(path: &Path, advance: super::FrontierAdvance, busy: Duration) -> StoreResult<Self> {
-        if super::serves_in_app() {
-            return Self::open_in_app(path);
-        }
         Self::open_with(path, &super::machine_home_dir(), advance, busy)
-    }
-
-    /// An app's in-process reads and writes: the store `lf` prepared, at this
-    /// build's schema. It never creates or migrates one.
-    fn open_in_app(path: &Path) -> StoreResult<Self> {
-        if !std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0) {
-            return Err(StoreError::InvalidData(format!(
-                "store {} is not prepared; run `lf` once to create it",
-                path.display()
-            )));
-        }
-        let mut conn = Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        crate::performance::observe_sqlite(&conn);
-        super::migrations::validate_sqlite_schema(&conn)?;
-        if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
-            return Err(StoreError::InvalidData(format!(
-                "store {} does not have migration {pending} yet; run `lf` once to migrate it",
-                path.display()
-            )));
-        }
-        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
     }
 
     /// Open resolving the migration decision against an explicit machine home.

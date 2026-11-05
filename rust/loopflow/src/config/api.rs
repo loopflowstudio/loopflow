@@ -145,7 +145,7 @@ fn file_value(
     })
 }
 
-/// The CLI and in-process Desktop read share this inspection.
+/// The CLI and served Desktop read share this inspection.
 pub fn inspect(
     repo: &std::path::Path,
     wave: Option<&str>,
@@ -223,8 +223,12 @@ fn inspect_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::Request;
+    use super::{run, Request};
     use crate::config::files::Destination;
+    use crate::lf::commands::graph::EnvVarGuard;
+    use loopflow_test_support::TestRepo;
+    use serde_json::{json, Value};
+    use std::path::Path;
 
     #[test]
     fn catalogue_wire_shape_includes_feature_category() {
@@ -254,5 +258,256 @@ mod tests {
             invalid["path"] = "/another/config.yaml".into();
             assert!(serde_json::from_value::<Destination>(invalid).is_err());
         }
+    }
+
+    fn edit(
+        destination: &Destination,
+        key: &str,
+        value: Option<&str>,
+        unset: bool,
+    ) -> anyhow::Result<Value> {
+        run(Request::Declaration {
+            destination: destination.clone(),
+            key: key.into(),
+            value: value.map(str::to_owned),
+            unset,
+        })
+    }
+
+    fn check(
+        destination: &Destination,
+        repo: &Path,
+        wave: Option<&str>,
+        key: &str,
+        expected: &str,
+    ) {
+        let explained = run(Request::Explain {
+            destination: destination.clone(),
+            key: key.into(),
+        })
+        .unwrap();
+        let config = crate::config::load_wave_config(Some(repo), wave)
+            .unwrap()
+            .unwrap();
+        let skill = if key.starts_with("graphs.") {
+            let graph = crate::graph::load_authored_graph("release", repo).unwrap();
+            let steps = crate::graph::compile_graph(&graph, repo).unwrap();
+            let crate::graph::ConcreteStep::Skill(step) = &steps[0] else {
+                panic!("expected skill")
+            };
+            step.skill.clone()
+        } else {
+            crate::graph::load_skill("probe", repo).unwrap()
+        };
+        let prepared = crate::prompt::process::prepare_process_prompt(
+            &config,
+            crate::prompt::process::ProcessPromptInput {
+                repo_root: repo.to_owned(),
+                wave: wave.map(str::to_owned),
+                resolved_skill: Some(skill),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(prepared.config.agent().unwrap(), expected);
+        assert_eq!(
+            explained["inspections"][0]["settings"]["agent"]["value"],
+            expected
+        );
+    }
+
+    #[test]
+    fn destinations_bind_save_explanation_and_launch_across_worktrees_and_wave_renames() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = TestRepo::new();
+        repo.create_file(".lf/skills/probe.md", "Probe settings.\n");
+        repo.create_file(
+            ".lf/graphs/release.yaml",
+            "- step: {name: probe, id: work}\n",
+        );
+        let id = "8ae21a68-8940-4553-a3ab-135133925e35";
+        repo.create_file(".lf/wave/old/config.yaml", &format!("id: {id}\n"));
+        repo.stage_all();
+        repo.commit("Authored fixture");
+        let child = home.path().join("child");
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["worktree", "add", "-b", "child"])
+            .arg(&child)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let global = Destination::PersonalGlobal {};
+        let private = Destination::PersonalRepository {
+            repository: child.clone(),
+        };
+        let shared = Destination::SharedRepository {
+            repository: child.clone(),
+        };
+        let wave = Destination::PersonalWave {
+            repository: child.clone(),
+            wave: "old".into(),
+        };
+        let other = Destination::PersonalWave {
+            repository: child.clone(),
+            wave: "different".into(),
+        };
+        std::fs::create_dir_all(child.join(".lf/wave/different")).unwrap();
+        std::fs::write(
+            child.join(".lf/wave/different/config.yaml"),
+            "id: 9ae21a68-8940-4553-a3ab-135133925e35\n",
+        )
+        .unwrap();
+        edit(&global, "default_agent", Some("codex:global"), false).unwrap();
+        let global_before = std::fs::read(home.path().join("config.yaml")).unwrap();
+        edit(&shared, "agent", Some("claude:shared"), false).unwrap();
+        let saved = edit(&private, "skills.probe.agent", Some("codex:private"), false).unwrap();
+        assert_eq!(
+            saved["path"],
+            json!(repo
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join("lf.config.local.yaml"))
+        );
+        assert!(!child.join("lf.config.local.yaml").exists());
+        check(
+            &private,
+            &child,
+            None,
+            "skills.probe.agent",
+            "codex:private",
+        );
+        check(
+            &private,
+            repo.path(),
+            None,
+            "skills.probe.agent",
+            "codex:private",
+        );
+        edit(&other, "skills.probe.agent", Some("claude:other"), false).unwrap();
+        edit(&wave, "skills.probe.agent", Some("claude:wave"), false).unwrap();
+        check(
+            &wave,
+            &child,
+            Some("old"),
+            "skills.probe.agent",
+            "claude:wave",
+        );
+        let private_before = std::fs::read(repo.path().join("lf.config.local.yaml")).unwrap();
+        assert!(edit(&private, "user.name", Some("Wrong scope"), false)
+            .unwrap_err()
+            .to_string()
+            .contains("does not apply"));
+        assert!(edit(&shared, "user.name", Some("Wrong owner"), false).is_err());
+        assert_eq!(
+            std::fs::read(repo.path().join("lf.config.local.yaml")).unwrap(),
+            private_before
+        );
+        std::fs::rename(child.join(".lf/wave/old"), child.join(".lf/wave/new")).unwrap();
+        std::fs::create_dir_all(child.join(".lf/wave/old")).unwrap();
+        std::fs::write(
+            child.join(".lf/wave/old/config.yaml"),
+            "id: 7ae21a68-8940-4553-a3ab-135133925e35\n",
+        )
+        .unwrap();
+        let renamed = Destination::PersonalWave {
+            repository: child.clone(),
+            wave: id.into(),
+        };
+        assert_eq!(
+            edit(&renamed, "skills.probe.agent", None, false).unwrap()["value"],
+            "claude:wave"
+        );
+        check(
+            &renamed,
+            &child,
+            Some("new"),
+            "skills.probe.agent",
+            "claude:wave",
+        );
+        check(
+            &wave,
+            &child,
+            Some("old"),
+            "skills.probe.agent",
+            "codex:private",
+        );
+        edit(&renamed, "skills.probe.agent", None, true).unwrap();
+        check(
+            &renamed,
+            &child,
+            Some("new"),
+            "skills.probe.agent",
+            "codex:private",
+        );
+        check(
+            &other,
+            &child,
+            Some("different"),
+            "skills.probe.agent",
+            "claude:other",
+        );
+        let shared_wave = Destination::SharedWave {
+            repository: child.clone(),
+            wave: id.into(),
+        };
+        let saved = edit(&shared_wave, "chrome", Some("false"), false).unwrap();
+        assert_eq!(
+            saved["path"],
+            json!(child
+                .canonicalize()
+                .unwrap()
+                .join(".lf/wave/new/config.yaml"))
+        );
+        edit(
+            &private,
+            "graphs.release.steps.work.agent",
+            Some("claude:occurrence"),
+            false,
+        )
+        .unwrap();
+        check(
+            &private,
+            &child,
+            None,
+            "graphs.release.steps.work.agent",
+            "claude:occurrence",
+        );
+        edit(&private, "graphs.release.steps.work.agent", None, true).unwrap();
+        edit(&private, "skills.probe.agent", None, true).unwrap();
+        check(
+            &private,
+            &child,
+            None,
+            "skills.probe.agent",
+            "claude:shared",
+        );
+        edit(&shared, "agent", None, true).unwrap();
+        check(
+            &private,
+            &child,
+            None,
+            "skills.probe.default_agent",
+            "codex:global",
+        );
+        assert_eq!(
+            std::fs::read(home.path().join("config.yaml")).unwrap(),
+            global_before
+        );
+        assert!(!home.path().join("loopflow.db").exists());
+        let clone = TestRepo::new();
+        assert_eq!(
+            crate::config::load_config(Some(clone.path()))
+                .unwrap()
+                .unwrap()
+                .agent()
+                .unwrap(),
+            "codex:global"
+        );
     }
 }

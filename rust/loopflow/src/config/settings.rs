@@ -169,7 +169,15 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .as_str()
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| invalid("agent needs harness[:model]"))?;
-        validate_agent_policy(agent)?;
+        // A fallback may list the agents a step falls through to; a choice
+        // names one.
+        if path[0] == "default_agent" {
+            for entry in super::agent_list(agent) {
+                validate_agent_policy(entry)?;
+            }
+        } else {
+            validate_agent_policy(agent)?;
+        }
     }
     let mut check = super::catalog::defaults();
     insert(&mut check, path, value.clone());

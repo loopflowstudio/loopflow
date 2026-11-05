@@ -497,13 +497,40 @@ pub struct LogConfig {
 }
 
 impl Config {
-    /// Resolve authored preferences, or the sole installed harness.
+    /// Resolve authored preferences, or the sole installed harness. A
+    /// `default_agent` list (`claude,codex`) selects its first entry.
     ///
     /// # Errors
     /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
     pub fn agent(&self) -> Result<&str, LoadError> {
-        select_agent(self.agent.as_deref().or(self.default_agent.as_deref()))
+        select_agent(
+            self.agent
+                .as_deref()
+                .or_else(|| self.default_agent.as_deref().map(first_agent)),
+        )
     }
+
+    /// The agents a headless step may fall through to when every account for
+    /// its own is held back: the rest of the `default_agent` list, in order.
+    /// An explicit `agent` choice has none; it is followed within itself.
+    pub fn fallback_agents(&self) -> Vec<String> {
+        match (&self.agent, &self.default_agent) {
+            (None, Some(list)) => agent_list(list).skip(1).map(str::to_owned).collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The entries of an ordered agent preference, `harness[:model]` each.
+pub fn agent_list(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+}
+
+fn first_agent(value: &str) -> &str {
+    agent_list(value).next().unwrap_or(value)
 }
 
 /// Parse agent string like 'claude:opus' into (harness, model).

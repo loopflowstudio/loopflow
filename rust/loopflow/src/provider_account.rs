@@ -119,28 +119,35 @@ fn earliest_release<'a>(
         .min()
 }
 
-/// Stable sort: larger plans lead, then the account with the most room for
-/// `model`; declared route order breaks ties.
-pub(crate) fn order_accounts_by_room(
+/// Stable sort: larger plans lead, then the account whose limiting window for
+/// `model` resets soonest, so no account resets with quota unused; then the
+/// most room; declared route order breaks ties.
+pub(crate) fn order_accounts_by_reset(
     accounts: &mut [ProviderAccount],
     limits: &[AccountLimitRow],
     model: Option<&str>,
     now: i64,
 ) {
-    accounts.sort_by_key(|account| room_rank(account, limits, model, now));
+    accounts.sort_by_key(|account| route_rank(account, limits, model, now));
 }
 
-/// Plan preference, then the tightest window's use. A window that has reset
-/// leaves its account full room.
-fn room_rank(
+/// Plan preference, the tightest window's reset, then its use. A window that
+/// has reset, or an account with none observed, has no reset to rank and
+/// full room.
+fn route_rank(
     account: &ProviderAccount,
     limits: &[AccountLimitRow],
     model: Option<&str>,
     now: i64,
-) -> (u8, u8) {
-    let used_percent = tightest_window(&account.provider, &account.account_id, limits, model, now)
-        .map_or(0, |limit| limit.used_percent);
-    (plan_preference(account), used_percent)
+) -> (u8, i64, u8) {
+    let tightest = tightest_window(&account.provider, &account.account_id, limits, model, now);
+    (
+        plan_preference(account),
+        tightest
+            .and_then(|limit| limit.resets_at)
+            .unwrap_or(i64::MAX),
+        tightest.map_or(0, |limit| limit.used_percent),
+    )
 }
 
 fn plan_preference(account: &ProviderAccount) -> u8 {
@@ -246,7 +253,7 @@ enum AccountLogin {
 struct AccountCandidate {
     account: ProviderAccount,
     credential_available: bool,
-    rank: (u8, u8),
+    rank: (u8, i64, u8),
     home: PathBuf,
 }
 
@@ -880,7 +887,7 @@ pub(crate) async fn resolve_provider_account(
 
 /// Native Claude reported a limit through `StopFailure`, on stdin. Its stream is
 /// not ours to read, so this hook is how lf hears of it: the account cools and
-/// a shared login moves to the eligible account with the most room, which every
+/// a shared login moves to the eligible account that resets soonest, which every
 /// open Claude follows. Their next message runs there, with no input of ours.
 /// Other Sessions reporting the same limit find the login already moved.
 pub fn observe_native_limit() -> anyhow::Result<()> {
@@ -1185,7 +1192,7 @@ async fn select_route(
     }))
 }
 
-/// Shared routing takes the eligible account with the most room. The
+/// Shared routing takes the eligible account that resets soonest. The
 /// active account wins ties, so a launch switches every running conversation
 /// only when another account is ahead.
 async fn select_shared_account(
@@ -1296,7 +1303,7 @@ async fn resolve_selected_provider_account(
 
 /// A shared launch stays on the active account where its own choice allows:
 /// among the accounts it named, or among all of them when it named none, as
-/// long as no other account there has more room.
+/// long as no other account there ranks ahead of it.
 fn active_candidate(
     active: &ProviderAccountId,
     candidates: &[(AccountCandidate, bool)],
@@ -1365,7 +1372,7 @@ async fn ordered_selected_candidates(
             candidates.push(AccountCandidate {
                 credential_available: account.credential_state == CredentialState::Connected
                     && identity_matches,
-                rank: room_rank(account, &limits, model, now),
+                rank: route_rank(account, &limits, model, now),
                 account: account.clone(),
                 home,
             });
@@ -1584,16 +1591,16 @@ pub(crate) async fn inspect_provider_route(
     provider: Provider,
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
-        return Ok(
-            ordered_selected_candidates(provider, None, None, repo_id, None, store, false, None)
-                .await?
-                .map(|candidates| {
-                    candidates
-                        .into_iter()
-                        .map(|(candidate, _)| candidate.account)
-                        .collect()
-                }),
-        );
+        return Ok(ordered_selected_candidates(
+            provider, None, None, repo_id, None, store, false, None,
+        )
+        .await?
+        .map(|candidates| {
+            candidates
+                .into_iter()
+                .map(|(candidate, _)| candidate.account)
+                .collect()
+        }));
     }
     let Some(store) = store else {
         return Ok(None);
@@ -1623,7 +1630,7 @@ pub(crate) async fn inspect_provider_route(
         )
         .cloned()
         .collect::<Vec<_>>();
-    order_accounts_by_room(&mut available, &limits, None, now);
+    order_accounts_by_reset(&mut available, &limits, None, now);
     Ok(Some(available))
 }
 
@@ -2742,7 +2749,7 @@ mod account_first_tests {
     }
 
     #[tokio::test]
-    async fn automatic_selection_prefers_the_account_with_more_room() {
+    async fn automatic_selection_prefers_the_account_that_resets_soonest() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
@@ -2763,27 +2770,40 @@ mod account_first_tests {
             model: None,
             limited_until: None,
         };
-        store
-            .upsert_provider_account_limits(
-                Provider::Codex.as_str(),
-                &first.account_id,
-                &[window(95, Some(now_unix() + 3600))],
-                "poll",
-            )
-            .await
-            .unwrap();
-
-        let selection = store
-            .select_provider_account(
-                Provider::Codex,
-                &[first.account_id.clone(), second.account_id.clone()],
-                None,
-                None,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(selection.account.account_id, second.account_id);
+        let soon = now_unix() + 3600;
+        let both = [first.account_id.clone(), second.account_id.clone()];
+        let select = || {
+            let store = Arc::clone(&store);
+            let both = both.clone();
+            async move {
+                store
+                    .select_provider_account(Provider::Codex, &both, None, None)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .account
+                    .account_id
+            }
+        };
+        let observe = |account: &ProviderAccount,
+                       windows: Vec<crate::store::AccountLimitWindow>| {
+            let store = Arc::clone(&store);
+            let account_id = account.account_id.clone();
+            async move {
+                store
+                    .upsert_provider_account_limits(
+                        Provider::Codex.as_str(),
+                        &account_id,
+                        &windows,
+                        "poll",
+                    )
+                    .await
+                    .unwrap();
+            }
+        };
+        // Nearly full but about to reset: its quota would otherwise go unused.
+        observe(&first, vec![window(95, Some(soon))]).await;
+        assert_eq!(select().await, first.account_id);
 
         let only = store
             .select_provider_account(
@@ -2797,29 +2817,18 @@ mod account_first_tests {
             .unwrap();
         assert_eq!(only.account.account_id, first.account_id);
 
-        // Already reset or never resetting: full room, so declared order stands.
+        // Already reset or never resetting: no reset to rank and full room, so
+        // declared order stands.
         for window in [window(95, Some(now_unix() - 1)), window(95, None)] {
-            store
-                .upsert_provider_account_limits(
-                    Provider::Codex.as_str(),
-                    &first.account_id,
-                    &[window],
-                    "poll",
-                )
-                .await
-                .unwrap();
-            let selection = store
-                .select_provider_account(
-                    Provider::Codex,
-                    &[first.account_id.clone(), second.account_id.clone()],
-                    None,
-                    None,
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(selection.account.account_id, first.account_id);
+            observe(&first, vec![window]).await;
+            assert_eq!(select().await, first.account_id);
         }
+        // Both observed: the sooner reset leads; at the same reset, more room.
+        observe(&first, vec![window(95, Some(soon))]).await;
+        observe(&second, vec![window(30, Some(soon + 3600))]).await;
+        assert_eq!(select().await, first.account_id);
+        observe(&second, vec![window(30, Some(soon))]).await;
+        assert_eq!(select().await, second.account_id);
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -3534,34 +3543,50 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn shared_launch_moves_off_a_strained_active_account() {
+    async fn shared_launch_stays_on_a_strained_account_until_another_resets_sooner() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
-        store
-            .upsert_provider_account_limits(
-                "codex",
-                &parse_account_id("first").unwrap(),
-                &[crate::store::AccountLimitWindow {
-                    window: "weekly".to_string(),
-                    used_percent: 99,
-                    resets_at: Some(now_unix() + 3600),
-                    plan: None,
-                    model: None,
-                    limited_until: None,
-                }],
-                "poll",
-            )
-            .await
-            .unwrap();
-
+        let observe = |account: &str, used_percent: u8, resets_in: i64| {
+            let store = Arc::clone(&store);
+            let account_id = parse_account_id(account).unwrap();
+            async move {
+                store
+                    .upsert_provider_account_limits(
+                        "codex",
+                        &account_id,
+                        &[crate::store::AccountLimitWindow {
+                            window: "weekly".to_string(),
+                            used_percent,
+                            resets_at: Some(now_unix() + resets_in),
+                            plan: None,
+                            model: None,
+                            limited_until: None,
+                        }],
+                        "poll",
+                    )
+                    .await
+                    .unwrap();
+            }
+        };
+        // Nearly full, but its quota would go unused if the launch moved.
+        observe("first", 99, 3600).await;
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()
             .unwrap();
         let switched = route.launch_as(&mut Command::new("codex")).await.unwrap();
+        assert!(switched.is_none());
+        assert_eq!(codex_login(&native), "first@example.com");
 
+        // Another account resets sooner: the login moves there.
+        observe("second", 10, 600).await;
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let switched = route.launch_as(&mut Command::new("codex")).await.unwrap();
         assert!(switched.is_some());
         assert_eq!(codex_login(&native), "second@example.com");
     }
@@ -3573,6 +3598,7 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let reset = now_unix() + 3600;
         for (account, used_percent) in [("first", 80), ("second", 30)] {
             store
                 .upsert_provider_account_limits(
@@ -3581,7 +3607,7 @@ mod account_first_tests {
                     &[crate::store::AccountLimitWindow {
                         window: "weekly".to_string(),
                         used_percent,
-                        resets_at: Some(now_unix() + 3600),
+                        resets_at: Some(reset),
                         plan: None,
                         model: None,
                         limited_until: None,
@@ -3592,7 +3618,8 @@ mod account_first_tests {
                 .unwrap();
         }
 
-        // `first` is active and first in the route, but `second` has more room.
+        // `first` is active and first in the route; both reset together and
+        // `second` has more room.
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()
@@ -3745,15 +3772,15 @@ mod account_first_tests {
         assert!(route.is_shared());
         assert_eq!(route.account_id().as_str(), "second");
 
-        // A strained active account does not displace a healthy named choice.
+        // A named account that resets sooner displaces the active one.
         store
             .upsert_provider_account_limits(
                 "codex",
-                &parse_account_id("second").unwrap(),
+                &parse_account_id("first").unwrap(),
                 &[crate::store::AccountLimitWindow {
                     window: "weekly".into(),
-                    used_percent: 95,
-                    resets_at: Some(now_unix() + 3600),
+                    used_percent: 20,
+                    resets_at: Some(now_unix() + 600),
                     plan: None,
                     model: None,
                     limited_until: None,
@@ -4116,12 +4143,13 @@ mod inspection_tests {
                 .await
                 .unwrap()
                 .unwrap();
+            // The strained account resets soonest, so it leads; cooling is held back.
             assert_eq!(
                 inspected
                     .iter()
                     .map(|a| a.account_id.as_str())
                     .collect::<Vec<_>>(),
-                ["healthy", "strained"]
+                ["strained", "healthy"]
             );
             assert_eq!(store.list_provider_accounts(None).await.unwrap(), before);
             let selected = store

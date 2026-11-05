@@ -265,7 +265,9 @@ fn touch_claude_credentials_marker(home: &Path) -> Result<(), ProviderAccountErr
         return Ok(());
     };
     file.set_modified(std::time::SystemTime::now())
-        .map_err(|error| ProviderAccountError::Filesystem(format!("touch {}: {error}", marker.display())))
+        .map_err(|error| {
+            ProviderAccountError::Filesystem(format!("touch {}: {error}", marker.display()))
+        })
 }
 
 /// Whether a stored profile holds a login worth installing.

@@ -205,6 +205,7 @@ fn prepare_prompt(
         skill_invocation,
         output_schema: None,
         agent: Some(agent),
+        fallback_agents: config.fallback_agents(),
         max_turns: None,
         resume_token: None,
         provider_account_id: None,

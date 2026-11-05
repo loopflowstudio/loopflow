@@ -192,6 +192,10 @@ pub struct AgentConfig {
     pub output_schema: Option<serde_json::Value>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
+    /// Agents a Graph step falls through to, in order, when every account
+    /// for `agent` is held back: the rest of a `default_agent` list. Empty
+    /// when the agent was an explicit choice.
+    pub fallback_agents: Vec<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
     /// Opaque provider continuation token for this launch.
@@ -251,6 +255,7 @@ impl std::fmt::Debug for AgentConfig {
                 &format_args!("({} bytes)", self.task_prompt.len()),
             )
             .field("agent", &self.agent)
+            .field("fallback_agents", &self.fallback_agents)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
             .field("provider_account_id", &self.provider_account_id)
@@ -274,24 +279,18 @@ pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Resu
     _pin_provider_account_id(launch).map_err(|attempt| attempt.into_error())
 }
 
-/// A Graph step that finds every account cooling waits for the first.
+/// A Graph step that finds every account cooling launches unpinned: the
+/// retry loop falls through to another model or provider, or waits.
 fn _pin_provider_account_waiting(
     launch: &mut AgentConfig,
     process: &ProcessConfig,
 ) -> Result<(), CoreError> {
-    let mut capacity = CapacityWait::default();
-    loop {
-        match _pin_provider_account_id(launch) {
-            Ok(()) => return Ok(()),
-            Err(AccountUnavailable {
-                error,
-                retry_at: Some(retry_at),
-            }) if process.wait_for_capacity => {
-                let provider = parse_agent(launch.agent()?).0;
-                thread::sleep(capacity.pause(&provider, &error, retry_at));
-            }
-            Err(unavailable) => return Err(unavailable.into_error()),
-        }
+    match _pin_provider_account_id(launch) {
+        Ok(()) => Ok(()),
+        Err(AccountUnavailable {
+            retry_at: Some(_), ..
+        }) if process.wait_for_capacity => Ok(()),
+        Err(unavailable) => Err(unavailable.into_error()),
     }
 }
 
@@ -420,7 +419,10 @@ fn resolve_account_route_blocking(
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
             launch.isolate,
-            launch.agent.as_deref().and_then(|agent| parse_agent(agent).1),
+            launch
+                .agent
+                .as_deref()
+                .and_then(|agent| parse_agent(agent).1),
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),
@@ -1073,7 +1075,12 @@ fn _run_with_transient_retries(
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentAttempt, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<AgentProcessResult, CoreError> {
-    let provider = parse_agent(launch.agent()?).0;
+    let rungs = _fallthrough_rungs(launch, process)?;
+    let mut rung = 0;
+    // How the step stood when it began falling through; every rung starts
+    // from here, and the wait at the top of the ladder returns to it.
+    let mut origin: Option<AgentConfig> = None;
+    let mut earliest_reset: Option<i64> = None;
     let mut attempt_config = launch.clone();
     let mut launched = false;
     let mut transient_failures = 0;
@@ -1082,7 +1089,9 @@ fn _run_with_transient_retries(
     let mut capacity = CapacityWait::default();
 
     loop {
-        let (mut result, can_failover) = match run(&attempt_config, launched)? {
+        let provider = parse_agent(attempt_config.agent()?).0;
+        let retry = launched || attempt_config.agent != launch.agent;
+        let (mut result, can_failover) = match run(&attempt_config, retry)? {
             AgentAttempt::Finished {
                 result,
                 can_failover,
@@ -1092,7 +1101,24 @@ fn _run_with_transient_retries(
                 retry_at: Some(retry_at),
             }) if process.wait_for_capacity => {
                 failovers = 0;
-                wait(capacity.pause(&provider, &error, retry_at));
+                earliest_reset = Some(earliest_reset.map_or(retry_at, |at| at.min(retry_at)));
+                let origin = origin.get_or_insert_with(|| attempt_config.clone());
+                rung += 1;
+                if rung == rungs.len() {
+                    rung = 0;
+                    let reset = earliest_reset.take().unwrap_or(retry_at);
+                    wait(capacity.pause(&provider, &error, reset));
+                    attempt_config = origin.clone();
+                } else {
+                    let next = &rungs[rung];
+                    tracing::warn!(error, agent = %next, "every account held back; falling through");
+                    _record_limit_recovery(
+                        &provider,
+                        &format!("{error}; continuing on {next}"),
+                        None,
+                    );
+                    attempt_config = _climb(origin, next, process, launch);
+                }
                 continue;
             }
             AgentAttempt::AccountUnavailable(unavailable) => {
@@ -1116,6 +1142,7 @@ fn _run_with_transient_retries(
             }
         };
         launched = true;
+        origin = None;
         let failure = if process.auto {
             result.failure.or_else(|| _classify_agent_failure(&result))
         } else {
@@ -1132,6 +1159,7 @@ fn _run_with_transient_retries(
         };
         let thread = result.agent_session.clone().or(launch.resume_token.clone());
         attempt_config = launch.clone();
+        attempt_config.agent = Some(rungs[rung].clone());
         // A route chooses again: an exact pin would hold the step on an
         // account that has since run out. The thread keeps its account when it can.
         if can_failover {
@@ -1193,6 +1221,84 @@ fn _run_with_transient_retries(
 
 fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
+}
+
+/// The agents a Graph step tries in turn when every account for one is held
+/// back: its own, that harness's other models when it was named bare, then
+/// each `default_agent` fallback the same way. An explicit `harness:model`
+/// stays on its model; a replay of a recorded account and anything outside a
+/// Graph step never moves.
+fn _fallthrough_rungs(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+) -> Result<Vec<String>, CoreError> {
+    let first = launch.agent()?.to_owned();
+    if !process.wait_for_capacity || launch.provider_account_authority_home.is_some() {
+        return Ok(vec![first]);
+    }
+    let mut rungs: Vec<String> = Vec::new();
+    for agent in
+        std::iter::once(first.as_str()).chain(launch.fallback_agents.iter().map(String::as_str))
+    {
+        let (harness, model) = parse_agent(agent);
+        let models = (model.is_none() && harness == "claude")
+            .then(|| crate::config::CLAUDE_MODEL_RUNGS.map(|model| format!("{harness}:{model}")))
+            .into_iter()
+            .flatten();
+        for rung in std::iter::once(agent.to_owned()).chain(models) {
+            if !rungs.contains(&rung) {
+                rungs.push(rung);
+            }
+        }
+    }
+    Ok(rungs)
+}
+
+/// Put the step on `agent`, starting from how it stood before it began falling
+/// through. The thread moves within its provider; another provider reads the
+/// conversation so far and begins its own.
+fn _climb(
+    origin: &AgentConfig,
+    agent: &str,
+    process: &ProcessConfig,
+    launch: &AgentConfig,
+) -> AgentConfig {
+    let mut next = origin.clone();
+    next.agent = Some(agent.to_owned());
+    next.provider_account_id = None;
+    let same_provider = origin
+        .agent
+        .as_deref()
+        .is_some_and(|from| parse_agent(from).0 == parse_agent(agent).0);
+    if !same_provider {
+        next.resume_token = None;
+        next.skill_invocation = None;
+        next.task_prompt = _history_import(process)
+            .unwrap_or_else(|| _with_original_task(LIMIT_FAILOVER_PROMPT, launch));
+    }
+    next
+}
+
+/// The conversation so far as the next provider's first turn, through the same
+/// import `lf session new -a` uses. None when the step has no Session or its
+/// transcript cannot be read yet; the task then starts over on the checkout.
+fn _history_import(process: &ProcessConfig) -> Option<String> {
+    let (session_id, _) = process.capture.as_ref()?.0.session_attachment()?;
+    let imported = (|| -> anyhow::Result<String> {
+        let store =
+            crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+        let session = store
+            .session(&session_id)?
+            .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
+        crate::ops::human_session::conversation_log::continuation(&store, &session)
+    })();
+    match imported {
+        Ok(turn) => Some(turn),
+        Err(error) => {
+            tracing::warn!(%error, "conversation could not move providers; the task starts over");
+            None
+        }
+    }
 }
 
 /// The provider's own words for a limit, when it gave any.
@@ -2380,8 +2486,9 @@ trust_level = "trusted"
 
     #[test]
     fn with_every_account_cooling_the_step_waits_and_goes_on_in_the_same_thread() {
+        // An explicit model has nowhere to fall through to.
         let launch = AgentConfig {
-            agent: Some("claude".to_string()),
+            agent: Some("claude:opus".to_string()),
             task_prompt: "implement the plan".to_string(),
             ..Default::default()
         };
@@ -2413,6 +2520,98 @@ trust_level = "trusted"
         assert_eq!(threads[3], Some("thread".into()));
         let poll = Duration::from_secs(CAPACITY_POLL_SECS as u64);
         assert_eq!(waits, vec![Duration::ZERO, poll, poll]);
+    }
+
+    #[test]
+    fn a_bare_harness_tries_its_other_models_before_waiting() {
+        let launch = AgentConfig {
+            agent: Some("claude".to_string()),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let mut scripted = vec![
+            cooling(Some(retry_at)),
+            cooling(Some(retry_at + 60)),
+            cooling(Some(retry_at)),
+            cooling(Some(retry_at)),
+            cooling(Some(retry_at)),
+            done(),
+        ]
+        .into_iter();
+        let mut agents = Vec::new();
+        let mut waits = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                agents.push(config.agent.clone().unwrap());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            agents,
+            [
+                "claude",
+                "claude:opus",
+                "claude:sonnet",
+                "claude:haiku",
+                "claude",
+                "claude:opus"
+            ]
+        );
+        // One wait for the earliest reset once every rung is held back.
+        assert_eq!(waits, vec![Duration::from_secs(CAPACITY_POLL_SECS as u64)]);
+    }
+
+    #[test]
+    fn a_preference_list_moves_the_step_to_the_next_provider_with_its_task() {
+        let launch = AgentConfig {
+            agent: Some("claude:opus".to_string()),
+            fallback_agents: vec!["codex".to_string()],
+            task_prompt: "implement the plan".to_string(),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3_600;
+        let mut scripted = vec![
+            managed_attempt(limited_result()),
+            cooling(Some(retry_at)),
+            done(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, retry| {
+                attempts.push((config.clone(), retry));
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        let agents: Vec<_> = attempts
+            .iter()
+            .map(|(c, _)| c.agent.clone().unwrap())
+            .collect();
+        assert_eq!(agents, ["claude:opus", "claude:opus", "codex"]);
+        let (codex, retry) = &attempts[2];
+        assert!(retry);
+        // Claude's thread stays behind; without a Session to read, Codex gets
+        // the whole task.
+        assert_eq!(codex.resume_token, None);
+        assert!(codex.task_prompt.starts_with(LIMIT_FAILOVER_PROMPT));
+        assert!(codex.task_prompt.ends_with("implement the plan"));
     }
 
     #[test]

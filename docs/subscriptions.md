@@ -184,11 +184,12 @@ unavailable and retains prior account evidence. Claude refresh coordination with
 native sessions is still under development; these comparisons do not serialize
 native refresh or credential writes.
 
-Eligible accounts are ordered by plan, then room: Codex Pro leads Plus, then
-the account whose most-used window (not yet reset) is lowest leads; declared
-route order decides ties. In shared
+Eligible accounts are ordered by plan, then reset, then room: Codex Pro leads
+Plus, then the account whose most-used window (not yet reset) resets soonest
+leads, so no account resets with quota unused; among accounts resetting
+together the lowest use leads, and declared route order decides ties. In shared
 mode the signed-in account also wins ties, so a launch switches every running
-Claude only when another account has more room. A provider session stays
+Claude only when another account ranks ahead. A provider session stays
 pinned to the account that created it so a resume does not silently switch
 identities; it moves only when that account cannot take it. Naming another
 login moves the conversation there and re-pins it:
@@ -312,7 +313,7 @@ stay as resolved, and nothing is written to your preferences. Commit messages
 and PR text fail at once, because someone is waiting for them.
 
 Open Claude Sessions need nothing either. When one hits a limit in shared mode,
-the login moves to the eligible account with the most room, and every open Claude
+the login moves to the eligible account that resets soonest, and every open Claude
 follows. Send your next message where you left off. Isolated Sessions and Codex
 keep their login until you `lf resume` them, which moves them.
 
@@ -366,8 +367,8 @@ Loopflow asks Claude whose it is before the next launch or switch and brings
 that account's stored copy up to date. If it cannot ask, a switch keeps the
 unrecognized login beside the stored accounts rather than discarding it.
 
-A shared launch moves the home to the eligible account with the most room,
-staying on the active account when nothing has more.
+A shared launch moves the home to the eligible account that resets soonest,
+staying on the active account when nothing ranks ahead of it.
 `--account codex=work@` makes that account active before launching.
 These launch-time switches do not restart Codex's shared daemon. If plain
 `codex` keeps the old login, run `lf account codex use` with the selected account.

@@ -1785,7 +1785,7 @@ impl SqliteStore {
         let mut account = match resumed {
             Some(index) => available.remove(index),
             None => {
-                crate::provider_account::order_accounts_by_room(
+                crate::provider_account::order_accounts_by_reset(
                     &mut available,
                     &limits,
                     model,

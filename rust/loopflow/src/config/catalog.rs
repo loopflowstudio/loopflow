@@ -193,7 +193,7 @@ definitions! {
         #[serde(skip)] context_budget_sources: BTreeMap<BudgetKey, String> = BTreeMap::new();
     };
     agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
-    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists";
+    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists; a comma list names the providers a step falls through to";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts";
     chrome: bool = "false", Launch, Replace, HostLocal, NextLaunch, Agents, "Enable local Chrome integration";

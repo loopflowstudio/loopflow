@@ -2040,7 +2040,6 @@ fn process_skill_agent(
             resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
-            yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
                 // Sync conflicts already name the affected paths in `context`.
                 // Embedding every authored file here makes the task prompt grow
@@ -2055,7 +2054,7 @@ fn process_skill_agent(
         },
     )?;
 
-    let agent = prepared.config.agent();
+    let agent = prepared.config.agent()?;
     let (provider, model) = crate::config::parse_agent(agent);
     let cwd = prepared
         .config
@@ -2082,7 +2081,7 @@ fn process_skill_agent(
         &context,
         Some(crate::session_record::AgentProcessRequest::from_prepared(
             &prepared.config,
-        )),
+        )?),
     )?;
 
     let launch = prepared.config;

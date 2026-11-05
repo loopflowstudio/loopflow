@@ -189,10 +189,12 @@ impl SqliteStore {
         repository: Option<&RepositoryId>,
     ) -> StoreResult<Vec<CopiedSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let machines = crate::config::placement::machine_declarations(&conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut statement = conn.prepare(
-            "SELECT r.origin_machine_id, m.label, r.key,
+            "SELECT r.origin_machine_id, r.key,
                     json_extract(r.row,'$.title'), json_extract(r.row,'$.completed_at')
-             FROM machine_records r LEFT JOIN machines m ON m.id=r.origin_machine_id
+             FROM machine_records r
              WHERE r.kind='session'
                AND (?1 IS NULL OR json_extract(r.row,'$.task_id')=?1)
                AND (?2 IS NULL OR json_extract(r.row,'$.task_id')
@@ -205,12 +207,17 @@ impl SqliteStore {
                 repository.map(RepositoryId::as_str)
             ],
             |row| {
+                let origin = MachineId::from_raw(row.get::<_, String>(0)?);
+                let origin_label = machines
+                    .iter()
+                    .find(|(_, declaration)| declaration.id == origin)
+                    .map(|(label, _)| label.clone());
                 Ok(CopiedSession {
-                    origin: MachineId::from_raw(row.get::<_, String>(0)?),
-                    origin_label: row.get(1)?,
-                    id: row.get(2)?,
-                    title: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    completed_at: row.get(4)?,
+                    origin,
+                    origin_label,
+                    id: row.get(1)?,
+                    title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    completed_at: row.get(3)?,
                 })
             },
         )?;
@@ -223,24 +230,26 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let found = conn
             .query_row(
-                "SELECT r.origin_machine_id, m.label, r.row, r.observed_at
-                 FROM machine_records r LEFT JOIN machines m ON m.id=r.origin_machine_id
-                 WHERE r.kind='session' AND r.key=?1
-                 ORDER BY r.observed_at DESC LIMIT 1",
+                "SELECT origin_machine_id, row, observed_at
+                 FROM machine_records
+                 WHERE kind='session' AND key=?1
+                 ORDER BY observed_at DESC LIMIT 1",
                 [session],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((origin, origin_label, row, copied_at)) = found else {
+        let Some((origin, row, copied_at)) = found else {
             return Ok(None);
         };
+        let origin = MachineId::from_raw(origin);
+        let origin_label =
+            super::durable::map_machine_by_id(&conn, &origin)?.and_then(|machine| machine.label);
         let row: serde_json::Value = serde_json::from_str(&row)?;
         let mut statement = conn.prepare(
             "SELECT row FROM machine_records
@@ -249,7 +258,9 @@ impl SqliteStore {
              ORDER BY CAST(key AS INTEGER)",
         )?;
         let events = statement
-            .query_map(params![origin, session], |row| row.get::<_, String>(0))?
+            .query_map(params![origin.as_str(), session], |row| {
+                row.get::<_, String>(0)
+            })?
             .map(|row| -> StoreResult<CopiedEvent> {
                 let row: serde_json::Value = serde_json::from_str(&row?)?;
                 let payload = row["payload"]
@@ -269,7 +280,7 @@ impl SqliteStore {
         let text = |name: &str| row[name].as_str().map(str::to_string);
         Ok(Some(CopiedHistory {
             session: CopiedSession {
-                origin: MachineId::from_raw(origin),
+                origin,
                 origin_label,
                 id: session.to_string(),
                 title: text("title").unwrap_or_default(),

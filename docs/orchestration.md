@@ -41,18 +41,23 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 ```
 
 A Skill's frontmatter `agent:` names its harness and model; a Graph step can
-name another for that occurrence. `-a` overrides them all, including nested
-Graphs and child `lf` commands. Without any, your configured `agent:` applies,
-then the Skill's `default_agent:`, then whichever harness is installed.
+name another for that occurrence. Explicit Graph `-a` applies to all its steps,
+including nested Graphs and routers. It is not exported to unrelated child work.
+Personal preferences can target the skill or an authored step ID;
+see [setting precedence](config.md). Use `default_agent:` in either definition
+for a fallback: every applicable `agent:` choice wins before any fallback,
+then source, scope and target decide within each class. Builtin skills recommend
+no harness; the application's fallback applies when nothing else selects one.
 
 ```markdown
 ---
-docs: [scripts/testing.md]
+context:
+  docs: [scripts/testing.md]
 ---
 Run the affected suites once for this tree.
 ```
 
-A repository Skill's `docs:` adds files to its context, resolved like `--docs`.
+A repository Skill's `context.docs` adds files to its context, resolved like `--docs`.
 
 ## Run a Graph anywhere
 

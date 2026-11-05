@@ -348,6 +348,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
 #[test]
 fn public_local_plan_matches_desktop() {
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: codex\n");
     let home = tempfile::tempdir().unwrap();
     let created = lf(
         repo.path(),

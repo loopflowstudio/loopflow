@@ -529,8 +529,6 @@ pub struct Task {
     pub branch: String,
     pub base_commit: String,
     pub parent_pr_id: Option<TaskPrId>,
-    /// Explicit choice for every Graph step; None uses the step/config defaults.
-    pub agent: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
@@ -775,7 +773,6 @@ mod tests {
             branch: "jack/ship-it".to_string(),
             base_commit: "abc".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,

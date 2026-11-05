@@ -47,6 +47,11 @@ bool lf_ended(LfSubscription *subscription);
 // with `*error` set. Free either with `lf_string_free`.
 char *lf_read(const char *read, char **error);
 
+// Inspect the catalogue, read/edit a typed destination, or explain its setting.
+// No Work store is required. Returns JSON or NULL with *error set; free either
+// string with lf_string_free. File edits use the shared configuration writer.
+char *lf_config(const char *request, char **error);
+
 // Make `write` on this thread. Returns what its `lf` command prints, or NULL
 // with `*error` set. NULL with `*error` left NULL means `lf` would send the
 // write to another Machine: nothing was written; run its `lf` command. Free

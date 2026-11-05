@@ -569,6 +569,7 @@ mod tests {
             skill: Skill::named(name),
             id: id.map(str::to_string),
             interactive,
+            interactive_name: None,
             returns,
             sources: Vec::new(),
         })

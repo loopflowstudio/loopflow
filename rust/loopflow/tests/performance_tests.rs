@@ -120,7 +120,7 @@ fn planning_statements_do_not_grow_with_its_tasks() {
                 .unwrap()
                 .execute(
                     "UPDATE tasks SET worktree=?2,
-                         checkout_machine_id=(SELECT id FROM machines WHERE route='local')
+                         checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
                      WHERE id=?1",
                     rusqlite::params![created["id"].as_str(), checkout.to_string_lossy()],
                 )
@@ -165,7 +165,7 @@ fn task_status_statements_do_not_grow_with_its_graphs() {
         .unwrap()
         .execute(
             "UPDATE tasks SET worktree=?2,
-                 checkout_machine_id=(SELECT id FROM machines WHERE route='local')
+                 checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
              WHERE id=?1",
             rusqlite::params![id, checkout.path().to_string_lossy()],
         )

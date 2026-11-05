@@ -22,7 +22,7 @@ fn lf_with(
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
-        if ["LF_", "CMUX_", "HERDR_", "REX_", "TMUX"]
+        if ["LF_", "CMUX_", "HERDR_", "TMUX"]
             .iter()
             .any(|prefix| name.starts_with(prefix))
         {

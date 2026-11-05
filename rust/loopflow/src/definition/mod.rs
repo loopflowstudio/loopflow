@@ -12,7 +12,8 @@ use crate::graph::XorDef;
 use serde::{Deserialize, Serialize};
 
 /// Kind restriction for named-definition lookup; commands are selected by the CLI tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DefinitionKind {
     Skill,
     Graph,

@@ -64,14 +64,14 @@ this review neither repeats execution nor treats delivery as containment.
 
 ## Remaining work
 
-The discovery and missing-Docker-timestamp repairs exist in this checkout at
-`d5e0b1151b`; publication and final installation remain. Publication review synced
-cleanly with main and checked the complete repair diff, including local notes.
-Calendar acceptance requires a complete ordinary hourly :17 invocation of those
-final bytes, a fresh successful receipt, matching installed digests and unchanged
-protected content. The successful manual invocation below used the pre-compress
-repair. A read-only comparison during reconciliation confirmed that the scheduled
-runner still differs from this checkout; its other four installed files match.
+The discovery and missing-Docker-timestamp repairs are published in
+[PR #1821](https://github.com/loopflowstudio/loopflow/pull/1821), at checkout HEAD
+`bba779a9a5e633b46c6684876a9f37888c2e8144`. The headless demo below installed
+and exercised these final executable bytes. This supersedes the earlier
+reconciliation observation that the installed runner differed from this checkout.
+Calendar acceptance still requires a complete ordinary hourly :17 invocation,
+a fresh successful receipt, matching installed digests and unchanged protected
+content. Neither manual invocation establishes that calendar acceptance.
 
 Sustained containment remains unverified independently of discovery performance.
 Successive ordinary-run observations must still establish coverage, growth and
@@ -79,6 +79,97 @@ target shortfall across coding repositories and tooling, with unknown measuremen
 visible. Any remaining recurring growth needs attribution and repository-owned
 prevention where applicable. Reclaimed allocation and free-space change alone do
 not establish this. No new cleanup-policy decision is needed for the current repair.
+
+## Gate — 2026-11-04
+
+Reviewed the complete change from merged PR #1820 (`6f0d98e016`) through
+`bba779a9a5`, including the uncommitted demo evidence. No code repair or additional
+policy choice emerged: inherited checkout ownership switches at nested repositories,
+registered worktrees remain discoverable, actual Git rules still authorize deletion,
+and an unknown-age Docker image does not prevent later eligible image maintenance.
+The standalone guide matches those behaviors. Existing demo notes are preserved.
+
+Check plan: `scripts/disk_cleanup.py` and `python/tests/test_disk_cleanup.py` reach
+the complete cleanup suite (101 cases); `scripts/disk-cleanup.md` and this note
+need review and whitespace checks. Architecture validation and Ruff check/format
+cover the changed Python files. The changed-aware planner selects all Python tests
+and an unrelated Rust CLI build; use the focused suite inside CI's network wrapper
+instead, leaving broader Python coverage to CI. No Rust, Swift or website inputs
+changed. This adds the network-isolated check to the earlier focused pass; it does
+not repeat the installed cleanup or performance probes.
+
+Checks below ran with inherited `LF_*` unset and stdin closed:
+
+- `uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/test_disk_cleanup.py` — 101 passed in 86.70s; broader Python coverage remains with CI.
+- `uv run python scripts/check_architecture.py` — passed, zero unexplained boundaries or stale vocabulary.
+- `uv run ruff check scripts/disk_cleanup.py python/tests/test_disk_cleanup.py` — passed.
+- `uv run ruff format --check scripts/disk_cleanup.py python/tests/test_disk_cleanup.py` — both files already formatted.
+- `git diff --check 6f0d98e016` — passed.
+
+Gate outcome: ready to continue the authored delivery steps, with no code changes.
+The earlier production timeout remains investigated as documented below, with its
+precise load-dependent cause unproven. Neither this suite nor the successful manual
+demo establishes ordinary calendar acceptance or sustained containment. Those
+verification obligations remain open; this gate does not complete LOO-722.
+
+## Headless demo — 2026-11-04, decision pass 1
+
+Experience reviewed: explicitly update the machine-local cleaner, run the existing
+launchd job, and read its cleanup receipt and successive usage measurements.
+The current design and accepted boundaries are above; the interaction is documented
+in [the standalone cleanup guide](../scripts/disk-cleanup.md).
+
+Jack Heart's earlier feedback approved PR #1820 ("lg2m ship it"), requested the
+standalone guide, and explicitly required that sustained containment remain
+unverified. That approval is historical, not fresh feedback on #1821. No person
+participated in this headless demo. The delegated decision is to **advance**:
+the repair preserves the accepted experience and the final installed bytes now
+complete a real configured run. No design change or new policy approval is inferred.
+
+The preceding pass intended to remove discovery overhead and retain Docker images
+whose creation time is unknown, while preserving deletion authority. Earlier proof
+covered the pre-compress repair. This pass adds final-byte evidence:
+
+- `scripts/disk-cleanup.sh install` first refused a busy shared recovery lock,
+  making no installation change. After its existing owner released the lock,
+  retry succeeded. No unrelated process was stopped.
+- `launchctl kickstart` invoked the configured job manually at 16:52:52 PST;
+  it completed at 16:56:39 with exit zero, no failures and `dry_run: false`.
+- Discovery completed in 28.2 seconds: 177 candidates, 93 checkouts and 18,082
+  directories. The unknown-age Docker image was retained with its explicit reason;
+  maintenance completed without the former timestamp failure. Changing inventory
+  and load make this unsuitable as a controlled performance comparison.
+- Nine acceptance checks passed: fresh receipt, successful exit, no failures,
+  finished launchd process, all five installed files matching checkout bytes,
+  unchanged hourly :17 schedule, unchanged private configuration, all six protected
+  specimen files unchanged, and the two reserved roots plus durable database
+  retaining filesystem identities. These observations do not prove every file on
+  the laptop was unchanged.
+- Removed allocation was **0 bytes**. Free space independently increased by
+  **727,846,912 bytes**, ending at 210,215,645,184 bytes with zero target shortfall.
+  No cleanup reclamation is claimed from that increase.
+- Usage history appended exactly one sample while retaining its prior 16 samples:
+  17 samples, 517,279 bytes. The latest observation has 132 roots, 33 measured and
+  99 unknown with explicit errors. There are 31 last-known comparisons, including
+  four growing and one shrinking root. Physical reconciliation remains null;
+  overlapping roots and different timestamps cannot be summed as exclusive growth.
+
+Private supporting evidence is under
+`~/.lf-machine/maintenance/disk-cleanup/evidence/20261104-LOO-722/discovery-repair/demo-final/`:
+`before.json`, `trigger.json`, `receipt-before.json`, `receipt.json`,
+`launchctl-after.txt`, `usage-before.json`, `usage-after.json`, `result.json`,
+and `public-summary.json`. Personal inventory stays there, outside the PR.
+Earlier comparison and acceptance evidence remains in the parent directory.
+
+There is no concrete implementation defect requiring a backward edge from this
+demo. Continue the authored delivery/verification steps, then inspect a fresh
+ordinary :17 receipt against the installed digests and protection snapshots.
+Keep LOO-722's sustained outcome open until successive ordinary measurements
+establish coverage and attribute recurring growth, with repository-owned prevention
+where needed. The 99 unknown measurements remain visible evidence gaps, not zeros
+or grounds to infer containment. This demo neither completes the Task nor restarts
+its Graph. No HTML review page was generated on this headless surface, and no
+process started for this demo remains running.
 
 ## Implemented repair
 

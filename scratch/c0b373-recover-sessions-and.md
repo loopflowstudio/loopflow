@@ -126,6 +126,18 @@ Still Jack's at demo, not blocking here: `scratch/questions.md` 3, 4, 11 and 16.
 Checks (implement, Nov 5, after concept review): `--lib human_session::moves_bulk::` (1) and `install::published::` (17) pass; clippy clean. Gate: `dto_fixtures::`, `served_reads`, docs check.
 Realign (Nov 5, after concept-review fixes): all three verified in code (`follow_login` reads every open interactive Session after the switch; `renew_rentals` skips non-live rentals); stale-promise grep over `docs/` returns none; one doc paragraph rewrapped; nothing rerun.
 
+## Concept review (November 5, 2026, headless, after merging #1831)
+The experience holds: "busy ones move after their turn" (`docs/sessions.md`, `docs/subscriptions.md`). The mechanism under it collides with the harness rule merged from main (Jack Heart, 2026-11-05: lf is never a middleman that can break the conversation; every hook is best-effort). `apply_pending_move_blocking` runs inside Claude's and Codex's Stop hook (`timeout: 10`):
+- it opens the full store (`SqliteStore::new`, 15s busy wait) plus a Tokio runtime on **every** Stop of every Session, move or not, instead of `open_for_hook` (1s);
+- `take_session_move` deletes the row before applying, then `new_thread` → `stop_session_agent` SIGTERMs and SIGKILLs the agent that is running the hook (up to 4s). If the host or its 10s timeout kills the hook before `append_input`, the Session is stopped with no continuation and the requested move is gone, logged only as a warning.
+
+Next implement direction (settled by the accepted decisions; the user-facing behavior does not change):
+1. The Stop hook only peeks through `open_for_hook` whether a move is pending; a store error is a recording gap. When one is pending it starts a detached (`setsid`) `lf` applier and returns at once. No runtime or full open when nothing is pending.
+2. The applier waits for the hook's turn to end, then runs the same `new_thread` path idle Sessions use. It deletes the `session_moves` row only after the new input is appended, so a failed or killed apply is retried at the next Stop instead of lost.
+3. `docs/subscriptions.md` drain line also says how to undo it (`lf account set claude jack@ --routing automatic`); drain is the one move-family command that writes routing state, as item 4 accepted.
+
+Open for Jack at demo, unchanged: `scratch/questions.md` 3, 4, 11, 16.
+
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.

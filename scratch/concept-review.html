@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>c0b373 concept review — after items 7–9</title>
+<title>c0b373 concept review — busy moves after #1831</title>
 <style>
   :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fdfdfb; --muted:#666; --rule:#ddd; --prop:#0a6b3d; --cur:#8a4b00; }
   @media (prefers-color-scheme: dark) { :root { --fg:#e8e8e4; --bg:#151515; --muted:#9a9a9a; --rule:#333; --prop:#5fd39a; --cur:#e0a35a; } }
@@ -13,7 +13,7 @@
   h1 { font-size:1.5rem; margin:0 0 .5rem; }
   h2 { font-size:1.15rem; margin:2.5rem 0 .75rem; }
   code, pre { font:.88em/1.5 ui-monospace, Menlo, monospace; }
-  pre { overflow-x:auto; padding:.9rem 1rem; border-left:3px solid var(--rule); margin:1rem 0; }
+  pre { overflow-x:auto; padding:.9rem 1rem; border-left:3px solid var(--rule); margin:1rem 0; white-space:pre-wrap; }
   .now { border-left-color:var(--cur); }
   .next { border-left-color:var(--prop); }
   .tag-now { color:var(--cur); font-weight:600; } .tag-next { color:var(--prop); font-weight:600; }
@@ -25,50 +25,48 @@
 <body>
 <main>
 <header>
-  <h1>The login belongs to the Machine</h1>
-  <p>Task c0b373 · concept-review step (headless) · November 5, 2026 · after items 7–9</p>
-  <p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>scratch/questions.md</code>, <code>ops/human_session/moves_bulk.rs</code>, <code>ops/human_session.rs</code>, <code>provider_account.rs</code>, <code>lf/commands/rental.rs</code>, <code>docs/sessions.md</code>, <code>docs/subscriptions.md</code>, <code>docs/architecture/machines.md</code>.</p>
+  <h1>A busy Session moves after its turn — without its hook ending it</h1>
+  <p>Task c0b373 · concept-review (headless, after merging #1831) · November 5, 2026</p>
+  <p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow/src/lf/commands/context.rs</code>, <code>ops/human_session/moves_bulk.rs</code>, <code>ops/human_session.rs</code>, <code>harness/agent_process.rs</code>, <code>store/sqlite.rs</code>, <code>context_block.rs</code></p>
 </header>
 
-<p>No decision is needed from this page. Item 7 made one login per provider per Machine; three things the accepted design already implies go back to implement. Questions 3, 4, 11 and 16 stay with you at demo.</p>
+<p><strong>No decision is needed here.</strong> The user-facing promise stays the same. Under it, the mechanism breaks the harness rule merged from main, and the accepted decisions already settle the fix. That fix goes back to implement.</p>
 
 <h2>Actions → concepts → APIs</h2>
 <table>
-  <tr><th>What you do</th><th>Concept</th><th>Owner</th></tr>
-  <tr><td>Continue blocked Sessions on Opus</td><td>per-Session agent move</td><td><code>lf session move --blocked -a claude:opus</code> → <code>move_agent</code></td></tr>
-  <tr><td>Put Claude on another login</td><td>Machine-wide login switch</td><td><code>lf session move … --account</code>, <code>lf account claude drain</code>, <code>lf account claude use</code> → <code>activation::activate</code></td></tr>
-  <tr><td>Resume a conversation</td><td>runs on the active login</td><td><code>lf resume</code>; legacy account-home transcripts adopted</td></tr>
-  <tr><td>Keep a rental's Claude alive</td><td>laptop-held rental login, access tokens sent</td><td><code>lf machine connect</code>, launch prefix; <span class="tag-next">schedule (proposed)</span></td></tr>
+  <tr><th>You do</th><th>Concept</th><th>API</th></tr>
+  <tr><td><code>lf session move --blocked -a claude:opus</code></td><td>Session selector, move target</td><td><code>moves_bulk::move_sessions</code></td></tr>
+  <tr><td>(idle Session)</td><td>new thread now, opens next time</td><td><code>new_thread(launch=false)</code></td></tr>
+  <tr><td>(busy Session)</td><td>pending move, applied after the turn</td><td><code>session_moves</code> row → Stop hook</td></tr>
 </table>
 
-<h2>The mismatch: a per-Session command doing a per-Machine act</h2>
-<p><code>--blocked</code> picks Sessions. <code>--account</code> switches the one login every Claude on this Machine reads. Today's report names only the picked ones.</p>
-<pre class="now"><span class="tag-now">now</span>
-$ lf session move --blocked --account work@
-moved  s-12  Claude is signed in as work@; it follows at its next request
-moved  s-31  Claude is signed in as work@; it follows at its next request
-# s-07 and s-40 (on Opus, not blocked) also moved. Nothing says so.</pre>
-<pre class="next"><span class="tag-next">next</span>
-$ lf session move --blocked --account work@
-Claude is signed in as work@; every open Claude Session follows at its next request
-moved  s-12  (blocked)
-moved  s-31  (blocked)
-moved  s-07
-moved  s-40</pre>
-<p>The selector stays required and still chooses the provider. <code>-a</code> moves stay per Session, where selection is real. <code>drain</code> reports the same way.</p>
+<h2>The mismatch</h2>
+<p><span class="tag-now">Now</span> — every Claude/Codex Stop hook (<code>timeout: 10</code>) runs:</p>
+<pre class="now">apply_pending_move_blocking(home, thread)
+  tokio::Runtime::new()                    // every Stop, move or not
+  open_store(...)                          // 15s busy wait, not open_for_hook's 1s
+  take_session_move(id)                    // row deleted here
+  new_thread(...)
+    stop_session_agent(...)                // SIGTERM, then SIGKILL, the agent running this hook
+    append_input(...)                      // never reached if the hook dies first</pre>
+<p>Failure: the host kills the hook, or its 10s timeout runs out, before <code>append_input</code>. The Session is stopped and has no continuation. The move you asked for is gone, and the only trace is a warning in <code>lf.log</code>.</p>
 
-<h2>Also going back to implement</h2>
-<ol>
-  <li><b>Two stale promises.</b> <code>docs/sessions.md</code>: “A resumed Session stays on the login it started with” → runs on the active login. <code>docs/architecture/machines.md</code>: <code>--rent</code> installs rental access tokens, not long-lived tokens.</li>
-  <li><b>Rental renewal on a schedule.</b> Item 9 accepted a scheduled out-of-band job every few hours; only connect and the launch prefix renew now. Proposed: one more entry in the schedule lf already owns (<code>lf self install schedule</code>: LaunchAgent, crontab on Linux), every 2 hours, idle when no rental is live. No new scheduler.</li>
-</ol>
+<p><span class="tag-next">Proposed</span> — the hook only checks whether a move is pending; the applier runs outside the turn:</p>
+<pre class="next">Stop hook:  open_for_hook → pending move?  no → return
+                                           yes → spawn detached lf applier, return
+            store error → recording gap, turn continues
+Applier:    wait for the turn to end → new_thread (same path as idle)
+            → delete the session_moves row only after append_input succeeds</pre>
+<p>Recovery: if an apply fails or is killed, the row stays and the next Stop tries again. What carries over: the Session's identity, its history, and the "after their turn" promise in the docs. What changes: a hook never stops its own host.</p>
 
-<h2>Still yours at demo</h2>
+<p>Small addition: the drain line in <code>docs/subscriptions.md</code> also says how to undo it (<code>lf account set claude jack@ --routing automatic</code>).</p>
+
+<h2>Still Jack's at demo</h2>
 <ol>
-  <li>Q3: a <code>seven_day_overage_included</code> rejection cools the whole account even while overage is allowed (HumanLayer parks only when it is not).</li>
-  <li>Q4: waits have no upper bound; a weekly limit can hold a step for days.</li>
-  <li>Q11: soonest-reset routing puts a 99%-used account ahead of an unobserved one.</li>
-  <li>Q16: <code>lf resume --account &lt;other&gt;</code> behind an open terminal now attaches or waits instead of ending it.</li>
+  <li>Questions 3: should <code>seven_day_overage_included</code> cool the whole account?</li>
+  <li>Questions 4: do waits need an upper bound?</li>
+  <li>Questions 11: should strained accounts that reset soonest be used first?</li>
+  <li>Questions 16: when a resume names another login behind an open terminal, it now attaches or waits. Is that acceptable?</li>
 </ol>
 </main>
 </body>

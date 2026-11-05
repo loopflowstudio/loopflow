@@ -14,7 +14,9 @@ in [rex-workspace.md](rex-workspace.md). No scope reduction, global configuratio
 change, Auto-Ship or merge is authorized.
 
 - **Native split verification:** Rex's app Split was not driven. It needs a focused
-  app window, and Jack was using the Machine. Open: which source the app prefers
+  app window, and Jack was using the Machine (again November 5: this run sat inside
+  his live Rex with active input). Both LF entry paths now have native-Rex cwd
+  evidence on an isolated server; the app's Split itself stays with the demo. Open: which source the app prefers
   when both exist (LF makes them agree), and whether it accepts LF's OSC 7 host.
 - **Assumption, reversible:** a conversation bound after launch reports its selected
   directory on later attachments, though its running provider keeps the original

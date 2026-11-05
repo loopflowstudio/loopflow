@@ -400,10 +400,17 @@ choice for Jack, not something the adapter should paper over with away detection
    inventory (above) must enforce the revised hold/release contract, including
    unfocused terminals, unavailable inventory and restored tabs. No LF closure of
    Rex shells.
-2. **Native split verification:** LF's directory path is implemented. Pressing
-   Split in the Rex app from each pane remains owed; automated checks prove both
-   sources agree, not which the app reads, or that it accepts LF's report host.
-   Herdr, Desktop and remote split proof also remain owed.
+2. **Native split verification:** LF's directory path is implemented and both
+   entry paths have native-Rex cwd evidence on an isolated server: automatic open
+   (`rex_native_workspace_keeps_window_and_block_identity`: tool `pwd` = Task,
+   shell foreground cwd = Task with no report) and manual resume from another
+   directory (`rex_manual_resume_elsewhere_reports_the_session_directory_until_it_leaves`:
+   block `pwd` and the viewer's lsof cwd = Task, Ctrl+] clears `pwd`, provider
+   launched once). Pressing Split in the Rex app from each pane remains owed to
+   the demo: it needs a focused app window, and on November 5 this run was inside
+   Jack's live Rex with active input, so it was not driven. Which source the app
+   reads, and whether it accepts LF's report host, stay unobserved. Herdr, Desktop
+   and remote split proof also remain owed.
 3. **Bare-open and remote routing:** native ancestor-based custom-server discovery
    passes the isolated host fixture; moved-viewer CLI routing passes with a
    simulated provider. Actual agent-tool invocation after viewer resume/move still
@@ -441,5 +448,7 @@ Earlier complete plans/results: `cc607dc3e1:scratch/rex-workspace.md` and
 `df3b5e810d:scratch/rex-workspace.md`. Earlier checkpoint:
 `7b886d04cc:scratch/rex-workspace.md`; dated demo evidence is in
 [workspace-demo.md](workspace-demo.md).
+
+Check (November 5 split pass, compress): shared `IsolatedRex::pwd`; clippy passed; native `rex_manual_resume_elsewhere…` 1 passed (isolated Rex, `LOOPFLOW_TEST_REX`); gate owns the combined run.
 
 Check (November 5 implement, compress, realign): lib `transport::`/`open::` 70, `work_open_tests::` 31, `documented_commands::`/`dto_fixtures::` 52 and `prepared_destination` 1 passed; clippy passed; `transport_tests` hermetic to `REX_*` 67 passed, 1 intermittent (`contended_input_retention_keeps_control_and_delivers_once_after_unlock`, 3/3 alone); native Rex restart, handoff and identity proofs passed one at a time, identity once missed its 15s arrival deadline beside restart. Realign reconciled plan and memory only, no rerun; gate owns the combined run and those intermittent cases, authored demo owns the app's Split.

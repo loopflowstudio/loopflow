@@ -2563,9 +2563,7 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         let id = block["block_id"].as_str().unwrap();
         let is_shell = block["label"] == "shell";
         loop {
-            let reported = server.block_call(container, id, "pwd")["pwd"]
-                .as_str()
-                .map(str::to_owned);
+            let reported = server.pwd(container, id);
             let process = server.block_call(container, id, "process");
             let cwd = process["foreground"]["cwd"].as_str().map(Path::new);
             let settled = if is_shell {

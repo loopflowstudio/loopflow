@@ -895,6 +895,81 @@ fn rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparati
     assert_eq!(fixture.wait_file("second"), "unfinished-continued");
 }
 
+/// Someone in an ordinary Rex terminal elsewhere resumes a live Session by hand.
+/// While attached, the terminal's process and its report both name the Task
+/// directory, so a native Split starts there; leaving withdraws the report.
+#[test]
+#[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
+fn rex_manual_resume_elsewhere_reports_the_session_directory_until_it_leaves() {
+    let fixture = Fixture::new();
+    let root = tempfile::Builder::new()
+        .prefix("rex498-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let bin = root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let rex =
+        support::rex::IsolatedRex::start(root.path(), &bin, Path::new(env!("CARGO_BIN_EXE_lf")));
+    let provider = fixture.waiting_provider();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let owner = fixture.owner(fixture.native(Path::new(lf), &provider, "manual"));
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    let elsewhere = root.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    let (pid, left) = (root.path().join("viewer.pid"), root.path().join("left"));
+    let script = r#"cd "$1" && /bin/sh -c 'printf %s "$$" > "$0"; exec "$@"' "$2" env HOME="$3" LF_HOME="$3" LF_BIN="$4" RUST_LOG=off "$4" session resume "$5"; printf left > "$6"; exec /bin/cat"#;
+    let created = rex.call(
+        "session.create",
+        json!({"label":"manual","initial_windows":[{"window_label":"manual","layout":{"block":{
+            "flavor":"com.superlogical.terminal.shell","options":{"shell":"none","cwd":elsewhere,
+            "command":["/bin/sh","-c",script,"manual",elsewhere,pid,fixture.home.path(),lf,session,left]}}}}]}),
+    );
+    let container = created["session_id"].as_str().unwrap().to_owned();
+    let block = rex.block_ids(&container).remove(0);
+    let checkout = fixture.repo.path().canonicalize().unwrap();
+    let reported = || rex.pwd(&container, &block);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let task_url = format!("{}/", checkout.display());
+    while !reported().is_some_and(|url| url.ends_with(&task_url)) {
+        assert!(
+            Instant::now() < deadline,
+            "no Task report: {:?}\n{}",
+            reported(),
+            rex.screen(&container, &block)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Rex's login wrapper can hide the viewer's cwd from the host; read the
+    // launcher-written viewer process directly.
+    let viewer = std::fs::read_to_string(&pid).unwrap();
+    let lsof = Command::new("lsof")
+        .args(["-a", "-d", "cwd", "-Fn", "-p", viewer.trim()])
+        .output()
+        .unwrap();
+    let cwd = String::from_utf8_lossy(&lsof.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix('n').map(PathBuf::from))
+        .expect("viewer cwd");
+    assert_eq!(cwd.canonicalize().unwrap(), checkout);
+
+    rex.write(&container, &block, "\u{1d}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !left.exists() || reported().is_some() {
+        assert!(
+            Instant::now() < deadline,
+            "report outlived the viewer: {:?}",
+            reported()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Resuming attached to the running provider; leaving never ended it.
+    let launches = std::fs::read_to_string(fixture.home.path().join("launches")).unwrap();
+    assert_eq!(launches.lines().count(), 1, "{launches}");
+    fixture.viewer(&owner, true).input("done\n");
+}
+
 #[test]
 fn automatic_attachment_preserves_an_existing_viewers_control() {
     let fixture = Fixture::new();

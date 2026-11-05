@@ -152,6 +152,13 @@ impl IsolatedRex {
         serde_json::from_slice(&output.stdout).unwrap()
     }
 
+    /// The directory the block reports through OSC 7, if any.
+    pub fn pwd(&self, session: &str, block: &str) -> Option<String> {
+        self.block_call(session, block, "pwd")["pwd"]
+            .as_str()
+            .map(str::to_owned)
+    }
+
     /// Type into a terminal the way a person would.
     pub fn write(&self, session: &str, block: &str, data: &str) {
         let output = self

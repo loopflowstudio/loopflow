@@ -204,7 +204,13 @@ fn snapshot_preview_fixture() {
             assert!(matches!(request.request, Request::Leave));
         }
     });
-    let result = attach_with_terminal(&owner, None, preview, observing.then_some(SESSION));
+    let result = attach_with_terminal(
+        &owner,
+        None,
+        preview,
+        observing.then_some(SESSION),
+        &mut || {},
+    );
     if lost_transfer {
         assert!(result
             .unwrap_err()

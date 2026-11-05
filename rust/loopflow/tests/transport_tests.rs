@@ -36,6 +36,39 @@ impl Drop for PausedOwner {
     }
 }
 
+struct PlacedProvider {
+    owner: String,
+    session: String,
+    agent: String,
+    attachment: String,
+}
+
+impl PlacedProvider {
+    fn placement(&self, fixture: &Fixture) -> String {
+        fixture
+            .sql()
+            .query_row(
+                "SELECT terminal_id FROM processes WHERE id=?1",
+                [&self.owner],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    /// Transfer moves input, never the provider's own attachment.
+    fn assert_attachment_unchanged(&self, fixture: &Fixture) {
+        let token: String = fixture
+            .sql()
+            .query_row(
+                "SELECT attachment_token FROM processes WHERE id=?1",
+                [&self.agent],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(token, self.attachment);
+    }
+}
+
 impl Fixture {
     fn new() -> Self {
         Self {
@@ -54,8 +87,8 @@ impl Fixture {
     fn command_from(&self, program: &Path, args: &[&str]) -> Command {
         let mut command = Command::new(program);
         for (key, _) in std::env::vars_os() {
-            // An inherited cmux workspace would receive the fixture Session's name.
-            if ["LF_", "LOOPFLOW_", "CMUX_"]
+            // An inherited host workspace would receive the fixture Session's name.
+            if ["LF_", "LOOPFLOW_", "CMUX_", "REX_"]
                 .iter()
                 .any(|prefix| key.to_string_lossy().starts_with(prefix))
             {
@@ -198,6 +231,43 @@ impl Fixture {
     }
     fn sql(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
+    }
+
+    /// A live two-line provider whose Session is placed at `rex:source`.
+    fn placed_provider(&self) -> PlacedProvider {
+        let owner = self.start(&[
+            "/bin/sh", "-c",
+            "stty -echo; read -r first; printf '%s' \"$first\" > \"$HOME/first\"; read -r second; printf '%s' \"$second\" > \"$HOME/second\"",
+        ]);
+        let session = self.session(&owner);
+        let agent = uuid::Uuid::new_v4().to_string();
+        let attachment = uuid::Uuid::new_v4().to_string();
+        let sql = self.sql();
+        sql.execute(
+            "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
+                started_at,agent_session_id,agent_provider,agent_interactive,spawn_state,
+                attached_lf_process_id,attachment_token)
+             SELECT ?1,'agent',trace_id,id,'fixture',repo,cwd,started_at,?2,'claude',1,'spawn_requested',id,?3
+             FROM processes WHERE id=?4",
+            rusqlite::params![agent, session, attachment, owner],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET agent_process_id=?1 WHERE id=?2",
+            rusqlite::params![agent, session],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE processes SET terminal_id='rex:source' WHERE id=?1",
+            [&owner],
+        )
+        .unwrap();
+        PlacedProvider {
+            owner,
+            session,
+            agent,
+            attachment,
+        }
     }
 
     fn pause(&self, owner: &str) -> PausedOwner {
@@ -650,54 +720,21 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
 #[test]
 fn prepared_destination_preserves_source_input_until_explicit_transfer() {
     let fixture = Fixture::new();
-    let owner = fixture.start(&[
-        "/bin/sh", "-c",
-        "stty -echo; read -r first; printf '%s' \"$first\" > \"$HOME/first\"; read -r second; printf '%s' \"$second\" > \"$HOME/second\"",
-    ]);
-    let session = fixture.session(&owner);
-    let agent = uuid::Uuid::new_v4().to_string();
-    let attachment = uuid::Uuid::new_v4().to_string();
-    let sql = fixture.sql();
-    sql.execute(
-        "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
-            started_at,agent_session_id,agent_provider,agent_interactive,spawn_state,
-            attached_lf_process_id,attachment_token)
-         SELECT ?1,'agent',trace_id,id,'fixture',repo,cwd,started_at,?2,'claude',1,'spawn_requested',id,?3
-         FROM processes WHERE id=?4",
-        rusqlite::params![agent, session, attachment, owner],
-    )
-    .unwrap();
-    sql.execute(
-        "UPDATE agent_sessions SET agent_process_id=?1 WHERE id=?2",
-        rusqlite::params![agent, session],
-    )
-    .unwrap();
-    sql.execute(
-        "UPDATE processes SET terminal_id='rex:source' WHERE id=?1",
-        [&owner],
-    )
-    .unwrap();
-    let placement = || {
-        sql.query_row(
-            "SELECT terminal_id FROM processes WHERE id=?1",
-            [&owner],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap()
-    };
-    let mut source = fixture.viewer(&owner, true);
+    let provider = fixture.placed_provider();
+    let (owner, session) = (&provider.owner, &provider.session);
+    let mut source = fixture.viewer(owner, true);
     source.input("source-");
     // A lost preparation reply cannot grant input or revoke the source claim.
-    let mut uncertain = fixture.connect(&owner);
+    let mut uncertain = fixture.connect(owner);
     uncertain.request(json!({"kind":"attach","control":false,"replace":false,
         "rows":24,"cols":80,"session":session,"placement":"rex:uncertain"}));
     drop(uncertain);
-    let mut destination = fixture.viewer(&owner, false);
+    let mut destination = fixture.viewer(owner, false);
     let destination_id = destination.id.clone();
     assert!(destination.token.is_none());
     source.input("retained\n");
     assert_eq!(fixture.wait_file("first"), "source-retained");
-    assert_eq!(placement(), "rex:source");
+    assert_eq!(provider.placement(&fixture), "rex:source");
     source.input("unfinished-");
     // The prepared connection itself requests transfer; no new provider or viewer.
     destination.request(json!({"kind":"attach","control":true,"replace":true,
@@ -706,19 +743,155 @@ fn prepared_destination_preserves_source_input_until_explicit_transfer() {
     assert_eq!(accepted["viewer"], destination_id);
     destination.accept(&accepted);
     assert!(destination.token.is_some());
-    assert_eq!(placement(), "rex:destination");
-    let retained: String = sql
-        .query_row(
-            "SELECT attachment_token FROM processes WHERE id=?1",
-            [&agent],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(retained, attachment);
+    assert_eq!(provider.placement(&fixture), "rex:destination");
+    provider.assert_attachment_unchanged(&fixture);
     source.until_event("control");
     source.input("stale\n");
     destination.input("continued\n");
     destination.finish();
+    assert_eq!(fixture.wait_file("second"), "unfinished-continued");
+}
+
+/// The composed handoff on a real Rex server and a real owner. A stalled owner
+/// leaves a retained failed observer; reopening reuses that destination, an
+/// explicit retry prepares beside it, and input moves only after acknowledgement.
+#[test]
+#[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
+fn rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparation() {
+    let fixture = Fixture::new();
+    let root = tempfile::Builder::new()
+        .prefix("rex498-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let bin = root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let rex =
+        support::rex::IsolatedRex::start(root.path(), &bin, Path::new(env!("CARGO_BIN_EXE_lf")));
+    support::register_task_without_pr(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "main",
+        &fixture.repo.head_sha(),
+    );
+    let provider = fixture.placed_provider();
+    let (owner, session) = (&provider.owner, &provider.session);
+    let bound = fixture
+        .command(&["session", "bind", session, "--task", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(bound.status.success(), "{bound:?}");
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let open = |args: &[&str]| -> Value {
+        let output = fixture.command(args).env("PATH", &path).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let args = [
+        "open",
+        "--task",
+        "INF-123",
+        "--host",
+        "rex",
+        "--server",
+        &rex.endpoint,
+        "--copy",
+        "review",
+        "--no-focus",
+        "--json",
+    ];
+
+    let mut source = fixture.viewer(owner, true);
+    source.input("source-");
+
+    // The destination is created while the owner cannot answer its observer.
+    let paused = fixture.pause(owner);
+    let created = open(&args);
+    let window = created["receipts"][0]["destination"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(created["receipts"][0]["status"], "opening");
+    assert_ne!(
+        created["receipts"][0]["conversations"][0]["state"],
+        "connected"
+    );
+    let container = rex.call("session.list", json!({}))["sessions"][0]["session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let retained = rex.block_ids(&container);
+
+    // Repeating the named copy reuses it until the observer's attempt expires.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let conversation = loop {
+        let report = open(&args);
+        assert_eq!(report["receipts"][0]["destination"], window.as_str());
+        let conversation = report["receipts"][0]["conversations"][0].clone();
+        if !conversation["retry_argv"].as_array().unwrap().is_empty()
+            && conversation["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("did not acknowledge"))
+        {
+            break conversation;
+        }
+        assert!(Instant::now() < deadline, "{conversation}");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(conversation["state"], "uncertain");
+    assert_eq!(
+        rex.block_ids(&container),
+        retained,
+        "reopen replayed a pane"
+    );
+    drop(paused);
+
+    // The source kept input through the uncertain preparation.
+    source.input("retained\n");
+    assert_eq!(fixture.wait_file("first"), "source-retained");
+    assert_eq!(provider.placement(&fixture), "rex:source");
+    source.input("unfinished-");
+
+    // The explicit retry prepares beside the retained failed pane.
+    let mut retry: Vec<&str> = conversation["retry_argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(1)
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    retry.push("--json");
+    let retried = open(&retry);
+    assert_eq!(retried["receipts"][0]["destination"], window.as_str());
+    assert_eq!(
+        retried["receipts"][0]["conversations"][0]["state"], "connected",
+        "{retried}"
+    );
+    assert_eq!(
+        provider.placement(&fixture),
+        "rex:source",
+        "preparation took input"
+    );
+    let blocks = rex.block_ids(&container);
+    let prepared = blocks
+        .iter()
+        .find(|block| !retained.contains(block))
+        .expect("a new observer beside the retained pane");
+    assert_eq!(blocks.len(), retained.len() + 1);
+    assert!(retained.iter().any(|block| {
+        rex.screen(&container, block)
+            .contains("did not acknowledge")
+    }));
+
+    // Ctrl+R on the prepared pane moves input; the provider never restarted.
+    rex.write(&container, prepared, "\u{12}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while provider.placement(&fixture) == "rex:source" {
+        assert!(Instant::now() < deadline, "input did not move");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    source.until_event("control");
+    provider.assert_attachment_unchanged(&fixture);
+    rex.write(&container, prepared, "continued\n");
     assert_eq!(fixture.wait_file("second"), "unfinished-continued");
 }
 

@@ -4,28 +4,32 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use super::{viewer_argv, Presentation, SqliteStore, ViewContent};
+use super::{observer, tool_cwd, viewer_argv, Presentation, SqliteStore, ViewContent};
 use crate::transport::local_directory_report;
 use crate::work::selection::{BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis};
 
 // Render each host directly. Neither host's wire format is shared layout state.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Host<'a> {
-    Rex(&'a str),
+    /// A server, and the destination its Conversation observers report to.
+    Rex(&'a str, Option<&'a str>),
     Herdr,
 }
 
 impl Host<'_> {
     pub(super) fn conversation(self, cwd: &Path, session: &str) -> Result<Value> {
-        let mut block = self.block(
-            "Conversation",
-            cwd,
-            viewer_argv(cwd, &["session", "view", session])?,
-        );
-        if matches!(self, Self::Rex(_)) {
+        let mut words = vec!["session", "view", session];
+        if let Self::Rex(_, Some(key)) = self {
+            words.extend(["--observer", key]);
+        }
+        let mut block = self.block("Conversation", cwd, viewer_argv(cwd, &words)?);
+        if let Self::Rex(_, key) = self {
             // Keep history and failed preparation visible for Task and Wave
             // conversations. Observer exit never invites command replay.
             block["block"]["options"]["exit"] = json!({"on_completion": false});
+            if let Some(key) = key {
+                observer::expect(key, session)?;
+            }
         }
         Ok(block)
     }
@@ -35,7 +39,7 @@ impl Host<'_> {
     /// only directory a native split can inherit.
     pub(super) fn block(self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
         let argv = match (self, local_directory_report(cwd)) {
-            (Self::Rex(_), Some(report)) => [
+            (Self::Rex(..), Some(report)) => [
                 "/bin/sh".into(),
                 "-c".into(),
                 r#"printf %s "$1"; shift; exec "$@""#.into(),
@@ -54,7 +58,7 @@ impl Host<'_> {
     /// process cwd, and a report made at launch would outlive its first `cd`.
     fn terminal(self, label: &str, cwd: &Path, mut argv: Vec<String>) -> Value {
         match self {
-            Self::Rex(server) => {
+            Self::Rex(server, _) => {
                 // Rex omits its endpoint from native child environments. Carry it
                 // through argv so tools and their shells return to this server.
                 argv.splice(0..0, ["env".into(), format!("REX_SERVER={server}")]);
@@ -66,7 +70,7 @@ impl Host<'_> {
 
     fn split(self, axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
         match self {
-            Self::Rex(_) => json!({"split":{
+            Self::Rex(..) => json!({"split":{
                 "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
                 "ratio": ratio, "before": before, "after": after,
             }}),
@@ -91,10 +95,7 @@ pub(super) fn layout(
     presentation: Presentation<'_>,
     host: Host<'_>,
 ) -> Result<(Value, usize)> {
-    let cwd = content
-        .location
-        .as_ref()
-        .map_or(repo, |location| Path::new(&location.cwd));
+    let cwd = tool_cwd(content, repo);
     let tools = Tools { host, content, cwd };
     let Some(location) = &content.location else {
         return Ok((tools.task_view()?, 0));
@@ -327,7 +328,7 @@ mod tests {
             argv: None,
             unavailable: vec![],
         };
-        for host in [Host::Rex("unix:///task.sock"), Host::Herdr] {
+        for host in [Host::Rex("unix:///task.sock", None), Host::Herdr] {
             let tools = Tools {
                 host,
                 content: &content,
@@ -345,7 +346,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(shells, expected_shells);
                 let (conversation, secondary, files) = match host {
-                    Host::Rex(_) => {
+                    Host::Rex(..) => {
                         assert_eq!(native["split"]["direction"], "horizontal");
                         let second = &native["split"]["after"];
                         let files = if shells == 1 {
@@ -383,17 +384,17 @@ mod tests {
                     let command = pane["command"].as_array().unwrap();
                     assert_eq!(
                         command[0] == "env" && command[1] == "REX_SERVER=unix:///task.sock",
-                        matches!(host, Host::Rex(_))
+                        matches!(host, Host::Rex(..))
                     );
-                    assert_eq!(reports(pane), matches!(host, Host::Rex(_)));
+                    assert_eq!(reports(pane), matches!(host, Host::Rex(..)));
                 }
-                if let (Host::Rex(_), 1) = (host, shells) {
+                if let (Host::Rex(..), 1) = (host, shells) {
                     let shell = &secondary["split"]["before"]["block"]["options"];
                     assert!(shell.to_string().contains("\"shell\""));
                     assert!(!reports(shell), "a shell's own cwd must follow cd");
                 }
                 let viewing = conversation["command"].as_array().unwrap();
-                if matches!(host, Host::Rex(_)) {
+                if matches!(host, Host::Rex(..)) {
                     assert_eq!(conversation["exit"]["on_completion"], false);
                 }
                 assert!(viewing

@@ -581,32 +581,33 @@ Home, preserving historical authors and review authority.
 LOO-297's read failed without Linear credentials; local absence is not remote
 absence, so repairs need a fresh authorized read. These records changed no Task.
 
-## Native host workspaces (LOO-498/717, revised 2026-11-04)
+## Native host workspaces (LOO-498/717, revised 2026-11-05)
 
 Jack Heart selected Rex first, bounded Herdr second. November 4: one-way LF
 templates; Rex owns edits, shells and restoration.
 Reopen preserves native work; confirmed absence permits template launch.
-IDs/receipts support reuse and uncertain creation, never retention or replay.
-Named copies and prepared handoff remain required. Transport now separates passive
-attachment from explicit input transfer; fixtures preserve source input and provider
-identity. Workspace receipts still describe native creation, not observer readiness;
-composed retry and configured handoff remain unproved.
-Started Tasks arrive passively; backlog is explicit. Isolated passes prove neither
-configured agent tools nor remote interaction. Native splits must use their Task's worktree/Machine.
-Revision-8 raw splits start in HOME; no scoped setter was found. App Split remains
-unproved; a passing shortcut would not repair the API case.
+IDs/receipts support reuse and uncertain creation, not retention or replay.
+Named copies and prepared handoff remain required. Transport separates passive
+attachment from explicit input transfer. Receipts describe native creation, not
+observer readiness; composed retry and configured handoff are unproved.
+Started Tasks arrive passively; backlog is explicit. Native splits must use their
+Task's worktree/Machine.
+Jack (November 5): a raw split without cwd starting in HOME is no verdict; no
+scoped-default API is needed; the app inherits the source terminal's reported or process
+directory. The owner publishes its directory to viewers; controllers withdraw it on
+leaving; shells never report. App Split unproved.
 
 Jack superseded Rex away/native-settlement: retained Task Session terminals prevent
 cleanup regardless of focus; confirmed final removal releases the hold, unknown
 does not. LF cleans Desktop-owned shells only. LOO-717 owns shared lifetime;
-its older settlement API still needs revision. Requested work finishes first;
-unfinished checkouts survive Close. Deleted-checkout reconstruction is excluded.
+its settlement API needs revision. Requested work finishes first;
+unfinished checkouts survive Close. Deleted-checkout reconstruction excluded.
 Desktop: two-minute eligible-idle and fifteen-minute completed-and-away cleanup;
-return cancels. Dirty files do not veto cleanup; changed committed refs stay protected.
+return cancels. Dirty files do not veto; changed committed refs stay protected.
 
-#1818 protects active input on failed attachment. #1807 binding preserves execution,
-which may retain its old cwd: replayed provider directory reports cannot own Task split defaults.
-Contract and evidence limits: docs/workspaces.md.
+#1818 protects active input on failed attachment. #1807 binding keeps the provider's
+cwd; later attachments report the selected directory instead.
+Contract: docs/workspaces.md.
 
 
 ## Workspace redesign decisions

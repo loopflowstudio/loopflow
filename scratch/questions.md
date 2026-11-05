@@ -1,6 +1,6 @@
 # LOO-498 — remaining design judgments
 
-**Reconciled November 4, 2026.** Jack Heart approved the revised build: LF templates
+**Reconciled November 5, 2026.** Jack Heart approved the revised build: LF templates
 flow one way into Rex; Rex owns native edits, shells and restoration. A retained Rex
 Task Session terminal prevents cleanup regardless of focus. LF cleans Desktop-owned
 shells only. Rex away detection, native closure and settlement are superseded.
@@ -54,6 +54,22 @@ This keeps preparation and explicit transfer on one destination connection; no
 resume command runs during native creation. Ctrl+] continues to leave the viewer.
 The shortcut is a reversible interaction choice, not a change to named copies,
 native ownership, or the required configured handoff demonstration.
+
+Implementation choices, November 5, all reversible:
+
+- **Fourth readiness state:** the plan named connected, failed and uncertain.
+  `history` was added because a Session with no live owner has nothing to connect
+  to; calling that failed would offer a pointless retry on most idle Tasks. It gets
+  no retry, and `lf resume` continues it. A pane showing history does not upgrade if
+  the Session goes live later.
+- **Retry shape:** `--retry-observers` adds a new pane rather than restarting the
+  retained one, so its error stays visible and nothing replays. Repeated retries
+  after panes fail accumulate panes; Rex owns closing them.
+- **Exit status:** `lf open` exits by native results only. A failed observer is
+  reported in the receipt without failing the command. Readiness-gating scripts
+  read `conversations`.
+- **Leaving looks like failure:** Ctrl+], a finished conversation and a host restart
+  all read `failed` ("no longer running"), because only the lock's absence is known.
 
 [workspace-demo.md](workspace-demo.md) preserves the failed configured opening,
 later disposable real-data demonstration and native Split review still owed.

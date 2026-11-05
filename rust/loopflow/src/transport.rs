@@ -1785,7 +1785,7 @@ fn attach_with_preview(
     crate::journal::carry_across_exec(&mut command)?;
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
-    attach_with_terminal(id, moved, terminal, None)
+    attach_with_terminal(id, moved, terminal, None, &mut || {})
 }
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
@@ -1835,20 +1835,30 @@ pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     } else {
         None
     };
-    attach_with_terminal(id, moved, terminal, None)
+    attach_with_terminal(id, moved, terminal, None, &mut || {})
 }
 
 /// Observe an existing execution; only an explicit action after acknowledgement
 /// requests input. This never starts an owner or resumes a provider.
-pub(crate) fn observe(id: &LfProcessId, session: &str) -> Result<()> {
-    attach_with_terminal(id, None, None, Some(session))
+pub(crate) fn observe(
+    id: &LfProcessId,
+    session: &str,
+    acknowledged: &mut dyn FnMut(),
+) -> Result<()> {
+    attach_with_terminal(id, None, None, Some(session), acknowledged)
 }
+
+/// The owner went quiet before answering, so the request may or may not have landed.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(crate) struct OutcomeUnknown(&'static str);
 
 fn attach_with_terminal(
     id: &LfProcessId,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
     observe_session: Option<&str>,
+    acknowledged: &mut dyn FnMut(),
 ) -> Result<()> {
     let take_control = observe_session.is_none();
     let mut preview = terminal.is_some();
@@ -1884,7 +1894,7 @@ fn attach_with_terminal(
         title.tick();
         anyhow::ensure!(
             acknowledgement_deadline.is_none_or(|deadline| Instant::now() < deadline),
-            "Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed"
+            OutcomeUnknown("Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed")
         );
         let mut fds = [
             libc::pollfd {
@@ -1912,7 +1922,10 @@ fn attach_with_terminal(
         if fds[0].revents != 0 {
             let mut bytes = [0; 16384];
             let n = socket.read(&mut bytes)?;
-            anyhow::ensure!(n != 0, "Execution owner disconnected; outcome is unknown");
+            anyhow::ensure!(
+                n != 0,
+                OutcomeUnknown("Execution owner disconnected; outcome is unknown")
+            );
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 let pieces = match tag {
@@ -1928,6 +1941,7 @@ fn attach_with_terminal(
                                 ..
                             } => {
                                 acknowledgement_deadline = None;
+                                acknowledged();
                                 controlled = claim.is_some();
                                 owned = owner.as_ref() == Some(&viewer);
                                 scanner = Some(Scanner::new(&nonce));

@@ -702,6 +702,18 @@ cargo nextest run -p loopflow --lib -E 'test(linear::) | test(ops::linear::) | t
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
+### Native Rex proofs
+
+Installed-host tests are `#[ignore]`d and use `support::rex::IsolatedRex`, which
+refuses unqualified CLI requests so a fixture cannot reach your own server. Run
+them one at a time: together they can miss a follower's arrival deadline.
+
+```bash
+export LOOPFLOW_TEST_REX="$(command -v rex)"
+cargo test -p loopflow --test integration rex_restart_reuses -- --ignored
+cargo test -p loopflow --test transport_tests rex_failed_observer -- --ignored
+```
+
 ### Test without an installed Loopflow
 
 Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`

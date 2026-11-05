@@ -800,6 +800,7 @@ fn view_plan(
                     no_focus: false,
                     local_workspace: false,
                     arrive_task: None,
+                    retry_observers: false,
                     files: Vec::new(),
                     url: None,
                     host: super::open::OpenHost::Desktop,

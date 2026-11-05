@@ -504,7 +504,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
+    /// Open Work in Desktop, this Rex/Herdr/cmux/tmux host or a terminal
     Open(commands::open::OpenArgs),
     /// Run an inline prompt
     #[command(name = ":")]
@@ -1680,7 +1680,12 @@ pub enum SessionCommand {
         agent_process: Option<String>,
     },
     /// Observe a conversation without taking input or starting a provider
-    View { id: String },
+    View {
+        id: String,
+        /// Report attachment to the workspace destination that launched this view
+        #[arg(long, hide = true)]
+        observer: Option<String>,
+    },
     /// Read this conversation's native start, usage and completion receipts
     History {
         /// Session ID or provider conversation ID

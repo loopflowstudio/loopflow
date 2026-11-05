@@ -5,6 +5,7 @@ use std::process::{Command, Output};
 
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
+use support::rex::IsolatedRex;
 use support::{register_task_without_pr, EnvGuard};
 
 /// Native host fixtures own the server and every terminal process it starts.
@@ -2175,6 +2176,297 @@ fn rex_activates_a_named_passive_copy_once_even_when_the_split_reply_is_lost() {
     }
 }
 
+/// A session that looks live but whose owner has no socket, so observers fail.
+fn unreachable_owner(home: &Path, session: &str) {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let owner = loopflow::id::LfProcessId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,started_at,pid,os_started_at)
+         SELECT ?1,?1,1,p.pid,p.os_started_at FROM processes p
+         JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?2",
+        rusqlite::params![owner, session],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id=?2",
+        rusqlite::params![owner, session],
+    )
+    .unwrap();
+}
+
+#[test]
+fn rex_native_receipts_are_not_readiness_and_retries_never_touch_the_retained_pane() {
+    use std::os::unix::process::CommandExt;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let provider = NativeServer(
+        Command::new("/bin/sleep")
+            .arg("3600")
+            .process_group(0)
+            .spawn()
+            .unwrap(),
+    );
+    let session = live_conversation(
+        home.path(),
+        &provider.0,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        repo.path(),
+        "Observed conversation",
+        0,
+        1,
+    );
+    json(&lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["session", "bind", &session, "--task", "INF-123", "--json"],
+    ));
+    unreachable_owner(home.path(), &session);
+    rex_peer(bin.path());
+    let args = [
+        "open",
+        "--task",
+        "INF-123",
+        "--host",
+        "rex",
+        "--copy",
+        "review",
+        "--no-focus",
+        "--json",
+    ];
+
+    // Native creation succeeded, and that proves nothing about the conversation.
+    let created = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    let receipt = &created["receipts"][0];
+    assert_eq!(receipt["status"], "opening");
+    assert_eq!(receipt["destination"], "window:fixture");
+    assert_eq!(receipt["conversations"][0]["session"], session.as_str());
+    assert_eq!(receipt["conversations"][0]["state"], "uncertain");
+
+    // The pane's own observer runs and fails, leaving its error in that pane.
+    let windows = bin.path().join("session.new_window.requests");
+    let request = std::fs::read_to_string(&windows).unwrap();
+    let launch: Value = serde_json::from_str(request.trim()).unwrap();
+    let argv = launch.to_string();
+    let key = argv
+        .split("\"--observer\",\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("the conversation pane reports to its destination");
+    let failed = lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["session", "view", &session, "--observer", key],
+    );
+    assert!(!failed.status.success());
+
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture","label":"Copy"}]}),
+    );
+    rex_reply(
+        bin.path(),
+        "session.view",
+        serde_json::json!({"windows":[{"window_id":"window:fixture","label":"Native edits"}]}),
+    );
+    let repeated = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    let receipt = &repeated["receipts"][0];
+    let conversation = &receipt["conversations"][0];
+    assert_eq!(receipt["status"], "opening");
+    assert_eq!(receipt["destination"], "window:fixture");
+    assert_eq!(conversation["state"], "failed");
+    assert!(
+        conversation["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Execution owner is unavailable"),
+        "{conversation}"
+    );
+    assert!(!bin.path().join("session.new_split.requests").exists());
+    assert_eq!(std::fs::read_to_string(&windows).unwrap(), request);
+
+    // The offered action adds beside the pane. A lost reply fences another.
+    let retry: Vec<&str> = conversation["retry_argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(1)
+        .map(|word| word.as_str().unwrap())
+        .chain(["--json"])
+        .collect();
+    assert!(retry.contains(&"--copy") && retry.contains(&"--retry-observers"));
+    std::fs::write(bin.path().join("session.new_split.reply"), "lost reply").unwrap();
+    let lost = lf(home.path(), repo.path(), Some(bin.path()), &retry);
+    assert!(!lost.status.success());
+    let fenced = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert_eq!(
+        fenced["receipts"][0]["conversations"][0]["state"],
+        "uncertain"
+    );
+    assert_eq!(
+        fenced["receipts"][0]["conversations"][0]["retry_argv"],
+        serde_json::json!([])
+    );
+    let repeated_retry = lf(home.path(), repo.path(), Some(bin.path()), &retry);
+    assert!(repeated_retry.status.success());
+    let splits = std::fs::read_to_string(bin.path().join("session.new_split.requests")).unwrap();
+    assert_eq!(splits.lines().count(), 1, "a lost reply must not duplicate");
+    let split: Value = serde_json::from_str(splits.trim()).unwrap();
+    assert_eq!(split["window_id"], "window:fixture");
+    assert_eq!(split["focus"], false);
+    assert_eq!(std::fs::read_to_string(windows).unwrap(), request);
+}
+
+/// Restart keeps native identities but ends every program in them.
+#[test]
+#[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
+fn rex_restart_reuses_survivors_relaunches_confirmed_absence_and_keeps_uncertainty_unknown() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::Builder::new()
+        .prefix("rex498-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let repo = TestRepo::new();
+    let home = root.path().join("lf");
+    std::fs::create_dir(&home).unwrap();
+    let _env = EnvGuard::with_lf_home(&[], &home);
+    register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
+    let bin = root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    host(
+        &bin,
+        "open",
+        "Desktop is excluded from this isolated Rex test",
+        1,
+    );
+    // Every tool launch passes through here, so the file counts replays.
+    let launches = root.path().join("launches");
+    let viewer = bin.join("lf-viewer");
+    std::fs::write(
+        &viewer,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nexec '{}' \"$@\"\n",
+            launches.display(),
+            env!("CARGO_BIN_EXE_lf"),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&viewer, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut server = IsolatedRex::start(root.path(), &bin, &viewer);
+    let endpoint = server.endpoint.clone();
+    let args = [
+        "open",
+        "--task",
+        "INF-123",
+        "--host",
+        "rex",
+        "--server",
+        &endpoint,
+        "--no-focus",
+        "--json",
+    ];
+    let open = || {
+        lf_command(&home, repo.path(), Some(&bin), &[], &args)
+            .env("LF_BIN", &viewer)
+            .output()
+            .unwrap()
+    };
+    let launched = || {
+        std::fs::read_to_string(&launches)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let settled = |count: usize| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while launched() < count {
+            assert!(std::time::Instant::now() < deadline, "tools did not launch");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        // A replay would show up here.
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        assert_eq!(launched(), count);
+    };
+
+    let first = json(&open());
+    let window = first["receipts"][0]["destination"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    settled(2);
+    let container = server.call("session.list", serde_json::json!({}))["sessions"][0]["session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let blocks = server.block_ids(&container);
+
+    // An unreachable server is unknown, not absence: nothing is recreated.
+    server.stop();
+    let unavailable = open();
+    assert!(!unavailable.status.success());
+    let report: Value = serde_json::from_slice(&unavailable.stdout).unwrap();
+    assert_eq!(report["receipts"][0]["status"], "failed", "{report}");
+    assert_eq!(launched(), 2);
+
+    // Surviving destinations are reused; their fresh shells receive no commands.
+    server.restart();
+    let reopened = json(&open());
+    assert_eq!(reopened["receipts"][0]["destination"], window.as_str());
+    assert!(reopened["receipts"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("without replaying commands"));
+    assert_eq!(server.block_ids(&container), blocks);
+    settled(2);
+
+    // Confirmed absence permits one relaunch from the template.
+    server.call(
+        "session.close_window",
+        serde_json::json!({"session_id":container,"window_id":window}),
+    );
+    let relaunched = json(&open());
+    let replacement = relaunched["receipts"][0]["destination"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(replacement, window);
+    settled(4);
+    assert_eq!(
+        json(&open())["receipts"][0]["destination"],
+        replacement.as_str()
+    );
+    settled(4);
+
+    // An unanswered creation across a restart stays unknown even with the window gone.
+    server.call(
+        "session.close_window",
+        serde_json::json!({"session_id":container,"window_id":replacement}),
+    );
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE host_work_occurrences SET destination_id=NULL,creation='pending'",
+            [],
+        )
+        .unwrap();
+    server.restart();
+    let unknown = open();
+    assert!(!unknown.status.success());
+    let report: Value = serde_json::from_slice(&unknown.stdout).unwrap();
+    assert!(report["receipts"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("outcome is unknown"));
+    settled(4);
+    assert_eq!(sessions(&home), 0);
+}
+
 #[test]
 fn rex_unavailable_context_never_falls_through_to_desktop() {
     let repo = TestRepo::new();
@@ -2214,8 +2506,7 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
 #[test]
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
 fn rex_native_workspace_keeps_window_and_block_identity() {
-    use std::os::unix::process::CommandExt;
-    use std::process::Stdio;
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
     let root = tempfile::Builder::new()
         .prefix("rex498-")
@@ -2226,8 +2517,6 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
     std::fs::create_dir(&home).unwrap();
     let _env = EnvGuard::with_lf_home(&[], &home);
     let registered = register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
-    let config = root.path().join("empty.lua");
-    std::fs::write(&config, "").unwrap();
     let bin = root.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     host(
@@ -2236,24 +2525,6 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         "Desktop is excluded from this isolated Rex test",
         1,
     );
-    let socket = root.path().join("rex.sock");
-    let endpoint = format!("unix://{}", socket.display());
-    let rex = std::env::var_os("LOOPFLOW_TEST_REX")
-        .expect("set LOOPFLOW_TEST_REX to the installed Rex executable");
-    // Native children have no REX_SERVER. The caller must discover this server,
-    // not Rex's configured default. Refuse any unqualified CLI query so this
-    // fixture can never contact the person's server.
-    let rex_cli = bin.join("rex");
-    std::fs::write(
-        &rex_cli,
-        format!(
-            "#!/bin/sh\ncase \" $* \" in *' -S '*|*' --server '*) ;; *) echo 'missing explicit Rex endpoint' >&2; exit 91;; esac\nexec '{}' \"$@\"\n",
-            rex.to_string_lossy().replace('\'', "'\"'\"'"),
-        ),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&rex_cli, std::fs::Permissions::from_mode(0o755)).unwrap();
     // Record the actual launch directory, then run the real viewer. Rex's
     // background process snapshot can retain the initial login process.
     let viewer = bin.join("lf-viewer");
@@ -2266,59 +2537,14 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
     )
     .unwrap();
     std::fs::set_permissions(&viewer, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let child = Command::new(&rex)
-        .args(["server", "run", "--listen", &endpoint, "--state-dir"])
-        .arg(root.path().join("state"))
-        .arg("--config")
-        .arg(&config)
-        .env_clear()
-        .env("HOME", root.path())
-        .env("LF_BIN", &viewer)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}:/opt/homebrew/bin:/usr/bin:/bin",
-                bin.display(),
-                Path::new(&rex).parent().unwrap().display()
-            ),
-        )
-        .env("TERM", "xterm-256color")
-        .process_group(0)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let mut server = NativeServer(child);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() {
-        assert!(
-            server.0.try_wait().unwrap().is_none(),
-            "isolated Rex exited"
-        );
-        assert!(Instant::now() < deadline, "isolated Rex did not listen");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let server = IsolatedRex::start(root.path(), &bin, &viewer);
+    let endpoint = server.endpoint.clone();
     let args = [
         "open", "--task", "INF-123", "--host", "rex", "--server", &endpoint, "--json",
     ];
     let first = json(&lf(&home, repo.path(), None, &args));
     let window = first["receipts"][0]["destination"].as_str().unwrap();
-    let call = |method: &str, args: Value| -> Value {
-        let output = Command::new(&rex)
-            .args([
-                "--autostart=false",
-                "-S",
-                &endpoint,
-                "api",
-                "call",
-                method,
-                &args.to_string(),
-            ])
-            .output()
-            .unwrap();
-        json(&output)
-    };
+    let call = |method: &str, args: Value| server.call(method, args);
     let inventory = call("session.list", serde_json::json!({}));
     let container = inventory["sessions"][0]["session_id"].as_str().unwrap();
     call(
@@ -2327,15 +2553,6 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
     );
     // Rex's wrapper hides a tool's cwd, so its report is all a split can inherit;
     // a shell has no report to outlive `cd`, and the host reads its process.
-    let block_method = |block: &str, method: &str| -> Value {
-        json(
-            &Command::new(&rex)
-                .args(["--autostart=false", "-S", &endpoint, "block", "call"])
-                .args(["-s", container, "-b", block, method])
-                .output()
-                .unwrap(),
-        )
-    };
     let blocks = call(
         "session.list_blocks",
         serde_json::json!({"session_id":container}),
@@ -2346,8 +2563,10 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
         let id = block["block_id"].as_str().unwrap();
         let is_shell = block["label"] == "shell";
         loop {
-            let reported = block_method(id, "pwd")["pwd"].as_str().map(str::to_owned);
-            let process = block_method(id, "process");
+            let reported = server.block_call(container, id, "pwd")["pwd"]
+                .as_str()
+                .map(str::to_owned);
+            let process = server.block_call(container, id, "process");
             let cwd = process["foreground"]["cwd"].as_str().map(Path::new);
             let settled = if is_shell {
                 reported.is_none() && cwd == Some(checkout.as_path())

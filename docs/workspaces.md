@@ -227,10 +227,32 @@ Rex keeps Task and Wave Conversation terminals visible when their observers exit
 including saved history and preparation errors. Reopening reuses them without
 replaying their commands; use an explicit resume to continue an ended conversation.
 
-The opening report currently describes native creation or reuse. It does not yet
-report whether each Conversation observer connected successfully; preparation
-errors appear in that terminal. Reopening a retained tab does not restart an
-exited observer. Coordinated readiness reporting and retry remain unfinished.
+Each opening reports a receipt for the native destination and, separately, a
+state for every Conversation observer in it:
+
+| State | Meaning |
+| --- | --- |
+| `connected` | The Session's execution owner acknowledged the observer, and it still runs |
+| `history` | No live execution exists; the pane shows saved history |
+| `failed` | The observer could not attach, or it no longer runs |
+| `uncertain` | The owner never answered, or the observer has not reported; inspect the destination |
+
+A native create or reuse never counts as readiness. `lf open` waits briefly for
+observers it just launched, so a slow attachment can read `uncertain` and settle
+later. Opening again reports the current state.
+
+Reopening a retained tab does not restart an exited observer. Its pane stays as
+it was, including any error. A `failed` or `uncertain` observer that has stopped
+gets a retry command in the report:
+
+```bash
+lf open --host rex --task LOO-498 --copy review --retry-observers
+```
+
+This adds a new observer beside the retained pane in the same destination. It
+replays nothing into that pane, takes no input and never takes focus. If Rex's
+reply to the retry is lost, the observer reads `uncertain` and retrying adds no
+second pane until it reports. Ctrl+R in the new pane is still how input moves.
 
 If reconnection fails while a turn, draft or pending request keeps the provider
 active, `lf resume` reports the failure and preserves that work. Saved history
@@ -241,11 +263,16 @@ cannot reconstruct unfinished input or answer a pending request.
 Returning to a retained workspace reuses its native views. Restarting the host
 server is Rex's restoration responsibility: the host may restore the layout with
 new shells. Familiar pane IDs do not prove that the original programs survived;
-LF does not replay commands over new work you have already started.
+LF does not replay commands over new work you have already started. Opening
+after a restart reuses every destination Rex still has and reports its stopped
+Conversation observers as `failed`, with the retry command above.
 
-An explicit fresh launch can recreate the Loopflow template as faithfully as
-the host supports. It does not recover edits made only in Rex or reconstruct
-running programs from a saved layout.
+Once a destination is confirmed gone, opening creates it again from the Loopflow
+template, as faithfully as the host supports. That does not recover edits made
+only in Rex or reconstruct running programs from a saved layout. An unreachable
+Rex server confirms nothing: opening reports the failure and creates nothing. A
+creation whose reply was lost stays unknown across a restart until you inspect
+Rex; no duplicate is attempted.
 
 LF automatically cleans up shells owned by Loopflow Desktop. It does not close
 Rex shells or tabs.
@@ -274,16 +301,12 @@ arrival/activation, follower recovery, and Herdr Task creation/reuse. It still o
 
 - Confirming native Split from each pane in the Rex app, and Herdr/Desktop split
   behavior. LF's directory reporting is implemented, as described above.
-- Clear template relaunch and native reuse behavior after a server restart,
-  without claiming to restore Rex edits or replaying commands into existing work.
 - Bare-open discovery covers explicit listeners on the native Rex server ancestry.
   Servers with unreadable ancestry and the actual agent-tool path after a viewer
   move still need proof; a direct native-shell test is not that proof.
 - Configured remote arrival, recovery and app acceptance across two Machines.
 - Retained Rex Task Session terminals preventing cleanup, with reliable release
   observation and no LF-initiated closure of Rex shells.
-- Workspace-level readiness and retry receipts across native creation failures.
-  The live viewer now separates observation from explicit input transfer; configured
-  move/handoff and return/reopen demonstrations remain outstanding.
+- Configured move/handoff and return/reopen demonstrations with a real provider.
 
 These are delivery gaps, not accepted reductions to the agreed experience.

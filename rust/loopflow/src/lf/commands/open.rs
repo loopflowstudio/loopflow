@@ -8,6 +8,7 @@
 
 mod files;
 mod workspace;
+pub(crate) use workspace::ObserverReport;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -123,6 +124,28 @@ pub enum OpenStatus {
     Failed,
 }
 
+/// What a Conversation's observer last proved. Native receipts never set this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ObserverState {
+    /// The execution owner acknowledged it, and it still runs.
+    Connected,
+    /// No live execution exists; the pane shows saved history.
+    History,
+    Failed,
+    /// It may have attached, or may not have started; only inspection can tell.
+    Uncertain,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ConversationReadiness {
+    pub session: String,
+    pub state: ObserverState,
+    pub reason: Option<String>,
+    /// Adds a new observer beside the retained pane; empty when no retry applies.
+    pub retry_argv: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OpenReceipt {
     pub label: String,
@@ -133,6 +156,8 @@ pub struct OpenReceipt {
     pub status: OpenStatus,
     pub reason: Option<String>,
     pub fallback_argv: Vec<String>,
+    /// Observers at this destination, separate from native create/reuse `status`.
+    pub conversations: Vec<ConversationReadiness>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -236,6 +261,7 @@ impl Resolved {
             status,
             reason,
             fallback_argv: self.fallback_argv(),
+            conversations: Vec::new(),
         }
     }
 
@@ -1620,6 +1646,9 @@ pub struct OpenArgs {
     /// Add one newly started Task passively within a routed workspace selection
     #[arg(long, hide = true, requires = "local_workspace")]
     pub arrive_task: Option<String>,
+    /// Add a new observer beside each failed Conversation in retained Rex views
+    #[arg(long, conflicts_with = "link")]
+    pub retry_observers: bool,
 }
 
 /// The Work an invocation names: every available conversation, an address,
@@ -1750,8 +1779,12 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         return workspace::run(cli, args);
     }
     anyhow::ensure!(
-        args.copy.is_none() && args.server.is_none() && !args.no_focus && !args.local_workspace,
-        "--copy, --server and --no-focus are available for Rex workspaces"
+        args.copy.is_none()
+            && args.server.is_none()
+            && !args.no_focus
+            && !args.local_workspace
+            && !args.retry_observers,
+        "--copy, --server, --no-focus and --retry-observers are available for Rex workspaces"
     );
     let (targets, unknown) = targets(cli, args)?;
     // A person typing in a terminal continues the conversation right here.

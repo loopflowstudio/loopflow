@@ -5,6 +5,7 @@ use anyhow::{bail, Context};
 
 use serde::{Deserialize, Serialize};
 
+use super::open::ObserverReport;
 use super::waves::Shape;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
@@ -129,29 +130,15 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
-        SessionCommand::View { id } => {
-            let store = std::sync::Arc::new(
-                crate::store::read_existing_registry()?
-                    .context("No recorded Sessions on this Machine")?,
-            );
-            let session = crate::ops::human_session::session_by_id(&store, id)
-                .await?
-                .context("Session not found")?;
-            println!(
-                "Observing {}. Input stays with its current viewer.",
-                session.id
-            );
-            println!("To work here: lf resume {}", session.id);
-            if let Some(owner) = store.sqlite.session_transport(&session.id)? {
-                if crate::ops::human_session::owner_running(&store.sqlite, &owner)? {
-                    println!("When connected: Ctrl+R takes input here; Ctrl+] leaves.");
-                    return crate::transport::observe(&owner, session.id.as_str());
-                }
+        SessionCommand::View { id, observer } => {
+            let mut report = observer
+                .as_deref()
+                .and_then(|key| ObserverReport::begin(key, id));
+            let result = view(id, report.as_mut()).await;
+            if let (Err(error), Some(report)) = (&result, report.as_mut()) {
+                report.failed(error);
             }
-            let transcript =
-                super::history_transcript::session(&store.sqlite, session.id.as_str())?;
-            print!("{}", super::history_transcript::render(&transcript));
-            Ok(())
+            result
         }
         SessionCommand::History {
             id,
@@ -285,6 +272,36 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             Ok(())
         }
     }
+}
+
+async fn view(id: &str, mut report: Option<&mut ObserverReport>) -> anyhow::Result<()> {
+    let store = std::sync::Arc::new(
+        crate::store::read_existing_registry()?.context("No recorded Sessions on this Machine")?,
+    );
+    let session = crate::ops::human_session::session_by_id(&store, id)
+        .await?
+        .context("Session not found")?;
+    println!(
+        "Observing {}. Input stays with its current viewer.",
+        session.id
+    );
+    println!("To work here: lf resume {}", session.id);
+    if let Some(owner) = store.sqlite.session_transport(&session.id)? {
+        if crate::ops::human_session::owner_running(&store.sqlite, &owner)? {
+            println!("When connected: Ctrl+R takes input here; Ctrl+] leaves.");
+            return crate::transport::observe(&owner, session.id.as_str(), &mut || {
+                if let Some(report) = report.as_mut() {
+                    report.connected();
+                }
+            });
+        }
+    }
+    if let Some(report) = report {
+        report.history();
+    }
+    let transcript = super::history_transcript::session(&store.sqlite, session.id.as_str())?;
+    print!("{}", super::history_transcript::render(&transcript));
+    Ok(())
 }
 
 /// `lf session list --json`: one Session and the Work it belongs to. Wire

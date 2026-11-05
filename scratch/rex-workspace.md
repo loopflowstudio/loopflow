@@ -1,6 +1,6 @@
 # Open and restore a Loopflow workspace in Rex
 
-**LOO-498 · revised build authorized · reconciled November 4, 2026.**
+**LOO-498 · revised build authorized · reconciled November 5, 2026.**
 
 ## Accepted direction
 
@@ -133,17 +133,18 @@ Task and Wave conversations share `Host::conversation`, retaining history/errors
 after exit through Rex's native `exit.on_completion=false`; ordinary shells retain
 their normal native behavior.
 Review found and repaired both disappearing preparation errors and stale routing
-after transfer. Configured provider and workspace-level readiness proof remain owed.
+after transfer. Configured provider proof remains owed.
 
-The `c0a5add7e7` checkpoint implements this transport boundary, not the complete
-workspace handoff. `OpenReport` still returns native creation/reuse receipts with
-status `Opening`; it does not receive the observer's attachment acknowledgement.
-The transport fixture preserves a source line across a lost preparation reply and
-then transfers on the same prepared connection, retaining the provider attachment
-token and updating placement. Separate native fixtures prove destination reuse.
-They do not yet prove the composed failed-preparation → repeat open → explicit
-transfer path. Retained failed observers stay visible and are not relaunched by
-opening again; coordinated retry must preserve that no-replay boundary.
+**Readiness (November 5).** Each `OpenReceipt` carries `conversations`: per-Session
+`connected · history · failed · uncertain`, separate from native `status`. The
+viewer alone reports it (`session view --observer <key>`), writing a record under
+`LF_HOME/open/observers/<destination>/` and holding its OS lock, as the follower
+does, so a record cannot outlive a host restart. No schema change. Opening waits
+at most 3s, once, for observers it launched. `--retry-observers` adds a new observer
+beside the retained pane (a new Conversation window for Wave containers). A record
+stays `pending` until the native reply, which fences duplicates after a lost reply
+until the observer itself reports. `retry_argv` is rewritten to the source Machine's
+command for remote receipts. Exit status still follows native results only.
 
 ### Shared tools
 
@@ -311,7 +312,12 @@ saved arrangement intent, not provider preferences. The earlier branch-catalog
 failure remains dated evidence, and a compatible current build/store still needs
 configured demonstration after this sync.
 
-The latest sync, `c6fa1074c0`, includes #1807 (`c59cfcc631`): promotion/binding
+#1817 (`589b7ac3c4`), in the November 5 sync, makes `pursue` begin by editing user
+docs and lets an attached Desktop present them in Files through `lf open --file`.
+docs/workspaces.md already follows that order; this realign added Rex to the docs
+index and to the `lf open` help text. No workspace behavior changed.
+
+The `c6fa1074c0` sync includes #1807 (`c59cfcc631`): promotion/binding
 preserves the conversation and immediately updates its selected Task directory,
 while an already-running provider may keep its original cwd. Transport now replays
 provider launch-directory reports to newly attached viewers. Those reports describe
@@ -321,8 +327,8 @@ owns checks of the combined transport and migration changes after this sync.
 
 ## Shared lifetime dependency
 
-November 4 status and source rechecked during realign confirm LOO-717 remains open at PR
-#1811, at demo. Its clean checkout at `b81df60579` still requires `--native-settled`
+Status and source rechecked November 5 confirm LOO-717 remains open at PR #1811, at
+demo, unchanged since November 4. Its clean checkout at `b81df60579` still requires `--native-settled`
 on every `task presence` write and native closure
 before retirement. It also offers exact retaining-process exit observation through
 optional owner identity. Those are implementation evidence for the older contract,
@@ -365,22 +371,17 @@ authority to settle or delete those resources.
    implemented. Connected source/destination fixtures cover delivery and retries
    without local Work changes; configured two-Machine interaction still needs proof.
 4. **Configured reuse and lifecycle proof:** real open → work → return → close/reopen,
-   renamed destinations, native arrangement and restart/relaunch without replay,
-   unfinished-input/provider-history preservation, app selection and remote usability.
+   renamed destinations, native arrangement, unfinished-input/provider-history
+   preservation with an actual provider, app selection and remote usability.
+   Restart/relaunch without replay passes on an isolated Rex server (November 5).
    Herdr needs its bounded configured return/reopen demonstration.
-5. **Move/copy:** named observing copies and explicit resume exist. Live observers
-   request input with Ctrl+R on their acknowledged destination connection. The
-   existing attachment owner acknowledges that separate request; no provider
-   launch, Session replacement or automatic retry occurs. Workspace-level readiness
-   reporting and composed preparation/handoff proof remain unfinished: failed or
-   uncertain preparation must preserve source input and retries reuse the destination.
-   Transport failure coverage and native reuse coverage currently test these
-   separately. The integrated proof must include a retained failed observer,
-   repeated named-copy opening, and explicit transfer after acknowledged preparation.
-   Native create/display receipts are not conversation readiness; initial layouts
-   must never run resume before a create reply is known. Preserve uncertain replies
-   in workspace reporting. Native reorder/source-state preservation still needs
-   end-to-end proof. Dropping coordination or named copies remains unaccepted.
+5. **Move/copy:** readiness, explicit retry and the composed path are delivered.
+   `rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparation`
+   runs a real owner and isolated Rex: stalled preparation retained, repeated named
+   copy, source input preserved, retry beside the pane, Ctrl+R transfer with the
+   provider attachment token unchanged. The provider is a shell stand-in. Native
+   reorder/source-state preservation still needs end-to-end proof. Dropping
+   coordination or named copies remains unaccepted.
 6. **Validation:** gate owns affected suites, migration/DTO coverage and the two
    host-fixture deadline failures below. Authored demo owns configured interaction
    and remaining product judgments; source/fixture passes cannot substitute for it.
@@ -399,6 +400,6 @@ Earlier complete plans/results: `cc607dc3e1:scratch/rex-workspace.md` and
 `7b886d04cc:scratch/rex-workspace.md`; dated demo evidence is in
 [workspace-demo.md](workspace-demo.md).
 
-Checks (November 5): `work_open_tests::` 27 passed with real Rex, including one stale `machines.route` fixture repaired after #1805; `transport_tests` 59 passed; lib `transport::` and `open::workspace` passed; fmt and clippy passed. Isolated Rex end-to-end covered manual start, manual resume from another directory, `cd`, observer and rebound attachment. Earlier results: `c0a5add7e7:scratch/rex-workspace.md`. Gate owns the combined run; authored demo owns the app's Split.
+Check (November 5 implement): lib `transport::`/`open::` 70 passed; `work_open_tests::` 31 passed; `documented_commands::`/`dto_fixtures::` 52 passed; clippy passed; `transport_tests` with `REX_*` inherited 67 passed, 1 failed (`contended_input_retention_keeps_control_and_delivers_once_after_unlock`, then 3/3 alone); native Rex: restart and handoff passed, `rex_native_workspace_keeps_window_and_block_identity` failed its 15s arrival deadline once when run beside the restart test, then 2/2 alone. Gate owns the combined run and those intermittent cases, authored demo owns the app's Split.
 
-Compress (November 5), load average about 100, `LF_*`/`REX_*` unset unless noted: lib `transport::` and `open::workspace` passed, `transport_tests` 3 clean runs, clippy passed. `work_open_tests::` failed 8 Rex tests in one full run, panic text not captured, then passed in later full runs and one of the eight alone; cause unestablished. Inside Rex, inherited `REX_*` fails `first_native_launch_keeps_only_valid_desktop_terminal_placement`; one run with them set also failed `successor_handoff_restores_the_terminal_and_preserves_command_results` and `resumed_session_completes_turns_after_build_replacement_and_viewer_return`, and an earlier run failed the cmux `reopening_a_live_conversation_focuses_its_cmux_workspace`, which passed alone. Gate owns the combined run.
+Check (November 5 compress): `open::` lib 13, `work_open_tests::` 31, `prepared_destination` 1 and native Rex handoff, restart and identity proofs each passed; clippy passed. Reduction only, no behavior change. The combined run stays with gate.

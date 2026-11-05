@@ -2,9 +2,11 @@
 //! Rex alone owns geometry and ordinary processes. Reads never execute resume argv.
 mod herdr;
 mod layout;
+mod observer;
 
 pub(super) use herdr::open_herdr;
 use layout::{layout, Host};
+pub(crate) use observer::ObserverReport;
 
 use std::collections::{BTreeSet, HashMap};
 use std::io::{IsTerminal, Read, Write};
@@ -15,7 +17,10 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::{OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening, Resolved};
+use super::{
+    ConversationReadiness, ObserverState, OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus,
+    Opening, Resolved,
+};
 use crate::durable::{RepositoryId, TaskId};
 use crate::id::WaveId;
 use crate::journal::OsProcess;
@@ -31,6 +36,14 @@ use crate::work::selection::{
 fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
+/// Where a Task's tools run: its recorded checkout, else the repository.
+fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {
+    content
+        .location
+        .as_ref()
+        .map_or(repo, |location| Path::new(&location.cwd))
+}
+
 fn identity(value: &str) -> String {
     hex::encode(&Sha256::digest(value.as_bytes())[..16])
 }
@@ -142,6 +155,16 @@ struct Presentation<'a> {
     omit_shells: bool,
     session: Option<&'a str>,
     diff: bool,
+    retry_observers: bool,
+}
+
+#[derive(Debug)]
+struct Materialized {
+    window: String,
+    created: bool,
+    shells: usize,
+    observers: String,
+    retried: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -247,6 +270,10 @@ impl Rex {
         }
         array(view, "windows")
     }
+    /// Add a pane to a retained window, leaving its native edits and focus alone.
+    fn split_beside(&self, container: &str, window: &str, layout: Value) -> Result<Value> {
+        self.call("session.new_split", json!({"session_id":container,"window_id":window,"direction":"horizontal","side":"after","focus":false,"layout":layout}))
+    }
     fn focus(&self, container: &str, window: &str) -> Result<String> {
         self.call(
             "session.focus_window",
@@ -336,6 +363,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
                     .map(|id| format!(" ({id})"))
                     .unwrap_or_default()
             );
+            for conversation in &receipt.conversations {
+                print_conversation(conversation);
+            }
         }
         super::print_unknown(&report.unknown);
     }
@@ -351,6 +381,67 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         "Some workspace items could not be opened; successful native work was retained"
     );
     Ok(())
+}
+
+fn print_conversation(conversation: &ConversationReadiness) {
+    let state = match conversation.state {
+        ObserverState::Connected => "connected",
+        ObserverState::History => "history",
+        ObserverState::Failed => "failed",
+        ObserverState::Uncertain => "uncertain",
+    };
+    println!(
+        "  Conversation {}: {state}{}",
+        conversation.session,
+        conversation
+            .reason
+            .as_ref()
+            .map(|reason| format!("; {reason}"))
+            .unwrap_or_default()
+    );
+    if !conversation.retry_argv.is_empty() {
+        println!("  To retry: {}", conversation.retry_argv.join(" "));
+    }
+}
+
+/// Repeats this opening with an explicit retry. Retries never take focus.
+fn retry_argv(target: &Resolved, args: &OpenArgs, server: Option<&str>) -> Vec<String> {
+    let mut argv = vec![
+        "lf".into(),
+        "open".into(),
+        target.url.to_string(),
+        "--host".into(),
+        "rex".into(),
+    ];
+    if let Some(session) = &target.session {
+        argv.extend(["--session".into(), session.clone()]);
+    }
+    if let Some(copy) = &args.copy {
+        argv.extend(["--copy".into(), copy.clone()]);
+    }
+    if let Some(server) = server {
+        argv.extend(["--server".into(), server.into()]);
+    }
+    argv.extend(["--no-focus".into(), "--retry-observers".into()]);
+    argv
+}
+
+/// Launch a new observer for each failed Conversation at a destination. The
+/// retained pane keeps its error; the new one starts passive, so it takes no
+/// input. A lost reply stays pending and fences a duplicate.
+fn retry_conversations(
+    rex: &Rex,
+    key: &str,
+    cwd: &Path,
+    mut launch: impl FnMut(Value) -> Result<Value>,
+) -> Result<usize> {
+    let mut retried = 0;
+    for failed in observer::read(key).iter().filter(|o| o.retryable()) {
+        launch(Host::Rex(&rex.server, Some(key)).conversation(cwd, &failed.session)?)?;
+        observer::confirm(key);
+        retried += 1;
+    }
+    Ok(retried)
 }
 
 fn open_machines(store: &SqliteStore, target: &Resolved, args: &OpenArgs) -> Result<OpenReport> {
@@ -403,6 +494,14 @@ fn open_machines(store: &SqliteStore, target: &Resolved, args: &OpenArgs) -> Res
             let result = remote_open(store, peer.as_str(), repository, &selected, &remote_args);
             match result {
                 Ok(mut report) => {
+                    // The peer's own command means nothing on this Machine.
+                    let retry = retry_argv(target, args, args.server.as_deref());
+                    report
+                        .receipts
+                        .iter_mut()
+                        .flat_map(|receipt| &mut receipt.conversations)
+                        .filter(|conversation| !conversation.retry_argv.is_empty())
+                        .for_each(|conversation| conversation.retry_argv = retry.clone());
                     receipts.append(&mut report.receipts);
                     unknown.append(&mut report.unknown);
                 }
@@ -473,6 +572,9 @@ fn remote_open(
     }
     if args.no_focus {
         argv.push("--no-focus".into());
+    }
+    if args.retry_observers {
+        argv.push("--retry-observers".into());
     }
     if let Some(task) = &args.arrive_task {
         argv.extend(["--arrive-task".into(), task.clone()]);
@@ -582,7 +684,9 @@ fn ensure_container(
             if let Some(session) =
                 store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
             {
-                windows.push(json!({"window_label":"Conversation","layout":Host::Rex(&rex.server).conversation(cwd,session.id.as_str())?}));
+                observer::clear(&workspace.id)?;
+                let host = Host::Rex(&rex.server, Some(&workspace.id));
+                windows.push(json!({"window_label":"Conversation","layout":host.conversation(cwd,session.id.as_str())?}));
             }
         }
         let result = rex.call(
@@ -595,6 +699,7 @@ fn ensure_container(
                 .context("Rex create reply omitted session identity; outcome is unknown")?
                 .into(),
         );
+        observer::confirm(&workspace.id);
     }
     if retained.is_none() {
         workspace.creation_pending = false;
@@ -658,6 +763,8 @@ fn open(
     )?;
     let mut receipts = Vec::new();
     let mut groups = HashMap::new();
+    let mut launched = Vec::new();
+    let mut observed = Vec::new();
     for content in local_tasks {
         let task = store
             .task(&TaskId::parse(&content.work.id)?)?
@@ -689,6 +796,7 @@ fn open(
                     omit_shells: args.copy.is_some() && !args.new_shells,
                     session: target.session.as_deref(),
                     diff: args.diff || target.url.diff,
+                    retry_observers: args.retry_observers,
                 },
             )
             .map(|opened| (destination, opened))
@@ -701,8 +809,13 @@ fn open(
         )
         .to_string();
         match result {
-            Ok((destination, (window, created, shells))) => {
+            Ok((destination, opened)) => {
+                let window = opened.window;
                 receipt.destination = Some(window.clone());
+                if opened.created || opened.retried > 0 {
+                    launched.push(opened.observers.clone());
+                }
+                observed.push((receipts.len(), opened.observers));
                 let focus = !args.no_focus && args.arrive_task.is_none() && receipts.is_empty();
                 let showing = if focus {
                     rex.focus(
@@ -718,13 +831,18 @@ fn open(
                 } else {
                     "Focus preserved".into()
                 };
+                let retried = match opened.retried {
+                    0 => String::new(),
+                    count => format!("; {count} new Conversation observers beside retained panes"),
+                };
                 receipt.reason = Some(format!(
-                    "{}; {shells} new native shells; {showing}",
-                    if created {
+                    "{}; {} new native shells{retried}; {showing}",
+                    if opened.created {
                         "Created"
                     } else {
                         "Reused native layout without replaying commands"
-                    }
+                    },
+                    opened.shells
                 ));
             }
             Err(error) => {
@@ -737,10 +855,51 @@ fn open(
     if receipts.is_empty() && !explicit {
         receipts.push(target.receipt(
             Some(OpenHost::Rex),
-            root.container_id,
+            root.container_id.clone(),
             OpenStatus::Opening,
             Some("Workspace is following started Tasks; no eligible local Tasks yet".into()),
         ));
+    }
+    // Wave containers carry their own conversation; a Task opened explicitly
+    // inside one reports only itself.
+    if !explicit {
+        for workspace in std::iter::once(&root).chain(groups.values()) {
+            let Some(container) = workspace.container_id.as_deref() else {
+                continue;
+            };
+            let key = &workspace.id;
+            let mut receipt = target.receipt(
+                Some(OpenHost::Rex),
+                Some(container.into()),
+                OpenStatus::Opening,
+                None,
+            );
+            receipt.label = "Wave conversation".into();
+            if args.retry_observers {
+                match retry_conversations(rex, key, &target.repository_path, |layout| {
+                    rex.call("session.new_window", json!({"session_id":container,"window_label":"Conversation","focus":false,"layout":layout}))
+                }) {
+                    Ok(0) => {}
+                    Ok(_) => launched.push(key.clone()),
+                    Err(error) => {
+                        receipt.status = OpenStatus::Failed;
+                        receipt.reason = Some(format!("{error:#}"));
+                    }
+                }
+            }
+            if !observer::read(key).is_empty() {
+                observed.push((receipts.len(), key.clone()));
+                receipts.push(receipt);
+            }
+        }
+    }
+    observer::settle(&launched);
+    let retry = retry_argv(target, args, Some(&rex.server));
+    for (index, key) in observed {
+        receipts[index].conversations = observer::read(&key)
+            .iter()
+            .map(|observer| observer.readiness(&retry))
+            .collect();
     }
     Ok(receipts)
 }
@@ -801,7 +960,7 @@ fn materialize(
     content: &ViewContent,
     repo: &Path,
     presentation: Presentation<'_>,
-) -> Result<(String, bool, usize)> {
+) -> Result<Materialized> {
     let container = workspace
         .container_id
         .as_deref()
@@ -814,6 +973,7 @@ fn materialize(
         presentation.diff
     ));
     let _opening = Opening::lock_key(&format!("host-occurrence:{id}"))?;
+    let observers = id.clone();
     let mut occurrence = store.host_occurrence(&id)?.unwrap_or(HostOccurrence {
         id,
         workspace_id: workspace.id.clone(),
@@ -856,31 +1016,42 @@ fn materialize(
             || occurrence.creation != HostCreation::Passive
             || content.location.is_none()
         {
-            return Ok((
-                occurrence
-                    .destination_id
-                    .expect("retained window has an identity"),
-                false,
-                0,
-            ));
+            let window = occurrence
+                .destination_id
+                .expect("retained window has an identity");
+            let retried = if presentation.retry_observers {
+                retry_conversations(rex, &observers, tool_cwd(content, repo), |layout| {
+                    rex.split_beside(container, &window, layout)
+                })?
+            } else {
+                0
+            };
+            return Ok(Materialized {
+                window,
+                created: false,
+                shells: 0,
+                observers,
+                retried,
+            });
         }
     } else {
         anyhow::ensure!(
             occurrence.creation != HostCreation::Pending || occurrence.destination_id.is_some(),
             "Task window creation outcome is unknown; no duplicate was attempted"
         );
+        observer::clear(&observers)?;
     }
 
-    let (layout, shells) = layout(store, content, repo, presentation, Host::Rex(&rex.server))?;
+    let host = Host::Rex(&rex.server, Some(&observers));
+    let (layout, shells) = layout(store, content, repo, presentation, host)?;
     let id = if existing.is_some() {
-        // Add tools beside the passive arrival; never replace its native edits.
         let id = occurrence
             .destination_id
             .as_deref()
             .expect("retained window has an identity");
         occurrence.creation = HostCreation::ToolsPending;
         store.save_host_occurrence(&occurrence)?;
-        rex.call("session.new_split", json!({"session_id":container,"window_id":id,"direction":"horizontal","side":"after","focus":false,"layout":layout}))?;
+        rex.split_beside(container, id, layout)?;
         id.to_owned()
     } else {
         occurrence.destination_id = None;
@@ -898,6 +1069,7 @@ fn materialize(
             .context("Rex create reply omitted window identity; outcome is unknown")?
             .to_owned()
     };
+    observer::confirm(&observers);
     occurrence.destination_id = Some(id.clone());
     occurrence.creation = if presentation.passive || content.location.is_none() {
         HostCreation::Passive
@@ -905,7 +1077,13 @@ fn materialize(
         HostCreation::Complete
     };
     store.save_host_occurrence(&occurrence)?;
-    Ok((id, true, shells))
+    Ok(Materialized {
+        window: id,
+        created: true,
+        shells,
+        observers,
+        retried: 0,
+    })
 }
 
 // The OS lock proves follower liveness, including after a host restart. Native
@@ -941,7 +1119,7 @@ fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path, follow: Fol
     if matches!(follow, Follow::Local) {
         words.push("--local-workspace");
     }
-    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":Host::Rex(&rex.server).block("Workspace",cwd,viewer_argv(cwd,&words)?)}))?;
+    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":Host::Rex(&rex.server,None).block("Workspace",cwd,viewer_argv(cwd,&words)?)}))?;
     Ok(())
 }
 
@@ -1134,7 +1312,7 @@ fn arrive(
         groups,
         following(args),
     )?;
-    let (_, created, _) = materialize(
+    let opened = materialize(
         store,
         rex,
         &destination,
@@ -1146,7 +1324,7 @@ fn arrive(
             ..Presentation::default()
         },
     )?;
-    if created {
+    if opened.created {
         println!("Added {}", content.title);
     }
     Ok(true)

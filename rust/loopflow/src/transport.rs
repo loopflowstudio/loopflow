@@ -53,8 +53,8 @@ const GRACE: Duration = Duration::from_secs(60);
 const SETTLE_WAIT: Duration = Duration::from_millis(800);
 
 /// How long the owner process stays to finish exit records after its viewers
-/// have returned.
-const SETTLE_LINGER: Duration = Duration::from_secs(20);
+/// have returned. A resume waits this long for it before continuing.
+pub(crate) const SETTLE_LINGER: Duration = Duration::from_secs(20);
 
 /// The exit code a provider's status reports on its own.
 fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
@@ -2103,6 +2103,12 @@ pub(crate) fn drop_exit_record() {
     if let Err(error) = dropped {
         tracing::warn!(%error, "could not cancel the exit record for a failed exec");
     }
+}
+
+/// Whether a running owner has returned its viewers and closed its socket, and
+/// stays only to finish the exit records its terminal stopped waiting for.
+pub(crate) fn leaving(id: &LfProcessId) -> bool {
+    endpoint(id).is_ok_and(|path| !path.exists())
 }
 
 /// Whether a viewer of this execution holds input control. A closed terminal

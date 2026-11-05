@@ -1724,7 +1724,10 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Assign a Task to a Session that has none; the Task never changes after
+    /// Bind a Session as the Task's primary conversation without starting work
+    #[command(
+        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Runs cannot become primary. Remote calls use the target Machine's Sessions and paths."
+    )]
     Bind {
         /// Session ID or provider conversation ID
         id: String,
@@ -2051,8 +2054,17 @@ until `lf ship`."
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Create a planning Task; with --run, start it and open its conversation
+    /// Create a Task; with --run, also start its Graph
+    #[command(
+        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
+    )]
     Create {
+        /// Existing conversation to promote without replaying its input
+        #[arg(long, id = "create_session")]
+        session: Option<String>,
+        /// Existing linked checkout to adopt
+        #[arg(long)]
+        worktree: Option<PathBuf>,
         /// What you want, in your words: the Task's notes, its first line the title.
         /// With --run, also the first turn of its conversation
         #[arg(conflicts_with = "notes")]

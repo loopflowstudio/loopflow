@@ -198,25 +198,23 @@ fn watch(
         if !grace.expired(now) {
             continue;
         }
-        match store.owner_retention(owner) {
-            Ok(None) => {
-                retention_failure.recovered();
-                retained = None;
+        let Some(retention) = report_result(
+            &mut retention_failure,
+            "Session retention, retrying",
+            store.owner_retention(owner),
+        ) else {
+            continue;
+        };
+        if retained != retention {
+            if let Some(reason) = retention {
+                tracing::info!(%owner, "retaining detached Session past its limit: {reason}");
             }
-            // Retained work counts as activity: the grace runs again from here.
-            Ok(Some(reason)) => {
-                retention_failure.recovered();
-                if retained != Some(reason) {
-                    tracing::info!(%owner, "retaining detached Session past its limit: {reason}");
-                    retained = Some(reason);
-                }
-                grace.quiet_since = now;
-                continue;
-            }
-            Err(error) => {
-                retention_failure.note("Session retention, retrying", &error);
-                continue;
-            }
+            retained = retention;
+        }
+        // Retained work counts as activity: the grace runs again from here.
+        if retention.is_some() {
+            grace.quiet_since = now;
+            continue;
         }
         if end
             .send(Ending {

@@ -466,6 +466,7 @@ impl CodexConnection {
             .await
             .context(RelayOperation::new("handshake", "relay_to_provider"))?;
         let input_key = diagnostics.input.as_deref();
+        let receipt_key = || input_key.expect("saved input dispatches only with its receipt key");
         // The store records this conversation; it never carries it. Every store
         // failure below except a lost attachment is logged once and relaying
         // continues. Only the saved initial input keeps waiting for its receipt.
@@ -654,7 +655,7 @@ impl CodexConnection {
                     } else {
                         let outcome;
                         (upstream, outcome) = self.send(upstream, message,
-                            starting.then(|| (input_key.expect("saved input dispatches only with its receipt key"), NativeSubmission::ThreadDispatched))).await?;
+                            starting.then(|| (receipt_key(), NativeSubmission::ThreadDispatched))).await?;
                         match outcome {
                             Ok(()) => {},
                             Err(StoreError::InvalidAuthority(reason)) => {
@@ -771,7 +772,7 @@ impl CodexConnection {
                             }
                             if initial_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, text) = initial_request.take().expect("matched initial request");
-                                let key = input_key.expect("saved input dispatches only with its receipt key");
+                                let key = receipt_key();
                                 if let Some(error) = rpc.get("error") {
                                     if let Err(error) = self.record_submission(key, NativeSubmission::InputRejected) {
                                         store_failure.note("input rejection receipt", &error);
@@ -822,7 +823,7 @@ impl CodexConnection {
                             }
                             let outcome;
                             (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into()),
-                                Some((input_key.expect("saved input dispatches only with its receipt key"), NativeSubmission::InputDispatched))).await?;
+                                Some((receipt_key(), NativeSubmission::InputDispatched))).await?;
                             outcome.context(RelayOperation::new("dispatch", "relay_to_provider"))?;
                             initial_request = Some((id, text));
                         }

@@ -47,9 +47,8 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   memory, the gap is noted once with the lock as its reason, and every later
   busy answer delivers at once until a record succeeds and closes the gap.
   LOO-709's "record before deliver" keeps its purpose (no idle ending while a
-  draft exists) through the in-memory hold. The second concept review found the
-  first implement had left this wait unbounded under an install's exclusive
-  migration transaction; the third implement pass bounded it.
+  draft exists) through the in-memory hold. Unbounded, the busy wait would hold
+  every keystroke for the whole of an install's exclusive migration transaction.
 - Exit: `settle` and the launcher's return record best-effort. The exit code is
   the provider's own; the resume hint is already printed by the owner.
   `SessionCapture::finish` writes `terminal.json` and treats its store
@@ -102,19 +101,15 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   are trimmed to their pointers (`a5000ef889`, `3b07e13404`) to stay under the
   16000-token budget.
 
-## Concept review (2026-11-05, headless; second pass after compress and realign)
+## The contract, traced through the change
 
 The person's experience is one sentence: whatever lf's store does, your
-conversation keeps accepting input, answering and quitting. Traced through the
-change, the contract holds at each layer but one:
+conversation keeps accepting input, answering and quitting. At each layer:
 
 - Typed bytes: `try_record_owner_input` runs with a zero busy timeout, so a
   locked store answers `Ok(false)` at once and never stalls the serve loop; a
-  failed store delivers unrecorded and the in-memory hold keeps the owner.
-  The seam the second pass found, `Retained::Busy` retrying every 100 ms with
-  no bound while the 11-04 install's `BEGIN EXCLUSIVE` held every keystroke
-  for the whole migration, is closed: the busy wait is bounded by the hooks'
-  one-second budget (Decisions, "Owner input").
+  failed store delivers unrecorded and the in-memory hold keeps the owner; a
+  busy one holds the bytes for at most the hooks' one-second budget.
 - A person's Codex turn: the dispatch fence is a file lock plus one read (WAL
   readers do not wait on an install's exclusive write), then an unfenced send if
   the fence cannot be read. Only the saved launch prompt waits for its receipt,
@@ -126,16 +121,8 @@ change, the contract holds at each layer but one:
   retention read retries at the next poll, and `lf resume` is the only thing
   that ends an idle superseded owner.
 
-The review found four seams and the implement pass closed them, each now in
-Decisions: one `store::RecordingGap` where four log-once bodies had grown; the
-gap written into the Session's history as a `store-gap` observation at the next
-successful boundary (Jack's steer), instead of a marker that cleared with a log
-line while a missed Stop read as a live turn; `native_delivery_path` for the
-file every native thread shares; and Claude as the reference behavior, so Pi's
-toasts and OpenCode's per-prompt stderr line became one log line per changed
-failure (Jack's quiet-terminal rule, 2026-10-21).
-
-Kept after challenge: the saved launch prompt still waits for its receipt under
+Kept after challenge (concept review, 2026-11-05): the saved launch prompt
+still waits for its receipt under
 a broken store (double-dispatch protection from the codex-resume work outranks
 sending it blind); `InvalidAuthority` still ends a relay (authority loss is not
 store loss); exit records open the store with the full 15 s budget because the
@@ -186,4 +173,4 @@ Not runnable headless here; fixtures below stand in.
 
 ## Checks
 
-At HEAD (`670ffdadf1`), unchanged since: `cargo test -p loopflow --lib -- store::recording_gap:: lf::commands::context:: transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::task_updates::` 34 passed (the locked input fixture delivers in about one second); `cargo test -p loopflow --test integration context_block_tests::` 2 passed; `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed; `node --check` on both JS hooks; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. `lf context`: memory 15986/16000 tokens, scratch under budget. Gate owns the affected suites; the Demo needs the installed build and is for Jack.
+After the 2026-11-05 compress pass: `cargo test -p loopflow --lib -- store::recording_gap:: lf::commands::context:: transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::task_updates::` 35 passed; `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes` 1 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` clean. Unchanged since the previous pass: `cargo test -p loopflow --test integration context_block_tests::` 2 passed, the other four `transport_tests` exit fixtures 5 passed, `node --check` on both JS hooks. `lf context`: memory 15986/16000 tokens, scratch under budget. Gate owns the affected suites; the Demo needs the installed build and is for Jack.

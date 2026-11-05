@@ -478,16 +478,15 @@ impl Viewer {
             other => panic!("unexpected frame tag {other:#x}"),
         })
     }
-    fn moves(&mut self) -> Vec<Option<String>> {
-        let mut moves = Vec::new();
+    /// Whether the owner ever told this viewer it lost input control.
+    fn moved(&mut self) -> bool {
+        let mut moved = false;
         while let Some(item) = self.next() {
             if let Item::Event(event) = item {
-                if event["type"] == "control" && event["held"] == false {
-                    moves.push(serde_json::from_value(event["notice"].clone()).unwrap());
-                }
+                moved |= event["type"] == "control" && event["held"] == false;
             }
         }
-        moves
+        moved
     }
     #[track_caller]
     fn until_reply(&mut self) -> Value {
@@ -2959,7 +2958,7 @@ fn sessions_keep_serving_when_their_lf_executable_goes() {
     }
     // No viewer of an untouched owner was ever told to move.
     for (index, viewer) in viewers[..2].iter_mut().enumerate() {
-        assert_eq!(viewer.moves(), [], "viewer {index} was moved");
+        assert!(!viewer.moved(), "viewer {index} was moved");
     }
 }
 

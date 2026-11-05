@@ -44,13 +44,12 @@ impl RecordingGap {
         } else {
             tracing::warn!("recording gap: {what}; the conversation goes on without lf's records");
         }
-        let open = self.open.get_or_insert_with(|| GapSpan {
-            what: String::new(),
-            first_miss: now,
+        let first_miss = self.open.as_ref().map_or(now, |open| open.first_miss);
+        let open = self.open.insert(GapSpan {
+            what,
+            first_miss,
             last_miss: now,
         });
-        open.what = what;
-        open.last_miss = now;
         if let Some(marker) = &self.marker {
             if let Some(parent) = marker.parent() {
                 let _ = std::fs::create_dir_all(parent);

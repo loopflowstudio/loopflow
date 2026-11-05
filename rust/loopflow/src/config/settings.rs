@@ -1156,7 +1156,7 @@ mod tests {
         let resolved = resolve_layers(&layers, Some(&skill)).unwrap();
         assert_eq!(resolved.config.agent().unwrap(), "codex");
         assert!(!resolved.config.yolo);
-        assert!(!resolved.config.chrome);
+        assert_eq!(resolved.config.chrome, Some(false));
         let source = resolved.settings["agent"].candidates.last().unwrap();
         assert_eq!(source.locator, "Personal/Repository");
         assert_eq!(source.target, super::SettingTarget::General);
@@ -1315,7 +1315,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(prepared.config.agent().unwrap(), expected);
-            assert_eq!(prepared.config.chrome, index % 2 != 0);
+            assert_eq!(prepared.config.chrome, Some(index % 2 != 0));
         }
         repo.create_file(
             ".lf/graphs/invalid.yaml",

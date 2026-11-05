@@ -953,11 +953,12 @@ mod tests {
             unset: false,
         })
         .unwrap();
-        assert!(
-            !crate::config::load_config(Some(repo.path()))
+        assert_eq!(
+            crate::config::load_config(Some(repo.path()))
                 .unwrap()
                 .unwrap()
-                .chrome
+                .chrome,
+            Some(false)
         );
     }
 }

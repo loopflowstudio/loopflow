@@ -410,7 +410,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Include branch files | `--diff files` | `context: {diff_files: true}` |
 | Include raw diff | `--diff patch` | `context: {diff: true}` |
 | Include clipboard | `-c, --clipboard` | — |
-| Chrome automation | `--chrome` | `chrome: true` |
+| Chrome automation | `--chrome on` | `chrome: true` |
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
 | End agents nobody is viewing | — | `session.end_detached_after: 2m` (or `off`) |
@@ -686,9 +686,7 @@ choice win, even if it is general. `-a` explicitly selects the invocation's agen
 Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
 LF-owned skill metadata, and Graph occurrence settings.
 
-Loopflow starts every Codex CLI and interactive run on the standard service tier,
-even when the user's Codex config selects Fast mode. In an interactive Codex
-TUI, run `/fast` to opt into Fast mode for that session.
+Loopflow sends Codex no service tier; the user's Codex config decides speed.
 
 Bare harness names use the model selected by that provider account. Add
 `harness:model` only when the invocation must pin a specific model. OpenCode
@@ -774,17 +772,19 @@ before each interactive step instead. See [Orchestration](orchestration.md#where
 
 ### Chrome
 
-Enable browser automation for Claude Code.
+Choose browser automation for Claude Code.
 
 | | |
 |---|---|
 | **CLI** | `--chrome on` / `--chrome off` |
-| **Config** | `chrome: true` |
-| **Default** | `false` |
+| **Config** | `chrome: true` / `chrome: false` |
+| **Default** | unset: Claude's own configuration decides |
 
-Applies to fresh and resumed Claude Sessions, both terminal and headless.
-`--chrome off` explicitly disables the vendor integration. Other providers do
-not use this Claude-specific setting.
+Applies to fresh and resumed Claude Sessions, both terminal and headless. With
+no Loopflow setting, lf passes no Chrome flag and Claude's
+`claudeInChromeDefaultEnabled` applies. `chrome: true` or `--chrome on` passes
+`--chrome`; `chrome: false` or `--chrome off` passes `--no-chrome`. Other
+providers do not use this Claude-specific setting.
 
 Requires the [Chrome extension](https://chromewebstore.google.com/detail/claude-browser-tool/gfbkicmkbhdjacjmfjffcldkdopkfjgk) and a paid Claude plan.
 
@@ -798,13 +798,14 @@ Skip vendor permission prompts and sandboxes.
 | **Config** | `yolo: true` |
 | **Default** | `false` |
 
-Loopflow's normal floor is conservative automation: Codex gets
-`workspace-write` and non-interactive Codex runs get `approval_policy = "never"`;
-non-interactive Claude runs skip permission prompts. User and repo-level vendor
-configs that are already more permissive are not downgraded. For example, Codex
+Attended Sessions keep the vendor's own permission configuration: Claude uses
+its `permissions.defaultMode`, and native Codex uses its configured sandbox and
+approval policy with approvals answered in the terminal. Unattended runs have
+nobody to answer a prompt, so they get a floor: Codex gets `workspace-write` and
+`approval_policy = "never"`, and Claude skips permission prompts. Vendor configs
+that are already more permissive are not downgraded. For example, Codex
 `sandbox_mode = "danger-full-access"` or Claude
 `permissions.defaultMode = "bypassPermissions"` are left to the vendor config.
-If vendor config is less permissive, Loopflow supplies its default.
 
 `--yolo` or `yolo: true` is the explicit Loopflow bypass: Claude uses
 `--dangerously-skip-permissions`, Codex sends `sandbox: "danger-full-access"`

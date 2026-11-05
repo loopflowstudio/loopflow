@@ -247,7 +247,7 @@ for line in sys.stdin:
             write_scope: crate::agent::AgentWriteScope::Worktree,
             execution_boundary: None,
             skip_permissions: true,
-            chrome: false,
+            chrome: None,
         };
         let source = CaptureHandle::begin_with_request(
             SessionCaptureSpec {

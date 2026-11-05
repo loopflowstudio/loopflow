@@ -1385,11 +1385,7 @@ impl SelfCommand {
         match self {
             Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
-                Some(
-                    InstallCommand::Preflight { .. }
-                    | InstallCommand::ReaderCatalog
-                    | InstallCommand::CanOpen { .. },
-                ) => false,
+                Some(InstallCommand::Preflight { .. }) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
@@ -2364,9 +2360,6 @@ pub enum InstallCommand {
     /// store and link `lf` into it. Moves no files.
     #[command(hide = true)]
     Adopt,
-    /// Exit 0 only when release TAG's build can open this Machine's store.
-    #[command(hide = true)]
-    CanOpen { tag: String },
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
@@ -2384,9 +2377,6 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print the reader floors this build knows, one per line.
-    #[command(hide = true)]
-    ReaderCatalog,
     /// Advance the receipt-selected store with this exact candidate's registry.
     #[command(hide = true)]
     AdvanceSwitch {

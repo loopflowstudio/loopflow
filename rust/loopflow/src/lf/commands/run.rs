@@ -1326,7 +1326,7 @@ mod tests {
                     );
                     assert_eq!(
                         built.agent_config.chrome,
-                        browser.map_or(configured, |value| value == "on")
+                        Some(browser.map_or(configured, |value| value == "on"))
                     );
                 }
             }

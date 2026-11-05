@@ -687,8 +687,11 @@ Lesson: store skew surfaces as an error naming the skew and `lf install`, never
 as an empty registry — agents take "nothing here" as fact.
 `open_existing_store` is the one opener (`Ok(None)` only when no file). A refusal
 names one fix, passed through verbatim; appending `lf doctor` sent operators to a
-command that installs nothing. Limit: a step's long-lived connection meeting a
-`-- breaks:` migration mid-write still fails with raw SQLite text.
+command that installs nothing. Task 337044 (2026-11-05, Jack Heart) deletes the
+reader floor: older lf opens any newer store; staging replaces it (MIGRATIONS.md).
+Released builds still read `reader_floor`, so new rows carry the newest one
+(f5981e removes). `lf self install preflight` reads `~/.lf/loopflow.db` whatever
+`LF_HOME` says.
 
 ## One main Home (LOO-342, curated 2026-10-10)
 
@@ -707,11 +710,8 @@ PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
 - Store opens validate ledger/schema, leaving full integrity scans to migration,
   doctor and install. Keep the Session fence outside runtime waits; OpenCode's
   fenced post remains bounded at 10 s. Exec observation waits 15 s, then warns
-  and runs unrecorded. Exact measurements and counterexamples remain in the
-  `6448e3c9e7:wave/infrastructure/MEMORY.md` archive; current timings live under
-  `<Home>/perf/`.
-- **Install preflight/promote read the OS account's Home whatever `LF_HOME`
-  says.** Tests running them are container-only installation proofs.
+  and runs unrecorded. Measurements and counterexamples:
+  `6448e3c9e7:wave/infrastructure/MEMORY.md`; current timings under `<Home>/perf/`.
 - Task decisions no longer depend on historical execution; checkout cleanup
   still retains live or unknown providers. LOO-408 owns the installed proof.
 

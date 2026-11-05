@@ -820,7 +820,7 @@ mod tests {
                 )
                 .unwrap();
                 let current = crate::config::load_config(Some(home)).unwrap().unwrap();
-                assert!(!current.yolo && !current.chrome);
+                assert!(!current.yolo && current.chrome == Some(false));
                 assert_eq!(current.agent.as_deref(), Some("claude:haiku"));
                 harness.send_input("resumed request").await.unwrap();
                 let (_, second) = capture.session_attachment().unwrap();
@@ -887,7 +887,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
-            chrome: false,
+            chrome: None,
             session_attachment: None,
             system_prompt: String::new(),
             conversation_context: None,
@@ -1166,7 +1166,7 @@ cat > /dev/null
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
-            chrome: false,
+            chrome: None,
             session_attachment: None,
             system_prompt: String::new(),
             conversation_context: None,

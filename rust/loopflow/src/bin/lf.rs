@@ -2025,18 +2025,11 @@ fn run() -> anyhow::Result<()> {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
             Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
-            Some(InstallCommand::CanOpen { tag }) => loopflow::lf::commands::install::can_open(tag),
             Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch.as_deref())
             }
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)
-            }
-            Some(InstallCommand::ReaderCatalog) => {
-                for floor in loopflow::store::migrations::reader_catalog() {
-                    println!("{floor}");
-                }
-                Ok(())
             }
             Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)

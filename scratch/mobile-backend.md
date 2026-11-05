@@ -10,7 +10,7 @@ for CLI and server, request-scoped telemetry, and deletion of the embedded Work
 library. Publication of PR #1813 and interactive demo are authorized; merge,
 Auto-Ship and Task completion are not. The existing feature Graph owns delivery.
 
-### Implemented through `041ca8f1c5`, with binding and adoption repairs below
+### Implemented through `30b4394a57`
 
 Every shared native `Read`, `Write` and `Subscription` uses the local server.
 `rust/loopflow-ffi/`, its C ABI/Cargo entries, `LoopflowLibrary.swift`, the Swift
@@ -34,13 +34,15 @@ for upgraded owners. Base conflicts are resolved locally; publication remains.
 Merges `000c88709f` and `041ca8f1c5` subsequently integrated #1805 file settings
 and #1807 Session adoption through `c59cfcc631`. The shared dispatcher and complete
 FFI deletion survived both. Saved settings/compression checks precede #1807;
-no full merged-build pass is established.
+no full merged-build pass is established. `b11d49d32f` checkpoints the binding
+and served adoption repairs; `30b4394a57` integrates #1822 (`86fea8578f`).
 
-Infrastructure's November 4 memory now identifies SQLite contention blocking
-owner control, with nonblocking input/retry regression coverage. It does not
-attribute the reported LOO-582/718 failures or prove configured recovery. Existing
-Sessions must still complete turns and sustain input with history and drafts
-intact; liveness and integrating #1818 alone do not establish that outcome.
+Infrastructure's November 4 memory identifies SQLite contention blocking owner
+control, with nonblocking input/retry coverage. #1822 adds real descriptor-loop
+retry tests, clears retirement on owner binding and distinguishes an unanswering
+superseded owner with no open Session from protected work. These changes prove
+neither the cause of the LOO-582/718 failures nor configured recovery. Continued
+turns/input with history and drafts intact remain the acceptance boundary.
 
 ### Shared direct-write implementation
 
@@ -105,7 +107,7 @@ uses `journal::request::diagnostic`, preserving CLI stderr and returning the war
 in the served bind receipt. A real-server regression checks the destination,
 primary selection, retained Session identity and absence of fabricated Processes.
 
-### Delete — do not maintain
+### Served adoption repair — November 4
 
 The non-launching `RegistryQuery.createTaskFromSession` CLI call and inline
 creation executor in `bin/lf.rs` are removed. Rust/Swift `TaskFromSession` writes
@@ -113,6 +115,12 @@ share `task_create::create`; creation and preview share report parsing, and grap
 validation runs directly before creation. Terminal input stays optional; piped
 reports and remote forwarding retain stdin. Create-and-run keeps
 `task_create::start` and its owners. Unknown outcomes never replay.
+
+Saved real-server coverage exercises creation and repeat adoption in both
+CLI/server orders, standalone defaults, repository-person claims, unchanged
+prepared Session identity, errors and request traces without new Process/Graph
+rows. Swift checks cover the shared fixture and propagation of uncertain failure
+without retry. These fixtures do not exercise a live provider or rendered adoption.
 
 ### Documentation and surviving-path reductions
 
@@ -129,22 +137,78 @@ with one server-readiness fixture and a direct Process-revision query. Transport
 tests retain watch invalidation and primary-Session resolution; their fake
 provider lives until cleanup. No FFI or subprocess executor remains.
 
+### Concept review after integration — November 4
+
+Reviewed `30b4394a57` against Jack Heart's accepted experience. No design change
+or in-scope product choice remains. The earlier documentation mismatch is closed:
+the architecture and Swift guides describe shared mutations and request traces.
+Keep their usage guidance and agent instructions unchanged.
+
+Adoption changes a conversation's Work association and recorded directory; it
+does not move the running provider or rewrite historical attribution. Its served
+`task_from_session`/bind path therefore belongs beside rename/save, while
+create-and-run retains execution ownership. Configuration uses its existing file
+owner and remains accessible without opening Work. Neither distinction requires
+another concept in the user interaction, a new lifecycle record, or a new retry
+authority. Request traces diagnose effects; they are not execution or replay
+receipts. These are consequences of accepted decisions, not new approval.
+
+The normal edit, lost reply and exact-owner recovery paths remain coherent.
+Preserve the counterexamples below: replay must not overwrite a later edit or
+reclaim a newer viewer's control. The next proof remains the merged-build checks
+and composed installed-helper replacement already specified under Remaining
+proof and delivery. This source review ran no runtime or rendered verification
+and adds no acceptance claim. Out-of-scope hosting/mobile choices stay open;
+they do not block the accepted local design.
+
+### Publication verification — November 4
+
+Publication inspection synchronized with main without conflicts. The bounded
+run on `30b4394a57` plus reconciled notes passed architecture, all 73 website
+checks, all 700 headless Desktop tests, Swift platform boundaries and Xcode
+app/test-runner build-for-testing. It found stale third-party input hashes after
+FFI removal and a released-registry compatibility defect from the settings merge:
+read-only pruning queried `machines.is_local` before that column existed.
+
+The notices were regenerated. The ownership reader now recognizes the released
+Machine route column without migrating the registry; its regression proves local
+completed ownership, retained remote/unknown work and byte-for-byte preservation.
+All 33 checkout/notices checks and the separate checkout-observation sandbox proof
+passed after repair. The initial Rust filter wrongly named `machine_commands` as
+a binary; it ran no Rust tests. The corrected bounded selection passed all 417
+tests, formatting and all-target Clippy with warnings denied. It covers shared
+dispatch, request isolation, served adoption/binding/settings, CLI/SSH defaults,
+large saves, cancellation, migrations and merged Session/transport recovery.
+
+The opt-in signed installed-helper replacement proof also passed on the repaired
+build: the exact owner/provider and unfinished Graph survive replacement, fresh
+acknowledgement and submission of the retained draft, then the Graph progresses.
+Registration migration and preservation of disabled choices passed separately.
+This replaces the executable with the same candidate bytes. It does not establish
+a released-version upgrade, rendered Desktop continuity or Linux supervision.
+
+Logs: `/tmp/loo593-publication-gate.log` (retains the initial failures),
+`/tmp/loo593-publication-rust.log`, `/tmp/loo593-publication-python-repair.log`,
+`/tmp/loo593-publication-observation.log`, `/tmp/loo593-publication-installed.log`
+and `/tmp/loo593-publication-registration.log`. No single all-suite green run is
+claimed; focused repair results complement the completed consumer/build suites.
+
 ### Remaining proof and delivery
 
-Gate owns affected correctness/packaging checks, including direct-write parity/isolation, adoption/binding, settings consumers,
-full Desktop and bounded Xcode builds. This extraction also reaches `binary(lf)`,
-`session_lifecycle_tests::promotion_*`, CLI create-and-run and SSH stdin forwarding.
-#1818 and #1807 both change Session admission
-and owner input/lifetime; the merged transport/recovery path needs coverage beyond
-saved pre-sync checks. Older binding parity never exercised a directory transfer. Final
-installed-helper replacement proof still requires an owner and unfinished Graph
-launched through the replaced installed executable, recovery acknowledgement,
-editing/submitting the same retained draft, and subsequent Graph progress.
-Earlier same-build evidence does not close that obligation. Rendered checks
-belong to interactive demo/review; Linux supervisor and combined mobile proof
+The merged-build automated checks and composed same-build installed replacement
+proof are recorded above. Final rendered checks belong to interactive demo/review:
+an owner and unfinished Graph launched through the replaced installed executable,
+recovery acknowledgement, editing/submitting the same retained draft and subsequent
+Graph progress. Automated same-build evidence does not establish that rendered
+acceptance or released-version migration. Linux supervisor and combined mobile proof
 remain explicitly unestablished. The existing Graph owns publication of PR #1813
 and the interactive demo boundary. Merge, Auto-Ship and Task completion remain
 unauthorized.
+
+#1822 separates durable demo history from disposable runtimes; historical fixtures
+below predate that split. New proof needs both roots and exact teardown evidence.
+Runtime release cannot stand in for retained-draft acceptance or authorize cleanup
+of earlier fixtures. Security-pressure stops leave later gate suites unrun.
 
 The [direct-write demo](direct-write-demo.md) retains native creation, conversation,
 rename and save receipts. Its bundle predates final repairs. The research Graph
@@ -158,12 +222,11 @@ and the single restart observation worsened. Host/Graph work was uncontrolled;
 there is no general read, startup or memory-savings claim. The earlier embedded
 baseline is historical. `scratch/demo.html` holds the prepared review artifact.
 
-The historical [handoff](server-cutover-handoff.md) preserves earlier failures: the full
-Desktop run failed Portfolio setup and stalled during Work observation shutdown;
-focused repairs passed, but no full-suite pass follows. Earlier server library
-checks emitted an Apple compact-unwind linker warning. Namespace-only signed
-replacement and the [earlier native demo](server-cutover-demo.md) retain their
-limits. Pre-realignment detail is committed at `59287ba3ed`.
+The historical [handoff](server-cutover-handoff.md) preserves the full Desktop
+Portfolio failure and Work observation shutdown stall; focused repairs passed,
+but no full-suite pass follows. Earlier linker warnings, signed namespace-only
+replacement and [native proof](server-cutover-demo.md) retain their limits.
+Pre-realignment detail is committed at `59287ba3ed`.
 
 ## Accepted responsibilities and shared contract
 
@@ -214,12 +277,6 @@ remove `MAX_REQUEST` imports in the mobile adapter. Preserve every wire field in
 
 This handoff leaves LOO-718’s checkout, schema and remote implementation with that
 Task. No namespace-only wire revision or persisted credential migration is needed.
-
-Do not create compatibility aliases for internal commands or duplicate protocol
-implementations. Persisted state and installed supervisor registrations need an
-explicit migration. Do not rename `MachineId`, `machine_id`, execution-location
-records, `LF_HOME` or ordinary SSH routing just because the server reports them.
-The namespace change alone does not require a new wire revision.
 
 ## Preserve the working contract
 
@@ -332,8 +389,4 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Pre-merge settings/compression evidence is retained at
-`041ca8f1c5:scratch/mobile-backend.md`; the full Desktop failure remains unresolved.
-Binding repair and pre-adoption Clippy passed in `/tmp/loo593-realign-{bind,clippy}.log`.
-
-Checks: `cargo test -p loopflow --test served_reads` passed (5), `cargo clippy --all-targets -- -D warnings` passed; `/tmp/loo593-compress-{served,adoption-clippy}.log`. Saved native adoption checks passed (3): `scripts/test_desktop.sh --filter 'servedSessionAdoption|sessionAdoptionSharesTheRustWriteContract|createOrBindConversation' -Xswiftc -gnone`, `/tmp/loo593-adoption-swift.log`. Gate owns remaining affected suites/packaging; demo owns rendered continuity.
+Checks: saved `cargo test -p loopflow --test served_reads` passed (5), `cargo clippy --all-targets -- -D warnings` passed, and `scripts/test_desktop.sh --filter 'servedSessionAdoption|sessionAdoptionSharesTheRustWriteContract|createOrBindConversation' -Xswiftc -gnone` passed (3); `/tmp/loo593-compress-{served,adoption-clippy}.log` and `/tmp/loo593-adoption-swift.log`. All precede #1822; gate owns merged-build/packaging checks, demo owns rendered continuity.

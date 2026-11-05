@@ -1289,6 +1289,36 @@ mod tests {
     }
 
     #[test]
+    fn reads_released_task_placement_without_migrating_the_machine() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("released.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/task_placement_released.sql"
+            ))
+            .unwrap();
+        drop(connection);
+        let before = std::fs::read(&path).unwrap();
+        let mut ownership: Vec<_> = super::sqlite::read_task_worktree_ownership(&path)
+            .unwrap()
+            .into_iter()
+            .map(|owner| (owner.task, owner.completed, owner.unfinished))
+            .collect();
+        ownership.sort();
+        assert_eq!(
+            ownership,
+            vec![
+                ("local-done".into(), true, false),
+                ("remote-done".into(), false, false),
+                ("running".into(), false, true),
+                ("unknown".into(), false, true),
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
     fn advancing_the_shared_frontier_is_exclusive_to_the_promotion_boundary() {
         use super::FrontierAdvance::{Authorized, Forbidden};
         let directory = tempfile::tempdir().unwrap();

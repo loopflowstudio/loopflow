@@ -261,8 +261,16 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
         [],
         |row| row.get(0),
     )?;
-    let local = if placed {
+    let (local_flag, local_route): (bool, bool) = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='route')",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let local = if placed && local_flag {
         "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
+    } else if placed && local_route {
+        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
     } else {
         "0"
     };

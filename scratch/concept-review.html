@@ -12,18 +12,20 @@
 </head>
 <body><main>
 <header>
-<p class="meta">LOO-593 · Concept review · November 4, 2026 · Source at <code>0e597c17a1</code><br>
+<p class="meta">LOO-593 · Concept review · November 4, 2026 · Source at <code>30b4394a57</code><br>
 Built from <a href="mobile-backend.md">working design</a>, <a href="server-write-direction.md">Jack Heart’s direct-write direction</a>,
 <a href="../docs/dev/server.md">server architecture</a>, <a href="../swift/README.md">Swift guide</a>,
 <a href="../rust/loopflow/src/server/service.rs">server dispatcher</a>,
 <a href="../rust/loopflow/src/lf/commands/mutation.rs">shared mutations</a>,
 <a href="../rust/loopflow/src/journal/request.rs">request tracing</a>,
-<a href="../swift/LoopflowMac/Services/ServerClient.swift">native client</a> and
+<a href="../swift/LoopflowMac/Services/ServerClient.swift">native client</a>,
+<a href="../swift/Loopflow/Services/RegistryQuery.swift">native operations</a>,
+<a href="../swift/LoopflowMac/Views/ConfigurationSettingsView.swift">configuration view</a> and
 <a href="../rust/loopflow/src/transport/connection.rs">connection recovery</a>.</p>
 <h1>A write request does not own execution.</h1>
-<p class="decision"><strong>Review outcome: update the design’s documentation direction.</strong>
-Jack Heart already selected shared direct writes with request-scoped telemetry. The implementation follows that model. The architecture and Swift guides still describe a CLI subprocess and Process attribution for each write. Reconcile those descriptions; no new product choice is needed.</p>
-<p><strong>Proposed documentation correction:</strong> a request runs the shared mutation path; actual execution keeps its existing owners. This changes no user action, wire shape or persistence model.</p>
+<p class="decision"><strong>No new product decision or design change is needed.</strong>
+Jack Heart selected shared direct writes with request-scoped telemetry. The implementation and corrected guides now agree. Adoption and settings retain that boundary after integration; the remaining obligation is proof on the merged build.</p>
+<p><strong>Accepted and implemented:</strong> a request runs the shared mutation path; actual execution keeps its existing owners. This review proposes no new interaction, wire shape or persistence model.</p>
 </header>
 
 <h2>Actions → concepts → APIs</h2>
@@ -31,6 +33,8 @@ Jack Heart already selected shared direct writes with request-scoped telemetry. 
 <thead><tr><th>Action</th><th>Concept</th><th>Accepted authority</th></tr></thead>
 <tbody>
 <tr><td>Rename or save in Desktop</td><td>Work mutation</td><td><code>command {change}</code> → shared Rust dispatcher → existing Work store</td></tr>
+<tr><td>Make this conversation a Task</td><td>Work association</td><td><code>task_from_session</code> / <code>session_bind</code> → shared creation/binding → same Session; no provider launch</td></tr>
+<tr><td>Change a setting</td><td>File declaration</td><td><code>configuration</code> → existing <code>config::api</code> file owner; no Work registry required</td></tr>
 <tr><td>Start a Task and open its conversation</td><td>Execution</td><td><code>task create --run --json</code> → existing Session / Graph owners</td></tr>
 <tr><td>Reconnect a terminal</td><td>Client access</td><td><code>attach {owner}</code> → the exact recorded owner; passive recovery preserves newer claims</td></tr>
 <tr><td>Run on another computer</td><td>Machine destination</td><td><code>lf --machine …</code> → existing routing</td></tr>
@@ -39,11 +43,11 @@ Jack Heart already selected shared direct writes with request-scoped telemetry. 
 </tbody>
 </table>
 
-<h2>The consequential mismatch</h2>
-<p><strong>Before — superseded guidance still in the guides:</strong></p>
+<h2>The consequential mismatch is resolved</h2>
+<p><strong>Before — superseded implementation and guidance:</strong></p>
 <pre><code>Desktop write → server → CLI child → mutation
                          └ Process attributed to each write</code></pre>
-<p><strong>After — accepted and implemented; documentation correction pending:</strong></p>
+<p><strong>After — accepted, implemented and documented:</strong></p>
 <pre><code>Desktop Write → server request ─┐
 CLI command ───────────────────┴→ shared mutation dispatcher → Work
 
@@ -52,10 +56,11 @@ CLI execution → actual Process + existing Session / Graph owners
 terminal connection → bridge to the exact existing owner</code></pre>
 <p>The dispatcher owns routing, selection, defaults, effects and formatting. Each caller supplies a directory and input/output/error streams. A served request uses a scoped worker without changing global cwd, environment or standard streams. It creates no Process row and inherits no launcher Session or Task attribution. The server adds no scheduler or second Work store.</p>
 <p><code>Write</code> remains the existing wire carrier. Reusing its CLI spelling to parse shared options starts no CLI child. A response trace correlates diagnostics; neither that trace nor the request ID is a durable receipt authorizing replay.</p>
+<p>Binding selects the Task’s primary conversation and recorded directory. It preserves live attachment and historical attribution; a changed record does not move the running provider. Configuration remains file-backed and available before Work can open. These existing authorities make a second executor, request Process and server-owned execution lifecycle unnecessary.</p>
 
-<h2>What the guides should say</h2>
-<blockquote><p><strong>Draft for the architecture and Swift guides:</strong> Desktop sends shared Work changes to the local server. CLI commands and server requests run the same Rust mutation dispatcher, preserving routing, defaults, input, output and errors. A served write runs in a request-scoped worker and creates no Process row. Task creation/start and other execution launches keep their ordinary CLI path and existing Session/Graph owners.</p></blockquote>
-<p>Keep <a href="../docs/server.md">Connect clients</a> and the agent command guidance unchanged: open Desktop, edit Work, use <code>lf server status</code> to inspect access and <code>lf install</code> to update. No new setup or recovery skill is needed. The <a href="../rust/loopflow/src/server/README.md">protocol README</a> already describes direct dispatch.</p>
+<h2>The interaction stays simple</h2>
+<blockquote><p>Open Desktop. Rename the conversation or save an edit. If the reply is lost, inspect the current state before making another deliberate edit. During terminal recovery, keep reading the last screen; wait for acknowledgement before typing. Use Move here only to request control.</p></blockquote>
+<p><strong>Existing guidance, unchanged:</strong> <a href="../docs/server.md">Connect clients</a>, the architecture and Swift guides now describe this boundary. Use <code>lf server status</code> to inspect access and <code>lf install</code> to update. No new setup command or recovery skill is needed. The <a href="../rust/loopflow/src/server/README.md">protocol README</a> owns direct dispatch and wire details.</p>
 
 <h2>Rename, lose the connection, continue editing</h2>
 <ol>
@@ -65,17 +70,18 @@ terminal connection → bridge to the exact existing owner</code></pre>
 <li><strong>Recovery.</strong> Reconnect the exact owner and wait for acknowledgement. Refresh Work subscriptions. Discard uncertain input. Retry changes connectivity; Move here deliberately requests control. Recovery neither repeats setup nor overrides disabled background items.</li>
 </ol>
 <p class="decision"><strong>Counterexamples to preserve:</strong> a rename commits, its reply is lost, and replay overwrites a later edit; or takeover succeeds, its acknowledgement is lost, and recovery steals control from a newer viewer. Both violate the accepted contract. Unknown outcomes and one-shot control transfer are necessary distinctions.</p>
+<p>For adoption, a lost reply likewise requires inspecting the conversation’s association before another deliberate action. Neither a transport Retry nor a changed Task directory authorizes starting a replacement provider. A recovery path that did so would invalidate this review’s conclusion.</p>
 
 <h2>Source review is not final acceptance</h2>
 <p>The <a href="direct-write-demo.md">native demo</a> and <a href="server-performance/results.md">matched measurements</a> retain their build-specific limits. Rename latency improved in that workload; read tail and the single restart observation worsened. No general speed or memory claim follows.</p>
-<p>This review ran no runtime tests or rendered demo. Final merged-build checks and the composed installed-helper replacement proof remain: acknowledge recovery, edit and submit the same retained draft, and observe subsequent Graph progress. A live PID alone is insufficient. Linux supervisor replacement, full packaging and combined LOO-718 mobile acceptance retain their separate evidence requirements.</p>
+<p>This source review ran no runtime tests or rendered demo. Final merged-build checks and the composed installed-helper replacement proof remain: acknowledge recovery, edit and submit the same retained draft, and observe subsequent Graph progress. A live PID alone is insufficient. New fixtures must separate durable demo history from disposable runtimes and retain teardown evidence. Linux supervisor replacement, full packaging and combined LOO-718 mobile acceptance retain their separate evidence requirements.</p>
 <p>GUI-less distribution, before-login hosting, removal during active work and phone takeover remain outside this local correction. Publication and interactive demo are authorized; merge, Auto-Ship and Task completion are not. This review does not change Graph navigation.</p>
 
 <h2>Questions for the next proof</h2>
 <p class="note">Verification questions, not pending requests for approval or new product decisions.</p>
 <ol>
-<li>Do the architecture diagram and both Swift guide sections describe shared dispatch and request tracing, while preserving ordinary execution launches?</li>
-<li>On the final merged build, do lost replies remain unknown without replay, and do simultaneous requests keep distinct diagnostics without fabricated Processes?</li>
+<li>On the final merged build, do edits, adoption and settings preserve CLI effects, scoped diagnostics and unknown outcomes without fabricated Processes or replay?</li>
+<li>Do the native and packaging checks preserve local copy, Find and scrolling while input is paused, and keep newer viewers’ input and geometry claims?</li>
 <li>After replacement of the installed helper under the real supervisor, does the same owner accept the retained draft and continue its turn while the unfinished Graph progresses?</li>
 </ol>
 </main></body></html>

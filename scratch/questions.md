@@ -4,8 +4,8 @@ Jack Heart selected direct server writes in [server-write-direction.md](server-w
 This supersedes the full-CLI subprocess design. Accepted delivery remains the
 existing feature Graph and PR #1813 through publication and interactive demo;
 no merge, Auto-Ship or Task completion. Direct execution is committed at
-`2d9c295d8a`; main is integrated through `c59cfcc631` at `041ca8f1c5`, including
-settings and Session adoption. The working design tracks their integration gaps.
+`2d9c295d8a`; adoption/binding repairs are checkpointed at `b11d49d32f` and
+main through #1822 at `30b4394a57`. The working design tracks remaining proof.
 
 The [working design](mobile-backend.md) owns the deletion list, invariants and
 remaining proof. LOO-718 owns remote admission, pairing and iOS; do not edit its
@@ -15,8 +15,9 @@ not a second Work implementation.
 The [direct-write demo](direct-write-demo.md) records native Task creation,
 conversation, rename and save; [matched measurements](server-performance/results.md)
 record the direct-write comparison. Both predate the final repairs and main
-merge. Gate owns merged-build validation; interactive demo/review owns rendered
-acceptance, including the composed installed-helper replacement proof. Earlier
+merge. Merged-build validation and automated composed installed-helper replacement
+passed as recorded in the working design. Interactive demo/review owns rendered
+acceptance and released-version upgrade proof. Earlier
 subprocess evidence cannot substitute. No matched embedded RSS sample supports
 a memory-savings claim.
 

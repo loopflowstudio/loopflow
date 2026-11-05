@@ -921,9 +921,11 @@ Configuration/status work without opening the registry. Client settings ignore
 launcher overrides. Explicit bind selects primary/cwd without moving live execution
 or historical attribution. Adoption exposed a merge hazard: shared operations can
 introduce raw stderr beneath served dispatch. Its directory warning now uses scoped
-diagnostics. New native non-launching Task creation still uses the CLI; that gap
-remains in LOO-593's plan, not an accepted execution-launch exception. Earlier
-parity/settings passes do not establish this combined build's acceptance.
+diagnostics. `b11d49d32f` routes non-launching adoption through the shared
+`task_from_session` write. CLI/server parity covers prepared Session identity,
+repository-person claims and no fabricated Process/Graph; it proves no live
+provider continuity. Create-and-run retains its execution owners. Earlier passes
+do not establish merged-build acceptance.
 
 Registration migrates OS labels while retaining socket/lock identity and disabled
 choices. Readiness is consumed once even on failure; Retry/watch recovery only
@@ -932,20 +934,20 @@ preserves newer claims. Unavailable is not ended; Copy/Find/scroll stay local.
 Move here consumes its generation before takeover; lost acknowledgements recover
 passively without replay. Closure cancels recovery.
 
-Native direct-write proof covers creation/conversation/rename/save, not final
-repairs or Jack's acceptance. Matched rename median improved eightfold; read tail
-and single restart worsened. Uncontrolled host work and no embedded RSS baseline
-preclude general speed/memory claims. Earlier same-build replacement proves no
-final upgrade. LaunchServices-owned updates model App Management; external bundle
-writes do not. Full Desktop, Xcode, Linux replacement, usage and combined mobile
-acceptance remain separate. Evidence: `0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`.
+Historical native proof and performance limits:
+`0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`. They establish neither
+final-build acceptance nor general speed/memory gains. Same-build replacement
+proves no upgrade; LaunchServices-owned updates model App Management, external
+bundle writes do not. Full Desktop, Xcode, Linux replacement, usage and combined
+mobile acceptance remain separate.
 
-LOO-718 owns remote admission/iOS; preserve wire identity and credentials across
-namespace moves. ViewPlan chooses primary Sessions; lookup starts nothing; local
-peer trust cannot authenticate proxies. Unattended hosting and phone takeover
-remain open. #1815 installation coherence is integrated; #1818 reattachment and
-#1820 cleanup survive. LOO-724's contention repair proves no incident cause or
-configured recovery: continued input/turns and retained drafts matter beyond liveness.
+LOO-718 owns remote admission/iOS; preserve wire identity/credentials. ViewPlan
+chooses primary Sessions; lookup starts nothing; local trust cannot authenticate
+proxies. Unattended hosting and phone takeover remain open. #1822 adds owner
+retirement and demo-runtime separation atop #1815/#1818/#1820; release is no
+continuity proof or authority to clean historical fixtures. LOO-724's contention
+repair proves no incident cause or configured recovery: retained drafts and
+continued input/turns matter beyond liveness.
 
 LOO-500 removed the placeholder scan: surviving files revived retired Waves.
 Writes register directories; reads list store rows. Unknown status stays explicit.

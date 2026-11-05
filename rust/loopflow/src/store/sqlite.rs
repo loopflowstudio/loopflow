@@ -25,7 +25,6 @@ pub(crate) mod ci_incidents;
 mod durable;
 mod github_people;
 mod graph_inventory;
-pub(crate) mod host_workspaces;
 #[cfg(test)]
 mod linear_migration_tests;
 

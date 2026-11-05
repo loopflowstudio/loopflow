@@ -36,12 +36,8 @@ fn snapshot_preview_fixture() {
         resume_fixture(&case);
         return;
     }
-    let observing = case == "observe";
-    let preview = if observing {
-        None
-    } else {
-        ViewerTerminal::preview(Some(SESSION)).unwrap()
-    };
+    let preview = ViewerTerminal::preview(Some(SESSION)).unwrap();
+    assert!(preview.is_some());
     if case == "startup_failure" {
         // The fixture test executable cannot serve an owner: startup exits
         // before acknowledgement, exercising the real startup failure path.
@@ -63,19 +59,7 @@ fn snapshot_preview_fixture() {
             if let Some((tag, payload)) = decoder.next().unwrap() {
                 assert_eq!(tag, Tag::Request);
                 let request: Incoming = serde_json::from_slice(&payload).unwrap();
-                if observing {
-                    assert!(matches!(
-                        request.request,
-                        Request::Attach {
-                            control: false,
-                            replace: false,
-                            own: None,
-                            ..
-                        }
-                    ));
-                } else {
-                    assert!(matches!(request.request, Request::Attach { .. }));
-                }
+                assert!(matches!(request.request, Request::Attach { .. }));
                 break;
             }
         }
@@ -89,9 +73,6 @@ fn snapshot_preview_fixture() {
         if case == "modes" {
             live.write(MODES);
         }
-        if observing {
-            live.write(b"observed output");
-        }
         let bytes = super::terminal::repaint(&live).unwrap();
         let reply = Outgoing {
             answers: 1,
@@ -100,10 +81,10 @@ fn snapshot_preview_fixture() {
                 viewer: "viewer".into(),
                 reconnect: "reconnect".into(),
                 nonce: "nonce".into(),
-                token: (!observing).then(|| "claim".into()),
+                token: Some("claim".into()),
                 terminal: true,
                 grace_ms: 60000,
-                owner: Some(if observing { "original" } else { "viewer" }.into()),
+                owner: Some("viewer".into()),
             },
         };
         socket
@@ -128,7 +109,7 @@ fn snapshot_preview_fixture() {
             assert!(matches!(request.request, Request::Leave));
         }
     });
-    attach_with_terminal(&owner, None, preview, !observing).unwrap();
+    attach_with_terminal(&owner, None, preview).unwrap();
     peer.join().unwrap();
 }
 
@@ -306,8 +287,6 @@ fn preview_case(case: &str) {
             if case == "resume" {
                 assert!(display.text().unwrap().contains("live primary"));
                 assert!(!display.text().unwrap().contains("saved preview"));
-            } else if case == "observe" {
-                assert!(display.text().unwrap().contains("observed output"));
             } else {
                 assert!(display.text().unwrap().trim().is_empty());
                 assert_eq!(display.cursor(), (0, 0));
@@ -321,13 +300,7 @@ fn preview_case(case: &str) {
             assert_eq!(display.foreground(0, 0), theme);
             assert_eq!(display.foreground(1, 0), theme);
             master
-                .write_all(if case == "resume" {
-                    b"done\n"
-                } else if case == "observe" {
-                    b"ignored input\x1d"
-                } else {
-                    &[0x1d]
-                })
+                .write_all(if case == "resume" { b"done\n" } else { &[0x1d] })
                 .unwrap();
             inspected = true;
         }
@@ -374,12 +347,9 @@ fn preview_case(case: &str) {
     };
     assert_ne!(attrs.c_lflag & libc::ICANON, 0);
     assert_ne!(attrs.c_lflag & libc::ECHO, 0);
-    assert_eq!(
-        output
-            .windows(b"saved preview".len())
-            .any(|w| w == b"saved preview"),
-        case != "observe"
-    );
+    assert!(output
+        .windows(b"saved preview".len())
+        .any(|w| w == b"saved preview"));
     assert!(case == "startup_failure" || case == "provider_failure" || cancelled || inspected);
 }
 
@@ -398,11 +368,6 @@ fn snapshot_preview_hands_off_to_a_fresh_primary_screen() {
 #[test]
 fn snapshot_preview_hands_off_to_mode_only_live_state() {
     preview_case("modes");
-}
-
-#[test]
-fn passive_viewer_displays_without_claiming_control_or_forwarding_input() {
-    preview_case("observe");
 }
 
 #[test]

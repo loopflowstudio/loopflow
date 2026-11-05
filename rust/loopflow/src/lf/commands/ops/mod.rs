@@ -281,16 +281,18 @@ pub(crate) fn run_sync_in(
             return Ok(());
         }
     }
-    // A Task stack owns its sync target: the live parent branch until merge,
-    // then the default branch. An explicit override could silently drop work.
+    // An explicit default branch detaches the child using its recorded fork;
+    // ordinary sync continues to follow the live parent.
     let stacked = if on_main {
         None
     } else {
         crate::ops::task::task_stack(repo_root)?
     };
-    if stacked.is_some() && onto.is_some() {
+    let detach =
+        stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
+    if stacked.is_some() && onto.is_some() && !detach {
         return Err(anyhow!(
-            "stacked Task syncs choose their parent automatically; omit the target"
+            "use the default branch to detach this Task, or omit the target to sync its parent"
         ));
     }
     let stacked_onto = stacked
@@ -298,8 +300,16 @@ pub(crate) fn run_sync_in(
         .and_then(|stacked| stacked.parent_branch.as_ref())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let default_target = if on_main { upstream } else { default.clone() };
-    let target = stacked_onto.as_deref().or(onto).unwrap_or(&default_target);
+    let default_target = if on_main {
+        upstream.clone()
+    } else {
+        default.clone()
+    };
+    let target = if detach {
+        upstream.as_str()
+    } else {
+        stacked_onto.as_deref().or(onto).unwrap_or(&default_target)
+    };
     if !plan_only {
         crate::git::fetch_tracking_ref(repo_root, target)?;
     }
@@ -355,13 +365,6 @@ pub(crate) fn run_sync_in(
             }
         })?
     };
-    if let Some(stacked) = stacked.as_ref() {
-        crate::ops::task::record_stack_sync(
-            stacked,
-            &verification.target_sha,
-            stacked.parent_branch.is_none(),
-        )?;
-    }
     if manual {
         return Ok(());
     }

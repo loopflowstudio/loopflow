@@ -1,57 +1,47 @@
 # Surfaces
 
 Your Tasks and conversations live in `lf`, not in a window. Open them wherever
-you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
-
-For Task layouts, Wave defaults, automatic arrivals and native splits, read
-[Open your Loopflow workspace](workspaces.md).
+you already work: Loopflow Desktop, cmux, Herdr, tmux or a plain terminal.
 
 ## Open Work where you are
 
 ```bash
 lf open loopflow://loopflow/task/LOO-12        # LOO-12's conversation, in the host you're in
-lf open loopflow://loopflow/wave/product       # the product Wave
+lf open loopflow://loopflow/wave/product       # the product Wave's conversation
 lf open --available                            # every conversation available for you, at once
 lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (Desktop)
 ```
 
-From Rex, `lf open` opens a native workspace for the selected Work. It uses
-recorded viewer placement when available, otherwise Rex's configured local
-server and caller block. Custom-server discovery and the complete agent-tool
-path remain unfinished; known Rex failures never fall through to Desktop.
-From a Herdr pane, `lf open --task LOO-12` adds a Herdr workspace; from tmux, a new window
+From a Herdr pane, `lf open` adds a Herdr workspace; from tmux, a new window
 right after this one; from cmux, a new workspace. Otherwise it opens in Desktop on
 macOS, then a plain terminal. It reads only the host's own environment
-(`REX_*`, `HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
-apps. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one explicitly.
+(`HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
+apps. `--host desktop|cmux|herdr|tmux|terminal` picks one explicitly.
 
-Rex and Herdr open passive conversation views. Other terminal routes focus an
-existing conversation in that host or report it as `elsewhere`, with the
-`lf resume` command that moves input. Opening never steals input. Repeated
-opening reuses the workspace.
+A conversation already live in this host is focused, draft intact. One live in
+another client is reported as `elsewhere`, with the `lf resume` command that
+moves it; opening never steals it. Open the same Task twice while its
+workspace starts and you get the one workspace.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
 
-## Open files where you are
+## Present documentation in Desktop
 
 ```bash
-lf open --file docs/usage.md --file README.md
+lf open --host desktop --file docs/usage.md --file README.md
 ```
 
-Open the actual files in the current host without starting a conversation.
-Paths are relative to the selected checkout. Desktop uses its Files view;
-Rex, Herdr, cmux and tmux open the Files editor alongside existing work.
-Terminal editors follow `VISUAL`, then `EDITOR`, then `vi`. Existing panes and
-unsaved edits remain in place. No attached host means a successful no-op; the
-command never launches a host as a fallback.
-Terminal file presentation currently requires a local checkout; Desktop Files
-also supports Tasks on another Machine.
+Present the original files in an attached Desktop Files view, without starting a
+host or conversation. Paths are relative to the selected checkout. Markdown and
+HTML render in read mode; active edits keep their selection and draft while
+another file becomes a tab. Desktop retains its existing remote Files transport.
 
-The docs-first workflow automatically presents files only in an already attached
-Desktop Files view, which renders Markdown and HTML and preserves active drafts.
-Elsewhere it reports their paths and continues. Explicit `lf open --file` retains
-the current-host behavior above.
+With no Desktop attached, the command reports paths and opens nothing. A missing
+file or unmatched view reports an error; correct the path or destination and
+retry presentation without rewriting the docs. The docs-first workflow reports
+paths and continues when presentation is unavailable. It never launches a
+terminal editor, browser or host as a fallback.
 
 ## Share a link
 

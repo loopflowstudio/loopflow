@@ -42,8 +42,8 @@ Write the docs someone will use when the change ships.
    Desktop. If Desktop is absent, unavailable or has no matching Files view,
    report the actual paths and continue. Never fall back to a terminal editor,
    host, browser or conversation, including from Rex, Herdr, tmux or cmux.
-   Explicit user requests to open files in another host remain separate from
-   this automatic presentation. Do not create a scratch wrapper.
+   Explicit user requests to use another editor remain separate from this
+   automatic presentation. Do not create a scratch wrapper.
    Record the changed documentation paths in the existing implementation plan
    so the next worker reads them from this checkout.
 

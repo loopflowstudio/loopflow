@@ -2018,9 +2018,9 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
 }
 
 #[test]
-fn hooks_from_an_earlier_lf_never_block_their_provider() {
+fn retired_title_hooks_never_block_their_provider() {
     let home = tempfile::tempdir().unwrap();
-    let output = command(home.path(), &["__planning-check"])
+    let output = command(home.path(), &["__session-title", "claude"])
         .stdin(std::process::Stdio::null())
         .output()
         .unwrap();

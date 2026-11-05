@@ -27,7 +27,7 @@ pub struct TaskFilesFrame {
     pub paths: Vec<String>,
 }
 
-pub(crate) fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
+fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
     let checkout = file_context(&file_store()?, issue)?;
     ensure!(
         checkout.worktree == expected,

@@ -1,0 +1,9 @@
+# LOO-728 recovery — November 4
+
+The independent-main implementation remains unfinished in this checkout. Run 6973676a returned from demo to implement, but no implementation agent could start: Task base 3bdaad5c6f7c301e2e45ca8c6184097377c5d7e6 is absent from local Git and origin rejects fetching it (not our ref). Both subsequent retries failed building context for the same reason. This is distinct from the earlier Codex usage-limit failure.
+
+Current source had one known compile error: retarget_pr expects u64, while GithubPr.number is u32. The primary conversation fixed this with u64::from. It also made task_workspace_context report unavailable comparison context instead of preventing a repair agent from starting. It changes no durable base and invents no empty diff. Build/check this recovery and add focused coverage before committing.
+
+Recover the managed Task comparison base from verified history and finish the independent-main sync. Parent integration before extraction was df3b5e810d3841a19bc5911c332fb42f23193d46; preserved whole-work checkpoint ea0e0781b22f092b6a0169802997ff7a3628c65c. Never write the registry directly or pretend the missing commit exists. Investigate whether the earlier isolated demo/test work contaminated recorded placement; that cause is presently unproven. Run all tests with inherited LF_* unset and closed stdin, isolated stores and pinned test CLI, as AGENTS.md specifies.
+
+The previous demo's throwaway build was not validation of this checkout. Fix/build this checkout, then run its actual focused tests. Preserve the user's accepted Desktop-only scope and request to move onto main and land. Do not run another detached copy using the shared target directory. Continue from implement, not another demo of the unfinished tree. Existing failed runs and evidence remain history.

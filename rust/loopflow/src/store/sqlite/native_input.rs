@@ -2,13 +2,16 @@
 //! This is not an editor emulator: edits, queued input and unknown controls retain
 //! the native process. Neither a Return key nor a Stop alone settles a draft.
 
+use std::sync::TryLockError;
+use std::time::Duration;
+
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use super::SqliteStore;
 use crate::id::LfProcessId;
 use crate::steer::{NativeBoundary, SteerAdapter};
-use crate::store::StoreResult;
+use crate::store::{StoreError, StoreResult};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct NativeInput {
@@ -165,13 +168,34 @@ fn update(
 }
 
 impl SqliteStore {
-    /// Record before forwarding: an unrecorded key must never enter the editor.
-    pub(crate) fn record_owner_input(&self, owner: &LfProcessId, bytes: &[u8]) -> StoreResult<()> {
-        update(
-            &mut self.conn.lock().expect("store mutex poisoned"),
-            owner,
-            |input| input.accept(bytes),
-        )
+    /// Record before forwarding, without blocking the terminal's descriptor loop.
+    /// False leaves the bytes with the owner to retry after store contention.
+    pub(crate) fn try_record_owner_input(
+        &self,
+        owner: &LfProcessId,
+        bytes: &[u8],
+    ) -> StoreResult<bool> {
+        let mut conn = match self.conn.try_lock() {
+            Ok(conn) => conn,
+            Err(TryLockError::WouldBlock) => return Ok(false),
+            Err(TryLockError::Poisoned(_)) => panic!("store mutex poisoned"),
+        };
+        let previous: u32 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
+        conn.busy_timeout(Duration::ZERO)?;
+        let result = update(&mut conn, owner, |input| input.accept(bytes));
+        conn.busy_timeout(Duration::from_millis(u64::from(previous)))?;
+        match result {
+            Ok(()) => Ok(true),
+            Err(StoreError::Sqlite(error))
+                if matches!(
+                    error.sqlite_error_code(),
+                    Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) fn clear_owner_input(&self, owner: &LfProcessId) -> StoreResult<()> {

@@ -914,11 +914,18 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
 }
 
 #[test]
-fn command_tree_has_no_command_aliases() {
+fn command_tree_only_retains_the_running_provider_hook_alias() {
     fn check(command: &clap::Command) {
+        // Running providers keep this Stop callback across upgrades (LOO-724).
+        let expected_aliases = if command.get_name() == "__context-block" {
+            assert!(command.is_hide_set());
+            vec!["__planning-check"]
+        } else {
+            Vec::new()
+        };
         assert_eq!(
-            command.get_all_aliases().count(),
-            0,
+            command.get_all_aliases().collect::<Vec<_>>(),
+            expected_aliases,
             "{}",
             command.get_name()
         );

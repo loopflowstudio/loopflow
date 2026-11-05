@@ -279,7 +279,6 @@ final class TaskFilesStore {
         case pullRequest = "PR"
         case files = "Files"
     }
-    var comparison = ChangeComparison.workingTree(base: "parent")
     let pullRequest = PullRequestStore()
     var page = Page.files
     enum Navigator { case closed, dropdown, pinned }
@@ -662,7 +661,7 @@ final class TaskFilesStore {
         isRefreshingChanges = true
         defer { if generation == refreshGeneration { isRefreshingChanges = false } }
         do {
-            let changes = try await query.taskChanges(issue: issue, base: comparison.base, head: comparison.head)
+            let changes = try await query.taskChanges(issue: issue, base: "parent")
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             self.changes = changes
             if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
@@ -706,22 +705,21 @@ final class TaskFilesStore {
         observation?.watch(path)
         let document = selectedDocument
         let version = document?.editVersion
-        let target = comparison
         do {
             // Debounce edits; identity checks also protect transports that finish after cancellation.
             if document?.dirty == true { try await Task.sleep(for: .milliseconds(180)) }
-            let next = try await query.taskDiff(issue: issue, path: path, base: base, head: target.head,
-                                               draft: target.head == nil && document?.dirty == true ? document?.text : nil)
+            let next = try await query.taskDiff(issue: issue, path: path, base: base,
+                                               draft: document?.dirty == true ? document?.text : nil)
             let lines = await Task.detached(priority: .userInitiated) {
                 TaskPatchLine.changes(in: next.patch)
             }.value
-            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target,
+            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base,
                   selectedDocument?.editVersion == version else { return }
             patchLines = lines
             diff = next
             changesError = nil
         } catch {
-            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target else { return }
+            guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base else { return }
             changesError = error.localizedDescription
         }
     }

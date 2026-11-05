@@ -855,6 +855,176 @@ fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
 }
 
 #[test]
+fn explicit_main_sync_detaches_only_the_child_and_preserves_its_pr() {
+    for (conflict, missing_base) in [(false, false), (true, false), (false, true)] {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let _env = EnvGuard::with_lf_home(
+            &[(
+                "gh",
+                r#"#!/bin/sh
+case "$1 $2" in
+  'pr list') echo '[{"number":42,"url":"https://github.com/fixture/repo/pull/42","state":"OPEN","isDraft":true}]' ;;
+  'pr edit')
+    test ! -f "$LF_HOME/retarget-fails" || exit 1
+    printf '%s' "$3 $5" > "$LF_HOME/pr-base" ;;
+  *) exit 1 ;;
+esac
+"#,
+            )],
+            home.path(),
+        );
+        let main = repo.head_sha();
+        repo.create_branch("parent");
+        repo.create_file("parent.txt", "parent work\n");
+        repo.stage_all();
+        repo.commit("Parent work");
+        repo.push_new_branch("parent");
+        let fork = repo.head_sha();
+        let parent = support::register_task_with_pr(home.path(), repo.path(), "parent", &fork);
+        let child_path = repo.create_named_worktree("child");
+        // TestRepo forks main by default; explicitly incorporate the parent.
+        git(&child_path, &["merge", "--ff-only", "parent"]);
+        let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+        stack_on_published_parent(&parent, &child, &fork, None);
+        std::fs::write(child_path.join("child.txt"), "child work\n").unwrap();
+        if conflict {
+            std::fs::write(child_path.join("parent.txt"), "child changes parent\n").unwrap();
+        }
+        git(&child_path, &["add", "."]);
+        git(&child_path, &["commit", "-m", "Child work"]);
+        let original = git(&child_path, &["rev-parse", "HEAD"]);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        if missing_base {
+            runtime
+                .block_on(parent.store.sync_task_placement(
+                    &child.id,
+                    "0000000000000000000000000000000000000001",
+                    false,
+                    time::OffsetDateTime::now_utc(),
+                ))
+                .unwrap();
+            assert_eq!(task_stack(&child_path).unwrap().unwrap().fork_base, fork);
+            assert_eq!(
+                runtime
+                    .block_on(parent.store.get_task(&child.id))
+                    .unwrap()
+                    .unwrap()
+                    .base_commit,
+                "0000000000000000000000000000000000000001"
+            );
+        }
+        let mut pr = parent.pr.clone();
+        pr.id = loopflow::work::task::TaskPrId::new();
+        pr.task_id = child.id.clone();
+        pr.branch = child.branch.clone();
+        pr.slug = child.workspace_slug.clone();
+        let placed = runtime
+            .block_on(parent.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        pr.base_commit = placed.base_commit;
+        pr.parent_pr_id = placed.parent_pr_id;
+        pr.publication = Some(PrPublication {
+            requested_at: pr.created_at,
+            presentation: None,
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/fixture/repo/pull/42".into(),
+                head_sha: Some(original.clone()),
+            }),
+            merge: None,
+        });
+        runtime.block_on(parent.store.insert_task_pr(&pr)).unwrap();
+        let run = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_lf"))
+                .current_dir(&child_path)
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        let plan = run(&["sync", "main", "--plan"]);
+        assert!(
+            plan.status.success(),
+            "{}",
+            String::from_utf8_lossy(&plan.stderr)
+        );
+        assert!(String::from_utf8_lossy(&plan.stdout).contains("strategy: merge_target"));
+        assert!(runtime
+            .block_on(parent.store.get_task(&child.id))
+            .unwrap()
+            .unwrap()
+            .parent_pr_id
+            .is_some());
+        if !conflict {
+            std::fs::write(home.path().join("retarget-fails"), "offline").unwrap();
+            let failed = run(&["sync", "main", "--manual"]);
+            assert!(!failed.status.success());
+            assert!(runtime
+                .block_on(parent.store.get_task(&child.id))
+                .unwrap()
+                .unwrap()
+                .parent_pr_id
+                .is_some());
+            std::fs::remove_file(home.path().join("retarget-fails")).unwrap();
+        }
+        let sync = run(&["sync", "main", "--manual"]);
+        if conflict {
+            assert!(!sync.status.success());
+            assert!(runtime
+                .block_on(parent.store.get_task(&child.id))
+                .unwrap()
+                .unwrap()
+                .parent_pr_id
+                .is_some());
+            assert!(!home.path().join("pr-base").exists());
+            git(&child_path, &["rm", "parent.txt"]);
+            let continued = run(&["sync", "--continue"]);
+            assert!(
+                continued.status.success(),
+                "{}",
+                String::from_utf8_lossy(&continued.stderr)
+            );
+        } else {
+            assert!(
+                sync.status.success(),
+                "{}",
+                String::from_utf8_lossy(&sync.stderr)
+            );
+        }
+        let placed = runtime
+            .block_on(parent.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(placed.parent_pr_id, None);
+        assert_eq!(placed.base_commit, main);
+        assert_eq!(placed.worktree, child.worktree);
+        assert_eq!(
+            runtime
+                .block_on(parent.store.active_task_pr(&child.id))
+                .unwrap()
+                .unwrap()
+                .id,
+            pr.id
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.path().join("pr-base")).unwrap(),
+            "42 main"
+        );
+        assert_eq!(
+            git(&child_path, &["diff", "--name-only", "origin/main...HEAD"]),
+            "child.txt"
+        );
+        assert!(loopflow::git::is_ancestor(&child_path, &original, "HEAD").unwrap());
+        assert_eq!(git(repo.path(), &["rev-parse", "parent"]), fork);
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("parent.txt")).unwrap(),
+            "parent work\n"
+        );
+    }
+}
+
+#[test]
 fn stacked_child_rebased_onto_main_syncs_from_its_parents_merge() {
     // LOO-669: after its parent squash-merged, the child was rebased onto main.
     // Its HEAD holds the parent's merge commit but not the recorded parent tip.

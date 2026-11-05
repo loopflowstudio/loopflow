@@ -436,7 +436,7 @@ public struct DesktopCommandStatus: Codable, Sendable, Equatable {
 }
 
 public struct DesktopTabInspection: Codable, Sendable, Equatable {
-    public enum Kind: String, Codable, Sendable { case shell, files, task, changes; case graphLog = "graph_log"; case url }
+    public enum Kind: String, Codable, Sendable { case shell, files; case graphLog = "graph_log"; case url }
     public let id: String
     public let kind: Kind
     public let title: String
@@ -503,8 +503,6 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
                     switch page {
                     case .files: kind = .files; url = nil
                     case .graphLog: kind = .graphLog; url = nil
-                    case .task: kind = .task; url = nil
-                    case .changes: kind = .changes; url = nil
                     case .url(_, let address): kind = .url; url = address.absoluteString
                     }
                     return DesktopTabInspection(id: page.id, kind: kind, title: page.title, incarnation: state.incarnation,

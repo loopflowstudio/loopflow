@@ -198,6 +198,16 @@ lf task run LOO-13 --stack-on LOO-12
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 
+For a stacked Task, `lf sync` follows its parent. To deliver the child's work
+independently, run `lf sync main` (or the repository's default branch). It uses
+the recorded parent tip to remove inherited changes, keeps the Task, branch and
+PR identities, and retargets the PR after integration succeeds. Resolve conflicts
+with `lf sync --manual main`, then `lf sync --continue`; `lf sync --abort` keeps
+the original placement. Parent work remains in its own branch and in Git history.
+If the recorded fork is unavailable, sync recovers it from the common ancestor
+of this checkout and the parent's remote branch. `lf sync main --plan` shows
+that fork without changing placement.
+
 ## Other machines
 
 ```bash

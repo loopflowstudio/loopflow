@@ -1168,26 +1168,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Tool {
-            issue,
-            tool,
-            checkout,
-            path,
-            base,
-            head,
-            difftool,
-        } => loopflow::lf::commands::task_tool::run(
-            issue,
-            *tool,
-            checkout,
-            path.as_deref(),
-            base,
-            head.as_deref(),
-            *difftool,
-        ),
-        TaskCommand::View { issue, once } => {
-            loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
-        }
         TaskCommand::Status { issue, json, watch } => {
             let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
             if *watch {
@@ -1264,12 +1244,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Diff {
             issue,
             base,
-            head,
             json,
             files: true,
             ..
         } => {
-            let snapshot = loopflow::ops::task::task_changes(issue, base, head.as_deref())?;
+            let snapshot = loopflow::ops::task::task_changes(issue, base)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.files.is_empty() {
@@ -1298,19 +1277,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             issue,
             path,
             base,
-            head,
             draft,
             json,
             files: false,
         } => {
             let content = draft.then(read_task_draft).transpose()?;
-            let snapshot = loopflow::ops::task::task_diff(
-                issue,
-                path.as_deref(),
-                base,
-                head.as_deref(),
-                content.as_deref(),
-            )?;
+            let snapshot =
+                loopflow::ops::task::task_diff(issue, path.as_deref(), base, content.as_deref())?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else {
@@ -2346,19 +2319,6 @@ fn selected_task_repository(
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
-    // Provider hooks name the stable installed entry, which an upgrade can
-    // replace under a running Session. An internal command this release no
-    // longer has came from a hook an older lf wrote; skip it rather than fail
-    // the provider's turn, since a Stop hook's error blocks stopping.
-    if let Some(Commands::External(parts)) = &cli.command {
-        if parts[0].starts_with("__") {
-            eprintln!(
-                "lf {}: skipped an internal hook this lf version no longer has; restart the Session to refresh its hooks",
-                parts[0]
-            );
-            return Ok(());
-        }
-    }
     // Own direct conversations and Graphs. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(

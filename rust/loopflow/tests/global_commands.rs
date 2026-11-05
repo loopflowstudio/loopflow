@@ -3308,17 +3308,9 @@ fn repository_move_with_a_separate_git_directory_keeps_work_readable() {
 }
 
 #[test]
-fn a_hook_left_by_an_older_lf_does_not_fail_the_provider_turn() {
+fn a_missing_skill_still_fails() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
-    // `__planning-check` was the Stop hook before 0.14.11 renamed it.
-    let output = command(home.path(), repo.path(), &["__planning-check"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
-    // A misspelled skill still fails.
     let output = command(home.path(), repo.path(), &["no-such-skill"])
         .stdin(std::process::Stdio::null())
         .output()

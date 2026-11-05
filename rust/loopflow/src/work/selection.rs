@@ -6,8 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod panes;
 mod query;
 pub use panes::{
-    BrowserTab, ChangeComparison, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab,
-    TaskLayoutTemplate, WorkPaneLayout,
+    BrowserTab, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab, WorkPaneLayout,
 };
 
 #[derive(

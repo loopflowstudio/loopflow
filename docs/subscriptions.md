@@ -356,7 +356,7 @@ lf session history 0199a213-81c0-7800-8aa1-bbab2a035a53
 Resuming a conversation plain Codex started brings it in as a Session with
 no Task. Normal batch completion and closing the current connected interface
 close its Codex process, leaving saved history available to plain `codex resume`.
-`lf resume` takes over a running conversation without restarting it;
+`lf resume` reconnects to a running conversation without restarting it;
 the old attachment's exit cannot close the new owner's Codex process. Codex allows one
 writer per conversation, so use `lf resume` while it is still running.
 

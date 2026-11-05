@@ -81,16 +81,12 @@ public enum PaneContent: Codable, Sendable, Equatable {
 public enum BrowserTab: Codable, Sendable, Equatable, Identifiable {
     case files
     case graphLog
-    case task
-    case changes(comparison: ChangeComparison)
     case url(id: String, url: URL)
 
     public var id: String {
         switch self {
         case .files: "files"
         case .graphLog: "graph-log"
-        case .task: "task"
-        case .changes(let comparison): "changes-\(comparison.title)-\(comparison.base)-\(comparison.head ?? "worktree")"
         case .url(let id, _): id
         }
     }
@@ -99,8 +95,6 @@ public enum BrowserTab: Codable, Sendable, Equatable, Identifiable {
         switch self {
         case .files: "Files"
         case .graphLog: "Graph processes"
-        case .task: "Task & workflow"
-        case .changes(let comparison): comparison.title
         case .url(_, let url): url.host() ?? url.absoluteString
         }
     }

@@ -1270,7 +1270,11 @@ pub fn merge(
     }
     let target_sha = rev_parse(worktree, target)?;
     let target = target_sha.as_str();
-    if is_ancestor(worktree, target, "HEAD")? {
+    let replay_stack = match fork_base {
+        Some(base) => !is_ancestor(worktree, base, target)?,
+        None => false,
+    };
+    if !replay_stack && is_ancestor(worktree, target, "HEAD")? {
         return Ok(MergeResult {
             success: true,
             conflicts: None,

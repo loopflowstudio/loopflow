@@ -717,11 +717,10 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             ] {
                 let file = super::task_file(issue, "scratch/note.md", false).unwrap();
                 assert_eq!(file.content.as_deref(), Some("local note\n"));
-                let changes = super::task_changes(issue, "parent", None).unwrap();
+                let changes = super::task_changes(issue, "parent").unwrap();
                 assert_eq!(changes.base_commit, pr.base_commit);
                 assert_eq!(changes.scratch, ["scratch/note.md"]);
-                let diff =
-                    super::task_diff(issue, Some("scratch/note.md"), "head", None, None).unwrap();
+                let diff = super::task_diff(issue, Some("scratch/note.md"), "head", None).unwrap();
                 assert!(diff.patch.contains("+local note"));
             }
             let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
@@ -772,7 +771,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             assert_eq!(saved.file.content.as_deref(), Some("no PR needed\n"));
             let directory = super::task_files("FILES-1", "scratch", None, false).unwrap();
             assert_eq!(directory.entries[0].path, "scratch/note.md");
-            let changes = super::task_changes("FILES-1", "parent", None).unwrap();
+            let changes = super::task_changes("FILES-1", "parent").unwrap();
             assert_eq!(changes.base_commit, pr.base_commit);
             assert_eq!(changes.scratch, ["scratch/note.md"]);
             let conflict = super::task_save(
@@ -841,7 +840,7 @@ fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
                     .unwrap_err()
                     .to_string()
                     .contains(expected));
-                assert!(super::task_changes("LOCATION-1", "head", None)
+                assert!(super::task_changes("LOCATION-1", "head")
                     .unwrap_err()
                     .to_string()
                     .contains(expected));
@@ -911,7 +910,6 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
             worktree: repo.path(),
         },
         base_commit: &parent,
-        head_commit: None,
     };
     let changes = super::snapshot::changes_snapshot(workspace).unwrap();
     assert!(!changes
@@ -928,23 +926,6 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
     let patch = super::snapshot::diff_snapshot(workspace, Some("new.txt")).unwrap();
     assert!(patch.patch.contains("rename from old.txt"));
     let head = super::resolve_file_base(repo.path(), &parent, "head").unwrap();
-    let committed = super::TaskComparison {
-        head_commit: Some(&head),
-        ..workspace
-    };
-    let committed_files = super::snapshot::changes_snapshot(committed).unwrap();
-    assert!(committed_files
-        .files
-        .iter()
-        .any(|file| file.path == "cancelled.txt"));
-    assert!(!committed_files
-        .files
-        .iter()
-        .any(|file| file.untracked || file.staged || file.unstaged));
-    let committed_patch = super::snapshot::diff_snapshot(committed, None).unwrap();
-    assert!(committed_patch.patch.contains("+committed"));
-    assert!(!committed_patch.patch.contains("scratch/nested/notes.md"));
-    assert_eq!(committed_patch.head_commit.as_deref(), Some(head.as_str()));
     let head_changes = super::snapshot::changes_snapshot(super::TaskComparison {
         base_commit: &head,
         ..workspace
@@ -1106,6 +1087,16 @@ async fn task_workspace_context_covers_committed_staged_unstaged_and_untracked_b
     assert!(context.contains("Patch omitted"));
     assert!(!context.contains("content_sha256"));
     assert!(crate::prompt::count_tokens(&context) < 5_000);
+
+    // A stale comparison must not prevent an agent from recovering saved work.
+    task.base_commit = "0000000000000000000000000000000000000001".into();
+    let recovery = super::task_workspace_context(&task).unwrap();
+    assert!(recovery.contains("comparison base"));
+    assert!(recovery.contains("unavailable"));
+    assert_eq!(
+        std::fs::read_to_string(repository.path().join("tracked.txt")).unwrap(),
+        "unstaged bytes\n"
+    );
 }
 
 #[tokio::test]

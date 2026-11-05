@@ -1,5 +1,5 @@
 pub(crate) mod remote;
-pub(crate) mod workspace;
+mod workspace;
 pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
@@ -222,7 +222,6 @@ pub struct TaskDiffSnapshot {
     pub issue_identifier: String,
     pub task_id: String,
     pub base_commit: String,
-    pub head_commit: Option<String>,
     pub path: Option<String>,
     pub patch: String,
     pub binary: bool,
@@ -273,7 +272,6 @@ impl<'a> From<&'a TaskCheckout> for TaskWorkspace<'a> {
 struct TaskComparison<'a> {
     checkout: TaskWorkspace<'a>,
     base_commit: &'a str,
-    head_commit: Option<&'a str>,
 }
 
 impl<'a> TaskComparison<'a> {
@@ -285,7 +283,6 @@ impl<'a> TaskComparison<'a> {
                 worktree: task.worktree()?,
             },
             base_commit: &task.base_commit,
-            head_commit: None,
         })
     }
 }
@@ -435,6 +432,11 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         // tip. That commit is its base now; one missing both is refused later.
         let fork_base = match parent.merge_commit.as_deref() {
             Some(merge) if contains_commit(worktree, merge)? => merge.to_string(),
+            _ if !crate::git::commit_exists(worktree, &task.base_commit)? => {
+                // Recover from shared Git history without changing placement on
+                // a read. The owned sync records its verified target on success.
+                crate::git::merge_base(worktree, "HEAD", &format!("origin/{}", parent.branch))?
+            }
             _ => task.base_commit.clone(),
         };
         Ok(Some(StackedSync {
@@ -465,7 +467,7 @@ pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
 }
 
 /// Persist the exact base reached by a successful deterministic sync. Clear
-/// the parent link only when its work is now present on the default branch.
+/// the parent link after landing or an explicitly requested default-branch sync.
 /// Refuses with an actionable authority error if the registry is not usable, so
 /// a post-sync base is never silently dropped — the sync already pushed, so
 /// the operator must know the durable record did not advance with it.
@@ -478,6 +480,19 @@ pub fn record_stack_sync(
     let new_base = new_base.to_string();
     block_on_task(async move {
         let store = task_store().await?;
+        if clear_parent {
+            if let Some(pr) = store.active_task_pr(&task_id).await.map_err(task_error)? {
+                if let Some(github) = pr.github() {
+                    let worktree = stacked.child.worktree()?;
+                    crate::ops::pr::retarget_pr(
+                        worktree,
+                        u64::from(github.number),
+                        &crate::git::get_default_branch(worktree)?,
+                        &|_| {},
+                    )?;
+                }
+            }
+        }
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // sync only repoints the mutable row to the post-merge truth.

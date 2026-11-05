@@ -81,37 +81,6 @@
               "kind": "url",
               "id": "page-1",
               "url": "http://localhost:5173"
-            },
-            {
-              "kind": "task",
-              "id": "task"
-            },
-            {
-              "kind": "changes",
-              "id": "changes-parent",
-              "comparison": {
-                "kind": "working_tree",
-                "base": "parent"
-              }
-            },
-            {
-              "kind": "changes",
-              "id": "changes-branch",
-              "comparison": {
-                "kind": "branch",
-                "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-              }
-            },
-            {
-              "kind": "changes",
-              "id": "changes-pr",
-              "comparison": {
-                "kind": "pull_request",
-                "number": 19,
-                "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "head": "cccccccccccccccccccccccccccccccccccccccc"
-              }
             }
           ],
           "selected": "files"

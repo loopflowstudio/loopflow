@@ -589,11 +589,12 @@ pub enum Commands {
     /// Internal provider turn-boundary hook: context at startup and compaction,
     /// steers at tool and prompt boundaries, Linear acquisition at turn end,
     /// Pi's native lifecycle events and its bash tool groups.
-    #[command(name = "__context-block", hide = true)]
+    // Running providers retain this older Stop spelling across lf upgrades.
+    #[command(name = "__context-block", alias = "__planning-check", hide = true)]
     ContextBlock {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, default_value = "stop")]
         moment: crate::context_block::ContextMoment,
         /// The FIFO Pi holds open while a `tool-group` command runs
         #[arg(
@@ -807,7 +808,7 @@ pub enum DesktopCommand {
     },
     /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
     Layout {
-        /// repository, wave:<durable-id>, wave-default:<durable-id>, task:<durable-id> or query:ID
+        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
         work: String,
         /// Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default)
         #[arg(long)]
@@ -1094,8 +1095,6 @@ impl TaskCommand {
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
-            | Self::View { .. }
-            | Self::Tool { .. }
             | Self::Diff { .. }
             | Self::Files { .. }
             | Self::File { .. }
@@ -1142,10 +1141,7 @@ impl WaveCommand {
 impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::ObserveStatus { .. }
-            | Self::View { .. }
-            | Self::History { .. }
-            | Self::List { .. } => false,
+            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
@@ -1634,8 +1630,6 @@ pub enum SessionCommand {
         #[arg(long)]
         agent_process: Option<String>,
     },
-    /// Observe a conversation without taking input or starting a provider
-    View { id: String },
     /// Read this conversation's native start, usage and completion receipts
     History {
         /// Session ID or provider conversation ID
@@ -1652,7 +1646,7 @@ pub enum SessionCommand {
     List(SessionListArgs),
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Whatever holds the conversation, it continues here: a terminal showing it hands it over and says where it went; a provider client lf started stops; a dead one resumes from its history. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID
@@ -1898,7 +1892,7 @@ pub struct SyncArgs {
     /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to sync onto
+    /// Branch to sync onto; naming the default branch detaches a stacked Task
     pub onto: Option<String>,
 }
 
@@ -2093,31 +2087,6 @@ until `lf ship`."
         #[arg(long)]
         watch: bool,
     },
-    /// Render a workspace tool in the Task's recorded checkout
-    Tool {
-        issue: String,
-        #[arg(value_enum)]
-        tool: crate::lf::commands::task_tool::Tool,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        #[arg(long)]
-        path: Option<std::path::PathBuf>,
-        #[arg(long, default_value = "parent")]
-        base: String,
-        /// Compare to this resolved commit instead of the working tree
-        #[arg(long)]
-        head: Option<String>,
-        /// Delegate comparison display to the configured Git difftool
-        #[arg(long)]
-        difftool: bool,
-    },
-    /// Browse the Task brief, workflow and recorded runs without starting work
-    View {
-        issue: Option<String>,
-        /// Print once, including when stdout is a terminal
-        #[arg(long)]
-        once: bool,
-    },
     /// Show this Task's patch or list its changed files
     Diff {
         issue: String,
@@ -2127,9 +2096,6 @@ until `lf ship`."
         files: bool,
         #[arg(long, default_value = "parent")]
         base: String,
-        /// Compare to this resolved commit instead of the working tree
-        #[arg(long)]
-        head: Option<String>,
         /// Compare a UTF-8 draft read from stdin without writing the worktree
         #[arg(long, requires = "path")]
         draft: bool,
@@ -2260,12 +2226,10 @@ impl TaskCommand {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
             Self::Shell { issue, .. }
-            | Self::Tool { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2290,12 +2254,10 @@ impl TaskCommand {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
             Self::Shell { issue, .. }
-            | Self::Tool { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }

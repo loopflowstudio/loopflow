@@ -266,24 +266,20 @@ public enum WorkPaneIntent: Codable, Equatable, Sendable {
 public enum WorkBrowserTab: Codable, Equatable, Sendable, Identifiable {
     case files(id: String, tabs: [WorkFileTab], selected: String?)
     case graphLog(id: String)
-    case task(id: String)
-    case changes(id: String, comparison: ChangeComparison)
     case url(id: String, url: String)
     public var id: String {
         switch self {
-        case .files(let id, _, _), .graphLog(let id), .task(let id), .changes(let id, _), .url(let id, _): id
+        case .files(let id, _, _), .graphLog(let id), .url(let id, _): id
         }
     }
-    private enum Keys: String, CodingKey { case kind, id, tabs, selected, url, comparison }
-    private enum Kind: String, Codable { case files, url, task, changes; case graphLog = "graph_log" }
+    private enum Keys: String, CodingKey { case kind, id, tabs, selected, url }
+    private enum Kind: String, Codable { case files, url; case graphLog = "graph_log" }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         let id = try c.decode(String.self, forKey: .id)
         switch try c.decode(Kind.self, forKey: .kind) {
         case .files: self = .files(id: id, tabs: try c.decode([WorkFileTab].self, forKey: .tabs),
                                    selected: try c.decode(String?.self, forKey: .selected))
-        case .task: self = .task(id: id)
-        case .changes: self = .changes(id: id, comparison: try c.decode(ChangeComparison.self, forKey: .comparison))
         case .graphLog: self = .graphLog(id: id)
         case .url: self = .url(id: id, url: try c.decode(String.self, forKey: .url))
         }
@@ -294,9 +290,6 @@ public enum WorkBrowserTab: Codable, Equatable, Sendable, Identifiable {
         case .files(let id, let tabs, let selected):
             try c.encode(Kind.files, forKey: .kind); try c.encode(id, forKey: .id)
             try c.encode(tabs, forKey: .tabs); try c.encode(selected, forKey: .selected)
-        case .task(let id): try c.encode(Kind.task, forKey: .kind); try c.encode(id, forKey: .id)
-        case .changes(let id, let comparison):
-            try c.encode(Kind.changes, forKey: .kind); try c.encode(id, forKey: .id); try c.encode(comparison, forKey: .comparison)
         case .graphLog(let id): try c.encode(Kind.graphLog, forKey: .kind); try c.encode(id, forKey: .id)
         case .url(let id, let url):
             try c.encode(Kind.url, forKey: .kind); try c.encode(id, forKey: .id); try c.encode(url, forKey: .url)
@@ -338,43 +331,5 @@ public struct WorkFileTab: Codable, Equatable, Sendable, Identifiable {
     public let path: String
     public init(id: String, path: String) {
         self.id = id; self.path = path
-    }
-}
-
-
-public enum ChangeComparison: Codable, Hashable, Sendable {
-    case workingTree(base: String)
-    case branch(base: String, head: String)
-    case pullRequest(number: UInt64, base: String, head: String)
-
-    public var base: String {
-        switch self { case .workingTree(let base), .branch(let base, _), .pullRequest(_, let base, _): base }
-    }
-    public var head: String? {
-        switch self { case .workingTree: nil; case .branch(_, let head), .pullRequest(_, _, let head): head }
-    }
-    public var title: String {
-        switch self { case .workingTree: "Working tree"; case .branch: "Branch comparison"; case .pullRequest(let number, _, _): "PR #\(number)" }
-    }
-    private enum Keys: String, CodingKey { case kind, base, head, number }
-    private enum Kind: String, Codable { case workingTree = "working_tree"; case branch; case pullRequest = "pull_request" }
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: Keys.self)
-        let base = try c.decode(String.self, forKey: .base)
-        switch try c.decode(Kind.self, forKey: .kind) {
-        case .workingTree: self = .workingTree(base: base)
-        case .branch: self = .branch(base: base, head: try c.decode(String.self, forKey: .head))
-        case .pullRequest: self = .pullRequest(number: try c.decode(UInt64.self, forKey: .number), base: base, head: try c.decode(String.self, forKey: .head))
-        }
-    }
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: Keys.self)
-        try c.encode(base, forKey: .base)
-        switch self {
-        case .workingTree: try c.encode(Kind.workingTree, forKey: .kind)
-        case .branch(_, let head): try c.encode(Kind.branch, forKey: .kind); try c.encode(head, forKey: .head)
-        case .pullRequest(let number, _, let head):
-            try c.encode(Kind.pullRequest, forKey: .kind); try c.encode(number, forKey: .number); try c.encode(head, forKey: .head)
-        }
     }
 }

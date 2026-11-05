@@ -129,29 +129,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
-        SessionCommand::View { id } => {
-            let store = std::sync::Arc::new(
-                crate::store::read_existing_registry()?
-                    .context("No recorded Sessions on this Machine")?,
-            );
-            let session = crate::ops::human_session::session_by_id(&store, id)
-                .await?
-                .context("Session not found")?;
-            println!(
-                "Observing {}. Input stays with its current viewer.",
-                session.id
-            );
-            println!("To work here: lf resume {}", session.id);
-            if let Some(owner) = store.sqlite.session_transport(&session.id)? {
-                if crate::ops::human_session::owner_running(&store.sqlite, &owner)? {
-                    return crate::transport::observe(&owner);
-                }
-            }
-            let transcript =
-                super::history_transcript::session(&store.sqlite, session.id.as_str())?;
-            print!("{}", super::history_transcript::render(&transcript));
-            Ok(())
-        }
         SessionCommand::History {
             id,
             json,

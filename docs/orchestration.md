@@ -101,9 +101,9 @@ presentation never launches an editor, host, browser or conversation.
 
 Edit the docs or discuss changes while work continues. There is no extra review
 stop or scratch copy. Saved edits guide implementation; for a change that needs
-attention now, tell the Task conversation. Explicit `lf open --file <path>` still
-opens files in the current host. Internal changes with no documentation impact
-leave the docs alone.
+attention now, tell the Task conversation. `lf open --file <path>` presents the
+original in an attached Desktop Files view. Internal changes with no
+documentation impact leave the docs alone.
 
 At each `loop:`, the deciding step reads the work and the plan and returns
 advance, iterate (back to the target, with direction) or blocked (with the

@@ -801,6 +801,11 @@ impl GraphTask {
                 ".lf/graphs/gated.yaml",
                 "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: gate\n- interactive: {name: demo, id: accepted}\n",
             ),
+            // A step that is done, then one that a limit can hold.
+            (
+                ".lf/graphs/held.yaml",
+                "- cmd: task sync --plan\n- cmd: graph show late\n",
+            ),
             // The Wave's default, `feature`, as this repository defines it.
             (
                 ".lf/graphs/feature.yaml",
@@ -1382,6 +1387,52 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
         .collect::<rusqlite::Result<_>>()
         .unwrap();
     outcomes
+}
+
+#[test]
+fn a_run_a_limit_held_starts_again_at_that_step_without_replaying_the_done_ones() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held"]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let steps_of_latest_graph = || -> Vec<String> {
+        db.prepare(
+            "SELECT p.command FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid",
+        )
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    };
+    let steps = steps_of_latest_graph();
+    assert_eq!(steps.len(), 2, "{steps:?}");
+    // The step's Process ended waiting on a limit; the wait is over.
+    let held: String = db
+        .query_row(
+            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries VALUES(?1,'claude','rejected: five_hour',1,1)",
+        [&held],
+    )
+    .unwrap();
+    assert!(task
+        .text_status()
+        .contains("ended while waiting for claude capacity"));
+
+    let again = task.task_run(&["task", "run", "INF-123"]);
+    assert!(!again.success(), "{}", again.text);
+    let steps = steps_of_latest_graph();
+    assert_eq!(steps.len(), 1, "{steps:?}");
+    assert!(steps[0].contains("late"), "{steps:?}");
 }
 
 #[test]

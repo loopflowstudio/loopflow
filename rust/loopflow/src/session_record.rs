@@ -1921,13 +1921,11 @@ impl CaptureHandle {
         let saved_thread = store
             .session_thread(session)?
             .or_else(|| capture.agent_session.clone());
+        // Only a move to another account may leave a thread behind, and only
+        // when the thread could not go with it.
         let account_changed = capture.account_observed && capture.account_id != account_id;
-        if (account_changed && resume_thread.is_some())
-            || (!account_changed && saved_thread.as_ref() != resume_thread)
-        {
-            anyhow::bail!(
-                "AgentProcess retry must retain its thread unless the selected account changes"
-            );
+        if saved_thread.as_ref() != resume_thread && (resume_thread.is_some() || !account_changed) {
+            anyhow::bail!("AgentProcess retry must retain its thread");
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
             crate::harness::agent_process::close_session_agent_process(&store, session)

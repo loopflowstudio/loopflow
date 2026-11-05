@@ -2,7 +2,7 @@
 //! Graph process writes it, and only by appending. Reading selects nothing and grants
 //! neither attachment nor process authority.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 
@@ -148,6 +148,52 @@ pub(crate) fn entry_of(
 pub(crate) struct GraphExecutionFacts {
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
     pub receipts: HashMap<LfProcessId, PathBuf>,
+    pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
+}
+
+/// Each process in ?1 and the commands its transport owner serves for it.
+const DELEGATED: &str = "WITH RECURSIVE delegated(root,id,serves) AS (
+                 SELECT id,id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='session' AND json_extract(command,'$[2]')='serve' END
+                 FROM processes WHERE id IN (SELECT value FROM json_each(?1))
+                 UNION
+                 SELECT d.root,p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END
+                 FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
+                 WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END))";
+
+/// How a headless step is getting past a usage limit. `retry_at` set means
+/// nothing can launch before then; none means another account took the step on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AgentLimitRecovery {
+    pub provider: String,
+    pub reason: String,
+    pub retry_at: Option<i64>,
+}
+
+/// How each of `steps`, or the command served for it, is recovering from a
+/// usage limit.
+fn limit_recoveries(
+    conn: &Connection,
+    steps: &[&LfProcessId],
+) -> StoreResult<HashMap<LfProcessId, AgentLimitRecovery>> {
+    let ids = super::children::ids_json(steps.iter().map(|id| id.as_str()));
+    let rows = conn
+        .prepare(&format!(
+            "{DELEGATED}
+             SELECT d.root,r.provider,r.reason,r.retry_at,MAX(r.updated_at) FROM delegated d
+             JOIN agent_limit_recoveries r ON r.lf_process_id=d.id GROUP BY d.root"
+        ))?
+        .query_map([&ids], |row| {
+            Ok((
+                row.get(0)?,
+                AgentLimitRecovery {
+                    provider: row.get(1)?,
+                    reason: row.get(2)?,
+                    retry_at: row.get(3)?,
+                },
+            ))
+        })?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    Ok(rows)
 }
 
 /// The conversation, captured input and its event each of `processes` opened
@@ -160,18 +206,12 @@ fn process_inputs(
     let ids = super::children::ids_json(processes.iter().map(|id| id.as_str()));
     // Agent Processes record a bare executable name, not an argv array.
     let rows = conn
-        .prepare(
-            "WITH RECURSIVE delegated(root,id,serves) AS (
-                 SELECT id,id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='session' AND json_extract(command,'$[2]')='serve' END
-                 FROM processes WHERE id IN (SELECT value FROM json_each(?1))
-                 UNION
-                 SELECT d.root,p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END
-                 FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
-                 WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END))
+        .prepare(&format!(
+            "{DELEGATED}
              SELECT d.root,c.session_id,c.receipt_key,MAX(c.seq) FROM delegated d
              JOIN session_events c ON c.lf_process_id=d.id
-             WHERE c.kind='captured' GROUP BY d.root",
-        )?
+             WHERE c.kind='captured' GROUP BY d.root"
+        ))?
         .query_map([&ids], |row| {
             Ok((row.get(0)?, (row.get(1)?, row.get(2)?, row.get(3)?)))
         })?
@@ -180,6 +220,88 @@ fn process_inputs(
 }
 
 impl SqliteStore {
+    /// Whether `process` runs under a Graph, through any transport owner between.
+    pub(crate) fn process_under_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "WITH RECURSIVE up(id) AS (
+                 SELECT ?1
+                 UNION
+                 SELECT p.parent_lf_process_id FROM processes p JOIN up ON p.id=up.id
+                 WHERE p.parent_lf_process_id IS NOT NULL)
+             SELECT EXISTS(SELECT 1 FROM up JOIN graph_processes g ON g.lf_process_id=up.id)",
+            [process],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub(crate) fn agent_limit_recovery(
+        &self,
+        step: &LfProcessId,
+    ) -> StoreResult<Option<AgentLimitRecovery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(limit_recoveries(&conn, &[step])?.remove(step))
+    }
+
+    /// Say how step Process `id` is recovering from a usage limit.
+    pub(crate) fn record_agent_limit_recovery(
+        &self,
+        id: &LfProcessId,
+        provider: &str,
+        reason: &str,
+        retry_at: Option<i64>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,updated_at)
+             VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(lf_process_id) DO UPDATE SET provider=excluded.provider,
+                reason=excluded.reason,retry_at=excluded.retry_at,updated_at=excluded.updated_at",
+            params![
+                id,
+                provider,
+                reason,
+                retry_at,
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// `step`'s wait is over: its launch is under way, or someone interrupted it.
+    pub(crate) fn end_agent_limit_wait(&self, step: &LfProcessId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let ids = super::children::ids_json(std::iter::once(step.as_str()));
+        conn.execute(
+            &format!(
+                "{DELEGATED} UPDATE agent_limit_recoveries SET retry_at=NULL,updated_at=?2
+                 WHERE retry_at IS NOT NULL AND lf_process_id IN (SELECT id FROM delegated)"
+            ),
+            params![ids, crate::store::rows::now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// The Tasks of every wait whose time has come. A run restarted at its step
+    /// leaves the old wait behind, so a Task here may hold nothing any more.
+    pub(crate) fn tasks_past_a_limit_wait(&self, now: i64) -> StoreResult<HashSet<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let waits = conn
+            .prepare("SELECT lf_process_id FROM agent_limit_recoveries WHERE retry_at<=?1")?
+            .query_map([now], |row| row.get(0))?
+            .collect::<Result<Vec<LfProcessId>, _>>()?;
+        let mut tasks = HashSet::new();
+        for process in waits {
+            if let Some(task) = super::task_work::task_of_process(&conn, &process)? {
+                tasks.insert(
+                    TaskId::parse(&task)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                );
+            }
+        }
+        Ok(tasks)
+    }
+
     /// Graphs in Graph-process-id order after `after`, at most `limit`.
     pub fn graph_inventory(
         &self,
@@ -349,6 +471,7 @@ impl SqliteStore {
         );
         let conn = self.conn.lock().expect("store mutex poisoned");
         let inputs = process_inputs(&conn, &steps)?;
+        let limit_recoveries = limit_recoveries(&conn, &steps)?;
         let home = conn
             .path()
             .filter(|path| !path.is_empty())
@@ -369,7 +492,11 @@ impl SqliteStore {
                 receipts.insert(id, crate::journal::process_receipt_path(&home, &locator));
             }
         }
-        Ok(GraphExecutionFacts { inputs, receipts })
+        Ok(GraphExecutionFacts {
+            inputs,
+            receipts,
+            limit_recoveries,
+        })
     }
 }
 
@@ -449,6 +576,52 @@ mod tests {
     use crate::durable::GraphProcessFilter;
     use crate::session::GraphProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
+
+    /// Two waits on one Task's step and a later wait still running its time.
+    #[test]
+    fn a_task_past_its_limit_wait_is_found_once_and_only_when_due() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let repository = store.ensure_repository("/repo").unwrap();
+        let task = crate::durable::TaskId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO tasks(repository_id,id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id)
+                 VALUES(?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE is_local=1))",
+                rusqlite::params![repository.as_str(), task.as_str()],
+            )
+            .unwrap();
+        let graph = store.test_graph(
+            "code",
+            "/repo/task",
+            &[("implement", None), ("gate", None)],
+            None,
+        );
+        let steps = store
+            .graph_process(graph.as_str())
+            .unwrap()
+            .unwrap()
+            .0
+            .steps;
+        let wait = |step: usize, retry_at| {
+            store
+                .record_agent_limit_recovery(
+                    &steps[step].process.id,
+                    "claude",
+                    "limit",
+                    Some(retry_at),
+                )
+                .unwrap();
+        };
+        wait(0, 200);
+        assert!(store.tasks_past_a_limit_wait(100).unwrap().is_empty());
+        wait(1, 100);
+        assert_eq!(store.tasks_past_a_limit_wait(200).unwrap().len(), 1);
+        assert!(store.tasks_past_a_limit_wait(200).unwrap().contains(&task));
+    }
 
     #[test]
     fn a_step_lands_after_its_graphs_mark_when_an_unrelated_rowid_is_reused() {

@@ -26,6 +26,8 @@ use crate::store::{CredentialState, RoutingState};
 
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
+/// A limit reported this soon after a switch belongs to the account before it.
+const SWITCH_SETTLE_SECS: i64 = 120;
 const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -61,6 +63,17 @@ pub(crate) fn account_route_eligible(account: &ProviderAccount, now: i64) -> boo
         .date();
     account.eligible_for_automatic_routing(today)
         && account.cooldown_until.is_none_or(|until| until <= now)
+}
+
+/// When the first of `accounts` still cooling at `now` frees up.
+fn earliest_cooldown_end<'a>(
+    accounts: impl Iterator<Item = &'a ProviderAccount>,
+    now: i64,
+) -> Option<i64> {
+    accounts
+        .filter_map(|account| account.cooldown_until)
+        .filter(|until| *until > now)
+        .min()
 }
 
 /// Stable sort: larger plans lead, then the account with the most room;
@@ -114,10 +127,12 @@ pub enum ProviderAccountError {
         provider: Provider,
         accounts: String,
     },
+    /// Nothing can launch now; a candidate frees up at `retry_at`, if one will.
     #[error("no eligible managed {provider} account: {accounts}")]
     NoEligibleAccount {
         provider: Provider,
         accounts: String,
+        retry_at: Option<i64>,
     },
 }
 
@@ -130,6 +145,19 @@ pub(crate) struct RateLimitSignal {
     /// Per-window subscription state carried by the provider event, persisted
     /// so cached auth inspection can show capacity without a fresh poll.
     pub windows: Vec<crate::store::AccountLimitWindow>,
+}
+
+impl RateLimitSignal {
+    /// A limit reached with nothing more said: no reset time, no windows.
+    fn stated(reason: String) -> Self {
+        Self {
+            utilization_percent: None,
+            resets_at: None,
+            limited: true,
+            reason,
+            windows: Vec::new(),
+        }
+    }
 }
 
 /// Where a conversation runs.
@@ -276,9 +304,10 @@ impl ProviderAccountRoute {
         }
     }
 
-    /// Bring conversation `agent_session` into this route's home and pin it
-    /// here, so the provider resumes the same conversation under this account.
-    /// Fails, rather than starting an empty conversation, when its transcript
+    /// Bring conversation `agent_session` into this route's home, so the
+    /// provider resumes the same conversation under this account. The pin
+    /// waits for the provider to report the thread under this launch. Fails,
+    /// rather than starting an empty conversation, when its transcript
     /// is nowhere to be found. A conversation no route has run and whose
     /// transcript is nowhere, such as one whose id lf assigns before its
     /// first launch, is new: there is nothing to adopt.
@@ -320,7 +349,7 @@ impl ProviderAccountRoute {
                 )));
             }
         }
-        self.pin_session(agent_session).await
+        Ok(())
     }
 
     #[cfg(test)]
@@ -501,6 +530,14 @@ impl ProviderAccountRoute {
             AccountLogin::Replayed { .. } => {}
         }
         Ok(())
+    }
+
+    /// Cool this route's account on a limit the provider stated in words,
+    /// with no reset time.
+    pub(crate) fn record_limit_blocking(&self, reason: String) -> Result<(), ProviderAccountError> {
+        _run_blocking_account(self.provider, "record", move |runtime| {
+            runtime.block_on(self.record_rate_limit(&RateLimitSignal::stated(reason)))
+        })
     }
 
     pub(crate) fn pin_session_blocking(
@@ -774,6 +811,83 @@ pub(crate) async fn resolve_provider_account(
     resolve_provider_account_exact(provider, agent_session, None, None, None).await
 }
 
+/// Native Claude reported a limit through `StopFailure`, on stdin. Its stream is
+/// not ours to read, so this hook is how lf hears of it: the account cools and
+/// a shared login moves to the eligible account with the most room, which every
+/// open Claude follows. Their next message runs there, with no input of ours.
+/// Other Sessions reporting the same limit find the login already moved.
+pub fn observe_native_limit() -> anyhow::Result<()> {
+    let input = std::io::read_to_string(std::io::stdin())?;
+    let details: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+    let reason = details["error_details"]
+        .as_str()
+        .or(details["error"].as_str())
+        .unwrap_or("usage limit")
+        .to_string();
+    _run_blocking_account(Provider::Claude, "record", |runtime| {
+        runtime.block_on(record_native_limit(Provider::Claude, reason))
+    })?;
+    Ok(())
+}
+
+async fn record_native_limit(
+    provider: Provider,
+    reason: String,
+) -> Result<(), ProviderAccountError> {
+    let Some(store) = route_store().await? else {
+        return Ok(());
+    };
+    let signal = RateLimitSignal::stated(reason);
+    let launch_home = activation::home_env(provider).and_then(std::env::var_os);
+    if let Some(home) = launch_home.filter(|home| activation::is_account_home(Path::new(home))) {
+        // An isolated Session stays where it is; its next resume moves it.
+        let accounts = store
+            .list_provider_accounts(Some(provider.as_str()))
+            .await?;
+        if let Some(account) = accounts
+            .iter()
+            .find(|account| account.home.as_deref() == Some(Path::new(&home)))
+        {
+            record_rate_limit_signal(&store, provider, &account.account_id, &signal).await?;
+        }
+        return Ok(());
+    }
+    let settled = now_unix() - SWITCH_SETTLE_SECS;
+    if store
+        .provider_account_switched_since(provider, settled)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    let native = activation::native_home(provider, None);
+    let Some(active) = activation::observe_active_account(&store, provider, &native).await? else {
+        return Ok(());
+    };
+    record_rate_limit_signal(&store, provider, &active, &signal).await?;
+    // A Session a person pinned to accounts keeps to them.
+    if !selection::AccountSelection::from_env()?.is_default() {
+        return Ok(());
+    }
+    let wave = crate::work::wave::context::ambient_wave_id();
+    match select_route(provider, None, None, wave.as_ref(), Some(false)).await {
+        Ok(Some(route)) => {
+            activation::activate(
+                &store,
+                provider,
+                &route.account_id,
+                &native,
+                activation::SwitchCause::Exhaustion,
+            )
+            .await?;
+            Ok(())
+        }
+        // Nothing has capacity: the login stays, and Sessions wait for the reset.
+        Ok(None) | Err(ProviderAccountError::NoEligibleAccount { .. }) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 /// The `provider` login this launch's `--account` names when it differs from
 /// the one conversation `agent_session` is pinned to: a request to move it.
 pub(crate) async fn names_another_account(
@@ -857,6 +971,7 @@ async fn select_route(
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
                 accounts: format!("'{account_id}' is not available on this Machine"),
+                retry_at: None,
             });
         }
         return Ok(None);
@@ -870,6 +985,7 @@ async fn select_route(
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
                 accounts: format!("'{account_id}' is outside the configured account route"),
+                retry_at: None,
             });
         }
         return Ok(None);
@@ -880,6 +996,7 @@ async fn select_route(
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
                 accounts: format!("'{account_id}' is outside the configured account route"),
+                retry_at: None,
             });
         }
         return Ok(None);
@@ -915,6 +1032,7 @@ async fn select_route(
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: rejected.join("; "),
+            retry_at: None,
         });
     }
     let selection = if isolated {
@@ -939,9 +1057,15 @@ async fn select_route(
             })
             .collect::<Vec<_>>()
             .join(", ");
+        let cooling = candidates.iter().filter_map(|account_id| {
+            accounts
+                .iter()
+                .find(|account| account.account_id == *account_id)
+        });
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: reasons,
+            retry_at: earliest_cooldown_end(cooling, now_unix()),
         });
     };
     let account_id = selection.account.account_id.clone();
@@ -1030,6 +1154,10 @@ async fn resolve_selected_provider_account(
             candidates.insert(0, active);
         }
     }
+    let retry_at = earliest_cooldown_end(
+        candidates.iter().map(|(candidate, _)| &candidate.account),
+        now_unix(),
+    );
     for (candidate, explicit) in candidates {
         let home = &candidate.home;
         if !explicit
@@ -1069,6 +1197,7 @@ async fn resolve_selected_provider_account(
     Err(ProviderAccountError::NoEligibleAccount {
         provider,
         accounts: "no healthy selected account remains".to_string(),
+        retry_at,
     })
 }
 
@@ -1155,6 +1284,7 @@ async fn ordered_selected_candidates(
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
                 accounts: "the restricted account selection excludes this provider".to_string(),
+                retry_at: None,
             });
         }
         return Ok(None);
@@ -1200,6 +1330,7 @@ async fn ordered_selected_candidates(
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: "the account selection is empty".to_string(),
+            retry_at: None,
         });
     }
 
@@ -1251,6 +1382,7 @@ async fn ordered_selected_candidates(
                 })
                 .collect::<Vec<_>>()
                 .join(", "),
+            retry_at: None,
         });
     }
     Ok(Some(ordered))
@@ -1527,6 +1659,7 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
                         "'{account_id}' has no credential Machine at {}",
                         home.display()
                     ),
+                    retry_at: None,
                 });
             }
             let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -3417,6 +3550,52 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
+    async fn one_native_limit_moves_the_shared_login_and_repeats_change_nothing() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let active = || {
+            let store = Arc::clone(&store);
+            let native = native.clone();
+            async move {
+                activation::observe_active_account(&store, Provider::Codex, &native)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .as_str()
+                    .to_string()
+            }
+        };
+        let cooling = |id: &'static str| {
+            let store = Arc::clone(&store);
+            async move {
+                store
+                    .get_provider_account("codex", &parse_account_id(id).unwrap())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .cooldown_until
+            }
+        };
+
+        record_native_limit(Provider::Codex, "usage limit".into())
+            .await
+            .unwrap();
+        assert_eq!(active().await, "second");
+        assert!(cooling("first").await.is_some());
+
+        // Every other open Session reports the same limit moments later.
+        record_native_limit(Provider::Codex, "usage limit".into())
+            .await
+            .unwrap();
+        assert_eq!(active().await, "second");
+        assert_eq!(cooling("second").await, None);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
     async fn a_named_account_list_keeps_the_active_account_it_includes() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
@@ -3525,13 +3704,23 @@ mod account_first_tests {
         assert_eq!(route.account_id().as_str(), "second");
         assert!(!route.is_shared());
         assert!(temp.path().join("second").join(&rollout).is_file());
-        assert_eq!(
+        // Choosing an account is no proof it ran the thread; the launch pins it.
+        let pinned = |store: SharedStore, conversation: AgentSessionId| async move {
             store
                 .provider_session_account(Provider::Codex, &conversation)
                 .await
                 .unwrap()
                 .unwrap()
-                .as_str(),
+                .as_str()
+                .to_string()
+        };
+        assert_eq!(
+            pinned(Arc::clone(&store), conversation.clone()).await,
+            "first"
+        );
+        route.pin_session(&conversation).await.unwrap();
+        assert_eq!(
+            pinned(Arc::clone(&store), conversation.clone()).await,
             "second"
         );
 
@@ -3625,6 +3814,7 @@ mod account_first_tests {
             .unwrap()
             .unwrap();
         assert_eq!(route.account_id().as_str(), "second");
+        route.pin_session(&conversation).await.unwrap();
         assert_eq!(
             store
                 .provider_session_account(Provider::Claude, &conversation)

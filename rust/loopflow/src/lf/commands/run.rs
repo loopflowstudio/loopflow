@@ -584,6 +584,7 @@ fn build_prompt_at(
             .map(|(store, seed)| crate::ops::task_input::TaskInput::new(store, seed)),
         auto: !is_interactive,
         stream: !is_interactive,
+        wait_for_capacity: !is_interactive && crate::ops::graph_process::in_graph(),
         ..Default::default()
     };
     let mut agent_config = prepared.config;

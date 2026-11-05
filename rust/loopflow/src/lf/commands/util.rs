@@ -96,11 +96,8 @@ pub(crate) fn resume_session_with_env(
         config.agent()?,
         config.agent()?,
     );
-    if let Some(provider) = provider_session {
-        if session.provider.as_deref() != Some("codex") {
-            config.task_prompt.clear();
-        }
-        config.provider_account_id = provider.account_id.clone().or(config.provider_account_id);
+    if provider_session.is_some() && session.provider.as_deref() != Some("codex") {
+        config.task_prompt.clear();
     }
     config.env.extend(extra_environment.clone());
     config.env.insert(

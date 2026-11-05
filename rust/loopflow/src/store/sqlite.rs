@@ -66,7 +66,7 @@ pub(crate) mod wave_definitions;
 mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
-pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
+pub(crate) use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub use task_details::TaskDetailFacts;

@@ -190,7 +190,8 @@ route order decides ties. In shared
 mode the signed-in account also wins ties, so a launch switches every running
 Claude only when another account has more room. A provider session stays
 pinned to the account that created it so a resume does not silently switch
-identities. Naming another login moves the conversation there and re-pins it:
+identities; it moves only when that account cannot take it. Naming another
+login moves the conversation there and re-pins it:
 `lf resume --account <email> -a claude`. A named login that cannot launch
 fails rather than falling back to another account.
 
@@ -288,6 +289,32 @@ A Graph carries these choices to its steps. `--account` keeps fallback routing;
 Steps have no account overrides. Native Session affinity remains authoritative within that selection.
 Local choices use the Machine's catalog directly and survive the initiating CLI's
 exit, including logins installed on a remote machine.
+
+## When an account runs out
+
+A Graph step keeps going by itself:
+
+```bash
+lf task status LOO-1
+#   implement went on under another claude account after: provider_rate_limited: rejected: five_hour
+#   implement is waiting for claude capacity until Nov 5 14:00: ... It goes on by itself.
+```
+
+| What happens | What the step does |
+|---|---|
+| Its account hits a limit, another is eligible | Continues the same conversation under that account |
+| Every eligible account is cooling | Waits, checking each minute, and continues at the first reset |
+| No account will free up | Fails with the limit, like any other failure |
+| Its Process ends during a wait | The run starts again at that step after the reset; earlier steps stay done |
+
+Only accounts in the resolved route take a step on. The Task's agent and model
+stay as resolved, and nothing is written to your preferences. Commit messages
+and PR text fail at once, because someone is waiting for them.
+
+Open Claude Sessions need nothing either. When one hits a limit in shared mode,
+the login moves to the eligible account with the most room, and every open Claude
+follows. Send your next message where you left off. Isolated Sessions and Codex
+keep their login until you `lf resume` them, which moves them.
 
 ## Switch the shared account
 

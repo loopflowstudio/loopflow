@@ -118,6 +118,8 @@ struct TaskGraphTests {
         #expect(graphNodeStates(blocked.compiled, latest: blocked)[3] == .blocked)
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
+        let held = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_waiting.json"))
+        #expect(held.state == .waiting)
         // A preview only marks stages.
         let preview = graphNodeStates(review.compiled, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)

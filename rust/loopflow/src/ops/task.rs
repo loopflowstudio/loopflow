@@ -1,4 +1,5 @@
 pub(crate) mod adoption;
+pub(crate) mod limit_recovery;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 mod workspace;
@@ -719,8 +720,12 @@ pub(crate) fn select_task_run(
                 graph.describe_steps()
             ))
         })?),
-        // A run that stopped starts again from where it began.
-        (None, Some((cursor, _))) => graph.place_of(cursor),
+        // A run that stopped starts again from where it began, or from the
+        // step a limit held when it ended: the steps before it are done.
+        (None, Some((cursor, _))) => limit_recovery::held(&store.sqlite, &task.id)
+            .map_err(task_error)?
+            .and_then(|(step, _)| graph.find(&step))
+            .or_else(|| graph.place_of(cursor)),
         (None, None) if step == START => graph.find(START),
         (None, None) if step == END => {
             return Err(task_error(format!(
@@ -2534,7 +2539,9 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();
         let position = match execution.state {
-            TaskExecutionState::Running | TaskExecutionState::Stalled => Some(format!("at {step}")),
+            TaskExecutionState::Running
+            | TaskExecutionState::Stalled
+            | TaskExecutionState::Waiting => Some(format!("at {step}")),
             TaskExecutionState::Starting => Some(format!("between steps after {step}")),
             TaskExecutionState::Unknown => Some(format!("at {step} (liveness unknown)")),
             TaskExecutionState::Idle | TaskExecutionState::Blocked => None,

@@ -265,7 +265,7 @@ and export acceptance remain unproved. Jack selected unambiguous Task prefixes
 Peer/installed acceptance and full CI remain unproved in this evidence. Exact
 October decisions, superseded mechanics, fixture counts and linked archives:
 `04bdec77e312a4bd0166a027113fb4a952732b9e:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Archives neither prove delivery nor restore removed writers.
+this heading.
 
 ## On-demand Linear acquisition (lf-6f396c0, 2026-10-11)
 
@@ -653,7 +653,7 @@ opportunities had unknown timezone provenance and zero executions. September 24'
 36 telemetry failures remain contrary evidence. Installed accounting, Intelligence
 handoff and two automatic settlements remain unproved. LOO-357/#1441 removed only
 the UI-host prerequisite. Jack's demo waiver/landing authorization and fuller
-evidence, granting no new installation, schedule/Home or review authority:
+evidence:
 `c65d1643a0b93afb165df91f6227d48f6e9e583c:.lf/wave/infrastructure/MEMORY.md`,
 this heading.
 
@@ -686,7 +686,7 @@ identity. Reading validity differs from Work state; workspaces can be non-Git.
 That gate stopped at disk reserve after static checks. Public CLI/crash recovery,
 configured Intelligence repair and installed acceptance remain unproved; headless
 app/view checks remain required, mounted judgment optional. Full decisions and
-contrary evidence, without settlement or installation authority:
+contrary evidence:
 `39f57361dd597044c0939d0f3ca1aa67d223ea6a:.lf/wave/infrastructure/MEMORY.md`,
 this heading.
 
@@ -905,7 +905,7 @@ LOO-291/300's performance limits are historical (targets retired October 7);
 
 September history:
 `39f57361dd597044c0939d0f3ca1aa67d223ea6a:.lf/wave/infrastructure/MEMORY.md`,
-this heading and its archives. Archival proves no acceptance or deletion authority.
+this heading and its archives.
 
 - Saved definitions preserve alternatives and interactive boundaries. Claims fence
   late results; settlement consumes actual outcomes before teardown. Cursor
@@ -1073,8 +1073,8 @@ telemetry red; fresh failures join existing work.
 
 ## Durable model lessons (curated 2026-10-02)
 
-[Earlier model and planning records](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#model-design-settled)
-preserve their exact decisions and implementation history. Current planning and release decisions supersede archived cadence, daemon-chat
+Earlier model and planning records: `d281370191:wave/infrastructure/MEMORY.md`,
+Model design settled. Current planning and release decisions supersede archived cadence, daemon-chat
 and mandatory Project assumptions.
 
 Self-hosting remains the default; credentials follow the repository Doppler
@@ -1090,14 +1090,14 @@ Preserve first accepted usage and conflicting-repeat partiality. Window by the
 owning fact's terminal time; publish measured coverage beside percentiles.
 Unknown authority cannot be inferred from observer time or trace prose.
 
-Plan ownership above records LOO-406's current direction. KRs are explicit
+KRs are explicit
 judgments; preserve unrelated provider associations and diagnose ambiguous moves.
 Standing frontier plans need no invented completion date. No fourth planning noun
 was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Archived pointers
 
-Archives authorize no work; installed worker recovery is under Shipped history.
+Installed worker recovery is under Shipped history.
 Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
 earlier follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths”
 referent: `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.

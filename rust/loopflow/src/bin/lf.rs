@@ -2884,6 +2884,10 @@ fn execute_command(
             provider_pid.expect("clap requires --provider-pid with --lifeline"),
         ),
         Some(Commands::ContextBlock {
+            moment: ContextMoment::Limit,
+            ..
+        }) => loopflow::provider_account::observe_native_limit(),
+        Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),

@@ -200,6 +200,7 @@ When editing Rust tests:
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin. In zsh that is `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`; an unquoted `$VAR` does not word-split, and a leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
+- Account routing fixtures read personal preferences scoped to this checkout's repository, so on a Machine with its own routes they fail with "has no resident login". Run the built test binary from an empty directory with `HOME` pointed at another, keeping `CARGO_HOME` for fixtures that build `lf`.
 - Claims name their person by the Task repository's Git `user.email` and fail without one; fixtures set a repository-local identity (`TestRepo` does), and CI test jobs set only a global fallback.
 - Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
 - `SqliteStore::open_ephemeral` applies the build's whole migration catalog; do not

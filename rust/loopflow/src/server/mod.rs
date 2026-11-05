@@ -3,6 +3,7 @@ pub mod client;
 pub mod mobile;
 mod remote;
 mod service;
+mod ticket;
 pub mod wire;
 
 use std::path::PathBuf;

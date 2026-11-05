@@ -101,9 +101,9 @@ final class MachineConnectionIntegrationTests: XCTestCase {
     }
 
     private func exerciseConnectionLifecycle(savedMachine: SavedMachine) async throws {
-        // Admit a real socket but send no operation. The service waits for its
-        // request; our earlier deadline must report a timeout, not URL cancellation.
-        let idle = try MachineConnection(endpoint: savedMachine.endpoint)
+        // Admit a real ticket socket but present no ticket. The service waits for
+        // it; our earlier deadline must report a timeout, not URL cancellation.
+        let idle = try MachineSocket(endpoint: savedMachine.endpoint, path: ServerProtocol.ticketPath, maximumMessage: ServerProtocol.maxBulk)
         defer { idle.close() }
         let deadline = idle.deadline(seconds: 1)
         defer { deadline.cancel() }
@@ -120,7 +120,7 @@ final class MachineConnectionIntegrationTests: XCTestCase {
             XCTAssertEqual(error.localizedDescription, "The Machine did not respond in time")
         }
 
-        let canceled = try MachineConnection(endpoint: savedMachine.endpoint)
+        let canceled = try MachineSocket(endpoint: savedMachine.endpoint, path: ServerProtocol.ticketPath, maximumMessage: ServerProtocol.maxBulk)
         defer { canceled.close() }
         var reading = false
         let reader = Task {

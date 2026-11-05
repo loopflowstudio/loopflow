@@ -1,5 +1,6 @@
 //! Blocking client for the server protocol: the readiness probe, one
-//! connection with requests by id, and the owner bridge.
+//! connection with requests by id, and the ticketed connections that carry a
+//! terminal's bytes or one message over the control limit.
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read as _, Write};
 use std::os::unix::net::UnixStream;
@@ -10,13 +11,13 @@ use anyhow::{Context, Result};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, Reply, ServerMessage, Welcome,
-    MAX_MESSAGE, MIN_REVISION, REVISION,
+    MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::id::LfProcessId;
 use crate::lf::commands::read::Read;
 
-/// How long the server has to answer `status`, `hello` or `attach`. A session's
-/// later waits are unbounded unless the caller sets its own limit.
+/// How long the server has to answer `status`, `hello`, `attach` or a ticket.
+/// A session's later waits are unbounded unless the caller sets its own limit.
 const HANDSHAKE: Duration = Duration::from_secs(10);
 
 /// `lf server status`: readiness observed without opening Work.
@@ -105,6 +106,8 @@ pub struct Connection {
     welcome: Welcome,
     /// Messages received while waiting for another id's answer.
     pending: VecDeque<ServerMessage>,
+    /// Where ticketed connections for bulk messages open.
+    path: PathBuf,
 }
 
 impl Connection {
@@ -114,13 +117,13 @@ impl Connection {
     }
 
     pub fn open_at(path: &Path) -> Result<Self> {
-        Self::start(connect(path)?, 64 * 1024)
+        Self::start(connect(path)?, path)
     }
 
     /// Hello and welcome within [`HANDSHAKE`]; the session's reads are then unbounded.
-    fn start(stream: UnixStream, capacity: usize) -> Result<Self> {
+    fn start(stream: UnixStream, path: &Path) -> Result<Self> {
         stream.set_read_timeout(Some(HANDSHAKE))?;
-        let mut socket = Socket::new(stream, capacity)?;
+        let mut socket = Socket::new(stream, 64 * 1024)?;
         socket.send(&ClientMessage::Hello(Hello {
             revision: REVISION,
             min_revision: MIN_REVISION,
@@ -140,6 +143,7 @@ impl Connection {
                 socket,
                 welcome,
                 pending: VecDeque::new(),
+                path: path.to_path_buf(),
             }),
             Some(ServerMessage::Error { code, message, .. }) => {
                 Err(ServerError { code, message }.into())
@@ -158,14 +162,48 @@ impl Connection {
         Ok(self.socket.writer.set_read_timeout(timeout)?)
     }
 
-    /// Send a request without waiting; its answer arrives through [`Self::receive`].
+    /// Send a request without waiting; its answer arrives through [`Self::request`]
+    /// or [`Self::reading`]. A request over the control limit travels on a
+    /// ticketed connection and is answered here like any other.
     pub fn send(&mut self, operation: Operation) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
-        self.socket.send(&ClientMessage::Request {
+        let line = Socket::line(&ClientMessage::Request {
             id: id.clone(),
             operation,
         })?;
+        if line.len() <= MAX_MESSAGE {
+            self.socket.write(&line)?;
+        } else {
+            self.upload(line)?;
+        }
         Ok(id)
+    }
+
+    fn upload(&mut self, line: String) -> Result<()> {
+        anyhow::ensure!(
+            line.len() <= MAX_BULK,
+            "Server request exceeds {MAX_BULK} bytes"
+        );
+        let Reply::Ticket { ticket } = self.request(Operation::Bulk { bytes: line.len() })? else {
+            anyhow::bail!("Server did not issue a bulk ticket")
+        };
+        let mut stream = redeem(&self.path, &ticket)?;
+        stream.write_all(line.as_bytes())?;
+        Ok(())
+    }
+
+    /// One message the server moved to a ticketed connection.
+    fn fetch(&self, ticket: &str) -> Result<ServerMessage> {
+        let stream = redeem(&self.path, ticket)?;
+        let mut line = Vec::new();
+        BufReader::new(stream)
+            .take(MAX_BULK as u64 + 1)
+            .read_until(b'\n', &mut line)?;
+        anyhow::ensure!(
+            line.len() <= MAX_BULK && line.ends_with(b"\n"),
+            "Loopflow server did not deliver the bulk message"
+        );
+        Ok(serde_json::from_slice(&line)?)
     }
 
     /// One request and its answer; other ids' messages wait in `pending`.
@@ -218,10 +256,13 @@ impl Connection {
                 .expect("position names a pending message"));
         }
         loop {
-            let message = self
+            let mut message = self
                 .socket
                 .receive()?
                 .context("Loopflow server closed the connection; the outcome is unknown")?;
+            if let ServerMessage::Bulk { ticket, .. } = &message {
+                message = self.fetch(ticket)?;
+            }
             if matches(&message) {
                 return Ok(message);
             }
@@ -256,21 +297,53 @@ pub(crate) fn bridge_existing(owner: &LfProcessId) -> Result<UnixStream> {
     attach(&super::socket_path()?, owner)
 }
 
-/// Hello, attach, `bridged`: the stream then speaks the owner protocol. Until
-/// then it reads one byte at a time, so no owner byte is left in a buffer.
+/// `attach` on a control connection answers a ticket; the terminal connection
+/// redeems it and then speaks the owner protocol.
 pub fn attach(path: &Path, owner: &LfProcessId) -> Result<UnixStream> {
-    let mut connection = Connection::start(connect(path)?, 1)?;
+    let mut connection = Connection::open_at(path)?;
     connection.set_read_timeout(Some(HANDSHAKE))?;
-    match connection
+    let ticket = match connection
         .request(Operation::Attach {
             owner: owner.clone(),
         })
         .map_err(|error| stalled(error, "open the owner bridge"))?
     {
-        Reply::Bridged => {}
+        Reply::Ticket { ticket } => ticket,
         other => anyhow::bail!("Server did not open the owner bridge: {other:?}"),
+    };
+    redeem(path, &ticket)
+}
+
+/// A ticketed connection past `admitted`. The answer is read one byte at a
+/// time, so no byte of what follows is left in a buffer.
+fn redeem(path: &Path, ticket: &str) -> Result<UnixStream> {
+    let mut stream = connect(path)?;
+    stream.set_read_timeout(Some(HANDSHAKE))?;
+    stream.write_all(
+        Socket::line(&ClientMessage::Ticket {
+            ticket: ticket.into(),
+        })?
+        .as_bytes(),
+    )?;
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    while !line.ends_with(b"\n") {
+        anyhow::ensure!(
+            line.len() <= MAX_MESSAGE,
+            "Server answer to a ticket exceeds {MAX_MESSAGE} bytes"
+        );
+        stream
+            .read_exact(&mut byte)
+            .map_err(|error| stalled(error.into(), "admit the ticket"))?;
+        line.push(byte[0]);
     }
-    let stream = connection.socket.reader.into_inner();
+    match serde_json::from_slice::<ServerMessage>(&line)? {
+        ServerMessage::Admitted => {}
+        ServerMessage::Error { code, message, .. } => {
+            return Err(ServerError { code, message }.into())
+        }
+        other => anyhow::bail!("Server did not admit the ticket: {other:?}"),
+    }
     stream.set_read_timeout(None)?;
     Ok(stream)
 }
@@ -314,14 +387,22 @@ impl Socket {
     }
 
     fn send(&mut self, message: &ClientMessage) -> Result<()> {
-        let mut line = serde_json::to_string(message)?;
+        let line = Self::line(message)?;
         anyhow::ensure!(
             line.len() <= MAX_MESSAGE,
             "Server request exceeds {MAX_MESSAGE} bytes"
         );
+        self.write(&line)
+    }
+
+    fn line(message: &ClientMessage) -> Result<String> {
+        let mut line = serde_json::to_string(message)?;
         line.push('\n');
-        self.writer.write_all(line.as_bytes())?;
-        Ok(())
+        Ok(line)
+    }
+
+    fn write(&mut self, line: &str) -> Result<()> {
+        Ok(self.writer.write_all(line.as_bytes())?)
     }
 
     /// The next message; `None` once the server closed after a whole message.

@@ -1,1318 +1,156 @@
 # LOO-718 native iOS implementation
 
 Jack Heart requested sustained improvement toward an excellent iOS app, prioritizing
-polish, performance and UX over feature count. Continue in this checkout. The
-initial fixture/demo boundary is not the completion boundary. No merge or Auto-Ship
-authorization. Apple registration, signing for distribution and TestFlight remain
-LOO-721; no Apple account work has been performed here.
+polish, performance and UX over feature count. Continue in this checkout and
+PR #1812. No merge or Auto-Ship authorization. Apple registration, signing for
+distribution and TestFlight remain LOO-721; no Apple account work has been
+performed here. The dated proof history (November 3–4) and its failure logs are
+committed at `4070315ab3:scratch/mobile-ios.md`; this note keeps the live design,
+decisions and remaining work.
+
+## Selected scope and decisions
+
+- **Scope (November 3, Jack Heart):** existing open Tasks → the selected existing
+  Session terminal, with typing, editing, submission and prompt responses. No Wave
+  view, generic shells, inspectors or changes/checks screen. Desktop typography and
+  colors; the default key bar reduced to Paste, New line, Keys and keyboard
+  visibility; contextual approval/Stop controls stay absent until the backend
+  supplies trustworthy program state. Touch selection must work natively.
+- **New-Task flow (November 3):** Jack selected describe-first flow 1 after
+  reviewing three prototypes (“1 looks good”): a compact sheet, editable
+  typed/dictated request, visible changeable destination, explicit Create & start
+  through shared recoverable admission. Studies: `explore.html`,
+  `prototype-tasks.html`; prototype notes at `4070315ab3:scratch/mobile-prototypes.md`
+  and `mobile-new-task-flows.md`.
+- **Connection (November 4):** Scan QR code is the default, Enter address the
+  fallback. The QR carries only the Machine's HTTPS address. Host Tailscale
+  supplies connectivity and caller identity; the Machine admits a distinct untagged
+  node of the approved owner through `tailscale whois` and saves node/user with the
+  endpoint. No Serve route, embedded node, phone ticket, relay or hub. Automatic
+  discovery is deferred; the announcement probe experiment never passed a physical
+  device test (`4070315ab3:scratch/mobile-tailscale-discovery.md`, probe sources
+  `4070315ab3:scratch/tailscale-discovery/`).
+- **Backend (November 4, LOO-593):** one shared server for Desktop and phone; Rust
+  reads/subscriptions/commands with no second owner, scheduler or store; existing
+  Session and Graph owners keep execution. Its design, deletion list and proof live
+  with PR #1813 (`4070315ab3:scratch/mobile-backend.md`, `server-write-direction.md`,
+  `direct-write-demo.md`, `server-cutover-*.md`, `server-performance/`). This
+  checkout merged that branch at `4070315ab3`.
+- **Protocol (November 5, Jack Heart):** server protocol revision 2 and the
+  additions below. Design and survey: `4070315ab3:scratch/server-protocol-2.md`,
+  `rex-server-comparison.md`.
+- **Lanes:** A local server (LOO-593), B native client (LOO-718), C phone over host
+  Tailscale, D Desktop Work cutover, E recoverable create/start, F start work from
+  the phone. All are implemented in this checkout; supported release still needs
+  the acceptance below. Full table: `4070315ab3:scratch/mobile-task-plan.md`.
 
 ## Current design
 
-Native Swift, host Tailscale only, no embedded node, public relay or required hub.
-Start with existing open Tasks and their recorded Session terminal. Preserve
-Desktop typography/colors and compact Paste / New line / Keys / keyboard controls.
-New-Task flow remains Jack’s selected describe-first sheet, with a visible editable
-destination and explicit Create & start through shared recoverable admission.
-
-LOO-593’s backend was merged locally at 23ed1ea7dd; neither PR was landed. The
-Machine service shares Rust reads and delegates complete commands to lf. Existing
-Graph and Session owners retain execution and lifetime. Desktop automation and
-rendering stay local to Desktop. Do not introduce another owner, scheduler or
-store. Follow-up architecture remains in mobile-task-plan.md and mobile-backend.md.
-
-The iOS target in swift/ios.yml includes the shared project and pins SwiftTerm
-1.20.0. UIKit supplies native text input, composition, selection and accessible
-terminal reading. Ghostty’s Desktop artifact is Mac-only; the earlier wrapper
-comparison did not establish better device performance or accessible reading.
-The renderer can be revisited on evidence, without changing the Machine protocol.
-
-## Native connection
-
-Jack Heart selected **Scan QR code** as the default and **Enter address** as the
-fallback on November 4. The working cutover carries only the HTTPS address and
-remembers the Machine after protocol/identity verification. Automatic discovery
-is deferred. See [connection design and evidence](mobile-tailscale-discovery.md).
-
-The Machine now binds HTTPS/WSS directly to its host Tailscale addresses. It asks
-the installed host CLI who owns the actual TCP peer and admits a distinct,
-untagged node belonging to the approved owner. The approved node/user are saved
-with the endpoint, so restart does not transfer approval to another account.
-The TLS certificate is retrieved into memory and refreshed through host Tailscale.
-No Serve route, embedded node, phone ticket, token, or device-grant store remains.
-Local clients keep their private same-user Unix socket. Same-host network identity
-is refused because it cannot distinguish OS accounts; Simulator proofs explicitly
-fixture a second node identity.
-
-The app validates a scanned/entered HTTPS address, presents it for confirmation,
-and saves only its endpoint and verified Machine ID in Keychain. Later identity
-mismatches fail rather than repinning. Forget Machine removes the saved connection;
-individual device access is managed through Tailscale.
-
-RemoteMobileClient watches shared all-repository WorkViewPlans for actual Task
-primary Sessions. It rejects unavailable/truncated
-readings. A missing Session owner offers explicit Open Session; navigation and
-reconnect never launch or resume a provider. The adapter bridges the actual owner and consumes its existing
-binary protocol; no mobile CLI or second serialized domain model is introduced.
-
-OwnerStream handles fragmented frames and nonce-qualified events, buffers snapshot
-chunks until canonical geometry arrives, detects event gaps and enforces size bounds.
-Input and geometry are distinct claims. Opening/reconnecting observes; Use keyboard
-explicitly takes control. The request waits for its replacement screen, and repeated
-taps cannot overlap takeover requests. The ordered bounded writer never retries
-raw input. Backgrounding disconnects; returning opens one fresh observer attachment to the
-same Session and preserves provider-owned drafts. A failed attempt leaves explicit
-Reconnect; no background retry loop or input replay runs. Missing/mismatched Sessions have
-no misleading keyboard or reconnect action. Ended Sessions retain their screen
-and offer explicit Open Session, without replaying any input.
-
-The observer viewport preserves the owner’s grid. Geometry control fits the phone;
-loss restores the owner’s geometry. Layout deduplicates resize traffic and theme
-installation. Search filters the compact Task list by title/path. A fresh control
-grant restores the software keyboard even if the earlier attachment hid it.
-System text size scales the terminal and accessory controls. Accessibility sizes
-stack the Session header; observer font changes preserve even alternate-screen
-cells without sending remote geometry changes.
-
-The Session header displays the owner's validated program activity. Tapping it
-reads the reported message. It shares the ordered attachment stream and existing
-ProgramStatusRecords, without a second parser or Desktop publication dependency.
-Activity never grants keyboard control or completes a Task. Disconnect clears it;
-passive reconnect restores current evidence.
-
-Open Session delegates the complete `lf resume --start-only --json` operation
-through the shared Machine command. It pins the recorded Session ID, reuses the
-existing startup lock and returns without viewer claims. An uncertain reply
-exposes passive Reconnect; no automatic command replay runs. A later explicit
-open can resume a provider that has ended, so this is not a durable idempotent
-receipt. Runs remain unavailable through the same shared admission policy.
-
-## Next work and acceptance
-
-The dated carrier proofs below predate the address-only cutover unless explicitly
-marked otherwise. Current QR UI/address/Keychain checks and TLS lifecycle tests
-pass. An isolated production listener validated the real host certificate and
-rejected same-host identity. Native retained-owner acceptance on the replacement carrier now passes with an
-explicit host-identity fixture. Physical-device identity/network testing remains.
-
-Sustained output now exercises MobileWorkspace and native editing, and a stalled
-viewer recovers after foreground liveness detection; see the dated proof below.
-Foreground service interruption while editing and idle Task-watch recovery now
-pass over the actual carrier. Continue with installed Desktop lifecycle and
-physical phone/network acceptance; those differ from stopping the isolated
-foreground test service.
-
-The mounted-terminal sustained-output proof now passes; retain its failure-stage
-diagnostics. Two earlier batching experiments failed at output/recovery deadlines
-with misleading socket-error attribution. Later batched and original-decoder runs
-passed. Their cause remains unresolved; do not infer that timeout-message cleanup
-fixed those failures. No batching change remains: it reduced feed calls without
-materially reducing feed time. Physical-phone rendering/energy and typing under
-load still need proof. Detailed results and failure logs are recorded below.
-
-1. Continue live acceptance with actual Desktop and a separate physical phone,
-   service/network interruptions and sustained rendered workloads. Native UIKit editing,
-   passive reconnect, competing control/geometry and owner exit now pass over
-   actual Tailscale WSS. The proof uses a real owner and a local stand-in program;
-   it does not establish provider-specific IME behavior or manual Desktop UX.
-   Raw sustained-output acceptance now delivers 32 MiB to an active phone stream,
-   disconnects a stalled viewer and restores it passively; see the evidence below.
-2. Finish installed Desktop-to-phone onboarding acceptance. Desktop now delegates
-   automatic host setup to the CLI and displays the ready HTTPS address as a QR
-   code; iOS validates scans before explicit Connect. Verify actual
-   camera scanning, first-certificate provisioning latency and real permission/
-   sign-in failures. A running CLI alone does not establish readiness.
-3. Continue Task-list performance and recovery acceptance under sustained Work
-   changes and real network loss. The phone now uses one all-repository selection
-   watch, closes it offscreen/in background and preserves stale readings on failure.
-   Local query cost is measured below; physical-phone latency/energy remains open.
-4. Verify real phone ergonomics: horizontal observer panning, software keyboard
-   layout, CJK conversion, dictation, physical keys, VoiceOver and sustained-output
-   battery use. Programmatic scroll offsets and UIKit text calls do not prove these.
-5. Continue new-Task ergonomics and failure acceptance. The describe-first sheet,
-   saved draft/destination, shared recoverable admission and explicit initial
-   terminal opening are implemented. Creation uses one request UUID/payload saved
-   before sending. App restart and lost replies recover it; changing paired Machines
-   cannot retarget it. Started opens the recorded Task/Session; failed/unknown keeps
-   Open Task without rerunning the Graph. Existing-Task navigation stays passive.
-   Desktop delegation and explicit create/start share Session owner startup exclusion.
-   Verify actual dictation and software-keyboard layout on a physical phone. The
-   phone still pairs one Machine. Save for later now moves a request into a
-   protected recovery list and frees the composer; inspecting/recovering it keeps
-   a newer draft intact. Broader multi-Machine selection remains UX work.
-6. Preserve useful telemetry: shared command/Process attribution, identity and
-   connection diagnostics without duplicate provider usage or persisted terminal
-   contents. Full Desktop Work cutover and installed update survival retain their
-   separate acceptance in mobile-task-plan.md/mobile-backend.md.
-
-## Dated evidence — November 4, 2026
-
-All 25 signed native tests passed at 00:28, including opt-in actual Tailscale WSS
-pairing against an isolated empty registry, Keychain save/reload/update/removal,
-Machine identity pinning and repeated Task reads. Result:
-`swift/.build/ios/Logs/Test/Test-LoopflowiOS-2026.11.04_00-28-01--0800.xcresult`.
-The integration test was supplied a fresh ticket and passed; it was not skipped.
-No production registry or credential was used. The temporary route was restricted
-to the existing tailnet, then removed; the test grant was revoked and the isolated
-service stopped. Serve configuration is back to its original empty state. The signed Simulator setup screen was inspected directly.
-An unsigned build showed a Keychain error; enabling normal ad-hoc simulator signing
-supplied the application identifier and resolved it. No insecure credential fallback.
-Apple’s entitlement contract:
-https://developer.apple.com/documentation/security/sharing-access-to-keychain-items-among-a-collection-of-apps
-
-The Rust-generated owner fixture comparison passed; cargo fmt and all-target
-Clippy with warnings denied passed. Native tests cover split snapshots, fragmented
-control events, foreign nonces as output, sequence gaps, fresh grants, control loss,
-request-in-progress input suppression and missing-owner states. Existing mounted
-terminal tests cover IME/selection/paste, geometry and accepted-then-failed input.
-These are focused proofs, not completion of the wider goal or a physical-device demo.
-
-The earlier design and proof history remain in
-`073568812fb5f3deaa5207305b6bb63aa71675b3:scratch/mobile-ios.md`.
-Earlier research/prototype sources are indexed by the other scratch notes.
-Preserve demo-assets and the historical HTML studies; their fixture screenshots do
-not establish that the live path has been demonstrated.
-
-
-### Retained-owner proof — November 4, 00:39
-
-The opt-in `transport_tests::mobile_machine_native_acceptance` test starts the
-actual owner/CLI and remote Machine service in a private registry, seeds one Task,
-and invokes native XCTest through host Tailscale Serve. UIKit opens the recorded
-Session, edits the existing desktop-side draft, disconnects, then reconnects after
-a newer viewer has taken input and 120×40 geometry. The phone remains an observer
-until explicit takeover. The existing child receives exactly
-`desktop draft + phone + desktop` once and exits; its provider launch log has one
-entry. The native screen reports ended rather than reconnecting a finished owner.
-No real provider account, Task data or credentials were used. The temporary route
-was removed; owners, service and registry are fixture-owned and cleaned up.
-
-This found and fixed an initial-readiness race: MobileWorkspace changed to viewing
-before its queued snapshot/geometry were rendered. It now remains loading until
-the ordered initial control event, after the replacement screen. The same native
-proof then passed with canonical geometry, without adding sleeps or tolerating
-wrong dimensions. Result:
-`swift/.build/ios/Logs/Test/Test-LoopflowiOS-2026.11.04_00-39-21--0800.xcresult`.
-The test uses two real protocol viewers, not an operated Desktop app, and mounted
-UITextInput calls, not hardware key presses. Remaining device/demo obligations
-above are unchanged.
-
-Regression check: all 24 ordinary native tests passed at 00:40 (the opt-in test
-skipped without its consumed ticket; its separate live pass is above). Five
-Machine-service transport tests passed; the isolated launchd test remains an
-explicit opt-in. The final diff contains the readiness fix, repeatable acceptance
-fixture and reconciled documentation, not a new Session execution path.
-
-### Automatic host setup implementation
-
-Keep one service installation authority. Add a same-user-only control operation
-for enabling/disabling its loopback carrier without restarting local Desktop
-connections. The remote carrier must reject this operation even for paired devices.
-Save the owned loopback port and Tailscale endpoint in Machine-local configuration
-for the next supervised launch. Setup detects a working signed-in host CLI (including
-renamed Mac app bundles), derives its DNS name and selects an unused HTTPS port.
-Reuse only a route matching Loopflow's recorded endpoint and backend; never reset
-Serve or overwrite an unrelated route, and reject Funnel on the selected endpoint.
-Persist only after the route is verified. Keep ticket generation in the existing
-admission code; no new listener, installation owner or pairing protocol.
-
-
-### Automatic setup proof — November 4, 01:00
-
-`lf machine service pair --name ... --output ...` now detects the working host
-Tailscale CLI and private DNS endpoint, obtains the selected existing service,
-enables its loopback carrier through a local-only operation, selects an unused
-HTTPS port and saves its configuration. The service restores enabled settings on
-startup; disabled state is saved before route cleanup. The paired remote protocol
-explicitly rejects configuration changes. Listener teardown closes only remote
-connections; local Work watches and retained owners keep running.
-
-The real-host proof used a private registry and a deliberate unrelated text route
-on 8443. Setup found the renamed Tailscale 2.app despite the broken PATH wrapper,
-selected 443 and preserved the unrelated route. Native pairing, Keychain identity
-pinning and repeated Work reads passed through the automatically configured
-endpoint: `swift/.build/ios/Logs/Test/Test-LoopflowiOS-2026.11.04_01-00-20--0800.xcresult`.
-Repeating setup kept the same local service instance; restarting the foreground
-service without a remote-port flag restored its saved listener. Disable removed
-only Loopflow’s route. The test grant was revoked, service stopped and the test
-route removed; Serve is back to its original empty configuration. The installed
-launchd registration path itself was not changed by this work.
-
-Focused Rust checks prove six Machine-service behaviors, route ownership including
-Funnel and foreground collisions, and local subscription continuity during
-listener changes. Native suite: 25 passed, one opt-in test skipped before its
-separate real-host run. Protocol fixtures round-trip in Rust and Swift. The
-complete native retained-owner proof passed again with the listener manager at
-01:06 (`Test-LoopflowiOS-2026.11.04_01-05-59--0800.xcresult`), including draft
-editing, passive reconnect, control handoff and one exact submission. Desktop's
-five shared protocol tests passed at 01:08. The final route-selection test and
-all-target Clippy check also passed. Temporary Serve routes were removed.
-
-Sources used for setup semantics:
-https://tailscale.com/docs/reference/tailscale-cli/serve
-https://github.com/tailscale/tailscale/blob/main/ipn/serve.go
-These establish persistent background routes and separate foreground configuration;
-Loopflow’s ownership/persistence behavior is verified by its own tests above.
-
-### Desktop pairing and phone scanning — November 4, 01:27
-
-Jack Heart's automatic host-Tailscale direction now extends to Desktop Settings →
-Mobile. The view delegates setup, device listing and revocation to the existing
-CLI. A private temporary ticket file is read into a QR image and immediately
-removed; the QR disappears on observed pairing, expiry or closing settings.
-An explicit Share setup file action offers the same ticket through the system
-share sheet for phones without camera access. No ticket enters a URL, diagnostic
-log or automatic pasteboard write. Hiding a code does not
-revoke it: the server still owns its one-use, ten-minute lifetime.
-
-iOS scans only QR codes, validates the existing bounded setup format and shows
-the Machine before explicit Connect. File import/paste remains available without
-camera permission. Scanning stops when the sheet closes or the app backgrounds.
-Desktop and iOS share ticket validation and endpoint construction. No second
-pairing protocol or Machine installation path is introduced.
-
-Validation: Desktop compiled and both pairing tests passed, including decoding the
-actual generated QR image with Vision and decoding Rust’s configuration/device
-fixtures. The signed native suite passed 25 tests with the opt-in network test
-skipped (`Test-LoopflowiOS-2026.11.04_01-22-39--0800.xcresult`). Subsequent button/
-fallback-copy edits built successfully. The route fixture test, all-target Clippy
-and diff whitespace check passed. CLI status was exercised with unset and disabled
-private configurations; neither enabled access, and conflicting flags were rejected.
-
-Simulator screenshots in `demo-assets/mobile-qr-onboarding*.png` establish light
-and dark initial layout and the corrected button contrast. Computer-use returned
-`cgWindowNotFound`; no camera, share-sheet or Desktop settings interaction was
-operated. Physical camera scanning, file sharing and installed app interaction
-remain acceptance work. Apple’s API requirements:
-https://developer.apple.com/documentation/visionkit/scanning-data-with-the-camera
-
-### One Task reading and live replacement — November 4, 01:49
-
-The phone previously performed bootstrap + roadmap + two requests per repository.
-The roadmap could also observe the external tracker before returning. It now uses
-a shared all-repository selection read (`desktop plans --all`) with the existing
-ViewPlan projection and one pinned store snapshot. Its watch uses
-the existing Subscription owner and Session observation probe; no mobile store,
-Task resolver, polling scheduler or delta log.
-
-While the Task list is visible and the app is active, one bounded replacement
-stream runs. Leaving/backgrounding cancels it; return starts fresh. Pull-to-refresh
-confirms a new reading on the same connection. Failure preserves the last list
-with an explicit stale/error explanation. Incomplete projection bodies fail, and
-an older canceled opening cannot replace a newer watch. Whole readings coalesce
-to one queued replacement; checkpoint acknowledgements settle before coalescing.
-
-The new read exposed a shared projection cost: every repository loaded all Tasks
-before filtering them. The existing task reader now applies repository scope in
-SQL. On the current Machine, 46 repositories/36 visible Tasks/124,608 JSON bytes
-took 4.653 seconds before that fix, then 0.876/0.707/1.013 seconds (median 0.876).
-These are local debug-CLI wall times, not phone/network latency or a controlled
-benchmark suite. The cold original measurement and warm repeats are not a claim
-of a portable speedup. Network requests now stay at bootstrap + one subscription
-instead of growing with repository count; refresh uses its existing connection.
-
-Native suite: 29 passed, one opt-in skipped, including four Task-update tests.
-CLI/read/watch parity and cross-repository service replacement tests passed;
-the latter observes a rename and a new repository without client polling.
-All-target Clippy passed. The separate native host-Tailscale proof also passed
-initial/confirmed readings and retained-owner editing/reconnect at
-`Test-LoopflowiOS-2026.11.04_01-48-15--0800.xcresult`; temporary Serve configuration
-was restored. All 21 selection-engine tests and six Desktop protocol tests passed.
-
-### Recoverable creation admission — November 4
-
-`task create --run --json --request-id UUID` now reserves one Task identity in the
-shared store, validates the complete request on reuse, serializes competing callers
-and records whether Graph launch was attempted. Existing planning creation and
-ordinary `task run`/primary-conversation admission still own their effects. A saved
-result survives the CLI and Machine service exiting. Unknown launch outcomes never
-automatically advance the Graph. Failed starts retain their filed Task. This is
-backend support for Jack Heart's selected flow; the iOS creation sheet and explicit
-initial terminal launch remain unfinished.
-
-The real service test exposed macOS ENOTCONN during peer-credential lookup when a
-caller immediately disconnected. That now closes only its connection instead of
-terminating the listener. The same test admits creation, drops the reply, waits for
-the command, restarts the service and recovers through both socket and CLI with one
-Task, Graph process and primary Session. It uses an isolated local socket and
-fixture repository, not a phone or external planning provider.
-
-Checks: six creation/DTO integration tests, shared Rust wire fixtures, app/CLI write parity, seven Swift MachineProtocolTests, all-target Clippy and signed iOS Simulator build passed; logs `/tmp/mobile-create-tests-final.log`, `/tmp/mobile-create-validation.log`, `/tmp/mobile-create-native-build.log`.
-
-### Native Create & start — November 4, 02:46
-
-Jack Heart's describe-first flow now creates through the shared Machine command,
-opens the admitted primary Session through the retained owner, and navigates to
-that recorded terminal. The phone saves its exact request before sending, keeps
-uncertain payloads immutable, preserves failed starts, and restores drafts across
-app restarts. Original Machine identity and destination remain attached to pending
-requests. Closing a sheet cancels observation without replaying the command or
-letting a late response overwrite a newer recovered draft. Native keyboard
-Dictation supplies editable text; there is no separate speech service.
-
-Actual host-Tailscale acceptance passed in Simulator at
-`Test-LoopflowiOS-2026.11.04_02-46-23--0800.xcresult`: existing Session handoff and
-passive reconnect, then native creation, same-result recovery, recorded Session
-opening and native text submission. The isolated fixture recorded exactly two
-provider launches, one per intended Session, and both exact submissions. It uses
-stand-in providers and direct native model/input calls, not manual button presses
-or real provider accounts. The temporary private Serve route was removed; the
-original empty Serve configuration was verified afterward.
-
-Six native creation tests cover saved drafts, lost replies/app restart, Machine
-changes, failed/unknown starts, local read/write failures and late canceled replies.
-Six shared admission/DTO tests and focused Desktop terminal-opening regressions
-pass. UI captures in both themes and accessibility text size were inspected after
-fixing the test's unmounted-window capture. These do not establish physical-phone
-keyboard or VoiceOver quality. Final six creation tests passed at
-`Test-LoopflowiOS-2026.11.04_02-48-59--0800.xcresult`; the ordinary native suite
-passed before the last cancellation/rendering refinements (34 passed, one opt-in
-skipped). Final all-target Clippy and seven shared Swift protocol tests passed.
-Logs: `/tmp/mobile-creation-native-final.log`, `/tmp/mobile-creation-validation-final.log`,
-`/tmp/mobile-terminal-regressions.log`, `/tmp/mobile-creation-tailscale.log`.
-Rendered captures are `demo-assets/mobile-create-ready-{light,dark,large-text}.png`.
-
-### Foreground restoration and operated keyboard — November 4, 03:00
-
-Returning from the background now automatically restores the selected Session as
-an observer. It never claims input/geometry or resends keys. A failed foreground
-attempt leaves the existing Reconnect action; ended/unavailable Sessions retain
-their explanation. Leaving the Session screen clears the pending restoration.
-Generation fencing closes an older attachment that completes after backgrounding.
-
-Twenty-one native terminal tests pass, including fresh-screen/draft restoration,
-no control/geometry takeover, one attempt per return, explicit retry after failure,
-leaving before restoration, and an attachment completing late. Actual Tailscale
-owner acceptance also passes through this restoration entry point at
-`Test-LoopflowiOS-2026.11.04_02-54-45--0800.xcresult`, preserving newer Desktop-sized
-control and exact input counts. Its temporary route was removed.
-
-The new LoopflowiOSUITests target operates the actual app in explicit fixture mode:
-Task tap, Use keyboard, system typing, Home, app activation, observer restoration,
-explicit takeover, continued typing. Captures show the unfinished draft, hidden
-keyboard on return and one 31-character submission after continuation. The peer
-requests a steady cursor using the terminal protocol; this avoids XCTest waiting
-60 seconds for repeating cursor animations. Live terminal styling is unchanged.
-This is operated Simulator/software-keyboard evidence, not a physical-phone or
-VoiceOver demonstration. The separate Tailscale proof uses the actual carrier.
-
-Checks: native terminal suite `/tmp/mobile-foreground-final-tests.log` (21 pass); operated app suite `Test-LoopflowiOS-2026.11.04_03-00-21--0800.xcresult` (1 pass); real carrier `/tmp/mobile-foreground-tailscale.log` (pass). Captures: `demo-assets/mobile-foreground-{keyboard-before,observer-return,keyboard-after}.png`.
-
-### Enlarged text and touch targets — November 4, 03:22
-
-The Session header now stacks at accessibility sizes instead of squeezing its
-status into broken words. Keyboard/reconnect labels contain the full 44-point
-touch target. Terminal text and the accessory row scale with the system setting;
-the row grows for wrapped titles. Changing an observer font preserves its exact
-120×40 alternate screen, including far-edge cells, and sends no geometry change.
-Explicit takeover still fits the terminal to the phone.
-
-The Task/Session touch-target and accessible-description audits pass at standard
-and accessibility-extra-extra-large sizes. Keyboard → Home → return → continued
-typing also passes at both sizes. Captures were inspected; enlarged text and
-controls remain visible above the keyboard. Native tests cover font-change cell
-preservation and 4.5:1 minimum text contrast across both default theme surfaces.
-The iOS contrast/clipping audit also flagged fully visible custom-font labels;
-one flagged status measured 14.14:1 from its captured foreground/background.
-Those audit categories are not asserted as passing; palette checks and screenshot
-review supplement the selected audits. This is not VoiceOver navigation evidence.
-
-Checks: `/tmp/mobile-readable-final.log` (23 native terminal tests, 2 operated UI
-tests); enlarged UI `/tmp/mobile-readable-accessory.log` (2 UI tests pass). That
-earlier run exposed two fixture assumptions about the simulator's default font;
-the line-selection fixture now pins its starting size and the final suite passes.
-Simulator text size was restored. Captures:
-`demo-assets/mobile-large-{tasks,session,keyboard}.png`. Physical-phone gestures,
-dictation, VoiceOver and sustained-output energy remain acceptance work above.
-
-### Saved requests without blocking new work — November 4, 03:32
-
-Save for later atomically moves an active request and its optional result into
-the same protected local file, clearing only the composer. It does not cancel
-remote execution. Saved requests show original instructions/Machine/destination,
-check the same admission identity, and open the recorded Task. A newer draft is
-preserved throughout recovery. Failed local saves leave the request in place;
-canceled late replies cannot restore a record another sheet already opened.
-Existing on-phone drafts retain their data when the recovery-list field is absent.
-No credentials or second server admission path were added.
-
-Twelve creation tests pass, including lost replies/restart, re-pairing, local
-write failures, cancellation and the Save for later → Check status button path.
-Mounted UIKit/SwiftUI captures were inspected in both themes and accessibility
-text size (`demo-assets/mobile-saved-request*.png`). These are native view/model
-tests, not physical-phone gestures. `/tmp/mobile-saved-final.log` records the pass.
-
-Actual host-Tailscale acceptance also passes at
-`Test-LoopflowiOS-2026.11.04_03-31-33--0800.xcresult`: create a Task, save its
-confirmed request, reload it, recover the identical receipt and open its Session
-without submitting the newer draft. The real owner receives native input once;
-the isolated fixture records two provider starts for the two intended Sessions.
-This proves saved confirmed-result opening over the carrier; lost-result recovery
-is exercised by the separate native admission tests. The temporary Serve route
-was removed and the original empty configuration verified. Broader multi-Machine
-selection and the physical-phone acceptance above remain.
-
-### Consumer-driven terminal output — November 4, 03:44
-
-RemoteAttachment now reads as its renderer consumes events. Its eager reader
-Task and 16-event queue are removed: a legal coalesced packet containing many small
-frames cannot overflow that artificial event-count limit. Only the current decoded
-batch is retained, then released; framing/snapshot limits remain in OwnerStream.
-Cancellation closes the connection, writer failures retain their uncertainty
-message, and input is still bounded and never replayed. No server queue or owner
-policy changed.
-
-The actual host-Tailscale fixture now includes an independent retained terminal
-which sends 512 × 64 KiB, paced by the active phone's acknowledgements. The active
-native adapter received all 33,554,432 bytes while a second connection deliberately
-stopped reading. That stalled connection disconnected after 1,061,888 output bytes;
-its replacement received the current screen as an observer. The original controller
-could still finish the terminal. The preceding draft/handoff/create tests also
-pass, with exactly the two intended provider launches.
-
-Final carrier result: `Test-LoopflowiOS-2026.11.04_03-44-31--0800.xcresult`;
-outer log `/tmp/mobile-output-final.log`. The temporary Serve route was removed
-and its original empty configuration verified. Twenty-six native terminal/decoder
-tests passed in `/tmp/mobile-pull-tests.log`; cargo fmt and all-target Clippy passed.
-This sustained load exercises the real adapter and carrier, not SwiftTerm drawing
-32 MiB or physical-phone energy/latency. Those acceptance items remain open.
-
-### Mounted rendering and connection errors — November 4, 04:11
-
-The sustained-output acceptance now mounts SessionTerminalController in a real
-Simulator window, applies actual geometry/snapshot/output callbacks and verifies
-the final rendered text. The current original decoder delivered all 33,554,432
-bytes through 32,769 feeds, taking 6.313 seconds inside feed calls; the longest
-feed was 0.491 ms. A stalled viewer disconnected after 1,060,864 bytes and its
-replacement received the current screen without control. Existing draft handoff,
-saved creation recovery and exact submission/provider counts also passed.
-This measures synchronous feeding, not GPU frame cadence, physical-phone energy
-or keyboard responsiveness under load.
-
-An experiment combining adjacent output up to 16 KiB reduced calls to 17,826 but
-took 6.245 seconds in feeds (1.904 ms longest). The original path's neighboring
-run took 6.314 seconds. The additional buffering code was removed: this evidence
-does not establish a useful improvement. Two earlier experimental runs failed
-after rendered completion or during output, respectively. XCTest attributed raw
-socket errors to nonthrowing reader loops; their actual cause remains unresolved.
-Preserved native logs: `/tmp/mobile-render-batched-native.log` and
-`/tmp/mobile-render-diagnostic-native.log`. The test now records counts and the
-actual error at its output/drain deadlines. Subsequent passing runs do not erase
-these failures or establish that batching caused them.
-
-Separately, MachineConnection now translates a deadline-triggered socket failure
-into “The Machine did not respond in time,” including when the deadline fires
-during an awaited read/write. Explicit task cancellation stays CancellationError;
-other network failures retain their original error. No timeout, retry or input
-delivery policy changed. Live acceptance opens an idle authenticated socket and
-asserts its timeout, rejects a later write, and cancels another pending read.
-
-Checks: host-Tailscale native acceptance passed at
-`Test-LoopflowiOS-2026.11.04_04-10-58--0800.xcresult` (22.400 seconds), log
-`/tmp/mobile-connection-lifecycle-native.log`; diff whitespace passed. Temporary
-Serve configuration was removed and verified empty. The preceding unchanged-
-decoder rendered proof also passed at 04:08:57. No Apple distribution work or
-physical-device acceptance is claimed.
-
-### Searchable creation destinations — November 4, 04:21
-
-The describe-first sheet now opens a native searchable repository list instead of
-a menu. Names and full paths distinguish equal basenames. Unavailable repositories
-show their shared error and cannot be selected. Pull-to-refresh and a toolbar action
-reload destinations, including after the list was empty. Refresh preserves the
-instructions and selected path; a missing selected repository requires an explicit
-new selection. Selection persists before returning to the composer. An unavailable
-Machine no longer remains labeled “Connecting…” after its request has failed.
-The same creation model/admission owns all effects; no new backend or Machine
-picker was introduced.
-
-Checks: 14 native creation tests passed at 04:17:36, including exact-path selection,
-empty-to-populated refresh, unavailable entries, missing saved destinations and
-offline refresh without losing the draft. The final native search capture passed
-at `Test-LoopflowiOS-2026.11.04_04-20-44--0800.xcresult` after correcting the test's
-UIKit assumption (this iOS build exposes UITextField, not UISearchBar). Native
-text insertion filtered a path fragment to the intended row; its capture was
-inspected, alongside light/dark, accessibility text and empty-state layouts.
-Logs: `/tmp/mobile-repository-picker-tests.log`, `/tmp/mobile-repository-search-field.log`.
-Captures: `demo-assets/mobile-repository-picker-{light,dark,large-text,empty,search}.png`.
-These are mounted Simulator views; physical-phone keyboard and VoiceOver review
-remain outstanding. Backend behavior is unchanged, so no carrier rerun was needed.
-
-### Explicitly continue a stopped Session — November 4, 04:47
-
-A saved conversation with no running owner now offers Open Session. An ended
-terminal retains its screen and offers the same action. The Machine delegates
-`resume --start-only --json` to the CLI, pins the resolved Session and uses the
-same startup exclusion as Desktop and Task creation. It reuses a live owner or
-resumes that conversation, then the phone attaches as an observer. Input and
-geometry still require Use keyboard. No CLI is installed on iOS, no provider
-runtime moved into the service, and no second lifecycle owner was introduced.
-The reply decodes the existing shared SessionRecord. CLI explanation now describes
-owner reuse without claiming a takeover; existing owners retain their harness.
-
-Lost replies leave passive Reconnect, never automatic command replay. Background,
-cancellation and leaving the screen fence late opening replies. A canceled opening
-cannot leave the screen stuck loading. This operation is intentionally not a
-creation-style durable receipt: another explicit open after the provider ended
-can resume it again. Missing identities, Runs and incompatible flags fail before
-launching. Ordinary `resume --json` retains its existing relay lifetime.
-
-Native terminal suite: 28 tests passed at 04:41, including explicit button action,
-no implicit opening/control, lost replies, duplicate taps and lifecycle cancellation.
-The final prominent-button captures and action test passed at 04:45; light/dark
-and accessibility3 screenshots were inspected and saved as
-`demo-assets/mobile-open-session-{light,dark,large-text}.png`. Shared Swift DTO and
-protocol suites passed 59 tests. CLI proofs cover concurrent starts sharing one
-provider, preserved viewer control/geometry, response loss followed by passive
-inspection, service exit without owner loss, Run refusal and normal relay behavior.
-Read-only explanation, Rust wire/DTO fixtures and app/CLI write parity pass.
-
-Actual host-Tailscale acceptance passed twice, including the full SessionRecord
-decoder at `Test-LoopflowiOS-2026.11.04_04-46-31--0800.xcresult`. The same recorded
-Session continued after its first provider ended and received native text once.
-Opening a live owner retained the newer viewer's 120×40 screen and input claim.
-The fixture counted exactly three intended provider starts: the initial Session,
-its explicit continuation, and a new Task. Each submitted line arrived once.
-The 32 MiB mounted rendering/slow-viewer proof also passed. The temporary Serve
-route was removed and the original empty configuration verified afterward.
-These use stand-in providers and Simulator UIKit input, not actual account history,
-physical keyboard/dictation or a manual Desktop interaction. Those acceptance
-items above remain open; no distribution, push or merge occurred.
-
-Logs: `/tmp/mobile-session-open-rust-final.log`, `/tmp/mobile-session-open-layouts.log`,
-`/tmp/mobile-session-open-polish.log`, `/tmp/mobile-session-open-shared-swift.log`,
-`/tmp/mobile-session-open-validation.log`, `/tmp/mobile-session-open-validation-rest.log`,
-`/tmp/mobile-session-open-tailscale-final.log`. Final CLI argument/unknown-identity
-checks passed in `/tmp/mobile-session-open-last.log`; eight shared Swift protocol
-tests passed in `/tmp/mobile-session-open-protocol-final.log`. Cargo fmt, all-target
-Clippy with warnings denied and diff whitespace checks pass.
-
-### Native input under load and stream liveness — November 4, 05:13
-
-The 32 MiB proof now opens through MobileWorkspace and the native terminal's
-keyboard path. Every 64 KiB, UITextInput inserts, deletes and submits a line;
-the remote PTY checks all 512 lines exactly. A 16 ms main-actor heartbeat measures
-scheduling while output is being drawn. The fixture selects its separate real
-retained owner in a copied Work surface; canonical Task selection is proven by
-the earlier stages, not by that copied field. No production domain model changed.
-
-This reproduced a stalled-reader recovery failure: after rendering all output,
-a stopped reader drained about 1 MiB and never received disconnection within
-15 seconds. The precise stage appears in `/tmp/mobile-busy-input-native-failure.log`;
-XCTest's final InvalidTransition attribution is misleading. The carrier also
-closed TCP without a WebSocket close handshake, independently reproduced as
-ResetWithoutClosingHandshake in a focused Rust test. Adding a bounded close frame
-fixed that protocol regression but did not fix the stalled native read; its
-second failure is preserved in `/tmp/mobile-busy-close-native-failure.log`.
-
-Long-lived foreground connections now ping every 20 seconds, with a five-second
-response deadline. Failure closes the socket and lets the existing observer
-recovery report disconnection. It never retries input, commands, or attachment.
-Task watches and terminal attachments share this connection behavior; closing or
-backgrounding stops the monitor. An initial continuation adapter crashed when
-Foundation called a ping completion twice during cancellation. The final callback
-settles once under OSAllocatedUnfairLock and has no continuation bridge; that
-failure log is `/tmp/mobile-ping-callback-failure.log`. The live proof exercises
-both ongoing pongs and the canceled/dead stalled connection.
-
-Final host-Tailscale acceptance passed at
-`Test-LoopflowiOS-2026.11.04_05-11-57--0800.xcresult` (48.573 seconds). It rendered
-33,554,432 bytes in 32,769 feeds; all 512 native edited acknowledgements arrived
-once. Native-input-to-next-output latency was p95 13.9 ms/max 20.5 ms. Main-actor
-wake intervals were p95 33.6 ms/max 58.6 ms across 2,233 samples. Feed calls consumed
-16.034 seconds at the keyboard's phone-sized grid; this differs from the earlier
-manual-render/80-column setup and is not a comparable speed regression measure.
-The stalled socket had already closed before consumption, and a fresh observer
-received the complete current screen without claims. The active controller then
-ended its program. Existing handoff, explicit Session continuation and recoverable
-creation also passed with exactly their intended provider/submission counts.
-
-The temporary Serve route was removed and its original empty configuration
-verified. Rust carrier tests prove idle ping replies, final-byte delivery followed
-by a WebSocket close, pairing and admission. All-target Clippy and formatting pass.
-This establishes Simulator native input and scheduling under a paced stream, not
-physical typing, GPU frame rate, memory/energy bounds or arbitrary network outage
-recovery. Earlier intermittent failure logs remain evidence; the reproduced
-stalled-read gap is fixed without claiming every earlier failure had that cause.
-Logs: `/tmp/mobile-busy-heartbeat-final.log`,
-`/tmp/mobile-busy-heartbeat-final-native.log`, `/tmp/mobile-close-validation.log`.
-
-Final native regression suite passed at 05:14:24: 53 ordinary tests passed,
-one opt-in integration test skipped without its fixture ticket. The separate live
-carrier pass above supplies that proof. Log: `/tmp/mobile-stream-liveness-native.log`.
-
-### Live service interruption — November 4, 05:25
-
-The opt-in native/host-Tailscale fixture now stops and restarts only
-its isolated foreground Machine service while a phone has an unfinished terminal
-draft and a separate idle Task-list consumer. The Simulator requests each transition
-through a unique test-only Documents directory; no product control endpoint exists.
-It verifies visible disconnection, preserved draft/cached Tasks, honest failed
-offline retry, fresh Task readings and passive same-Session recovery. The enclosing fixture
-checks exact input and provider counts after continuation. This is not installed
-launchd update survival or physical network-change evidence.
-
-The first run timed out waiting for the host to see the phone's request: Xcode
-moved the Simulator's data container during installation. The runner now follows
-that move; no product change was needed. The native wait helper prints its actual
-stage before throwing because XCTest can replace it with a socket-deinit error.
-Failure log: `/tmp/mobile-interruption-first-native.log`.
-
-The corrected real-carrier proof passed at
-`Test-LoopflowiOS-2026.11.04_05-24-36--0800.xcresult` (51.218 seconds). Both terminal
-and idle list detected this explicit service exit within the first 20 ms polling
-interval; this is not a bound for silent network loss. Offline retry preserved
-both surfaces. Restart changed the service instance, restored the same draft and
-Task identities, and left the phone observing. Outage/observer input never reached
-the child. The enclosing fixture still counted only three intended provider starts
-and exactly the expected lines. The 32 MiB/512 native edited input proof also passed
-(p95 response 16.0 ms; maximum 567.6 ms), including stalled-viewer recovery. That
-maximum remains evidence against a universal latency guarantee.
-
-Logs: `/tmp/mobile-service-interruption-final.log`,
-`/tmp/mobile-service-interruption-final-native.log`. The temporary Tailscale route
-was removed and empty Serve configuration verified. Ordinary native regressions
-were unchanged from their 53-test pass; this changed opt-in test ran rather than
-skipping. No physical phone, actual-provider history, installed Desktop restart or
-launchd executable replacement is established by this fixture.
-
-Final checks: cargo fmt, all-target Clippy with warnings denied and diff whitespace
-passed. The current Simulator integration directory is empty after cleanup.
-
-### Session activity on the phone — November 4, 06:00
-
-The native header shows the selected owner's existing ProgramStatusRecords,
-separately from connection/input ownership. Tap for its reported message. The
-owner already parses OSC 7501 with its retained Ghostty terminal; it now sends
-that validated snapshot on fresh attachment and after changes, in the same ordered
-control stream. Ordinary terminal bytes remain unchanged. No second parser,
-subscription, Session store writer or execution authority is added. Disconnect,
-background and Session switch clear the local report; passive reconnect restores
-current evidence. Reporting Done does not end the Session or complete the Task.
-
-The first implementation tried reading SessionRecord through desktop_sessions.
-After a live timeout, source inspection showed that owner terminal reports reach
-that store through Desktop's renderer writer, not the owner alone. The timeout
-itself did not isolate that dependency as its only cause. That additional subscription
-and abstraction were removed. The phone consumes retained-owner evidence directly;
-Desktop's existing store projection and publication remain unchanged. The first
-failed native log is `/tmp/mobile-session-activity-first-native.log`.
-
-The phone's terminal answers the optional OSC 7501 capability query only while
-controlling live output; observer and snapshot query replies remain suppressed.
-The protocol permits BEL or ST termination and the simple `?` reply. Source:
-https://www.superlogical.com/rex/docs/build/program-status#feature-detection
-Reports remain untrusted display evidence, never approval/interruption bindings.
-
-Native regression coverage exercises activity updates, explicit clearing, passive
-recovery and old-attachment fencing. Captures from the owner-event implementation
-were inspected in light, dark and accessibility text sizes and saved under
-`scratch/demo-assets/mobile-session-activity-*.png`. The 05:48 native suite passed
-57 ordinary tests; its capability-query test failed because the test bypassed the
-workspace's snapshot replay path. After injecting the snapshot through the actual
-attachment event, that focused test passed at 05:49. The opt-in live test remains
-separate. Rust checks passed: 50 transport library tests, 66 transport integration
-tests (two opt-in tests ignored), and all-target Clippy with warnings denied.
-
-Status changes flush their ordered events immediately. Merely enqueuing the event
-after output delivery would leave an idle program's final report waiting for more
-terminal bytes. The native live test now requires Done after the output program
-goes quiet, while keyboard control remains held.
-
-The first owner-event live run delivered activity, restored it after service
-restart and reached Done while retaining control. Its output-count assertion
-failed by two bytes: `app=fixture` in the two new raw OSC reports added two `x`
-characters to the fixture's count of payload `x` bytes. The reports now identify
-`app=proof`, keeping that marker exclusive to the payload. The failed native log
-is `/tmp/mobile-owner-status-first-native.log`.
-Source review also moved publication after held native output and exit settlement,
-so their final status precedes ChildExited. Existing native success/failure
-settlement tests now require the corresponding final report before that event.
-
-Final live acceptance passed at
-`Test-LoopflowiOS-2026.11.04_05-59-16--0800.xcresult` (49.240 seconds native;
-68.70 seconds enclosing fixture). Current activity arrived on first attachment,
-cleared on service loss, and returned on passive reconnect. A quiet program's
-Done report arrived while the phone retained keyboard control. All 33,554,432
-payload bytes and 512 native edited acknowledgements arrived exactly once;
-input-to-next-output latency was p95 15.4 ms/max 31.5 ms in this Simulator run.
-The existing handoff, continuation, creation and stalled-viewer proofs also passed.
-Logs: `/tmp/mobile-owner-status-final-live.log`,
-`/tmp/mobile-owner-status-final-native.log`,
-`/tmp/mobile-owner-status-final-checks.log`. The temporary Serve route was removed
-and empty configuration verified. Native completion success/failure assertions,
-formatting, Clippy and diff whitespace pass on the final source. Physical phone,
-actual provider history and installed Desktop update acceptance remain open.
-
-Next terminal polish: make the existing link-opening callback useful, and expose
-a local return-to-latest control when reading scrollback. The current callback is
-empty; SwiftTerm already exposes its scroll position and local scroll API. Preserve
-passive viewing, canonical geometry and selection; neither action should acquire
-input or send terminal bytes.
-
-### Terminal reading ergonomics — implementation and acceptance
-
-Add a local Latest button only when the terminal scrollback or oversized observer
-viewport is above its bottom. Tapping it moves the two local scroll views, leaves
-selection intact and never requests input or geometry. Keep the compact typing
-bar unchanged. Use existing SwiftTerm scrolling APIs instead of another history.
-
-Open explicit terminal web links in a dismissible native browser. Other link
-schemes have no mobile implementation and should give a readable response.
-Observer reading must support native selection/link gestures without showing the
-software keyboard: local first-responder status is distinct from remote input
-authority. Keep all text input gated, disable remote mouse reporting while
-observing and retain explicit Use keyboard for control.
-
-Implemented with the native terminal's two scroll views and SafariServices.
-Latest retains selection and horizontal position; new output does not interrupt
-scrollback reading. Its pill uses Desktop colors/type and scales with system text.
-Observers have local reading focus and no software keyboard or remote mouse
-reporting. Underlined OSC 8 web links open in the native browser. Plain text URLs
-are not yet touch links; the pinned renderer only activates those through hover.
-No extra link parser or terminal history store was added.
-
-Actual UIKit/XCTest exposed a gap that handler tests missed: the first tap only
-established reading focus. The terminal now begins local reading on appearance.
-Close initially appeared broken, but instrumentation showed that XCTest's
-remote-service element tap never reached the button. Tapping its reported frame
-in app coordinates reached it and passed; no custom dismissal is needed. The
-temporary delegate and logs were removed. Apple's automatic dismissal contract:
-https://developer.apple.com/documentation/safariservices/sfsafariviewcontrollerdelegate/safariviewcontrollerdidfinish(_:)
-The tap-through test opens the link from observation and closes back to that
-Session without a keyboard grant. Initial logs: `/tmp/mobile-terminal-reading-ui.log` and
-`/tmp/mobile-terminal-reading-focus.log`. Native captures initially used a
-scene-less test window and were black; the capture test now mounts its window in
-the actual UIWindowScene before rendering.
-
-The 32 native terminal tests passed at 06:13; the existing lifecycle and
-accessibility UI tests passed in that run. The corrected link tap-through test
-then passed on the final browser implementation at
-`Test-LoopflowiOS-2026.11.04_06-18-05--0800.xcresult`, with default Safari dismissal
-and no delegate workaround. Screenshot review then caught the shared font helper
-discarding a configuration-only button title; it now preserves the existing
-configuration title/image, and Latest has an explicit visible-label/width check.
-
-The actual carrier proof passed at
-`Test-LoopflowiOS-2026.11.04_06-18-55--0800.xcresult` (49.755 seconds native).
-All 33,554,432 payload bytes and 512 native edited acknowledgements arrived once.
-Native-input response was p95 15.4 ms/max 21.3 ms; feed CPU was 16.503 seconds
-across 32,770 calls. Service restart, current activity, passive recovery and stale
-viewer disconnection passed. This is not a physical-phone energy or touch-latency
-guarantee. Logs: `/tmp/mobile-terminal-reading-live.log` and
-`/tmp/mobile-terminal-reading-live-native.log`; the temporary Serve route was
-removed and empty configuration verified. The later title-preservation change is
-local button styling only; its focused render/interaction verification remains
-separate from that carrier run.
-
-Large-text review also found a font-transformer sizing issue: the Latest label
-grew while its pill retained a narrow intrinsic width. The pill now uses an
-attributed title with its scaled font so layout measures the rendered text.
-Final local navigation and rendered sizing checks passed at
-`Test-LoopflowiOS-2026.11.04_06-21-48--0800.xcresult`; the visible Latest label,
-44-point minimum target width, preserved selection and no control/resize/input
-effects are asserted. Light, dark and large-text captures were inspected under
-`scratch/demo-assets/terminal-reading-*.png`; the browser round trip is also
-captured there. Physical gestures and VoiceOver on a phone remain unverified.
-The final capture-only run at 06:23 also applies the matching UIKit light/dark
-appearance so native disabled controls reflect the selected theme.
-
-### Find in Session — November 4 implementation
-
-Expose a navigation-bar Find action that searches text already loaded in the
-native terminal, including its local scrollback. Use SwiftTerm findNext /
-findPrevious and selection; keep one terminal history and no server endpoint.
-Use a native search field and previous/next controls, with an explicit loaded-text
-scope hint and No matches feedback. Do not scan every match merely to show a count:
-the renderer's count API enumerates a capped result list, which cannot provide an
-honest total for arbitrary terminal sizes without unbounded work.
-
-Find is a local reading action. It may show the phone keyboard while observing,
-but neither the query nor Return goes to the provider. Opening/canceling it must
-not acquire input or geometry or reflow the remote grid; freeze the current local
-grid while the find UI changes available space. A new explicit keyboard takeover
-returns to terminal editing. Reveal found text in both the renderer's scrollback
-and the outer observer viewport, including horizontal panning. Cancel removes
-search decoration and leaves the reading position. Test real touch input, no
-remote bytes/resize/claims, wraparound/Unicode, no matches, new output, Session
-replacement, and large-text/light/dark presentation before committing.
-
-
-Find now uses the renderer's existing search/selection APIs, with no extra history,
-Machine request or parser. Native tests cover Unicode and wraparound, no matches,
-offscreen observer matches, new output, reconnect clearing stale highlights, and
-explicit takeover returning to terminal typing. Query editing, Return, terminal
-context paste and mouse reporting stay local while Find is open. The current grid
-is frozen during search so the local keyboard does not resize a retained program.
-
-The 06:41:53 run passed all four new Find tests and both real-touch UI tests
-(Find and foreground recovery). Two older keyboard tests failed because they
-selected the first stack view, now the Find bar; selecting the named keyboard
-button fixed both, verified at 06:43:12. No product keyboard workaround was needed.
-Light, dark and accessibility-text captures were inspected. The dark placeholder
-now uses the theme's secondary text color; final captures passed at 06:43:44 and
-are under `scratch/demo-assets/terminal-find-*.png`. The real keyboard screenshots
-are `session-find-observer.png` and `session-find-closed.png`. Physical VoiceOver
-and IME use remain device acceptance, not established by these captures.
-
-
-Live Find acceptance passed through host Tailscale at
-`Test-LoopflowiOS-2026.11.04_06-44-34--0800.xcresult` (49.638 seconds native): the
-phone searched the unfinished remote draft, pressed Search and attempted a
-terminal-context paste, then the owner still received the exact expected draft.
-The same run passed service interruption/recovery, current activity, passive
-handoff and 33,554,432 output bytes with 512 edited acknowledgements exactly once.
-Input-to-next-output p95 was 14.6 ms/max 22.7 ms; native feed CPU was 16.562 seconds
-across 32,770 calls. Logs: `/tmp/mobile-find-live.log` and
-`/tmp/mobile-find-live-native.log`. The temporary route was removed and empty
-Serve configuration verified. Unicode search across actual local scrollback also
-passed its focused test at 06:45:44. These remain Simulator and stand-in-provider
-proofs; physical-phone and actual-provider acceptance are still open.
-
-The mounted-window hidden-keyboard case passed at 06:46:44: opening and closing
-Find while the terminal keyboard was hidden sent no geometry updates. This covers
-the local keyboard transition in Simulator, not physical keyboard accessories.
-
-### Choose an existing Task Session — November 4 implementation
-
-Jack Heart's expanded native-app goal includes navigating the conversations already
-available on Desktop. Keep Task → primary Session as the first tap. Add a Sessions
-sheet with existing names, provider/status, primary/current markers, refresh and
-bounded Load more. Selecting a conversation only attaches as an observer. Pin that
-selected Session through reconnect, foreground recovery and explicit Open Session;
-do not change the Task's primary conversation or copy a Work DTO to disguise selection.
-
-Reuse SessionRecord and the existing SessionPage/CLI query. Add the optional Task
-filter to that shared page so the Machine applies membership before its 100-row
-limit, instead of filtering an incomplete repository-wide page on the phone.
-Expose the same read through the remote carrier. No second Session inventory,
-watcher or resolver. Errors retain the last sheet reading with retry; dismissal
-cancels pending reads. Headless Runs and unrelated Task Sessions stay out of the
-picker. Verify multiple distinct drafts, stale attachment fencing, no implicit
-control/start, pagination/retry, native touch and real carrier reads.
-
-
-The Sessions sheet now consumes the shared Task-scoped SessionPage and exposes
-current/primary markers, bounded loading and retry at the failed cursor. Dismissing
-or superseding a reading cancels its Task and fences late replies. MobileWorkspace
-keeps selected Session identity separately from the immutable Task reading, through
-reconnect, foreground return and explicit opening. Switching clears old terminal
-search state and grants no control. The live output proof now uses this selection
-API instead of rewriting a WorkViewPlan fixture's primary Session.
-
-Verification: 39 native terminal tests and three Session-list tests passed at
-`Test-LoopflowiOS-2026.11.04_06-54-51--0800.xcresult`, including separate drafts,
-selected-Session recovery, no implicit start/control and old attachment fencing.
-The final cancellation/retry tests passed at 06:57:25. Light/dark/accessibility-text
-layouts were inspected from 06:58:49 (`scratch/demo-assets/session-picker-*.png`).
-The actual touch switch/return and hit-region/accessible-description audit passed
-at 07:02:22; its capture shows the original unfinished draft after returning.
-Rust wire fixtures, served-read/CLI parity (including a Task-scoped page), fmt and
-all-targets Clippy passed. Logs: `/tmp/mobile-session-page-rust.log`,
-`/tmp/mobile-session-page-parity.log`, `/tmp/mobile-sessions-clippy.log`.
-
-Host-Tailscale proof passed at
-`Test-LoopflowiOS-2026.11.04_07-01-09--0800.xcresult` (49.873 seconds native). It
-read Task-scoped pages for both original and created Tasks, selected a non-primary
-retained terminal without changing the Task reading, then passed service restart,
-current activity, passive recovery and 33,554,432 output bytes with 512 edited
-acknowledgements exactly once. Input-to-next-output p95 was 14.3 ms/max 20.1 ms;
-feed CPU was 16.716 seconds across 32,770 calls. Logs:
-`/tmp/mobile-sessions-live.log`, `/tmp/mobile-sessions-live-native.log`. Temporary
-Serve route removed; empty configuration verified. This remains Simulator plus
-stand-in-provider acceptance, not physical-phone or actual-provider UX proof.
-
-### Compact-height terminal — November 4 implementation
-
-Landscape touch testing exposed a 10-point terminal viewport while Find and the
-software keyboard were open. Preserve the keyboard and readable terminal first.
-In compact vertical size, fold Session state/actions into navigation chrome and
-keep the detailed Machine, chosen Session and program report available through a
-status disclosure. Portrait keeps its existing header. Keep ordinary input and
-observer geometry semantics unchanged; search remains local. Verify actual device
-rotation with keyboard/Find, readable viewport and reachable actions, large text,
-and no observer resize or replay during geometry transitions.
-
-
-Compact height now uses navigation-bar state/actions and one Session-details
-alert; program activity remains visible as a status dot and accessibility value.
-Portrait retains its header. The typing bar collapses while observing and appears
-for Find or explicit input control. Its constraints settle immediately, so the
-next unchanged layout does not send a late geometry update. Find hides Latest
-while selecting matches, and its Done button resists compression by a long query.
-
-Baseline touch test (07:05:51) exposed the 10-point viewport. The first rotated
-captures used app.screenshot and were cropped by XCTest's transformed app frame;
-XCUIScreen captures now show the complete rotated display. A strict keyboard-edge
-assertion also counted the keyboard's rounded decoration; the test checks that the
-control's active center is above it and that the action is reachable.
-
-Large-text testing found two separate issues: the search test placed its caret
-mid-query, and the offline peer did not repaint on resize. The test now explicitly
-clears/re-enters the query and checks both its value and the terminal input value.
-Pinned SwiftTerm Buffer.reflowNarrower intentionally leaves cursor-line reflow to
-the program (revision 5d14406844143538cd8f8851d2d8a67c1fe443e5, Buffer.swift:1365).
-The native regression proved the peer still held the exact draft while its stale
-screen was clipped. FixtureAttachment now repaints after a granted resize, and
-FixtureTerminal saves/restores the rendered cursor at the edit point instead of
-assuming fixed rows/columns. This fixes the explicit offline demo, not a second
-live provider or transport path.
-
-Native terminal/activity run at 07:21:49 passed the reflow and reading tests;
-two deferred typing-bar layout counts failed. Immediate layout fixed those, with
-focused observer geometry/Find/control checks passing at
-`Test-LoopflowiOS-2026.11.04_07-22-54--0800.xcresult`, along with actual landscape
-keyboard input, Find, details disclosure and return to portrait. Earlier portrait
-hit-target/description audit passed at 07:11:35. The final full rotation flow also
-passed with system accessibility-extra-large text at
-`Test-LoopflowiOS-2026.11.04_07-23-53--0800.xcresult`; the Simulator's previous
-large text setting was restored and verified. Final landscape and portrait Find
-captures under `scratch/demo-assets/session-*-large-text.png` were inspected.
-Logs: `/tmp/mobile-compact-native-final.log`, `/tmp/mobile-compact-controls-final.log`,
-`/tmp/mobile-landscape-large-confirmed.log`. Physical device rotation, VoiceOver
-navigation and actual-provider redraw behavior remain acceptance work. No carrier
-or engine code changed in this layout pass.
-
-
-## QR-first connection cutover — November 4, 12:53
-
-Jack Heart's selected QR/address flow now replaces phone tickets throughout the
-working tree. The failed Serve Unix-socket proposal is removed. Direct HTTPS binds
-the installed host's Tailscale addresses; WhoIs admits another untagged node of
-the approved owner. Saved node/user identity prevents approval from silently
-following an account change at service restart. Certificate material stays in
-memory and refresh uses wall time. Local Unix admission remains separate.
-
-Review findings resolved: the installed macOS client rejected Serve's Unix target;
-the host certificate CLI could not write outside its sandbox; same-host network
-identity could not distinguish OS accounts; an unavailable IPv6 allocation should
-not prevent IPv4 use. The selected path handles these without a second auth mode,
-custom relay, embedded node or phone enrollment database. A local setup response
-has a longer deadline for certificate issuance; failed setup closes admission.
-
-The native runner initially signaled restart after only local readiness. It now
-waits for HTTPS too. Its next failure came from replacing fixture config and
-losing the manual repository selection; setup now changes only the mobile key.
-Neither failure justified changing Session recovery semantics. The final native
-run passed exact provider counts, retained draft editing, passive reconnect,
-Task creation and 32 MiB output with 512 edited acknowledgements. Its p95 native
-input response was 20.4 ms, longest 36.9 ms; scheduler p95 36.5 ms. These are
-Simulator measurements with a stand-in provider and an explicit second-node
-identity fixture, not physical-device or provider-specific acceptance.
-
-- Signed iOS address/Keychain tests and QR-first UI: pass; `/tmp/mobile-qr-onboarding-final.log`.
-- Camera fallback opens editable address entry directly: pass; `/tmp/mobile-qr-fallback.log`.
-- `scripts/test_desktop.sh --filter 'MachineProtocolTests|MobilePairingTests'`: 10 pass; actual QR decodes to the exact address.
-- Installed-host isolated HTTPS probe: real certificate validates and same-host identity returns 403; `/tmp/mobile-direct-live.py`.
-- Exact Desktop enable/status/off CLI workflow: pass, stable address and owner approval, local incarnation unchanged, no supervisor registration; `/tmp/mobile-direct-setup.py`.
-- `mobile_machine_native_acceptance --ignored --exact`: pass; `/tmp/mobile-direct-native.log`, native result `Test-LoopflowiOS-2026.11.04_12-51-18--0800.xcresult`.
-
-Remaining: physical phone over installed Tailscale, network/account transitions
-on both devices, installed Desktop update survival, real provider/dictation and
-VoiceOver judgment. No publication, app account or TestFlight action taken.
-
-- `cargo test -p loopflow --lib machine_service::`: 7 pass; `/tmp/mobile-qr-final-checks.log`.
-- `cargo test -p loopflow --test transport_tests machine_service_`: 7 pass; isolated launchd replacement remains opt-in and was not rerun for this carrier change.
-- `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-qr-clippy.log`; initial lint found a large test-only handshake error, converted to its diagnostic string.
-- `cargo fmt` and `git diff --check`: pass. Dedicated Simulator `Loopflow onboarding proof` was shut down and deleted after acceptance; existing Simulators were preserved.
-
-Restoration failures now log the first error while retrying the saved approval,
-without repeating the same warning every five seconds. QR-first and confirmation
-captures are `scratch/demo-assets/machine-qr-first.png` and
-`scratch/demo-assets/machine-address-confirmation.png`. Existing demo edits were
-preserved. The superseded patch was moved out of scratch; current code is the
-single implementation.
-
-## Setup durability and readiness — November 4
-
-Jack Heart's ongoing priority is a polished, reliable phone experience. The
-Machine service now saves approval before serving phones. Losing the setup
-reply leaves the same recoverable address after restart. Status separates saved
-approval from listener readiness; Desktop shows the QR only after a successful
-read confirms readiness and keeps the address and explanation when unavailable.
-A failed setup command reads status without replaying the command.
-
-Review resolved two ownership gaps: the CLI no longer owns the final persistence
-step, and Desktop no longer treats enabled configuration as proof of readiness.
-Offline disable saves off without starting the service, then probes once more to
-close the concurrent-startup window. Listener replacement persists off first and
-closes admission even if persistence fails. Local Work and Session lifetime stay
-with their existing owners. Status is a snapshot refreshed on opening settings or
-using Refresh; it is not a reachability guarantee from the phone.
-
-The lifecycle proof now disconnects the caller after certificate retrieval begins,
-before setup completes. An earlier test disconnected before Unix admission and
-therefore never requested setup; the certificate gate makes the intended failure
-precise. Restart checks now wait for local service readiness before sending their
-next command. The final test covers lost replies, durable addresses, same-account
-automatic recovery, changed-account rejection, live disable and offline disable.
-
-- `cargo test -p loopflow --lib machine_service::`: 7 pass; `/tmp/mobile-readiness-rust.log`.
-- `cargo test -p loopflow --test transport_tests machine_service_mobile_changes_preserve_local_connections_and_saved_disable -- --exact`: pass; `/tmp/mobile-readiness-lifecycle.log`.
-- `scripts/test_desktop.sh --filter 'MachineProtocolTests|MobilePairingTests'`: 11 pass; `/tmp/mobile-readiness-desktop.log`.
-- iOS Simulator app build: pass; `/tmp/mobile-readiness-ios.log`.
-- Installed-host isolated enable/status/off workflow: pass, stable address and local incarnation, live readiness and disabled state verified; `/tmp/mobile-direct-setup.py`.
-- `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-readiness-clippy.log`.
-- `cargo fmt -- --check` and `git diff --check`: pass.
-
-The next section resolves occupied saved ports and obsolete mobile configuration.
-Physical-phone network transitions and installed Desktop update survival remain
-acceptance work.
-The preceding native editing proof still applies to unchanged phone/carrier code;
-no new physical-device, real-provider, voice or VoiceOver claim is made.
-
-## Explicit setup recovery — November 4
-
-Jack Heart's QR-first flow now repairs two recoverable setup failures. Explicit
-Set up again selects a new port when another process occupies the saved port;
-automatic restoration keeps retrying the approved address. Explicit setup replaces
-obsolete mobile settings, and Turn off removes them. Both preserve unrelated
-Machine configuration under its existing file lock. Invalid whole-file YAML
-remains an error and is left untouched.
-
-Review kept fallback limited to an occupied port during explicit setup. Identity,
-certificate, permission and unavailable-address failures cannot broaden the bind
-or bypass approval. The same certificate and identity check serve both socket
-attempts; partially bound sockets drop before choosing another port. The new test
-uses the real CLI against an isolated foreground service and confirms that its
-local incarnation survives setup changes.
-
-- `cargo test -p loopflow --test transport_tests machine_service_mobile_ -- --nocapture`: 2 pass; `/tmp/mobile-setup-repair.log`; obsolete setup, unchanged unrelated settings, stable restoration address, explicit port repair, offline disable and damaged-YAML preservation.
-
-Phone source review found the remaining UX cost: changing an address requires
-Forget Machine before scanning again. Keychain stores the endpoint and verified
-Machine ID, and drafts are keyed by Machine ID, but replacement should be possible
-without first discarding the working saved connection. The next section implements
-Change address with verification of the existing Machine ID before replacement. No physical-phone
-or new native UI acceptance is claimed by these backend tests.
-
-- `cargo clippy --all-targets -- -D warnings`: pass; `/tmp/mobile-setup-repair-clippy.log`.
-- `cargo fmt -- --check` and `git diff --check`: pass; no Swift changes or native test rerun for this backend-only repair.
-
-## Change a saved address — November 4
-
-Jack Heart's QR-first flow now offers Machine connection → Change address on the
-Task list. It reuses the onboarding form in a sheet, with scanning first and
-address entry as fallback. The existing client and Keychain entry remain until
-the new endpoint verifies the same Machine ID. Successful replacement rebuilds
-the Task workspace for that endpoint; cancellation or failure keeps the old
-connection. Switching Machines remains the separate Forget Machine flow.
-
-Review caught two UX problems. The first UI run showed an invalid-address message
-below the keyboard; the form now scrolls the message into view, and the test checks
-that it is reachable. Large-text captures put the repair sheet's redundant welcome
-heading ahead of its actions; that heading now belongs only to first connection.
-The final light/dark/large-text captures were inspected. Cancel immediately cancels
-the connection task; interactive dismissal is disabled only while connecting.
-Machine identity is checked before the single Keychain write, and cancellation
-is checked after the network reply. No Task or provider start is part of setup.
-
-The live proof saves an old address, verifies that a different Machine is rejected
-without replacing it, cancels an attempt, then verifies and saves the same Machine
-at its new address. It continues through the existing native editing, service
-restart, Task creation and 32 MiB output proofs with 512 edited acknowledgements.
-The first runner attempt stopped before XCTest because the dedicated Simulator
-had no installed app container; installing the built app resolved the prerequisite.
-These are Simulator results over real HTTPS/WSS with an explicit phone-identity
-fixture and stand-in provider, not physical-phone or provider-specific acceptance.
-
-- `xcodebuild test ... -only-testing:LoopflowiOSTests/MachinePairingTests -only-testing:LoopflowiOSUITests/MachineOnboardingTests`: 5 pass; `/tmp/mobile-address-form-final.log`, `Test-LoopflowiOS-2026.11.04_13-34-09--0800.xcresult`.
-- `mobile_machine_native_acceptance --ignored --exact`: pass; `/tmp/mobile-address-native.log`, `Test-LoopflowiOS-2026.11.04_13-37-13--0800.xcresult`.
-- `git diff --check`: pass; no Rust source changes or redundant Rust lint run in this UI unit.
-- Dedicated Simulator `Loopflow address proof` was shut down and deleted; existing Simulators and saved connections were preserved.
-
-Captures: `scratch/demo-assets/change-machine-address.png`,
-`change-machine-address-large-text.png`, and `machine-address-validation.png`.
-Physical-phone network transitions, voice/VoiceOver judgment, actual-provider
-interaction and installed Desktop update survival remain acceptance work.
-
-## Reopen with the last Task list — November 4
-
-Jack Heart's return-to-work flow now keeps one bounded Task reading across app
-restarts. The cache is scoped to the verified Machine ID, lives in Caches, requests
-complete file protection and is excluded from backup. Until a current watch
-replaces it, the list shows its original last-updated time. An empty live reading
-replaces old Tasks too. Cache failure never hides a valid live reading or prevents
-connection. Terminal output and input remain uncached.
-
-Review kept disk encoding and I/O off the UI actor and the cache at 2 MiB. The
-existing newest-reading buffer bounds updates while a write finishes. A canceled
-subscription cannot begin a late cache write. Forgetting a Machine removes only
-its matching cache, avoiding delayed cleanup of a newly selected Machine. Cache
-records use the existing Work content types, not a second domain inventory.
-A cached row still goes through live Session attachment and can never start one.
-
-Tests cover reopening offline with a newly constructed workspace, Machine
-isolation, an empty replacement surviving another reopen, corruption/oversize
-removal, backup exclusion, cancellation and write failure. Two initial assertions
-were incorrect: the fake deliberately reports SessionUnavailable, and Simulator
-returns no file-protection attribute. The state expectation now follows that
-contract; file-protection metadata has its own explicitly device-only test.
-Light, dark and large-text status-component captures were inspected. They show
-the error, original update time and recovery action without clipping.
-
-- `xcodebuild test ... -only-testing:LoopflowiOSTests/MobileTaskUpdatesTests`: 7 pass, 1 device-only skip; `/tmp/mobile-task-cache-verified.log`, `Test-LoopflowiOS-2026.11.04_13-47-53--0800.xcresult`.
-
-The live service-interruption proof now constructs a new workspace and cache
-reader while the isolated service is stopped. It confirms the same saved rows and
-original timestamp, then replaces them with a current watch after restart.
-The later output exercise uses a workspace without a cache. Its first run missed
-the existing 60-second completion deadline at 502 of 512 acknowledgements, with
-32,899,072 payload bytes received and no reported disconnect. Host load average
-was above 300 when inspected, but that does not establish the cause. Added failure
-diagnostics report time since payload progress, render time, longest feed and
-longest scheduling gap. A diagnostic run passed the same workload and unchanged
-deadline; no retry or relaxed limit was added. This does not explain the earlier
-miss. Sustained-output timing variability remains unresolved alongside the earlier
-observations recorded above.
-
-- `mobile_machine_native_acceptance --ignored --exact`: cache/reopen and complete retained-owner workload pass on diagnostic run; `/tmp/mobile-task-cache-native.log`, `Test-LoopflowiOS-2026.11.04_13-56-23--0800.xcresult`; first output-deadline miss retained in `/tmp/mobile-task-cache-native-first.log` and `/tmp/mobile-task-cache-native-first-xcode.log`.
-- `git diff --check`: pass; Swift-only changes, no redundant Rust lint run.
-- Dedicated Simulator `Loopflow task cache proof` was shut down and deleted; existing Simulators were preserved.
-
-Status-component captures are `scratch/demo-assets/task-list-offline-status.png`
-and `task-list-offline-status-large-text.png`. Physical file-protection behavior,
-whole-app cold-launch ergonomics and device network/voice/VoiceOver acceptance
-remain unproven; Simulator model tests do not supply those guarantees.
-
-## Actual provider acceptance — November 4
-
-Jack Heart's sustained improvement goal now has an explicit installed-Claude
-acceptance path. It shares the existing runner's disposable Machine registry,
-Task, host identity fixture and Simulator. Ordinary tests retain their deterministic
-stand-in and need no account. Physical-phone IME, voice, VoiceOver and installed
-update survival remain separate.
-
-The opt-in actual-Claude path now passes with installed Claude Code 2.1.318.
-Native UIKit enters and edits a draft, the isolated Machine service stops/restarts,
-the same draft returns passively, and a later reply uses the preceding answer after
-foreground recovery. Rust confirms the same retained owner, Session and provider
-PID throughout. The provider uses its ordinary account home; LF_HOME isolates the
-registry. Tools/customizations are disabled for this fresh conversation. The test
-transcript remains in normal provider history; no existing conversation is resumed.
-
-Two failed attempts corrected the test rather than production behavior. Claude's
-new-folder menu defaults to No, exit; the test now selects its disposable folder
-with Down before Return. A subsequent test inserted text plus LF together, which
-correctly remained a multiline draft. A separate Return insertion submits it.
-Failure logs are `/tmp/mobile-real-provider-trust-first-xcode.log` and
-`/tmp/mobile-real-provider-newline-first-xcode.log`. Final native proof takes
-5.850 seconds; result `Test-LoopflowiOS-2026.11.04_14-12-46--0800.xcresult`.
-`/tmp/mobile-real-provider-native.log` and
-`/tmp/mobile-real-provider-final-xcode.log` preserve the enclosing/native results.
-No deadlines were increased and no automatic retry was added.
-
-That proof exposed provider menus requiring arrow navigation with no numbered
-choices. It sent a test arrow; the next section adds the discoverable touch path
-without restoring the generic shell modifier strip Jack Heart removed. Physical-
-phone IME/dictation/VoiceOver, other real providers, usage-accounting parity and
-installed Desktop update survival remain separate acceptance obligations.
-
-The unchanged stand-in path also passes after the shared-harness extraction:
-`/tmp/mobile-provider-regression.log` and
-`/tmp/mobile-provider-regression-xcode.log`. It still checks exact provider/input
-counts, explicit continuation, recoverable creation and all 33,554,432 bytes with
-512 native edited acknowledgements. This pass does not explain the earlier
-sustained-output timing variability. The dedicated Simulator was shut down and
-deleted; existing Simulators, accounts and active conversations were preserved.
-
-Final checks: `cargo fmt -- --check`, all-target Clippy with warnings denied
-(`/tmp/mobile-provider-clippy.log`) and `git diff --check` pass. The stand-in
-regression result is `Test-LoopflowiOS-2026.11.04_14-13-45--0800.xcresult`.
-
-## Compact provider navigation — implementation
-
-Jack Heart's compact keyboard direction remains. Keys switches the typing bar to
-arrows, Tab and Escape; the keyboard icon returns to Paste / New line / Keys /
-keyboard visibility. Both modes share the typing row's layout, so large labels,
-rotation and repeated key presses keep one terminal size and the native keyboard.
-Use the pinned renderer's normal/application cursor sequences and the existing
-workspace input claim. Actions recheck control and Find state when tapped.
-No modifier strip, contextual approval API or second input queue is added.
-
-The first system-menu version passed ordinary touch tests but failed at confirmed
-accessibility text size: iOS hid the keyboard to fit its popup, expanding the
-viewport. Replace that popup with the inline alternative row rather than another
-keyboard-lifecycle handler. One earlier nominal large-text run stayed at default
-size because the Simulator was shut down when configuration was attempted; it is
-not large-text evidence. The runner now boots, applies and reads back both text
-size and appearance before testing.
-
-The added typing button also exposed intermediate resizes while closing Find.
-Restore its row while geometry is still frozen, then settle the final layout and
-Latest visibility. Do not relax the existing geometry test. First failures:
-`/tmp/mobile-navigation-tests.log` and
-`/tmp/mobile-navigation-large-confirmed.log`. Current row verification follows.
-
-The inline row passes native and operated Simulator checks. All 43 terminal tests
-pass, including normal/application cursor mode, draft editing, Find isolation and
-late actions after control loss. Closing Find retains its original geometry and
-restores Latest when reading scrollback. Actual touch opens Keys, moves Left,
-edits the draft, returns to typing and finds the edited text without submission.
-Both ordinary light and confirmed accessibility-extra-large dark runs preserve
-keyboard/viewport, provide 44-point targets and pass hit-region/description audits.
-Landscape keyboard/Find interaction also passes at both settings.
-
-- Native/large-text run: `/tmp/mobile-navigation-row-large.log`, `Test-LoopflowiOS-2026.11.04_14-31-32--0800.xcresult`.
-- Final standard touch run: `/tmp/mobile-navigation-row-standard.log`, `Test-LoopflowiOS-2026.11.04_14-33-27--0800.xcresult`.
-- Inspected captures: `demo-assets/session-navigation-keys.png`, `session-navigation-large-text.png`, and `session-navigation-edited-draft.png`.
-
-The actual-Claude proof now uses the production navigation handler to select its
-fresh repository's trust choice. It passes editing, service interruption, passive
-foreground recovery and a context-dependent reply with one unchanged provider.
-Result: `Test-LoopflowiOS-2026.11.04_14-37-17--0800.xcresult` (8.322 seconds native),
-`/tmp/mobile-navigation-real-provider.log` and
-`/tmp/mobile-navigation-real-provider-xcode.log`. Touch operation is established
-separately by the operated fixture tests; this is not a physical-phone demo.
-
-`git diff --check` passes. Swift-only source changes required no new Rust lint
-run; the preceding all-target Clippy pass still covers unchanged Rust. The
-owned Simulator was shut down/deleted. Remaining acceptance includes real Codex,
-physical phone/IME/dictation/VoiceOver, usage-accounting parity and installed
-Desktop update survival.
-
-## Actual Codex acceptance — November 4
-
-Extend the existing opt-in native acceptance to installed Codex using the same
-isolated Task, registry, HTTPS service and UIKit flow. Its app server and native
-TUI are separate processes; preserve both PIDs across service restart and
-foreground recovery. Use an explicit private app-server endpoint, disable daemon
-auto-start and customizations/tools in the test wrapper, and never resume an
-existing conversation. Ordinary tests keep their deterministic stand-in.
-Installed Codex 0.166.0 is signed in; no credential is inspected or copied.
-This proof does not establish physical input, provider usage parity or installed
-Desktop lifetime.
-
-Installed Codex 0.166.0 passes the shared flow with both original process IDs:
-initial reply, edited draft, service interruption, passive foreground return and
-a context-dependent follow-up. The diagnostic run observed Kitty keyboard flags
-7 and bracketed paste enabled after recovery. Result:
-`Test-LoopflowiOS-2026.11.04_14-50-26--0800.xcresult` (7.070 seconds native),
-`/tmp/mobile-codex-visible-draft.log` and
-`/tmp/mobile-codex-visible-draft-xcode.log`.
-
-The first run timed out on the final reply after inserting the entire follow-up
-and Return in immediate succession. The final test additionally requires that
-the follow-up draft render before the separate Return action, then passes.
-No production input code, deadline or retry policy changed. Preserve the original
-failure in `/tmp/mobile-codex-context-first.log` and
-`/tmp/mobile-codex-context-first-xcode.log`; this pass does not explain that failure.
-Codex's [version-matched paste detector](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/tui/src/bottom_pane/paste_burst.rs)
-buffers rapid characters and can interpret nearby Return as a pasted newline.
-That is a candidate explanation, not a reproduced cause. Rapid input/submission,
-physical dictation and software-keyboard timing still need acceptance.
-
-Final shared-runner checks pass with exact initial process counts and unchanged
-PID lists after recovery. Codex's app server and TUI count as two launches; Claude
-counts as one. The stand-in still checks its three intentional launches, exact
-submitted lines, 33,554,432 output bytes and 512 native edited acknowledgements.
-
-- Codex: `/tmp/mobile-codex-native.log`, `/tmp/mobile-codex-acceptance-final-xcode.log`; `Test-LoopflowiOS-2026.11.04_14-54-05--0800.xcresult`, 6.932 seconds native.
-- Claude regression: `/tmp/mobile-codex-claude-regression.log`, `/tmp/mobile-claude-acceptance-final-xcode.log`; `Test-LoopflowiOS-2026.11.04_14-54-56--0800.xcresult`, 7.203 seconds native.
-- Stand-in regression: `/tmp/mobile-codex-regression.log`, `/tmp/mobile-standin-acceptance-final-xcode.log`; `Test-LoopflowiOS-2026.11.04_14-55-31--0800.xcresult`, 73.249 seconds native.
-- Formatting, all-target Clippy with warnings denied (`/tmp/mobile-codex-clippy.log`) and whitespace checks pass.
-
-The dedicated Codex-proof Simulator is removed after verification. Existing
-Simulators, saved connections and active conversations are preserved. These
-changes add repeatable acceptance; no production terminal behavior changed.
-Rapid-submission timing, physical-phone interaction, usage-accounting parity
-and installed Desktop update survival remain open.
+Native Swift (`swift/ios.yml` includes the shared project; SwiftTerm pinned).
+UIKit supplies text input, composition, selection and accessible reading; the
+renderer can be revisited on evidence without changing the protocol.
+
+RemoteMobileClient holds one server connection while the app is in use. It
+watches one all-repository WorkViewPlan subscription for Task primary Sessions,
+rejects unavailable or truncated readings, caches the last list per verified
+Machine, and offers explicit Open Session for a missing owner; navigation and
+reconnect never start a provider. Attach resolves the Session owner, then bridges
+the owner's unchanged binary protocol on a connection of its own. OwnerStream
+handles fragmented frames, nonce-qualified events, snapshot assembly at canonical
+geometry, gaps and size bounds. Input and geometry are separate claims: opening
+observes, Use keyboard takes control and waits for its replacement screen, the
+bounded writer never retries raw input. Backgrounding disconnects; returning
+opens one fresh observer attachment and preserves provider-owned drafts.
+Observers keep the owner's grid; control fits the phone. Find, Latest, link
+opening, compact-height chrome, Sessions sheet, program activity header, saved
+requests and the describe-first creation sheet are implemented as recorded in the
+proof history.
+
+### Server protocol revision 2 on the phone — November 5
+
+Jack Heart's steer: adopt revision 2, attach terminals by ticket rather than a
+protocol switch, and bound control messages. Decisions taken in this slice:
+
+- **One control connection** per client: hello/welcome, requests by id,
+  subscriptions, checkpoints and cancel (`wire.rs`, `ServerProtocol.swift`). The
+  phone opens it on first use per foreground session, reopens after a loss, and
+  closes it on background (`MobileClient.suspend`). Each request waits at most
+  15 s, then cancels its own id; the connection stays.
+- **Tickets** (`server/ticket.rs`): single use, 30 s, bound to the admission that
+  asked (local UID, or remote node + user). Redeemed on a second connection:
+  `/v1/ticket` remotely, a fresh Unix connection locally; first line `ticket`,
+  answer `admitted`, then the purpose. One implementation serves both carriers.
+- **Terminal attach:** `attach {owner}` answers `ticket`; the terminal connection
+  redeems it and carries the unchanged owner protocol as binary frames. The
+  bridge stays a byte copy with no store read; the control connection never
+  becomes a byte stream.
+- **Control limit 1 MiB** (`welcome.limits.max_message`); ticketed connections
+  carry up to 64 MiB; larger is refused with `unavailable`. A control line over
+  the limit is answered with a null-id `invalid` naming the bulk ticket, then
+  the connection closes.
+- **Per operation:** no paging. Any answer or reading above the limit spills
+  whole: the server sends `bulk {id, ticket, bytes}` on the control connection
+  and the client fetches the original message by ticket, off its reader, so other
+  readings never wait behind it (`task_file`, `history`, `task_diff`, oversized
+  view plans and session pages). Requests above the limit (Task save) ask for a
+  `bulk {bytes}` ticket, upload the one request line, and receive the answer on
+  the control connection under the request's id. Measured on this Machine: plans
+  61 KB for 43 Tasks, history 29 KB, a sessions page 179 KB; the spill is the
+  exception path today.
+- **Deleted:** revision-1 `MachineConnection` framing (four-byte prefix, 64 KiB
+  chunk reassembly, one operation per WebSocket), `MachineRequest/Response/
+  Operation`, `Reply::Bridged`, the `bootstrap` request and `tests/fixtures/dto/machine/`.
+  Nothing speaks revision 1.
+
+Checks (November 5): `cargo test -p loopflow --lib server::` 19 pass;
+`--test served_reads` 5 pass; `--test transport_tests server_` 18 pass and the
+task-create carrier-loss test pass (`/tmp/mobile-rev2-rust-integration.log`);
+`cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` pass;
+`scripts/test_desktop.sh --filter 'ServerClientTests|ServerProtocolTests'` 17 pass
+(`/tmp/mobile-rev2-desktop.log`); iOS `xcodebuild test -only-testing:LoopflowiOSTests`
+81 pass, 2 skipped (`/tmp/mobile-rev2-ios.log`). The opt-in host-Tailscale
+acceptance (`transport_tests mobile_native_acceptance`) has not been rerun on
+revision 2; it needs the private host certificate and belongs to demo.
+
+## Remaining work and acceptance
+
+The Simulator proofs over real HTTPS/WSS with a second-node identity fixture and
+stand-in, Claude and Codex providers passed through November 4 (see the history).
+Still open, in priority order:
+
+1. Rerun the host-Tailscale native acceptance on revision 2 (terminal by ticket,
+   32 MiB paced output, service interruption, creation recovery). Earlier
+   sustained-output runs twice missed deadlines with misleading socket attribution
+   and passed on rerun; the cause is unresolved and no batching change remains.
+2. Physical phone over installed Tailscale: identity, network and account
+   transitions, camera scanning, share sheet, cellular. Everything so far is
+   Simulator evidence.
+3. Installed Desktop lifecycle: update survival of owners and bridges; Desktop
+   reconnects after server replacement.
+4. Phone ergonomics the Simulator cannot judge: CJK conversion, dictation,
+   physical keys, VoiceOver, sustained-output energy, rapid submission timing
+   (Codex's paste-burst detector is a candidate explanation for one timeout).
+5. Multi-Machine selection, usage-accounting parity and contextual approval/Stop
+   controls once the backend supplies action semantics.
+
+Telemetry stays shared: command/Process attribution and connection diagnostics
+without duplicate provider usage or persisted terminal contents.
+
+## Demo
+
+The offline fixture app (`--fixture`) shows Task selection, retained Session
+editing, Session switching, Find and foreground recovery; `demo.html` and
+`demo-assets/` hold the walkthrough and inspected captures (fixture screenshots
+do not establish the live path). The live demo is Desktop's Mobile settings QR →
+phone scan → open Task → edit the same Session → reconnect to the same provider.
+Jack's November 4 review record: `4070315ab3:scratch/mobile-native-demo.md`.
+
+## Research index
+
+November 3 research for Jack Heart, historical evidence rather than direction,
+is committed at `9e4587bb53fc4102e8682a3bba61e9776a6de5c2:scratch/` (lfd-history,
+mobile-architecture, mobile-system, research-authority-hub, research-protocol,
+research-recovery, research-runtime-lifecycle, research-shared-sessions,
+research-trust-setup, research-native-mobile, rex-workspace-task-update,
+desktop-shell-task-brief, mobile-task-brief) and `4070315ab3:scratch/reports/`,
+`research_notes/`. HTML studies and `demo-assets/` stay in this checkout.

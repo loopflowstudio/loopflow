@@ -33,11 +33,16 @@ Work and credentials stay in place.
 ## Local protocol, revision 2
 
 One connection per client over the same-user Unix socket. Every message is one
-JSON object per line (`serde_json` never emits a raw newline). Messages are
-capped at 32 MiB and connections at 64; a connection has five seconds to send
-its first message and five seconds to take any message the server sends. The
-socket and its directory are private; remote proxies must never forward this
-endpoint. Remote admission is outside this revision.
+JSON object per line (`serde_json` never emits a raw newline). Control messages
+are capped at 1 MiB and connections at 64; a connection has five seconds to send
+its first message and five seconds to take any message the server sends. Larger
+messages and terminal bytes travel on ticketed connections (below). The socket
+and its directory are private; remote proxies must never forward this endpoint.
+The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
+over WebSocket on the host's Tailscale address: one text frame per message on
+`/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
+bytes. It admits another untagged node of the approved owner through
+`tailscale whois`.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
 mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
@@ -45,7 +50,7 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
+← {"type":"welcome","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":1048576,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"read","query":{"read":"roadmap",…}}}
 → {"type":"request","id":"b","operation":{"kind":"subscribe","query":{…},"generation":1}}
 ← {"type":"response","id":"a","result":{"kind":"read","value":{…}}}
@@ -120,11 +125,15 @@ outcome_unknown, busy`.
 - `session_owner {session}` resolves a Session ID to `session_owner {owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.
-- `attach {owner}` takes the exact existing owner Process ID on a connection of
-  its own: hello, one attach request, `bridged`, then the unchanged binary owner
-  protocol in `transport/README.md` and `transport/wire.rs`. Each terminal has
-  its own socket, so readings never wait behind terminal bytes and a control
-  failure never closes a bridged terminal. The owner alone grants input/geometry,
+- `attach {owner}` names the exact existing owner Process ID and answers
+  `ticket {ticket}`. The terminal opens a connection of its own, sends `ticket`
+  as its first message, reads `admitted`, then carries the unchanged binary owner
+  protocol in `transport/README.md` and `transport/wire.rs`: raw bytes locally,
+  binary frames remotely. A ticket (`ticket.rs`) is single use, expires unused
+  after 30 s and is redeemable only by the admission that requested it: the same
+  user locally, the same Tailscale node and user remotely. Each terminal has its
+  own connection, so readings never wait behind terminal bytes, a control failure
+  never closes a bridged terminal, and the bridge reads no Work. The owner alone grants input/geometry,
   handles bounded output continuation and revokes stale control. No automatic
   owner replacement or raw-input replay. Desktop automatically reconnects the
   exact owner with bounded backoff, keeping connection status in native chrome
@@ -134,11 +143,25 @@ outcome_unknown, busy`.
   Retry reconnects without preparing or resuming a provider. A connection
   failure alone never means the Session ended.
 
+- Bulk. An answer or reading larger than `limits.max_message` never travels on
+  the control connection: the client receives `bulk {id, ticket, bytes}`, redeems
+  the ticket on a second connection, and reads `admitted` followed by the original
+  message as one line. A request larger than the limit asks for `bulk {bytes}`,
+  receives `ticket`, and sends its one `request` line on the ticketed connection;
+  the answer arrives on the control connection under the request's id. Ticketed
+  connections carry up to 64 MiB and a transfer has two minutes; larger messages
+  are refused with `unavailable`. Clients fetch spills off their reader so other
+  readings never wait. A control line over the limit is answered
+  `error {id: null, invalid}` and the connection closes. Nothing is paged.
+
 Desktop holds one connection per server location for the app's lifetime,
 opened on first use and reopened on the next request after a loss with bounded
-backoff (100 ms doubling to 3.2 s). Its watches share that connection; losing it
+backoff (100 ms doubling to 3.2 s). A connection not welcomed within 10 s fails
+and the next request reopens. Its watches share that connection; losing it
 fails every pending request as outcome unknown and every watch, which the
-window reopens for a complete reading.
+window reopens for a complete reading. Bulk fetches and oversize uploads use
+ticketed connections of their own. The phone (`swift/LoopflowiOS/MachineConnection.swift`)
+keeps one control connection per foreground session and the same ticket flow.
 
 Request diagnostics correlate the response trace with its target, duration,
 result, service incarnation and request ID. The existing log formatter adds the

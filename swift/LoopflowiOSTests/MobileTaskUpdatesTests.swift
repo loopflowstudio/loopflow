@@ -207,28 +207,26 @@ final class MobileTaskUpdatesTests: XCTestCase {
     func testWatchFramesRejectWrongGenerationMissingContentsAndProjectionGaps() async throws {
         let rows = try await FixtureClient().workingTasks()
         let fixtureURL = try XCTUnwrap(Bundle.main.url(forResource: "task-reading", withExtension: "json"))
-        let fixture = try JSONDecoder().decode(MachineResponse.self, from: Data(contentsOf: fixtureURL))
-        guard case .read(let output) = fixture.result else { return XCTFail("Expected fixture plan") }
-        let plan = try JSONSerialization.jsonObject(with: Data(output.utf8))
-        func response(generation: Int = 1, body: Any = NSNull(), unavailable: Any = NSNull()) throws -> MachineResponse {
-            let object: [String: Any] = ["id":"tasks-1", "instance":"test", "result":[
-                "kind":"reading", "generation":generation,
-                "frame":["answers":7, "unavailable":unavailable, "body":body],
-            ]]
-            return try JSONDecoder().decode(MachineResponse.self, from: JSONSerialization.data(withJSONObject: object))
+        guard case .response(_, .read(let value)) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: fixtureURL)) else {
+            return XCTFail("Expected fixture plan")
         }
-        let reading = try RemoteTaskObservation.decode(response(body: [plan]))
+        let plan = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+        func frame(body: Any = NSNull(), unavailable: Any = NSNull()) throws -> JSONValue {
+            let object: [String: Any] = ["answers": 7, "unavailable": unavailable, "body": body]
+            return try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let reading = try RemoteTaskObservation.decode(generation: 1, frame: frame(body: [plan]))
         XCTAssertEqual(reading.answers, 7)
         XCTAssertEqual(try reading.reading.get().map(\.work), rows.map(\.work))
-        XCTAssertThrowsError(try RemoteTaskObservation.decode(response(generation: 2, body: [plan])))
-        XCTAssertThrowsError(try RemoteTaskObservation.decode(response()))
-        XCTAssertThrowsError(try RemoteTaskObservation.decode(response(unavailable: "Offline")).reading.get())
+        XCTAssertThrowsError(try RemoteTaskObservation.decode(generation: 2, frame: frame(body: [plan])))
+        XCTAssertThrowsError(try RemoteTaskObservation.decode(generation: 1, frame: frame()))
+        XCTAssertThrowsError(try RemoteTaskObservation.decode(generation: 1, frame: frame(unavailable: "Offline")).reading.get())
         var incomplete = try XCTUnwrap(plan as? [String: Any])
         incomplete["contents"] = []
-        XCTAssertThrowsError(try RemoteTaskObservation.decode(response(body: [incomplete])).reading.get())
+        XCTAssertThrowsError(try RemoteTaskObservation.decode(generation: 1, frame: frame(body: [incomplete])).reading.get())
         let bundle = Bundle(for: Self.self)
-        let url = try XCTUnwrap(bundle.url(forResource: "all_view_plans", withExtension: "json", subdirectory: "machine"))
-        let request = MachineRequest(version: 1, id: "tasks-1",
+        let url = try XCTUnwrap(bundle.url(forResource: "all_view_plans", withExtension: "json", subdirectory: "server"))
+        let request = ServerClientMessage.request(id: "tasks-1",
             operation: .subscribe(.allViewPlans(expression: "kind:task state:open"), generation: 1))
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
             try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url)))

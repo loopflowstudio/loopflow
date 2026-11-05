@@ -33,7 +33,7 @@ struct ServerProtocolTests {
         #expect(welcome.executableSHA256.count == 64)
         #expect(welcome.capabilities.contains("session_owner"))
         #expect(welcome.capabilities.contains("subscriptions"))
-        #expect(welcome.limits.maxMessage == 33554432)
+        #expect(welcome.limits.maxMessage == 1_048_576)
         #expect(welcome.limits.maxConnections == 64)
         #expect(welcome.machine == .object([:]))
     }
@@ -75,6 +75,20 @@ struct ServerProtocolTests {
         #expect(try encoded(owner) == self.value("session_owner"))
         let attach = ServerClientMessage.request(id: "terminal-1", operation: .attach(owner: trace))
         #expect(try encoded(attach) == self.value("attach"))
+    }
+
+    @Test func ticketsAdmitTerminalAndBulkConnections() throws {
+        guard case .response("terminal-1", .ticket(let ticket)) = try message("ticket_reply") else {
+            Issue.record("Missing ticket"); return
+        }
+        #expect(ticket == "f06b5872-b113-47e5-be82-4320e33d7a3d")
+        #expect(try encoded(.ticket(ticket)) == value("ticket"))
+        #expect(try encoded(.request(id: "save-1", operation: .bulk(bytes: 2_097_152))) == value("bulk_request"))
+        guard case .bulk(let id, let bulkTicket, let bytes) = try message("bulk") else { Issue.record("Missing bulk"); return }
+        #expect(id == "file-1")
+        #expect(bulkTicket == ticket)
+        #expect(bytes == 2_097_152)
+        guard case .admitted = try message("admitted") else { Issue.record("Missing admitted"); return }
     }
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {

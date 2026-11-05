@@ -141,8 +141,10 @@ actor ServerLocation {
 /// One server connection: hello and welcome once, then requests, subscriptions
 /// and cancels by id. One reader thread demultiplexes answers; writes serialize.
 /// Losing the connection fails every pending request and subscription.
+/// Messages over the control limit travel on ticketed connections of their own.
 final class ServerLink: @unchecked Sendable {
     let welcome: ServerWelcome
+    private let path: String
     private let fd: Int32
     private let state = NSLock()
     private let writes = NSLock()
@@ -165,6 +167,7 @@ final class ServerLink: @unchecked Sendable {
     static let handshakeSeconds = 10
 
     private init(path: String) throws {
+        self.path = path
         fd = try Self.connect(path)
         var reader = LineReader(fd: fd)
         do {
@@ -195,7 +198,22 @@ final class ServerLink: @unchecked Sendable {
     /// releases the wait; a command already dispatched may still complete.
     func request(_ operation: ServerOperation) async throws -> ServerReply {
         let id = UUID().uuidString
-        return try await withTaskCancellationHandler {
+        let line = try Self.line(.request(id: id, operation: operation))
+        if line.count <= ServerProtocol.maxMessage { return try await answer(id) { try write(line) } }
+        // A bulk ticket admits a second connection carrying this one request;
+        // its answer arrives here under the request's own id.
+        guard case .ticket(let ticket) = try await request(.bulk(bytes: line.count)) else {
+            throw RegistryQueryError("Server issued no bulk ticket")
+        }
+        return try await answer(id) {
+            Thread.detachNewThread { [self] in
+                do { try Self.ticketed(path, ticket) { try Self.write($0, line) } } catch { settle(id, throwing: error) }
+            }
+        }
+    }
+
+    private func answer(_ id: String, deliver: () throws -> Void) async throws -> ServerReply {
+        try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let refused: (any Error)? = state.withLock {
                     if let failure { return failure }
@@ -204,9 +222,7 @@ final class ServerLink: @unchecked Sendable {
                     return nil
                 }
                 if let refused { continuation.resume(throwing: refused); return }
-                do { try send(.request(id: id, operation: operation)) } catch {
-                    if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: error) }
-                }
+                do { try deliver() } catch { settle(id, throwing: error) }
             }
         } onCancel: {
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) {
@@ -214,6 +230,12 @@ final class ServerLink: @unchecked Sendable {
                 waiting.resume(throwing: CancellationError())
             }
         }
+    }
+
+    /// Fail the request or subscription `id` without touching the connection.
+    private func settle(_ id: String, throwing error: any Error) {
+        if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: error); return }
+        state.withLock { subscriptions.removeValue(forKey: id) }?.finish(throwing: error)
     }
 
     fileprivate func subscribe(_ subscription: ServerSubscription, query: ServedRead) throws {
@@ -238,7 +260,10 @@ final class ServerLink: @unchecked Sendable {
     }
 
     fileprivate func send(_ message: ServerClientMessage) throws {
-        let line = try Self.line(message)
+        try write(try Self.line(message))
+    }
+
+    private func write(_ line: Data) throws {
         try writes.withLock {
             if let failure = state.withLock({ failure }) { throw failure }
             try Self.write(fd, line)
@@ -262,15 +287,41 @@ final class ServerLink: @unchecked Sendable {
             // a late answer to a forgotten request.
         case .reading(let id, _, let frame):
             state.withLock { subscriptions[id] }?.receive(frame)
+        case .bulk(let id, let ticket, _):
+            // Fetched off the reader thread, so other readings never wait behind it.
+            Thread.detachNewThread { [self] in
+                do {
+                    try dispatch(try Self.ticketed(path, ticket) { fd in
+                        var reader = LineReader(fd: fd, limit: ServerProtocol.maxBulk)
+                        guard let line = try reader.next() else { throw RegistryQueryError("Server closed the bulk connection without its message") }
+                        return line
+                    })
+                } catch { settle(id, throwing: error) }
+            }
         case .error(let id?, let code, let message):
-            let refusal = RegistryQueryError("\(code): \(message)")
-            if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: refusal); return }
-            state.withLock { subscriptions.removeValue(forKey: id) }?.finish(throwing: refusal)
+            settle(id, throwing: RegistryQueryError("\(code): \(message)"))
         case .error(nil, let code, let message):
             throw RegistryQueryError("\(code): \(message)")
-        case .welcome, .status:
+        case .welcome, .status, .admitted:
             throw RegistryQueryError("Server repeated its greeting; update the client")
         }
+    }
+
+    /// A ticketed connection: present `ticket`, read `admitted`, then `body` has
+    /// the socket to itself. Every read waits at most the handshake bound.
+    private static func ticketed<T>(_ path: String, _ ticket: String, _ body: (Int32) throws -> T) throws -> T {
+        let fd = try connect(path)
+        defer { Darwin.close(fd) }
+        setReceiveTimeout(fd, seconds: handshakeSeconds)
+        try write(fd, try line(.ticket(ticket)))
+        var reader = LineReader(fd: fd)
+        guard let first = try reader.next() else { throw RegistryQueryError("Server closed the ticketed connection without admitting it") }
+        switch try JSONDecoder().decode(ServerMessage.self, from: first) {
+        case .admitted: break
+        case .error(_, let code, let message): throw RegistryQueryError("\(code): \(message)")
+        default: throw RegistryQueryError("Server did not admit the ticket; update the client")
+        }
+        return try body(fd)
     }
 
     private func fail(_ error: any Error) {
@@ -288,7 +339,7 @@ final class ServerLink: @unchecked Sendable {
 
     private static func line(_ message: ServerClientMessage) throws -> Data {
         var line = try JSONEncoder().encode(message)
-        guard line.count <= ServerProtocol.maxMessage else { throw RegistryQueryError("Server request exceeds 32 MiB") }
+        guard line.count <= ServerProtocol.maxBulk else { throw RegistryQueryError("Server request exceeds 64 MiB") }
         line.append(10)
         return line
     }
@@ -343,12 +394,16 @@ final class ServerLink: @unchecked Sendable {
 /// Newline-delimited messages read from one descriptor by one thread.
 private struct LineReader {
     let fd: Int32
+    let limit: Int
     private var buffer = Data()
     /// Bytes already searched for a newline.
     private var scanned = 0
     private var ended = false
 
-    init(fd: Int32) { self.fd = fd }
+    init(fd: Int32, limit: Int = ServerProtocol.maxMessage) {
+        self.fd = fd
+        self.limit = limit
+    }
 
     /// The next message, or nil once the peer closed after a whole message.
     mutating func next() throws -> Data? {
@@ -360,7 +415,7 @@ private struct LineReader {
                 return line
             }
             scanned = buffer.count
-            guard buffer.count <= ServerProtocol.maxMessage else { throw RegistryQueryError("Server message exceeds 32 MiB") }
+            guard buffer.count <= limit else { throw RegistryQueryError("Server message exceeds \(limit >> 20) MiB") }
             if ended {
                 guard buffer.isEmpty else { throw RegistryQueryError("Server disconnected mid-message; refresh state before retrying a command") }
                 return nil

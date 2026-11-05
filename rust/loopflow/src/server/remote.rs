@@ -9,8 +9,9 @@ use std::task::{ready, Poll};
 use std::time::{Duration, SystemTime};
 
 use super::mobile::{Configuration, Host, Status};
-use super::service::{self, Carrier};
-use super::wire::MAX_MESSAGE;
+use super::service::{self, Carrier, Greeting};
+use super::ticket::{Admission, Tickets};
+use super::wire::MAX_BULK;
 use anyhow::{Context, Result};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -46,6 +47,7 @@ pub(super) async fn manage(
     instance: Arc<str>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
+    tickets: Arc<Tickets>,
 ) -> Result<()> {
     let mut status = match initial {
         Ok(configuration) => Status {
@@ -95,7 +97,7 @@ pub(super) async fn manage(
                         .context("Could not save mobile access; no listener was enabled")?;
                     status.configuration = Some(bound.config.clone());
                     status.ready = true;
-                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone()));
+                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), tickets.clone()));
                     Ok(status.configuration.clone())
                 }.await;
                 status.error = result.as_ref().err().map(|error| format!("{error:#}"));
@@ -120,7 +122,7 @@ pub(super) async fn manage(
                             status.ready = true;
                             status.error = None;
                             reported_failure = false;
-                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone()));
+                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), tickets.clone()));
                         }
                         Err(error) => {
                             if !reported_failure {
@@ -243,6 +245,7 @@ async fn run(
     instance: Arc<str>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
+    tickets: Arc<Tickets>,
 ) -> Result<()> {
     tracing::info!(endpoint = %bound.config.endpoint, "Mobile HTTPS ready on host Tailscale");
     let mut connections = JoinSet::new();
@@ -263,21 +266,22 @@ async fn run(
         let Ok(permit) = slots.clone().try_acquire_owned() else {
             continue;
         };
-        let (host, owner, tls, instance, executable) = (
+        let (host, owner, tls, instance, executable, tickets) = (
             bound.host.clone(),
             bound.config.owner.clone(),
             tls.clone(),
             instance.clone(),
             executable.clone(),
+            tickets.clone(),
         );
         connections.spawn(async move {
             let _permit = permit;
             let result = async {
-                let permitted =
+                let admission =
                     tokio::task::spawn_blocking(move || host.permits(peer, &owner)).await??;
                 let socket =
                     tokio::time::timeout(Duration::from_secs(5), tls.accept(socket)).await??;
-                connection(socket, permitted, &instance, &executable).await
+                connection(socket, admission, &instance, &executable, tickets).await
             }
             .await;
             if let Err(error) = result {
@@ -296,15 +300,25 @@ fn reject(status: StatusCode) -> ErrorResponse {
         .expect("fixed HTTP response is valid")
 }
 
+/// `/v1/machine` is the control connection; `/v1/ticket` carries what a ticket
+/// names: a terminal's bytes or one bulk message.
 // Tungstenite's handshake callback requires an unboxed HTTP ErrorResponse.
 #[allow(clippy::result_large_err)]
-async fn connection<S>(socket: S, permitted: bool, instance: &str, executable: &str) -> Result<()>
+async fn connection<S>(
+    socket: S,
+    admission: Option<Admission>,
+    instance: &str,
+    executable: &str,
+    tickets: Arc<Tickets>,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
     let config = WebSocketConfig::default()
-        .max_message_size(Some(MAX_MESSAGE))
-        .max_frame_size(Some(MAX_MESSAGE));
+        .max_message_size(Some(MAX_BULK))
+        .max_frame_size(Some(MAX_BULK));
+    let permitted = admission.is_some();
+    let ticket_path = std::sync::Mutex::new(false);
     let socket = tokio::time::timeout(
         Duration::from_secs(5),
         accept_hdr_async_with_config(
@@ -316,8 +330,12 @@ where
                 {
                     return Err(reject(StatusCode::FORBIDDEN));
                 }
-                if request.uri().path() != "/v1/machine" {
-                    return Err(reject(StatusCode::NOT_FOUND));
+                match request.uri().path() {
+                    "/v1/machine" => {}
+                    "/v1/ticket" => {
+                        *ticket_path.lock().expect("handshake callback runs once") = true
+                    }
+                    _ => return Err(reject(StatusCode::NOT_FOUND)),
                 }
                 Ok(response)
             },
@@ -325,25 +343,34 @@ where
         ),
     )
     .await??;
+    let admission = admission.expect("the handshake refused an unadmitted peer");
+    let ticket_path = ticket_path
+        .into_inner()
+        .expect("handshake callback completed");
     let mut messages = Messages(socket);
     let first = tokio::time::timeout(service::FIRST_MESSAGE, messages.next())
         .await
         .context("no message within five seconds")?
         .context("closed before its first message")??;
-    if !service::welcome(&mut messages, &first, instance, executable).await? {
-        // A refusal ends with a close frame, not a reset.
-        let _ = messages.0.close(None).await;
-        return Ok(());
-    }
-    // Remote connections never configure mobile access.
-    match service::session(&mut messages, instance.into(), None).await {
-        Ok(Some(destination)) => bridge(messages.0, destination).await,
-        ended => {
-            // The control connection ends with a close frame, not a reset.
-            let _ = messages.0.close(None).await;
-            ended.map(|_| ())
+    let ended = match service::welcome(&mut messages, &first, instance, executable).await? {
+        Greeting::Ended => Ok(()),
+        Greeting::Ticket(ticket) if ticket_path => {
+            match service::ticketed(&mut messages, &ticket, &admission, &tickets).await {
+                Ok(Some(destination)) => return bridge(messages.0, destination).await,
+                ended => ended.map(|_| ()),
+            }
         }
-    }
+        // A ticket belongs on `/v1/ticket` and a session on `/v1/machine`.
+        Greeting::Ticket(_) => Ok(()),
+        Greeting::Session if ticket_path => Ok(()),
+        // Remote connections never configure mobile access.
+        Greeting::Session => {
+            service::session(&mut messages, instance.into(), None, admission, tickets).await
+        }
+    };
+    // The control connection ends with a close frame, not a reset.
+    let _ = messages.0.close(None).await;
+    ended
 }
 
 /// Protocol messages as WebSocket text frames. Binary frames belong to a
@@ -450,10 +477,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::{bridge, connection};
+    use crate::server::ticket::{Admission, Purpose, Tickets};
     use crate::server::wire::{
-        ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, MIN_REVISION, REVISION,
+        ClientIdentity, ClientMessage, Hello, Operation, Reply, ServerMessage, MAX_MESSAGE,
+        MIN_REVISION, REVISION,
     };
     use futures_util::{SinkExt, StreamExt};
+    use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::AsyncWriteExt;
     use tokio::net::{TcpListener, UnixStream};
@@ -499,10 +529,12 @@ mod tests {
     }
 
     async fn connect(
+        tickets: &Arc<Tickets>,
         permitted: bool,
         path: &str,
         origin: bool,
     ) -> anyhow::Result<tokio_tungstenite::WebSocketStream<UnixStream>> {
+        let tickets = tickets.clone();
         let (client, server) = UnixStream::pair()?;
         let mut request = format!("ws://localhost{path}").into_client_request()?;
         // Caller-supplied identity cannot override the host's WhoIs result.
@@ -515,7 +547,18 @@ mod tests {
                 .insert("origin", "https://example.com".parse()?);
         }
         tokio::spawn(async move {
-            let _ = connection(server, permitted, "test-instance", "test-executable").await;
+            let admission = permitted.then(|| Admission::Remote {
+                node: "phone".into(),
+                user: 1,
+            });
+            let _ = connection(
+                server,
+                admission,
+                "test-instance",
+                "test-executable",
+                tickets,
+            )
+            .await;
         });
         Ok(tokio_tungstenite::client_async(request, client).await?.0)
     }
@@ -556,16 +599,17 @@ mod tests {
 
     #[tokio::test]
     async fn only_owner_identity_reaches_shared_operations_on_one_connection() {
+        let tickets = Arc::new(Tickets::default());
         for (permitted, path, origin) in [
             (false, "/v1/machine", false),
             (true, "/v1/pair", false),
             (true, "/v1/machine?token=old", false),
             (true, "/v1/machine", true),
         ] {
-            assert!(connect(permitted, path, origin).await.is_err());
+            assert!(connect(&tickets, permitted, path, origin).await.is_err());
         }
         // A client speaking only a newer revision is refused by name.
-        let mut client = connect(true, "/v1/machine", false).await.unwrap();
+        let mut client = connect(&tickets, true, "/v1/machine", false).await.unwrap();
         client.send(text(&hello(REVISION + 1))).await.unwrap();
         let refusal = receive(&mut client).await.unwrap();
         assert!(
@@ -574,7 +618,7 @@ mod tests {
         );
         assert!(receive(&mut client).await.is_none(), "refusal closes");
 
-        let mut client = connect(true, "/v1/machine", false).await.unwrap();
+        let mut client = connect(&tickets, true, "/v1/machine", false).await.unwrap();
         client.send(text(&hello(REVISION))).await.unwrap();
         let ServerMessage::Welcome(welcome) = receive(&mut client).await.unwrap() else {
             panic!("expected welcome");
@@ -606,11 +650,88 @@ mod tests {
                 "{answer:?}"
             );
         }
+        // Attach answers a ticket; the terminal connection is separate.
+        client
+            .send(text(&ClientMessage::Request {
+                id: "terminal".into(),
+                operation: Operation::Attach {
+                    owner: crate::id::LfProcessId::new(),
+                },
+            }))
+            .await
+            .unwrap();
+        assert!(matches!(
+            receive(&mut client).await.unwrap(),
+            ServerMessage::Response {
+                result: Reply::Ticket { .. },
+                ..
+            }
+        ));
         // Binary frames belong to a bridged terminal, never to the control connection.
         client
             .send(Message::Binary(b"\x11\x00\x00\x00\x00".to_vec().into()))
             .await
             .unwrap();
         assert!(receive(&mut client).await.is_none(), "connection ends");
+    }
+
+    #[tokio::test]
+    async fn ticket_endpoint_delivers_one_bulk_message_to_the_issuing_device() {
+        let tickets = Arc::new(Tickets::default());
+        let phone = Admission::Remote {
+            node: "phone".into(),
+            user: 1,
+        };
+        let big = serde_json::to_string(&ServerMessage::Response {
+            id: "file".into(),
+            result: Reply::Read {
+                value: serde_json::Value::String("x".repeat(2 * MAX_MESSAGE)),
+            },
+        })
+        .unwrap();
+        let ticket = tickets.issue(phone.clone(), Purpose::Download(big.clone()));
+        // A ticket presented on the control endpoint admits nothing.
+        let mut wrong = connect(&tickets, true, "/v1/machine", false).await.unwrap();
+        wrong
+            .send(text(&ClientMessage::Ticket {
+                ticket: ticket.clone(),
+            }))
+            .await
+            .unwrap();
+        assert!(receive(&mut wrong).await.is_none());
+        let mut bulk = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
+        bulk.send(text(&ClientMessage::Ticket { ticket }))
+            .await
+            .unwrap();
+        assert!(matches!(
+            receive(&mut bulk).await.unwrap(),
+            ServerMessage::Admitted
+        ));
+        let Some(Ok(Message::Text(delivered))) = bulk.next().await else {
+            panic!("expected the bulk message")
+        };
+        assert_eq!(delivered.as_str(), big);
+        assert!(
+            receive(&mut bulk).await.is_none(),
+            "one message, then close"
+        );
+        // Another device's ticket is refused even on the right endpoint.
+        let foreign = tickets.issue(
+            Admission::Remote {
+                node: "laptop".into(),
+                user: 1,
+            },
+            Purpose::Download(big),
+        );
+        let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
+        refused
+            .send(text(&ClientMessage::Ticket { ticket: foreign }))
+            .await
+            .unwrap();
+        assert!(matches!(
+            receive(&mut refused).await.unwrap(),
+            ServerMessage::Error { id: None, .. }
+        ));
+        assert!(receive(&mut refused).await.is_none());
     }
 }

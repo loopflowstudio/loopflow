@@ -109,6 +109,34 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
     }
 
+    @Test func bulkAnswersAndOversizeRequestsTravelByTicket() async throws {
+        let peer = try ServerPeer()
+        let big = String(repeating: "x", count: ServerProtocol.maxMessage)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request", let id = message["id"] as? String,
+                  let operation = message["operation"] as? [String: Any] else { return true }
+            switch operation["kind"] as? String {
+            case "read":
+                respond(["type": "bulk", "id": id, "ticket": "download", "bytes": big.utf8.count])
+                try? peer.admit("download") { try $0.write(["type": "response", "id": id, "result": ["kind": "read", "value": big]]) }
+            case "bulk":
+                respond(["type": "response", "id": id, "result": ["kind": "ticket", "ticket": "upload"]])
+                try? peer.admit("upload") { connection in
+                    let request = try connection.read()
+                    let uploaded = ((request?["operation"] as? [String: Any])?["request"] as? String)?.utf8.count ?? 0
+                    respond(["type": "response", "id": request?["id"] ?? "", "result": [
+                        "kind": "command", "trace_id": "trace", "code": 0, "value": NSNull(), "output": "\(uploaded)", "stderr": "",
+                    ]])
+                }
+            default: break
+            }
+            return true
+        }
+        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == big)
+        let output = try await ServerClient.configuration(.string(big), location: peer.location)
+        #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
+    }
+
     @Test func serverEndingASubscriptionFailsItsWatchAlone() async throws {
         let peer = try ServerPeer()
         let subscription = Mutex<String?>(nil)
@@ -304,7 +332,7 @@ private final class ServerPeer: @unchecked Sendable {
                 try connection.write([
                     "type": "welcome", "revision": 2, "server_revision": 2, "min_revision": 2, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
-                    "capabilities": [], "limits": ["max_message": 33_554_432, "max_connections": 64],
+                    "capabilities": [], "limits": ["max_message": 1_048_576, "max_connections": 64],
                 ])
                 while let message = try connection.read() {
                     lock.withLock { messages.append(message) }
@@ -312,6 +340,21 @@ private final class ServerPeer: @unchecked Sendable {
                 }
             } catch {}
         }
+    }
+
+    /// Accept one ticketed connection presenting `ticket`, admit it, then let
+    /// `handle` exchange on it.
+    func admit(_ ticket: String, _ handle: (PeerConnection) throws -> Void) throws {
+        let fd = accept(listener, nil, nil)
+        guard fd >= 0 else { throw RegistryQueryError("No ticketed connection arrived") }
+        let connection = PeerConnection(fd: fd)
+        defer { connection.close() }
+        let presented = try connection.read()
+        guard presented?["type"] as? String == "ticket", presented?["ticket"] as? String == ticket else {
+            throw RegistryQueryError("The ticketed connection presented \(presented ?? [:])")
+        }
+        try connection.write(["type": "admitted"])
+        try handle(connection)
     }
 
     /// Accept one connection and answer nothing until the client closes it.

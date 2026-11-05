@@ -567,25 +567,25 @@ final class MobileTerminalTests: XCTestCase {
     }
 
     func testBackendOwnedFixturesDecodeWithoutDefaults() throws {
-        let response: MachineResponse = try machineFixture("reading")
-        guard case .reading(let generation, let frame) = response.result else { return XCTFail("Expected reading") }
+        let response: ServerMessage = try machineFixture("reading")
+        guard case .reading("tasks-1", let generation, let frame) = response else { return XCTFail("Expected reading") }
         XCTAssertEqual(generation, 7)
         guard case .object(let fields) = frame else { return XCTFail("Expected watch frame") }
         XCTAssertEqual(fields["unavailable"], .string("repository is unavailable"))
         XCTAssertEqual(fields["body"], .null)
-        XCTAssertThrowsError(try JSONDecoder().decode(MachineResponse.self,
-            from: Data(#"{"id":"x","instance":"i","result":{"kind":"read"}}"#.utf8)))
+        XCTAssertThrowsError(try JSONDecoder().decode(ServerMessage.self,
+            from: Data(#"{"type":"response","id":"x","result":{"kind":"read"}}"#.utf8)))
 
-        let request = MachineRequest(version: 1, id: "tasks-1", operation: .subscribe(
+        let request = ServerClientMessage.request(id: "tasks-1", operation: .subscribe(
             .roadmap(directory: "/", wave: nil, task: nil, all: true), generation: 7))
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try machineFixture("subscribe"))
 
-        let ownerResponse: MachineResponse = try machineFixture("owner")
-        guard case .sessionOwner(let owner) = ownerResponse.result else { return XCTFail("Expected Session owner") }
+        let ownerResponse: ServerMessage = try machineFixture("owner")
+        guard case .response(_, .sessionOwner(let owner)) = ownerResponse else { return XCTFail("Expected Session owner") }
         XCTAssertEqual(owner, "85c31c1e-850c-4821-878d-55527b6dba46")
-        let commandResponse: MachineResponse = try machineFixture("command")
-        guard case .command(let trace, _, _, let code) = commandResponse.result else { return XCTFail("Expected command result") }
+        let commandResponse: ServerMessage = try machineFixture("command")
+        guard case .response(_, .command(let trace, let code, _, _, _)) = commandResponse else { return XCTFail("Expected command result") }
         XCTAssertFalse(trace.isEmpty)
         XCTAssertEqual(code, 0)
     }
@@ -696,7 +696,7 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertThrowsError(try decodeMobileTasks(data, requestID: "old-request"))
         XCTAssertEqual(try decodeMobileTasks(data, requestID: "fixture-tasks").count, 3)
         XCTAssertThrowsError(try decodeMobileTasks(
-            Data(#"{"id":"fixture-tasks","instance":"i","result":{"kind":"error","code":"unavailable","message":"Offline"}}"#.utf8),
+            Data(#"{"type":"error","id":"fixture-tasks","code":"unavailable","message":"Offline"}"#.utf8),
             requestID: "fixture-tasks"))
     }
 
@@ -1131,7 +1131,7 @@ final class MobileTerminalTests: XCTestCase {
     }
 
     private func machineFixture<T: Decodable>(_ name: String) throws -> T {
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "machine"))
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "server"))
         return try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
     }
 

@@ -4,17 +4,18 @@ import Observation
 
 /// The fixture and live client consume the same backend-owned Work projection.
 func decodeMobileTasks(_ data: Data, requestID: String) throws -> [WorkViewPlan.Content] {
-    let response = try JSONDecoder().decode(MachineResponse.self, from: data)
-    guard response.id == requestID else { throw RegistryQueryError("Received a different Task request") }
-    return try mobileTasks(response)
+    switch try JSONDecoder().decode(ServerMessage.self, from: data) {
+    case .response(let id, let result):
+        guard id == requestID else { throw RegistryQueryError("Received a different Task request") }
+        return try mobileTasks(result)
+    case .error(_, _, let message): throw RegistryQueryError(message)
+    default: throw RegistryQueryError("The Machine did not return a Task reading")
+    }
 }
 
-func mobileTasks(_ response: MachineResponse) throws -> [WorkViewPlan.Content] {
-    guard case .read(let output) = response.result else {
-        if case .error(_, let message) = response.result { throw RegistryQueryError(message) }
-        throw RegistryQueryError("The Machine did not return a Task reading")
-    }
-    return try mobileTasks(JSONDecoder().decode(WorkViewPlan.self, from: Data(output.utf8)))
+func mobileTasks(_ reply: ServerReply) throws -> [WorkViewPlan.Content] {
+    guard case .read(let value) = reply else { throw RegistryQueryError("The Machine did not return a Task reading") }
+    return try mobileTasks(JSONDecoder().decode(WorkViewPlan.self, from: JSONEncoder().encode(value)))
 }
 
 func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
@@ -36,6 +37,12 @@ protocol MobileClient {
     func workingTasks() async throws -> [WorkViewPlan.Content]
     func observeTasks() async throws -> any MobileTaskObservation
     func attach(sessionID: String) async throws -> any MobileAttachment
+    /// The app left the foreground; release live connections.
+    func suspend()
+}
+
+extension MobileClient {
+    func suspend() {}
 }
 
 /// Explicitly open a recorded conversation; ordinary attachment never starts it.
@@ -334,6 +341,7 @@ final class MobileWorkspace {
 
     func suspend() {
         stopTaskUpdates()
+        client.suspend()
         guard selected != nil else { return }
         switch state {
         case .loading, .viewing, .requestingControl, .controlling:

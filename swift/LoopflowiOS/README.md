@@ -146,11 +146,13 @@ Missing or mismatched Sessions retain their explanation without a retry.
 
 The app uses the shared Loopflow fonts, Light/Dark themes and WorkViewPlan types.
 `MobileClient` is an injectable UI boundary, not a serialized protocol.
-`MachineProtocol.swift` and `tests/fixtures/dto/machine/` come from LOO-593 at their
-canonical paths. Client-authored Task data passes through that codec; it is not
-a recorded Machine reading. The live adapter uses authenticated WSS to the
-Machine service’s separate remote admission boundary. Its private Unix socket
-is never forwarded to remote callers. OwnerStream consumes Rust’s binary frames
+`ServerProtocol.swift` and `tests/fixtures/dto/server/` are the shared revision-2
+contract; client-authored Task data passes through that codec and is not a
+recorded Machine reading. The live adapter keeps one control WebSocket to the
+Machine’s server while the app is in use (requests, the Task subscription,
+cancel) and opens a ticketed connection per terminal, which carries the owner’s
+binary protocol. Messages over 1 MiB travel by ticket too. The server’s private
+Unix socket is never forwarded to remote callers. OwnerStream consumes Rust’s binary frames
 and nonce-qualified events; snapshots are assembled before rendering at the
 owner’s geometry. Every reconnect requests a fresh screen. The renderer requests
 the next output event as it consumes the stream; the adapter retains only the

@@ -11,7 +11,11 @@ use serde::{Deserialize, Serialize};
 pub const REVISION: u32 = 2;
 /// The oldest revision this build speaks.
 pub const MIN_REVISION: u32 = 2;
-pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
+/// The largest message a control connection carries, so a reading never waits
+/// behind a large body. Larger messages travel on a ticketed connection.
+pub const MAX_MESSAGE: usize = 1024 * 1024;
+/// The largest message a ticketed connection carries in either direction.
+pub const MAX_BULK: usize = 64 * 1024 * 1024;
 pub const MAX_CONNECTIONS: usize = 64;
 
 /// One message from the client.
@@ -31,6 +35,9 @@ pub enum ClientMessage {
     },
     /// Forget a request's answer, or end a subscription.
     Cancel { id: String },
+    /// A ticketed connection's first and only protocol message. The server
+    /// answers `admitted`, then the connection carries what the ticket names.
+    Ticket { ticket: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,9 +84,15 @@ pub enum Operation {
     Command {
         change: Write,
     },
-    /// Switch this connection to the existing owner protocol after `bridged`.
+    /// A ticket for a terminal connection to this owner's existing protocol.
     Attach {
         owner: LfProcessId,
+    },
+    /// A ticket for a connection that carries one request of `bytes` bytes,
+    /// larger than `limits.max_message`; its answer arrives here under the
+    /// uploaded request's own id.
+    Bulk {
+        bytes: usize,
     },
 }
 
@@ -98,6 +111,15 @@ pub enum ServerMessage {
         generation: u64,
         frame: serde_json::Value,
     },
+    /// The answer for `id` is `bytes` long, more than `limits.max_message`:
+    /// a ticketed connection delivers it as one message.
+    Bulk {
+        id: String,
+        ticket: String,
+        bytes: usize,
+    },
+    /// A ticketed connection's answer; what follows is what the ticket names.
+    Admitted,
     /// `id` is null before a request exists. An error for a subscription ends it.
     Error {
         id: Option<String>,
@@ -163,7 +185,11 @@ pub enum Reply {
     SessionOwner {
         owner: Option<LfProcessId>,
     },
-    Bridged,
+    /// Single use, bound to this connection's admission, expiring in
+    /// [`TICKET_TTL`](super::ticket::TICKET_TTL).
+    Ticket {
+        ticket: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,6 +233,8 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/all_view_plans.json"),
             include_str!("../../../../tests/fixtures/dto/server/configure_remote.json"),
             include_str!("../../../../tests/fixtures/dto/server/mobile_status_request.json"),
+            include_str!("../../../../tests/fixtures/dto/server/bulk_request.json"),
+            include_str!("../../../../tests/fixtures/dto/server/ticket.json"),
         ] {
             let message: ClientMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(
@@ -223,6 +251,9 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
             include_str!("../../../../tests/fixtures/dto/server/remote.json"),
             include_str!("../../../../tests/fixtures/dto/server/mobile_status.json"),
+            include_str!("../../../../tests/fixtures/dto/server/ticket_reply.json"),
+            include_str!("../../../../tests/fixtures/dto/server/bulk.json"),
+            include_str!("../../../../tests/fixtures/dto/server/admitted.json"),
         ] {
             let message: ServerMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(

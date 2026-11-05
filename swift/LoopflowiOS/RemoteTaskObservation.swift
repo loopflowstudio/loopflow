@@ -7,38 +7,30 @@ import Loopflow
 final class RemoteTaskObservation: MobileTaskObservation {
     let readings: AsyncThrowingStream<MobileTaskReading, any Error>
     private let continuation: AsyncThrowingStream<MobileTaskReading, any Error>.Continuation
-    private let connection: MachineConnection
-    private let id: String
-    private let instance: String
+    private let subscription: MachineSubscription
     private var reader: Task<Void, Never>?
     private var nextCheckpoint: UInt64 = 0
     private var refreshing: (id: UInt64, continuation: CheckedContinuation<Void, any Error>)?
     private var closed = false
 
-    private init(connection: MachineConnection, first: MachineResponse) {
-        self.connection = connection
-        id = first.id
-        instance = first.instance
+    private init(subscription: MachineSubscription) {
+        self.subscription = subscription
         (readings, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
 
-    static func open(savedMachine: SavedMachine, query: ServedRead) async throws -> RemoteTaskObservation {
-        let connection = try MachineConnection(endpoint: savedMachine.endpoint)
-        do {
-            let first = try await connection.request(.subscribe(query, generation: 1))
-            let observation = RemoteTaskObservation(connection: connection, first: first)
-            try observation.receive(first)
-            connection.keepAlive()
-            observation.reader = Task { [weak observation] in
-                guard let observation else { return }
-                do {
-                    while !observation.closed {
-                        try observation.receive(await connection.receiveResponse(id: observation.id))
-                    }
-                } catch { observation.close(error: error) }
-            }
-            return observation
-        } catch { connection.close(); throw error }
+    static func open(connection: MachineConnection, query: ServedRead) async throws -> RemoteTaskObservation {
+        let subscription = try await connection.subscribe(query, generation: 1)
+        let observation = RemoteTaskObservation(subscription: subscription)
+        observation.reader = Task { [weak observation] in
+            do {
+                for try await reading in subscription.readings {
+                    guard let observation, !observation.closed else { return }
+                    try observation.receive(generation: reading.generation, frame: reading.frame)
+                }
+                throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
+            } catch { observation?.close(error: error) }
+        }
+        return observation
     }
 
     func refresh() async throws {
@@ -46,13 +38,16 @@ final class RemoteTaskObservation: MobileTaskObservation {
         guard refreshing == nil else { return }
         nextCheckpoint += 1
         let checkpoint = nextCheckpoint
-        let timeout = connection.deadline()
+        let timeout = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            self?.close(error: RegistryQueryError("The Machine did not respond in time"))
+        }
         defer { timeout.cancel() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 refreshing = (checkpoint, continuation)
                 Task {
-                    do { try await connection.sendFrame(Data("{\"id\":\(checkpoint)}".utf8)) }
+                    do { try await subscription.checkpoint(.object(["id": .integer(Int64(checkpoint))])) }
                     catch { close(error: error) }
                 }
             }
@@ -66,27 +61,24 @@ final class RemoteTaskObservation: MobileTaskObservation {
     private func close(error: any Error) {
         guard !closed else { return }
         closed = true
-        connection.close()
+        subscription.cancel()
         reader?.cancel()
         continuation.finish(throwing: error)
         refreshing?.continuation.resume(throwing: error)
         refreshing = nil
     }
 
-    private func receive(_ response: MachineResponse) throws {
-        guard response.instance == instance else { throw RegistryQueryError("The Machine service changed; refresh Tasks") }
-        let frame = try Self.decode(response)
-        continuation.yield(frame.reading)
-        if let refreshing, let answers = frame.answers, answers >= refreshing.id {
+    private func receive(generation: UInt64, frame: JSONValue) throws {
+        let reading = try Self.decode(generation: generation, frame: frame)
+        continuation.yield(reading.reading)
+        if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
             refreshing.continuation.resume()
         }
     }
 
-    static func decode(_ response: MachineResponse) throws -> (answers: UInt64?, reading: MobileTaskReading) {
-        guard case .reading(let generation, let frame) = response.result, generation == 1 else {
-            throw RegistryQueryError("Received a different Task subscription")
-        }
+    static func decode(generation: UInt64, frame: JSONValue) throws -> (answers: UInt64?, reading: MobileTaskReading) {
+        guard generation == 1 else { throw RegistryQueryError("Received a different Task subscription") }
         struct Frame: Decodable {
             let answers: UInt64?
             let unavailable: String?

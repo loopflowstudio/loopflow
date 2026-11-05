@@ -1,20 +1,22 @@
 import Foundation
 import Loopflow
 
+/// One control connection to the Machine while the app is in use, opened on
+/// first use and reopened after a loss; terminals get connections of their own.
 @MainActor
 final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSessionOpeningClient, MobileSessionListingClient {
     let savedMachine: SavedMachine
+    private var opening: Task<MachineConnection, any Error>?
+    private var live: MachineConnection?
 
     init(savedMachine: SavedMachine) { self.savedMachine = savedMachine }
 
+    private static let baseline = ["all_view_plans", "session_owner", "owner_bridge"]
+
     static func connect(endpoint: URL, replacing: SavedMachine? = nil) async throws -> SavedMachine {
-        let connection = try MachineConnection(endpoint: endpoint)
+        let connection = try await MachineConnection.open(endpoint: endpoint)
         defer { connection.close() }
-        let reply = try await connection.request(.bootstrap)
-        guard case .bootstrap(let version, _, _, let machine, let capabilities, _, _) = reply.result,
-              version == 1, case .object(let fields) = machine,
-              case .string(let machineID) = fields["id"], !machineID.isEmpty,
-              ["all_view_plans", "session_owner", "owner_bridge"].allSatisfy(capabilities.contains) else {
+        guard let machineID = try? identity(connection.welcome, required: []) else {
             throw RegistryQueryError("Update the Machine service to connect from this phone.")
         }
         if let replacing, replacing.machineID != machineID {
@@ -27,43 +29,43 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     }
 
     func workingTasks() async throws -> [WorkViewPlan.Content] {
-        try await verifyMachine()
-        let output = try await read(Self.taskQuery)
-        return try JSONDecoder().decode([WorkViewPlan].self, from: Data(output.utf8)).flatMap { try mobileTasks($0) }
+        try await decode([WorkViewPlan].self, read(Self.taskQuery)).flatMap { try mobileTasks($0) }
     }
 
     private static let taskQuery = ServedRead.allViewPlans(expression: "kind:task state:open")
 
     func observeTasks() async throws -> any MobileTaskObservation {
-        try await verifyMachine()
-        return try await RemoteTaskObservation.open(savedMachine: savedMachine, query: Self.taskQuery)
+        try await RemoteTaskObservation.open(connection: connection(), query: Self.taskQuery)
+    }
+
+    func suspend() {
+        opening?.cancel()
+        opening = nil
+        live?.close()
+        live = nil
     }
 
     func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage {
-        try await verifyMachine(required: ["session_page", "repository_path"])
-        let directory = try await read(.repositoryPath(id: task.work.repository))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let output = try await read(.sessionPage(directory: directory, headless: false, after: after, task: task.work.id))
-        return try JSONDecoder().decode(SessionPage.self, from: Data(output.utf8))
+        guard case .string(let path) = try await read(.repositoryPath(id: task.work.repository), required: ["session_page", "repository_path"]) else {
+            throw RegistryQueryError("The Machine did not return the repository path")
+        }
+        let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await decode(SessionPage.self, read(.sessionPage(directory: directory, headless: false, after: after, task: task.work.id)))
     }
 
     func attach(sessionID: String) async throws -> any MobileAttachment {
-        try await verifyMachine()
-        let response = try await response(.sessionOwner(session: sessionID))
-        guard case .sessionOwner(let owner) = response.result else { throw RegistryQueryError("The Machine did not resolve the Session owner") }
+        let connection = try await connection()
+        guard case .sessionOwner(let owner) = try await connection.request(.sessionOwner(session: sessionID)) else {
+            throw RegistryQueryError("The Machine did not resolve the Session owner")
+        }
         guard let owner else { throw SessionNotRunning() }
-        let connection = try MachineConnection(endpoint: savedMachine.endpoint)
-        do {
-            let response = try await connection.request(.attach(owner: owner))
-            guard case .bridged = response.result else { throw RegistryQueryError("The Machine did not attach the Session") }
-            return try await RemoteAttachment.open(sessionID: sessionID, connection: connection)
-        } catch { connection.close(); throw error }
+        let terminal = try await connection.attach(owner: owner)
+        do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal) }
+        catch { terminal.close(); throw error }
     }
 
     func startSession(sessionID: String) async throws {
-        try await verifyMachine(required: ["session_start"])
-        let reply = try await response(.command(.sessionStart(id: sessionID)))
-        guard case .command(_, let output, let stderr, let code) = reply.result else {
+        guard case .command(_, let code, _, let output, let stderr) = try await request(.command(.sessionStart(id: sessionID)), required: ["session_start"]) else {
             throw RegistryQueryError("The Machine did not confirm Session opening")
         }
         guard code == 0 else { throw RegistryQueryError(stderr.isEmpty ? "The Session did not open" : stderr) }
@@ -75,18 +77,17 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     }
 
     func creationContext() async throws -> MobileCreationContext {
-        try await verifyMachine(required: ["task_create", "portfolio", "view_plan"])
-        let portfolio = try JSONDecoder().decode(Portfolio.self, from: Data(try await read(.portfolio).utf8))
+        let portfolio = try await decode(Portfolio.self, read(.portfolio, required: ["task_create", "portfolio", "view_plan"]))
         if let error = portfolio.error { throw RegistryQueryError(error) }
         let machineID = savedMachine.machineID
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
     }
 
     func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
-        try await verifySubmission(submission)
-        let reply = try await response(.command(.taskCreate(directory: submission.directory,
-            requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)))
-        guard case .command(_, let output, let stderr, let code) = reply.result else {
+        try verifySubmission(submission)
+        let reply = try await request(.command(.taskCreate(directory: submission.directory,
+            requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)), required: Self.creation)
+        guard case .command(_, let code, _, let output, let stderr) = reply else {
             throw RegistryQueryError("The Machine did not return the creation result")
         }
         guard code == 0 else { throw RegistryQueryError(stderr.isEmpty ? "Task creation did not finish" : stderr) }
@@ -94,48 +95,67 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     }
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
-        try await verifySubmission(submission)
-        let output = try await read(.viewPlan(directory: submission.directory, expression: "task:\(taskID)"))
-        let tasks = try mobileTasks(JSONDecoder().decode(WorkViewPlan.self, from: Data(output.utf8)))
-        guard let task = tasks.first(where: { $0.work.id == taskID }) else {
+        try verifySubmission(submission)
+        let plan = try await decode(WorkViewPlan.self, read(.viewPlan(directory: submission.directory, expression: "task:\(taskID)"), required: Self.creation))
+        guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
         return task
     }
 
-    private func verifySubmission(_ submission: MobileTaskSubmission) async throws {
-        try await verifyMachine(required: ["task_create", "view_plan"])
+    private static let creation = ["task_create", "view_plan"]
+
+    private func verifySubmission(_ submission: MobileTaskSubmission) throws {
         guard submission.machineID == savedMachine.machineID else {
             throw RegistryQueryError("Reconnect \(submission.machineName) to recover this request. Nothing was sent to this Machine.")
         }
     }
 
-    private func verifyMachine(required: [String] = []) async throws {
-        let reply = try await response(.bootstrap)
-        guard case .bootstrap(let version, _, _, let machine, let capabilities, _, _) = reply.result,
-              version == 1, case .object(let fields) = machine,
-              case .string(let machineID) = fields["id"] else {
+    /// The Machine's identity from its welcome, once it advertises what this app uses.
+    private static func identity(_ welcome: ServerWelcome, required: [String]) throws -> String {
+        guard case .object(let fields) = welcome.machine, case .string(let machineID) = fields["id"], !machineID.isEmpty else {
             throw RegistryQueryError("The Machine did not return its identity")
         }
-        guard savedMachine.machineID == machineID else {
-            throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
-        }
-        guard (["all_view_plans", "session_owner", "owner_bridge"] + required).allSatisfy(capabilities.contains) else {
+        guard (baseline + required).allSatisfy(welcome.capabilities.contains) else {
             throw RegistryQueryError("Update the Machine service to use Tasks and Sessions from this phone")
         }
+        return machineID
     }
 
-    private func read(_ query: ServedRead) async throws -> String {
-        guard case .read(let output) = try await response(.read(query)).result else {
+    /// The live control connection, opened once for concurrent callers.
+    private func connection(required: [String] = []) async throws -> MachineConnection {
+        let connection: MachineConnection
+        if let opening, let live = try? await opening.value, !live.isClosed {
+            connection = live
+        } else {
+            let endpoint = savedMachine.endpoint
+            let task = Task { try await MachineConnection.open(endpoint: endpoint) }
+            opening = task
+            do { connection = try await task.value } catch {
+                if opening == task { opening = nil }
+                throw error
+            }
+            if opening == task { live = connection } else { connection.close(); return try await self.connection(required: required) }
+        }
+        guard try Self.identity(connection.welcome, required: required) == savedMachine.machineID else {
+            throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
+        }
+        return connection
+    }
+
+    private func request(_ operation: ServerOperation, required: [String] = []) async throws -> ServerReply {
+        try await connection(required: required).request(operation)
+    }
+
+    private func read(_ query: ServedRead, required: [String] = []) async throws -> JSONValue {
+        guard case .read(let value) = try await request(.read(query), required: required) else {
             throw RegistryQueryError("The Machine did not return a reading")
         }
-        return output
+        return value
     }
 
-    private func response(_ operation: MachineOperation) async throws -> MachineResponse {
-        let connection = try MachineConnection(endpoint: savedMachine.endpoint)
-        defer { connection.close() }
-        return try await connection.request(operation)
+    private func decode<T: Decodable>(_ type: T.Type, _ value: JSONValue) throws -> T {
+        try JSONDecoder().decode(type, from: JSONEncoder().encode(value))
     }
 }
 
@@ -147,7 +167,7 @@ final class RemoteAttachment: MobileAttachment {
     }, onCancel: { [weak self] in
         Task { @MainActor in self?.close() }
     })
-    private let connection: MachineConnection
+    private let connection: MachineSocket
     private var decoder = OwnerStream()
     private var pendingEvents: ArraySlice<MobileTerminalEvent> = []
     private var failure: String?
@@ -159,14 +179,15 @@ final class RemoteAttachment: MobileAttachment {
     private var closed = false
     private var controlDeadline: Task<Void, Never>?
 
-    private init(sessionID: String, connection: MachineConnection) {
+    private init(sessionID: String, socket: MachineSocket) {
         self.sessionID = sessionID
-        self.connection = connection
+        connection = socket
         (writes, outgoing) = AsyncStream.makeStream(bufferingPolicy: .bufferingOldest(64))
     }
 
-    static func open(sessionID: String, connection: MachineConnection) async throws -> RemoteAttachment {
-        let link = RemoteAttachment(sessionID: sessionID, connection: connection)
+    /// `socket` is an admitted terminal connection carrying the owner protocol.
+    static func open(sessionID: String, socket connection: MachineSocket) async throws -> RemoteAttachment {
+        let link = RemoteAttachment(sessionID: sessionID, socket: connection)
         let timeout = connection.deadline(seconds: 5)
         defer { timeout.cancel() }
         link.decoder.expectAttachment(1)

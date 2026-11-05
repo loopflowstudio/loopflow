@@ -6,7 +6,6 @@ mod auth_input;
 use std::fs;
 use std::future::Future;
 use std::io::IsTerminal;
-use std::io::Read as _;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -36,8 +35,8 @@ use crate::provider_auth::{
     start_provider_account_auth, AuthCompletion, AuthFlowResponse, Provider, ProviderAuthService,
 };
 use crate::store::{
-    open_store, CredentialState, CredentialType, LongLivedToken, ProviderAccount,
-    ProviderAccountId, ProviderToken, RoutingState, SharedStore, StoreError,
+    open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
+    RoutingState, SharedStore, StoreError,
 };
 use crate::subscription::SubscriptionUsage;
 
@@ -126,12 +125,6 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             )
             .await
         }
-        AccountCommand::Token {
-            provider,
-            email,
-            file,
-            chrome_profile,
-        } => token_account(provider, email, file.as_deref(), chrome_profile.as_deref()).await,
         AccountCommand::Use { .. } | AccountCommand::Drain { .. } => {
             unreachable!("run handles use and drain with their provider")
         }
@@ -747,110 +740,6 @@ pub(super) async fn fresh_machine_login(
         bail!("fresh login belongs to a different provider identity; credential discarded");
     }
     Ok((login_home, identity))
-}
-
-/// Mint a Claude account's long-lived token with `claude setup-token` in its
-/// verified Chrome profile, and store it on the account.
-pub(super) async fn mint_long_lived_token(
-    store: &SharedStore,
-    account: &ProviderAccount,
-    chrome_profile: Option<&str>,
-) -> Result<LongLivedToken> {
-    let (profiles, _) =
-        browser_profiles(store, Provider::Claude, Some(account), chrome_profile).await?;
-    let profile = profiles
-        .first()
-        .ok_or_else(|| anyhow!("no browser profile available"))?;
-    let chrome = verified_chrome_profile(profile)?;
-    // setup-token prints a token and stores nothing; the home only isolates it.
-    let home = tempfile::Builder::new()
-        .prefix("lf-setup-token-")
-        .tempdir()?;
-    let (handle, minted) =
-        crate::provider_auth::start_claude_setup_token(home.path().to_path_buf()).await?;
-    approve_in_chrome(handle, Provider::Claude, account, profile, &chrome).await?;
-    let token = minted.take().ok_or_else(|| {
-        anyhow!("claude setup-token finished without printing a subscription token")
-    })?;
-    store_long_lived_token(store, account, token).await
-}
-
-/// Refuse anything but a subscription token: an API key bills per token.
-pub(super) fn require_subscription_token(token: &str) -> Result<()> {
-    let prefix = crate::provider_auth::SUBSCRIPTION_TOKEN_PREFIX;
-    if !token.starts_with(prefix) || token.chars().any(char::is_whitespace) {
-        bail!("not a Claude subscription token ({prefix}…); refused, since an API key bills per token. Mint one with `claude setup-token`");
-    }
-    Ok(())
-}
-
-async fn store_long_lived_token(
-    store: &SharedStore,
-    account: &ProviderAccount,
-    token: SecretString,
-) -> Result<LongLivedToken> {
-    require_subscription_token(token.expose_secret())?;
-    let minted_at = OffsetDateTime::now_utc().unix_timestamp();
-    if !store
-        .set_long_lived_token(
-            Provider::Claude.as_str(),
-            &account.account_id,
-            &token,
-            minted_at,
-        )
-        .await?
-    {
-        bail!(
-            "no Claude account {} on this laptop; `lf account connect claude {}` first",
-            account_login(account),
-            account_login(account)
-        );
-    }
-    Ok(LongLivedToken { token, minted_at })
-}
-
-/// `lf account token claude <email> [--file F]`
-async fn token_account(
-    raw_provider: &str,
-    selector: &str,
-    file: Option<&Path>,
-    chrome_profile: Option<&str>,
-) -> Result<()> {
-    if parse_managed_provider(raw_provider)? != Provider::Claude {
-        bail!("long-lived tokens are Claude's (`claude setup-token`); codex machines use `lf machine connect`");
-    }
-    let store = open_account_store().await?;
-    let accounts = store
-        .list_provider_accounts(Some(Provider::Claude.as_str()))
-        .await?;
-    let account = match match_account(&accounts.iter().collect::<Vec<_>>(), selector) {
-        AccountMatch::One(account) => account.clone(),
-        AccountMatch::Ambiguous(_) => bail!("ambiguous login; use its full email"),
-        AccountMatch::None => {
-            bail!("no Claude account {selector} on this laptop; `lf account connect claude {selector}` first")
-        }
-    };
-    match file {
-        Some(path) => {
-            let raw = if path == Path::new("-") {
-                let mut raw = String::new();
-                std::io::stdin().take(4096).read_to_string(&mut raw)?;
-                raw
-            } else {
-                fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?
-            };
-            store_long_lived_token(&store, &account, SecretString::new(raw.trim().to_string()))
-                .await?;
-        }
-        None => {
-            mint_long_lived_token(&store, &account, chrome_profile).await?;
-        }
-    }
-    println!(
-        "Stored a long-lived Claude token for {}; rented machines install it without a browser approval. Renew within a year.",
-        account_login(&account)
-    );
-    Ok(())
 }
 
 /// Run OpenCode's device login in a private `home`, approved in the verified Chrome

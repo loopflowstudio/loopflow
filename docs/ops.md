@@ -271,7 +271,7 @@ Group machines you own into a pool, and rent more when none is free:
 
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
-lf account token claude jack@example.com          # once a year: Claude for rented machines
+lf machine connect code-1 claude jack@example.com # once: approve the laptop's Claude login for rentals
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost

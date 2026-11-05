@@ -519,15 +519,13 @@ fn on_selects(on: &str, session: &SessionRecord, capacity: &LaunchCapacity) -> b
     if !on.contains('@') && crate::harness::HarnessKind::parse(&harness).is_some() {
         return provider == harness && (model.is_none() || model == session.model);
     }
-    capacity
-        .login(provider, session.account.as_ref())
-        .is_some_and(|account| {
-            account.account_id.as_str().eq_ignore_ascii_case(on)
-                || account
-                    .login_email
-                    .as_ref()
-                    .is_some_and(|email| email.as_str().eq_ignore_ascii_case(on))
-        })
+    capacity.login(provider).is_some_and(|account| {
+        account.account_id.as_str().eq_ignore_ascii_case(on)
+            || account
+                .login_email
+                .as_ref()
+                .is_some_and(|email| email.as_str().eq_ignore_ascii_case(on))
+    })
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
@@ -612,9 +610,10 @@ fn summary_surface(
         provider: session.provider.clone(),
         account: session.account.clone(),
         model: session.model.clone(),
-        blocked: session.provider.as_deref().is_some_and(|provider| {
-            capacity.blocks(provider, session.account.as_ref(), session.model.as_deref())
-        }),
+        blocked: session
+            .provider
+            .as_deref()
+            .is_some_and(|provider| capacity.blocks(provider, session.model.as_deref())),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -845,22 +844,6 @@ pub(crate) async fn open(
         session
     };
     drop(progress);
-    // Naming another login moves the conversation: its agent on the old login
-    // stops, and it relaunches here rather than attaching to that one.
-    let moving = match (&provider_session, session.provider.as_deref()) {
-        (Some(native), Some(provider)) if resume => match provider.parse() {
-            Ok(provider) => {
-                crate::provider_account::names_another_account(
-                    store,
-                    provider,
-                    &native.agent_session,
-                )
-                .await?
-            }
-            Err(_) => None,
-        },
-        _ => None,
-    };
     // An agent that already exited, whose identity was never recorded, has
     // nothing to stop.
     let running = || -> Result<bool> {
@@ -872,19 +855,8 @@ pub(crate) async fn open(
                     == crate::journal::ProcessIdentityEvidence::Live
             }))
     };
-    if let Some(account) = &moving {
-        if running()? {
-            crate::harness::agent_process::stop_session_agent(
-                &store.sqlite,
-                &session.id,
-                crate::process::Departure::Account {
-                    account: account.clone(),
-                },
-            )?;
-        }
-    }
     if resume {
-        if session.interactive && moving.is_none() {
+        if session.interactive {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
                     && attaches(&store.sqlite, session, &owner)?
@@ -1363,13 +1335,8 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         account: metadata.account.clone(),
         model: session.model.clone(),
         blocked: session.provider.as_deref().is_some_and(|provider| {
-            LaunchCapacity::read(&store.sqlite).is_ok_and(|capacity| {
-                capacity.blocks(
-                    provider,
-                    metadata.account.as_ref(),
-                    session.model.as_deref(),
-                )
-            })
+            LaunchCapacity::read(&store.sqlite)
+                .is_ok_and(|capacity| capacity.blocks(provider, session.model.as_deref()))
         }),
         cwd: session.cwd.display().to_string(),
         state,

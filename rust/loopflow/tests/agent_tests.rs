@@ -226,7 +226,9 @@ fn two_codex_accounts(
         let email = format!("{account_id}@example.com");
         let claims = BASE64_URL_SAFE_NO_PAD
             .encode(serde_json::json!({"email":email, "sub":account_id.as_str()}).to_string());
-        std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
+        // The access token names the account so a stand-in can tell which login
+        // the shared home carries.
+        std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":format!("fixture-{account_id}"), "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         ProviderAccount {
             provider: "codex".to_string(),
             account_id,
@@ -272,10 +274,10 @@ fn two_codex_accounts(
 }
 
 /// A Codex provider whose every launch keeps one thread with a transcript in
-/// its home. `$LIMITED` lists the account homes that hit a limit on their turn,
+/// its home. `$LIMITED` lists the accounts that hit a limit on their turn,
 /// each resetting `$RESET_IN` seconds from then, once.
 const LIMITED_CODEX: &str = r#"#!/bin/sh
-account="${CODEX_HOME##*/}"
+account=$(sed -n 's/.*"access_token":"fixture-\([^"]*\)".*/\1/p' "$CODEX_HOME/auth.json")
 thread="0199a213-81c0-7800-8aa1-bbab2a035a53"
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
@@ -293,8 +295,8 @@ echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"inProgress"}}}'
 case " $LIMITED " in
   *" $account "*)
-    if [ ! -e "$CODEX_HOME/limited-once" ]; then
-      touch "$CODEX_HOME/limited-once"
+    if [ ! -e "$CODEX_HOME/limited-once-$account" ]; then
+      touch "$CODEX_HOME/limited-once-$account"
       reset=$(( $(date +%s) + RESET_IN ))
       echo '{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":100,"resetsAt":'"$reset"'},"rateLimitReachedType":"rate_limit_reached"}}}'
       echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"failed"}}}'
@@ -327,12 +329,8 @@ impl Drop for RestoreEnv {
     }
 }
 
-/// Isolated launches run in the routed account's own home.
-fn isolated_launches() -> [RestoreEnv; 2] {
-    [
-        RestoreEnv::set("LF_ACCOUNT_ISOLATION", "isolated"),
-        RestoreEnv::set("LF_BIN", env!("CARGO_BIN_EXE_lf")),
-    ]
+fn branch_lf() -> RestoreEnv {
+    RestoreEnv::set("LF_BIN", env!("CARGO_BIN_EXE_lf"))
 }
 
 fn run_limited_step(
@@ -366,7 +364,7 @@ fn a_limit_moves_the_step_and_its_conversation_to_the_next_account() {
     let home = TempDir::new().expect("lf home");
     let codex = support::codex_socket_script(LIMITED_CODEX);
     let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
-    let _isolated = isolated_launches();
+    let _lf = branch_lf();
     let (runtime, store, primary) = two_codex_accounts(home.path(), "primary", "backup");
 
     let (result, launches) = run_limited_step(home.path(), "primary", 3_600);
@@ -382,10 +380,12 @@ fn a_limit_moves_the_step_and_its_conversation_to_the_next_account() {
         cooled.cooldown_reason.as_deref(),
         Some("rate_limit_reached")
     );
-    assert!(home
-        .path()
-        .join("accounts/codex/backup/sessions/2026/11/05")
-        .is_dir());
+    // The conversation moved on in the one shared home, now signed in as backup.
+    let shared = std::path::PathBuf::from(std::env::var_os("CODEX_HOME").unwrap());
+    assert!(shared.join("sessions/2026/11/05").is_dir());
+    assert!(std::fs::read_to_string(shared.join("auth.json"))
+        .unwrap()
+        .contains("fixture-backup"));
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let (account, retry_at): (String, Option<i64>) = db
         .query_row(
@@ -404,7 +404,7 @@ fn with_every_account_exhausted_the_step_waits_for_a_reset_and_finishes() {
     let home = TempDir::new().expect("lf home");
     let codex = support::codex_socket_script(LIMITED_CODEX);
     let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
-    let _isolated = isolated_launches();
+    let _lf = branch_lf();
     let (_runtime, _store, _) = two_codex_accounts(home.path(), "primary", "backup");
 
     let (result, launches) = run_limited_step(home.path(), "primary backup", 1);
@@ -422,34 +422,37 @@ fn release_acceptance_recovers_from_a_revoked_selected_account() {
     let home = TempDir::new().expect("lf home");
     let codex = support::codex_socket_script(
         r#"#!/bin/sh
-thread="thread-${CODEX_HOME##*/}"
+account=$(sed -n 's/.*"access_token":"fixture-\([^"]*\)".*/\1/p' "$CODEX_HOME/auth.json")
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
-read -r thread_start
-case "$thread_start" in
-  *'"method":"thread/start"'*) ;;
-  *) echo "failover attempted to resume the old account" >&2; exit 10;;
+read -r thread_open
+case "$thread_open" in
+  *'"method":"thread/start"'*) thread="thread-$account";;
+  *'"method":"thread/resume"'*)
+    thread=$(printf '%s' "$thread_open" | sed -n 's/.*"threadId":"\([^"]*\)".*/\1/p')
+    if [ "$account" = revoked ]; then echo "resumed on the revoked login" >&2; exit 10; fi;;
+  *) echo "unexpected thread request" >&2; exit 10;;
 esac
 echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"inProgress"}}}'
-case "$CODEX_HOME" in
-  */revoked)
+case "$account" in
+  revoked)
     echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
     echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"failed"}}}';;
-  */fallback)
+  fallback)
     echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
     echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"completed"}}}';;
-  *) echo "unexpected CODEX_HOME" >&2; exit 9;;
+  *) echo "unexpected login in CODEX_HOME" >&2; exit 9;;
 esac
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#,
     );
     let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
-    let _isolated = isolated_launches();
+    let _lf = branch_lf();
     let (runtime, store, revoked_id) = two_codex_accounts(home.path(), "revoked", "fallback");
 
     let launch = AgentConfig {
@@ -492,7 +495,8 @@ while read -r line; do :; done
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(thread, "thread-fallback");
+    // The shared home carries the conversation on to the fallback login.
+    assert_eq!(thread, "thread-revoked");
     let observations = db
         .prepare("SELECT payload FROM session_events WHERE session_id=?1 ORDER BY seq")
         .unwrap()
@@ -503,7 +507,6 @@ while read -r line; do :; done
         .join("\n");
     for retained in [
         "thread-revoked",
-        "thread-fallback",
         "revoked",
         "fallback",
         &agents[0].0,
@@ -516,7 +519,7 @@ while read -r line; do :; done
     }
     for (thread, account) in [
         ("thread-revoked", "revoked"),
-        ("thread-fallback", "fallback"),
+        ("thread-revoked", "fallback"),
     ] {
         let retained: bool = db
             .query_row(
@@ -610,7 +613,6 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
     );
     support::register_codex_account(home.path());
-    std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
     let launch = AgentConfig {
         agent: Some("codex:model".into()),
         system_prompt: "Keep these instructions".into(),
@@ -627,12 +629,15 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    let args = launches
+    assert!(launches
         .iter()
-        .find(|args| args.contains(&"--remote".into()))
-        .unwrap();
-    let remote = args.iter().position(|arg| arg == "--remote").unwrap();
-    assert!(args[..remote].contains(&"cli_auth_credentials_store=\"file\"".into()));
+        .any(|args| args.contains(&"--remote".into())));
+    // The shared home is signed in as the selected account.
+    let shared = std::path::PathBuf::from(std::env::var_os("CODEX_HOME").unwrap());
+    assert_eq!(
+        std::fs::read(shared.join("auth.json")).unwrap(),
+        std::fs::read(home.path().join("accounts/codex/fixture/auth.json")).unwrap()
+    );
     assert_eq!(
         std::fs::read_to_string(home.path().join("native-thread")).unwrap(),
         result.agent_session.as_ref().unwrap().as_str()

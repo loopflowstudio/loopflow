@@ -1760,13 +1760,14 @@ mod tests {
                 [],
             )
             .unwrap();
-        connection.account_route = Some(ProviderAccountRoute::isolated_for_test(
+        connection.account_route = Some(ProviderAccountRoute::shared(
             Provider::Codex,
-            "engineering",
+            crate::store::ProviderAccountId::parse("engineering").unwrap(),
             Arc::new(crate::store::Store {
                 sqlite: connection.store.clone(),
             }),
             home.path().join("engineering"),
+            true,
         ));
         let endpoint = home.path().join("provider.sock");
         let listener = UnixListener::bind(&endpoint).unwrap();
@@ -1819,21 +1820,18 @@ mod tests {
             "{response}"
         );
 
-        // Still open: the pin exists before the terminal exits.
+        // Still open: the pin exists before the terminal exits, in the
+        // shared home.
+        assert!(connection
+            .store
+            .provider_session_routed(Provider::Codex, &"open-thread".into())
+            .unwrap());
         assert_eq!(
             connection
                 .store
                 .provider_session_account(Provider::Codex, &"open-thread".into())
-                .unwrap()
-                .map(|account| account.to_string()),
-            Some("engineering".to_owned())
-        );
-        assert_eq!(
-            connection
-                .store
-                .provider_session_isolated(Provider::Codex, &"open-thread".into())
                 .unwrap(),
-            Some(true)
+            None
         );
         terminal.close(None).await.unwrap();
         tokio::time::timeout(within, relay)

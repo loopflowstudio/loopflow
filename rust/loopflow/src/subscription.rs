@@ -236,6 +236,43 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
         .collect()
 }
 
+/// A Claude access token, its expiry (unix seconds) and whether it was just
+/// refreshed.
+pub(crate) struct ClaudeAccess {
+    pub token: SecretString,
+    pub expires_at: Option<i64>,
+    pub refreshed: bool,
+}
+
+/// The access token of the Claude login in `home`, refreshed first when it
+/// expires within `margin` seconds. The refreshed login is written back to
+/// `home`; the caller holds its lock.
+pub(crate) async fn claude_access_token(
+    home: &Path,
+    margin: i64,
+) -> Result<ClaudeAccess, SubscriptionError> {
+    let expiry = |credential: &str| {
+        let value: Value = serde_json::from_str(credential).ok()?;
+        let oauth = value.get("claudeAiOauth").unwrap_or(&value);
+        oauth
+            .get("expiresAt")
+            .and_then(Value::as_i64)
+            .map(|ms| ms / 1000)
+    };
+    let stored = crate::provider_auth::read_claude_login(home)
+        .map_err(|_| SubscriptionError::Unavailable("cannot read stored credentials".into()))?
+        .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let due = expiry(stored.expose_secret()).is_none_or(|expires| expires <= now + margin);
+    let client = reqwest::Client::new();
+    let (token, credential, refreshed) = fresh_claude_token(&client, home, due).await?;
+    Ok(ClaudeAccess {
+        token,
+        expires_at: expiry(credential.expose_secret()),
+        refreshed,
+    })
+}
+
 /// The caller holds the managed login lock through polling and persistence.
 /// Comparisons detect completed replacements; they do not serialize native
 /// provider writes or competing server-side refreshes.

@@ -14,8 +14,7 @@
       "configured_plan": "max",
       "routing": "automatic",
       "cooldown_until": null,
-      "expires_at": null,
-      "long_lived_token_expires_at": 1810000000,
+      "expires_at": 1810000000,
       "windows": [
         {
           "provider": "claude",
@@ -24,6 +23,8 @@
           "used_percent": 22,
           "resets_at": 1800003600,
           "plan": null,
+          "limited_until": null,
+          "model": null,
           "observed_at": 1800000000,
           "source": "poll"
         },
@@ -34,6 +35,8 @@
           "used_percent": 96,
           "resets_at": 1799990000,
           "plan": null,
+          "limited_until": null,
+          "model": null,
           "observed_at": 1799900000,
           "source": "stream"
         }
@@ -58,7 +61,6 @@
       "routing": "automatic",
       "cooldown_until": null,
       "expires_at": null,
-      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": {
@@ -90,8 +92,7 @@
       "configured_plan": null,
       "routing": "automatic",
       "cooldown_until": null,
-      "expires_at": null,
-      "long_lived_token_expires_at": 1790000000,
+      "expires_at": 1790000000,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null
@@ -111,7 +112,6 @@
       "routing": "automatic",
       "cooldown_until": null,
       "expires_at": null,
-      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null
@@ -131,7 +131,6 @@
       "routing": "explicit_only",
       "cooldown_until": 1800000300,
       "expires_at": null,
-      "long_lived_token_expires_at": null,
       "windows": [
         {
           "provider": "claude",
@@ -140,6 +139,8 @@
           "used_percent": 61,
           "resets_at": null,
           "plan": null,
+          "limited_until": null,
+          "model": null,
           "observed_at": 1799990000,
           "source": "poll"
         }
@@ -162,7 +163,6 @@
       "routing": null,
       "cooldown_until": null,
       "expires_at": 1790000000,
-      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null
@@ -182,7 +182,6 @@
       "routing": null,
       "cooldown_until": null,
       "expires_at": null,
-      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null

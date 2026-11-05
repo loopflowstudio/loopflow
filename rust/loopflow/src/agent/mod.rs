@@ -179,7 +179,6 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 9] = [
 pub struct AgentConfig {
     /// Chrome integration for Claude terminal and stream sessions.
     pub chrome: bool,
-    pub isolate: Option<bool>,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
@@ -418,7 +417,6 @@ fn resolve_account_route_blocking(
                 .get(crate::work::wave::context::WAVE_ID_ENV)
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
-            launch.isolate,
             launch
                 .agent
                 .as_deref()

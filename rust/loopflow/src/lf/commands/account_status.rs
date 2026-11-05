@@ -1,4 +1,5 @@
 use anyhow::Result;
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -46,9 +47,9 @@ struct AccountRow {
     configured_plan: Option<String>,
     routing: Option<String>,
     cooldown_until: Option<i64>,
+    /// When the credential stops working: an ambient token's expiry, or a
+    /// rental's access token, which the laptop renews before then.
     expires_at: Option<i64>,
-    /// When the long-lived token lf machine connect installs stops working.
-    long_lived_token_expires_at: Option<i64>,
     windows: Vec<AccountLimitRow>,
     verified_windows: Vec<String>,
     reset_credits: Option<crate::subscription::RateLimitResetCredits>,
@@ -165,7 +166,6 @@ async fn local_rows(
             routing: None,
             cooldown_until: None,
             expires_at: snapshot.and_then(|s| s.expires_at),
-            long_lived_token_expires_at: None,
             windows: vec![],
             verified_windows: vec![],
             reset_credits: None,
@@ -347,9 +347,19 @@ async fn managed_rows(
                     .max_by_key(|w| w.observed_at)
                     .and_then(|w| w.plan.clone())
             });
-        let long_lived_token = store
-            .long_lived_token(&account.provider, &account.account_id)
-            .await?;
+        // Only an access token with nothing to refresh has an expiry worth
+        // showing; a full login renews itself.
+        let access_expires_at = match (provider, account.home.as_deref()) {
+            (Provider::Claude, Some(home)) => crate::provider_auth::read_claude_login(home)
+                .ok()
+                .flatten()
+                .and_then(|login| {
+                    super::super::machine_credentials::access_only_expiry(login.expose_secret())
+                        .ok()
+                        .flatten()
+                }),
+            _ => None,
+        };
         rows.push(AccountRow {
             provider,
             account_id: Some(account.account_id.clone()),
@@ -375,8 +385,7 @@ async fn managed_rows(
                     .into(),
             ),
             cooldown_until: account.cooldown_until,
-            expires_at: None,
-            long_lived_token_expires_at: long_lived_token.map(|token| token.expires_at()),
+            expires_at: access_expires_at,
             windows,
             reset_credits: live_usage
                 .as_ref()
@@ -460,9 +469,12 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
             if !policy.is_empty() {
                 lines.push(format!("  routing: {}", policy.join(" · ")));
             }
-            if let Some(expires) = row.long_lived_token_expires_at {
+            if let (Scope::Managed, Some(expires)) = (&row.scope, row.expires_at) {
                 let state = if expires > now { "until" } else { "expired" };
-                lines.push(format!("  long-lived token {state} {}", date(expires)));
+                lines.push(format!(
+                    "  access token {state} {}; the laptop's `lf machine connect` renews it",
+                    date(expires)
+                ));
             }
             if let Some(reason) = &row.diagnostic {
                 lines.push(format!("  {reason}"));
@@ -830,8 +842,8 @@ mod tests {
                 "claude / personal · choice 2",
                 "linear / local credentials · choice 1",
                 "Spare · Profile 9 · not signed in",
-                "long-lived token until 2027-05-11",
-                "long-lived token expired 2026-09-21",
+                "access token until 2027-05-11",
+                "access token expired 2026-09-21",
             ] {
                 assert!(
                     text.replace("\n    ", "").contains(evidence),

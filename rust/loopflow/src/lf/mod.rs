@@ -92,15 +92,6 @@ pub struct Cli {
     )]
     pub only_account: Vec<String>,
 
-    /// Run in the selected account's own provider home, unmoved by account
-    /// switches. Applies to this invocation and its children.
-    #[arg(long, conflicts_with = "shared")]
-    pub isolate: bool,
-
-    /// Run in the provider's ordinary home despite an `isolate: true` default
-    #[arg(long, conflicts_with = "isolate")]
-    pub shared: bool,
-
     /// Skip permission prompts
     #[arg(long)]
     pub yolo: bool,
@@ -179,12 +170,6 @@ impl Cli {
         for (key, enabled) in [
             ("yolo", self.yolo.then_some(true)),
             ("context.paste", self.clipboard.then_some(true)),
-            (
-                "isolate",
-                self.shared
-                    .then_some(false)
-                    .or(self.isolate.then_some(true)),
-            ),
             ("chrome", self.chrome.map(|mode| mode == BrowserMode::On)),
             (
                 "context.diff",
@@ -371,8 +356,6 @@ impl Cli {
             ("--interactive", self.interactive),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
-            ("--isolate", self.isolate),
-            ("--shared", self.shared),
             ("--verbose", self.verbose),
         ] {
             if enabled {
@@ -433,8 +416,6 @@ impl Cli {
             resolved_invocation: self.resolved_invocation.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
-            isolate: self.isolate,
-            shared: self.shared,
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
@@ -1319,7 +1300,6 @@ fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
             AccountCommand::Disconnect { .. }
             | AccountCommand::Connect { .. }
             | AccountCommand::Set { .. }
-            | AccountCommand::Token { .. }
             | AccountCommand::RedeemReset { .. }
             | AccountCommand::Use { .. }
             | AccountCommand::Drain { .. },
@@ -1723,7 +1703,7 @@ pub enum SessionCommand {
     List(SessionListArgs),
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked --account <email>  switch the shared login for blocked Sessions\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID
@@ -2897,17 +2877,6 @@ pub enum AccountCommand {
         chrome_profile: Vec<String>,
         #[arg(long)]
         clear_chrome_profiles: bool,
-    },
-    /// Store a long-lived Claude token for rented machines: mint it with
-    /// `claude setup-token` in the account's Chrome profile, or read one minted
-    /// by hand from --file (`-` for stdin)
-    Token {
-        provider: String,
-        email: String,
-        #[arg(long)]
-        file: Option<PathBuf>,
-        #[arg(long, conflicts_with = "file")]
-        chrome_profile: Option<String>,
     },
     /// Spend one banked Codex reset for this named login
     RedeemReset {

@@ -981,9 +981,6 @@ mod tests {
             Departure::Terminal {
                 to: Some("Desktop".into()),
             },
-            Departure::Account {
-                account: crate::store::ProviderAccountId::parse("other").unwrap(),
-            },
             Departure::Machine {
                 machine: crate::durable::MachineId::new(),
                 task: Some(crate::durable::TaskId::new()),

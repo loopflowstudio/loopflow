@@ -1150,63 +1150,6 @@ impl SqliteStore {
             .collect()
     }
 
-    /// Store a long-lived token on an existing account. False when no such account.
-    pub fn set_long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        token: &str,
-        minted_at: i64,
-    ) -> StoreResult<bool> {
-        let encrypted = token_crypto::encrypt_token(token).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to encrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET long_lived_token = ?3, long_lived_token_minted_at = ?4, updated_at = ?5
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                encrypted,
-                minted_at,
-                now_unix()
-            ],
-        )?;
-        Ok(changed == 1)
-    }
-
-    pub fn long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<Option<super::LongLivedToken>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let row: Option<(Option<String>, Option<i64>)> = conn
-            .query_row(
-                "SELECT long_lived_token, long_lived_token_minted_at FROM provider_accounts
-                 WHERE provider = ?1 AND account_id = ?2",
-                params![provider, account_id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let Some((Some(encrypted), Some(minted_at))) = row else {
-            return Ok(None);
-        };
-        let token = token_crypto::decrypt_token(&encrypted).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to decrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        Ok(Some(super::LongLivedToken {
-            token: secrecy::SecretString::new(token),
-            minted_at,
-        }))
-    }
-
     pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let exists: bool = conn.query_row(
@@ -1665,44 +1608,44 @@ impl SqliteStore {
         provider: Provider,
         agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
-        isolated: bool,
     ) -> StoreResult<()> {
+        // Every launch runs in the shared home, so the conversation lives
+        // there from now on, wherever it ran before.
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_session_accounts (
                 provider, provider_session_id, account_id, created_at, isolated
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ) VALUES (?1, ?2, ?3, ?4, 0)
              ON CONFLICT(provider, provider_session_id) DO UPDATE SET
                 account_id = excluded.account_id,
                 created_at = excluded.created_at,
-                isolated = excluded.isolated",
+                isolated = 0",
             params![
                 provider.as_str(),
                 agent_session,
                 account_id.as_str(),
                 now_unix(),
-                isolated,
             ],
         )?;
         Ok(())
     }
 
-    /// The home a recorded conversation lives in: its account's own
-    /// (`true`) or the provider's native one.
-    pub fn provider_session_isolated(
+    /// Whether a launch has run this conversation, on any account.
+    pub fn provider_session_routed(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<bool>> {
+    ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT isolated FROM provider_session_accounts
+                "SELECT 1 FROM provider_session_accounts
                  WHERE provider = ?1 AND provider_session_id = ?2",
                 params![provider.as_str(), agent_session],
-                |row| row.get(0),
+                |_| Ok(()),
             )
-            .optional()?)
+            .optional()?
+            .is_some())
     }
 
     pub fn record_provider_account_switch(
@@ -1743,6 +1686,8 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
+    /// The account whose own home still holds this conversation: it ran
+    /// there before every launch shared one, and has not resumed since.
     pub fn provider_session_account(
         &self,
         provider: Provider,
@@ -1768,7 +1713,6 @@ impl SqliteStore {
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        agent_session: Option<&AgentSessionId>,
         model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         if candidates.is_empty() {
@@ -1784,17 +1728,6 @@ impl SqliteStore {
             |row| row.get::<_, i64>(0),
         )?;
         let selection_time = now.max(newest_selection + 1);
-        let requested = match agent_session {
-            Some(session_id) => transaction
-                .query_row(
-                    "SELECT account_id FROM provider_session_accounts
-                     WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
-                    params![provider.as_str(), session_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?,
-            None => None,
-        };
         let limits = {
             let mut statement = transaction.prepare(
                 "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
@@ -1836,28 +1769,10 @@ impl SqliteStore {
         }
         drop(account_statement);
 
-        let resumed = requested.as_ref().and_then(|account_id| {
-            available
-                .iter()
-                .position(|account| account.account_id.as_str() == account_id)
-        });
-        let mut account = match resumed {
-            Some(index) => available.remove(index),
-            None => {
-                crate::provider_account::order_accounts_by_reset(
-                    &mut available,
-                    &limits,
-                    model,
-                    now,
-                );
-                match available.into_iter().next() {
-                    Some(selection) => selection,
-                    None => {
-                        transaction.commit()?;
-                        return Ok(None);
-                    }
-                }
-            }
+        crate::provider_account::order_accounts_by_reset(&mut available, &limits, model, now);
+        let Some(mut account) = available.into_iter().next() else {
+            transaction.commit()?;
+            return Ok(None);
         };
         transaction.execute(
             "UPDATE provider_accounts

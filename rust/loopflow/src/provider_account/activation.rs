@@ -17,24 +17,6 @@ use super::{account_login, ProviderAccountError};
 use crate::provider_auth::{codex_identity_from_home, Provider};
 use crate::store::{ProviderAccount, ProviderAccountId, RoutingState, SharedStore};
 
-/// `isolated` or `shared`: the mode `--isolate` / `--shared` set for this
-/// process and every launch beneath it. Absent, configuration decides.
-pub const ACCOUNT_ISOLATION_ENV: &str = "LF_ACCOUNT_ISOLATION";
-
-/// The variable and value that carry a mode to a child process.
-pub fn isolation_env(isolate: bool) -> (&'static str, &'static str) {
-    let mode = if isolate { "isolated" } else { "shared" };
-    (ACCOUNT_ISOLATION_ENV, mode)
-}
-
-pub(crate) fn isolation_from_env() -> Option<bool> {
-    match std::env::var(ACCOUNT_ISOLATION_ENV).as_deref() {
-        Ok("isolated") => Some(true),
-        Ok("shared") => Some(false),
-        _ => None,
-    }
-}
-
 /// Why the native home changed account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SwitchCause {
@@ -60,7 +42,7 @@ pub(crate) fn home_env(provider: Provider) -> Option<&'static str> {
 }
 
 /// A stored profile directory is never the native home, even when a launch
-/// inherited it from an isolated parent.
+/// inherited it from a parent.
 pub(crate) fn is_account_home(home: &Path) -> bool {
     home.starts_with(crate::store::lf_home_dir().join("accounts"))
 }
@@ -80,16 +62,6 @@ pub(crate) fn native_home(provider: Provider, launch_home: Option<&OsStr>) -> Pa
                 _ => operator_home.join(".codex"),
             }
         })
-}
-
-/// Flag, then `isolate:` in config, then shared.
-pub(crate) fn launch_isolated() -> bool {
-    isolation_from_env().unwrap_or_else(|| {
-        let repo = std::env::current_dir()
-            .ok()
-            .and_then(|cwd| crate::repo::discover_repo_root(&cwd).ok().flatten());
-        crate::config::load_config_or_default(repo.as_deref()).isolate
-    })
 }
 
 /// Whether a running agent adopts a login installed after it started. Claude
@@ -233,6 +205,23 @@ pub(crate) async fn activate(
     Ok(Some(lock))
 }
 
+/// Store `credential`, a newer copy of the Claude login in `profile` (a
+/// rental's renewed access token). The shared home follows when it was signed
+/// in on the old copy, and every open Claude picks it up at its next request.
+pub(crate) fn renew_claude_login(
+    profile: &Path,
+    credential: &str,
+) -> Result<(), ProviderAccountError> {
+    let native = native_home(Provider::Claude, None);
+    let _lock = lock_native_credential(Provider::Claude)?;
+    let active = same_login(Provider::Claude, &native, profile);
+    write_private(&profile.join(".credentials.json"), credential.as_bytes())?;
+    if active {
+        write_login(Provider::Claude, &native, credential.as_bytes())?;
+    }
+    Ok(())
+}
+
 /// A home's login, as its provider stores it.
 fn read_login(provider: Provider, home: &Path) -> Option<Vec<u8>> {
     match provider {
@@ -315,7 +304,7 @@ fn require_file_credential_store(native: &Path) -> Result<(), ProviderAccountErr
     match store.as_deref() {
         None | Some("file") => Ok(()),
         Some(other) => Err(ProviderAccountError::Runtime(format!(
-            "{} sets cli_auth_credentials_store = \"{other}\", so Codex would not read a switched login; set it to \"file\" or launch with --isolate",
+            "{} sets cli_auth_credentials_store = \"{other}\", so Codex would not read a switched login; set it to \"file\"",
             native.join("config.toml").display()
         ))),
     }
@@ -448,30 +437,6 @@ async fn save_back(
     account.routing_state = RoutingState::ExplicitOnly;
     store.upsert_provider_account(&account).await?;
     Ok(Kept::Profile(account_id))
-}
-
-/// Isolated launch repairs its profile in place, retaining conversation history.
-pub(crate) async fn prepare_isolated_codex(
-    store: &SharedStore,
-    account_id: &ProviderAccountId,
-) -> Result<Option<fs::File>, ProviderAccountError> {
-    let account = store
-        .get_provider_account("codex", account_id)
-        .await?
-        .ok_or_else(|| ProviderAccountError::Runtime("selected account disappeared".into()))?;
-    let profile = account
-        .home
-        .as_deref()
-        .ok_or_else(|| ProviderAccountError::Runtime("account has no home".into()))?;
-    let native = native_home(Provider::Codex, None);
-    if !same_login(Provider::Codex, &native, profile)
-        || read_login(Provider::Codex, &native) == read_login(Provider::Codex, profile)
-    {
-        return Ok(None);
-    }
-    let lock = lock_native_credential(Provider::Codex)?;
-    repair_codex_login(&account, profile).await?;
-    Ok(Some(lock))
 }
 
 /// Caller holds the native lock; the managed lock is nonblocking and acquired second.

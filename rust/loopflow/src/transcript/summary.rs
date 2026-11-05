@@ -136,7 +136,7 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
                     HarnessKind::Claude => Provider::Claude,
                     _ => Provider::Codex,
                 };
-                match conversation_home(store, provider, thread, session.account.as_ref())? {
+                match conversation_home(store, provider, thread)? {
                     None => (RetentionState::Facts, None, None),
                     Some(home) => {
                         let home = homes
@@ -287,12 +287,16 @@ mod tests {
             "claude" => Provider::Claude,
             _ => Provider::Codex,
         };
+        // It ran in the account's own home, before every launch shared one.
         store
-            .pin_provider_session_route(
-                route,
-                &thread.into(),
-                &ProviderAccountId::parse(provider).unwrap(),
-                true,
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO provider_session_accounts
+                    (provider, provider_session_id, account_id, created_at, isolated)
+                 VALUES (?1, ?2, ?3, 1, 1)",
+                rusqlite::params![route.as_str(), thread, provider],
             )
             .unwrap();
         for (kind, payload) in [

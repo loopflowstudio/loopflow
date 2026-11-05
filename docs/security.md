@@ -112,10 +112,12 @@ are installed atomically with owner-only permissions. The target and other code
 running as that OS user can read them, just as after a normal login. Trust the
 remote OS account with the account's refresh authority.
 
-SSH provider launches use isolated account homes under
-`~/.lf/accounts/<provider>/<account-id>`. They keep file-backed credentials even
-on a Mac without an unlocked login Keychain. Provider-owned refresh continues on
-the target; it does not depend on an origin broker or SSH-forwarded socket.
+SSH provider launches run in the target's shared provider home, switched to the
+selected stored login; without a Keychain login there, Claude keeps it in a
+file. An owned target refreshes its own login. A rental holds only a Claude
+access token, which the laptop refreshes from a login it keeps for rentals and
+sends again before it expires, never while a Session runs. Neither depends on
+an origin broker or SSH-forwarded socket.
 Local shared-account behavior remains described in [subscriptions](subscriptions.md).
 
 Linear credentials in SQLite are encrypted. The encryption key lives in an

@@ -412,7 +412,6 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Include clipboard | `-c, --clipboard` | — |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
-| Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
 | Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
 | End agents nobody is viewing | — | `session.end_detached_after: 2m` (or `off`) |
 
@@ -827,8 +826,8 @@ change the saved history's provider. A `default_agent` can refresh the model for
 that provider; switching providers requires an explicit agent choice. CLI overrides
 take precedence. Connecting
 to an already running provider keeps its existing launch settings. Historical
-replay uses captured inputs. Resuming native history from an isolated account
-keeps that account's provider home, including when `--shared` is requested.
+replay uses captured inputs. Native history from an account's own home, from
+before every launch shared one, moves into the shared home when it resumes.
 
 Claude turn limits and native JSON schemas require headless mode; terminal
 launches reject them. Other headless providers report unsupported turn limits
@@ -1058,8 +1057,8 @@ appropriate lifecycle. Reserved summary settings do not start a summarization ru
 
 `--setting KEY=YAML` uses the same typed values as configuration files.
 `LF_SETTINGS` accepts a YAML mapping. Explicit `LF_AGENT_OVERRIDE`,
-`LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME` and
-`LF_ACCOUNT_ISOLATION` retain their invocation meanings. User-supplied environment
+`LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE` and `LF_USER_NAME` retain their
+invocation meanings. User-supplied environment
 can flow into children; LF does not export a resolved preference as an environment
 override. Internal process identity variables carry execution context, not settings.
 Neither environment nor command-line choices are saved as future preferences.

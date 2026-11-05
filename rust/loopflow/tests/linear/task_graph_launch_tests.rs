@@ -614,9 +614,10 @@ fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
 fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &str) {
     let account_home = home.join("accounts/claude").join(name);
     fs::create_dir_all(&account_home).unwrap();
-    let credential =
-        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
-    fs::write(account_home.join(".credentials.json"), credential).unwrap();
+    let credential = format!(
+        r#"{{"claudeAiOauth":{{"accessToken":"fixture-{name}","expiresAt":4102444800000}}}}"#
+    );
+    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(store.upsert_provider_account(&ProviderAccount {
@@ -647,17 +648,23 @@ fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &st
         .unwrap();
 }
 
-/// A Claude stand-in that records each launch's arguments and account home.
+/// A Claude stand-in that records each launch's arguments, home and the login
+/// that home carries: the stand-in Keychain on macOS, else its file.
 const CLAUDE_RECORDER: &str = r#"#!/usr/bin/python3
+import glob
 import json
 import os
+import shutil
 import sys
 
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
+stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
+stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
+login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -714,12 +721,7 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
         ][..],
         &["-b", "task", "run", "INF-123", "proof"],
     ] {
-        // Isolated launches run in the routed account's own home; a shared one
-        // would sign in the native home, which is the Keychain on macOS.
-        let output = command(repo.path(), home.path(), args)
-            .env("LF_ACCOUNT_ISOLATION", "isolated")
-            .output()
-            .unwrap();
+        let output = command(repo.path(), home.path(), args).output().unwrap();
         assert!(
             output.status.success(),
             "{args:?}: {}",
@@ -733,14 +735,19 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
         args.windows(2).any(|pair| pair == ["--model", "opus"]),
         "{launch}"
     );
+    // The shared home ran signed in as the Wave's account.
     assert_eq!(
-        Path::new(launch["claude_home"].as_str().unwrap())
-            .canonicalize()
-            .unwrap(),
-        home.path()
-            .join("accounts/claude/work")
-            .canonicalize()
+        launch["claude_home"].as_str().map(Path::new),
+        std::env::var_os("CLAUDE_CONFIG_DIR")
+            .as_deref()
+            .map(Path::new)
+    );
+    assert!(
+        launch["claude_login"]
+            .as_str()
             .unwrap()
+            .contains("fixture-work"),
+        "{launch}"
     );
 }
 

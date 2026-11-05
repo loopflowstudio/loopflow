@@ -197,7 +197,7 @@ definitions! {
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts";
     chrome: bool = "false", Launch, Replace, HostLocal, NextLaunch, Agents, "Enable local Chrome integration";
-    isolate: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Run in the selected account home";
+    isolate: bool = "false", Launch, Replace, Portable, Inactive, Agents, "Ignored: every launch runs in the provider's shared home; kept readable for the released lf until Task e1f359";
     summaries: Vec<SummaryConfig> = "[]", Launch, AppendReset, ReferencedAssets, Inactive, Agents, "Parsed summary requests; no runtime consumer";
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
     #[serde(alias = "workflow")]

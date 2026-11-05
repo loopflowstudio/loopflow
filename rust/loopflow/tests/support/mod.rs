@@ -30,6 +30,63 @@ fn scrub_inherited_provider_homes() {
     env::remove_var("CLAUDE_CONFIG_DIR");
 }
 
+/// A macOS `security` stand-in that keeps generic passwords in a `keychain`
+/// directory beside itself. Signing a fixture's shared Claude home in goes
+/// through the Keychain on macOS; with this first on PATH it never reaches
+/// the real one. Each item's password is the file named by its service in hex.
+#[allow(dead_code)] // Shared Keychain fixture compiled into multiple test crates.
+pub const FAKE_SECURITY: &str = r#"#!/usr/bin/python3
+import os, shlex, sys
+store = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'keychain')
+os.makedirs(store, exist_ok=True)
+
+def item(service):
+    return os.path.join(store, service.encode().hex())
+
+def options(rest, valued):
+    found, flags, args = {}, set(), iter(rest)
+    for arg in args:
+        if arg in valued:
+            found[arg] = next(args)
+        else:
+            flags.add(arg)
+    return found, flags
+
+def missing():
+    sys.stderr.write('security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n')
+    sys.exit(44)
+
+def run(command, rest):
+    if command == 'add-generic-password':
+        found, _ = options(rest, {'-a', '-s', '-X', '-w', '-l', '-T', '-D', '-j'})
+        password = bytes.fromhex(found['-X']).decode() if '-X' in found else found.get('-w', '')
+        open(item(found['-s']), 'w').write(password)
+        open(item(found['-s']) + '.acct', 'w').write(found.get('-a', ''))
+        return
+    found, flags = options(rest, {'-a', '-s'})
+    path = item(found.get('-s', ''))
+    if not os.path.exists(path):
+        missing()
+    if command == 'find-generic-password':
+        if '-w' in flags:
+            print(open(path).read())
+        else:
+            print('attributes:\n    "acct"<blob>="%s"' % open(path + '.acct').read())
+    elif command == 'delete-generic-password':
+        os.remove(path)
+        os.remove(path + '.acct')
+    else:
+        sys.exit(1)
+
+if sys.argv[1:2] == ['-i']:
+    for line in sys.stdin:
+        if line.strip():
+            words = shlex.split(line)
+            run(words[0], words[1:])
+else:
+    run(sys.argv[1], sys.argv[2:])
+"#;
+
 #[cfg(unix)]
 #[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
 pub fn install_native_codex(bin: &Path) {
@@ -252,6 +309,7 @@ impl EnvGuard {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
         let cli = loopflow_test_support::lf_binary();
         let bin = TempDir::new().expect("temp bin dir");
+        write_executable(bin.path(), "security", FAKE_SECURITY);
         for (name, content) in entries {
             write_executable(bin.path(), name, content);
         }

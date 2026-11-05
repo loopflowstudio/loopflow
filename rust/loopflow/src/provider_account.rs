@@ -120,9 +120,8 @@ fn earliest_release<'a>(
 }
 
 /// What open conversations' next messages could launch on, read once: the
-/// stored logins and their limits. A Session is blocked when the login it
-/// would use (its pinned account, else the provider's active login) cannot
-/// take its model now.
+/// stored logins and their limits. A Session is blocked when its provider's
+/// shared login cannot take its model now.
 #[derive(Debug, Default)]
 pub(crate) struct LaunchCapacity {
     accounts: Vec<ProviderAccount>,
@@ -158,36 +157,23 @@ impl LaunchCapacity {
         })
     }
 
-    /// The login a `provider` conversation uses next: `pinned`, else the one
-    /// signed in to the provider's ordinary home. None for unmanaged providers.
-    pub(crate) fn login(
-        &self,
-        provider: &str,
-        pinned: Option<&ProviderAccountId>,
-    ) -> Option<&ProviderAccount> {
-        let account_id = match pinned {
-            Some(pinned) => pinned,
-            None => {
-                let provider: Provider = provider.parse().ok()?;
-                self.active
-                    .iter()
-                    .find(|(active, _)| *active == provider)?
-                    .1
-                    .as_ref()?
-            }
-        };
+    /// The login a `provider` conversation uses next: the one signed in to
+    /// the provider's shared home. None for unmanaged providers.
+    pub(crate) fn login(&self, provider: &str) -> Option<&ProviderAccount> {
+        let managed: Provider = provider.parse().ok()?;
+        let account_id = self
+            .active
+            .iter()
+            .find(|(active, _)| *active == managed)?
+            .1
+            .as_ref()?;
         self.accounts
             .iter()
             .find(|account| account.provider == provider && account.account_id == *account_id)
     }
 
-    pub(crate) fn blocks(
-        &self,
-        provider: &str,
-        pinned: Option<&ProviderAccountId>,
-        model: Option<&str>,
-    ) -> bool {
-        self.login(provider, pinned).is_some_and(|account| {
+    pub(crate) fn blocks(&self, provider: &str, model: Option<&str>) -> bool {
+        self.login(provider).is_some_and(|account| {
             account_held_until(account, &self.limits, model, self.now).is_some()
         })
     }
@@ -294,29 +280,20 @@ impl RateLimitSignal {
     }
 }
 
-/// Where a conversation runs.
-#[derive(Clone)]
-enum RouteHome {
-    /// In a home of the account's own.
-    Isolated,
-    /// In the provider's native home.
-    Shared {
-        cause: activation::SwitchCause,
-        launched_at: i64,
-    },
-}
-
-/// The catalog holding an account's login, independent of its launch home.
+/// The catalog holding an account's login.
 #[derive(Clone)]
 enum AccountLogin {
-    /// A profile in this Machine's catalog. A shared launch signs the native
-    /// home in from it.
+    /// A profile in this Machine's catalog. A launch signs the provider's
+    /// shared home in from it; every conversation runs there.
     Stored {
         store: SharedStore,
         profile: PathBuf,
+        cause: activation::SwitchCause,
+        launched_at: i64,
     },
-    /// A profile in a recorded capture's catalog, read to check identity. Replay
-    /// names the account it requires and records nothing.
+    /// A profile in a recorded capture's catalog. Replay runs in that profile,
+    /// names the account it requires and records nothing, so this Machine's
+    /// shared login is never switched to another catalog's account.
     Replayed {
         catalog: SharedStore,
         profile: PathBuf,
@@ -335,15 +312,14 @@ struct AccountCandidate {
 pub(crate) struct ProviderAccountRoute {
     provider: Provider,
     account_id: ProviderAccountId,
-    home: RouteHome,
     login: AccountLogin,
 }
 
 impl std::fmt::Debug for ProviderAccountRoute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let home = match self.home {
-            RouteHome::Isolated => "account_home",
-            RouteHome::Shared { .. } => "native_home",
+        let home = match self.login {
+            AccountLogin::Stored { .. } => "native_home",
+            AccountLogin::Replayed { .. } => "recorded_profile",
         };
         f.debug_struct("ProviderAccountRoute")
             .field("provider", &self.provider)
@@ -354,35 +330,7 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
-    #[cfg(test)]
-    pub(crate) fn isolated_for_test(
-        provider: Provider,
-        account_id: &str,
-        store: SharedStore,
-        profile: PathBuf,
-    ) -> Self {
-        Self {
-            provider,
-            account_id: parse_account_id(account_id).expect("test account id"),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored { store, profile },
-        }
-    }
-
-    fn shared_home(named: bool) -> RouteHome {
-        RouteHome::Shared {
-            // A launch that named its account switches on a person's behalf;
-            // one that was routed switches because the active account ran out.
-            cause: if named {
-                activation::SwitchCause::Person
-            } else {
-                activation::SwitchCause::Exhaustion
-            },
-            launched_at: now_unix(),
-        }
-    }
-
-    fn shared(
+    pub(crate) fn shared(
         provider: Provider,
         account_id: ProviderAccountId,
         store: SharedStore,
@@ -392,12 +340,23 @@ impl ProviderAccountRoute {
         Self {
             provider,
             account_id,
-            home: Self::shared_home(named),
-            login: AccountLogin::Stored { store, profile },
+            login: AccountLogin::Stored {
+                store,
+                profile,
+                // A launch that named its account switches on a person's
+                // behalf; one that was routed switches because the active
+                // account ran out.
+                cause: if named {
+                    activation::SwitchCause::Person
+                } else {
+                    activation::SwitchCause::Exhaustion
+                },
+                launched_at: now_unix(),
+            },
         }
     }
 
-    /// The home an isolated conversation on this account runs in.
+    /// The account's stored profile: its login, and replay's launch home.
     fn account_home(&self) -> &Path {
         match &self.login {
             AccountLogin::Stored { profile, .. } | AccountLogin::Replayed { profile, .. } => {
@@ -414,8 +373,9 @@ impl ProviderAccountRoute {
     /// where a shared agent began; the switch log says where a provider that
     /// follows its native login has moved it since.
     async fn used_account(&self) -> Result<ProviderAccountId, ProviderAccountError> {
-        if let (RouteHome::Shared { launched_at, .. }, AccountLogin::Stored { store, .. }) =
-            (&self.home, &self.login)
+        if let AccountLogin::Stored {
+            store, launched_at, ..
+        } = &self.login
         {
             if activation::running_agents_follow_native_login(self.provider) {
                 let moved = store
@@ -429,35 +389,21 @@ impl ProviderAccountRoute {
         Ok(self.account_id.clone())
     }
 
-    /// The home this route's conversations live in: the account's own when
-    /// isolated, else the provider's native one.
-    fn conversation_home(&self) -> PathBuf {
-        match self.home {
-            RouteHome::Isolated => self.account_home().to_path_buf(),
-            RouteHome::Shared { .. } => activation::native_home(self.provider, None),
-        }
-    }
-
-    /// Bring conversation `agent_session` into this route's home, so the
-    /// provider resumes the same conversation under this account. The pin
-    /// waits for the provider to report the thread under this launch. Fails,
-    /// rather than starting an empty conversation, when its transcript
-    /// is nowhere to be found. A conversation no route has run and whose
-    /// transcript is nowhere, such as one whose id lf assigns before its
-    /// first launch, is new: there is nothing to adopt.
+    /// Bring conversation `agent_session` into the shared home, so the
+    /// provider resumes it under this account. Only a conversation that ran
+    /// in an account's own home, before every launch shared one, lives
+    /// elsewhere; its pin moves to the shared home once the provider reports
+    /// the thread under this launch. Fails, rather than starting an empty
+    /// conversation, when that transcript is nowhere to be found.
     async fn adopt(&self, agent_session: &AgentSessionId) -> Result<(), ProviderAccountError> {
         let AccountLogin::Stored { store, .. } = &self.login else {
             return Ok(());
         };
-        let recorded = store
-            .provider_session_isolated(self.provider, agent_session)
-            .await?
-            .is_some();
         let harness = crate::harness::HarnessKind::parse(self.provider.as_str())
             .expect("account routes exist only for agent providers");
-        let to = self.conversation_home();
+        let to = activation::native_home(self.provider, None);
         let from =
-            crate::transcript::conversation_home(&store.sqlite, self.provider, agent_session, None)
+            crate::transcript::conversation_home(&store.sqlite, self.provider, agent_session)
                 .map_err(|error| ProviderAccountError::Runtime(format!("{error:#}")))?;
         if from.as_deref() != Some(to.as_path()) {
             let copied = match &from {
@@ -470,9 +416,6 @@ impl ProviderAccountRoute {
             if copied.is_none()
                 && crate::transcript::transcript(harness, &to, agent_session.as_str()).is_none()
             {
-                if !recorded {
-                    return Ok(());
-                }
                 let place = match &from {
                     Some(from) => format!("missing from {}", from.display()),
                     None => "its account home was removed".to_string(),
@@ -486,27 +429,22 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn is_shared(&self) -> bool {
-        matches!(self.home, RouteHome::Shared { .. })
-    }
-
     /// Home used for identity checks. Codex access is resolved separately;
     /// Claude's matching native credential carries its current refresh.
     fn credential_home(&self) -> PathBuf {
-        match (self.provider, &self.home) {
-            (Provider::Claude, RouteHome::Shared { .. }) => {
+        match (self.provider, &self.login) {
+            (Provider::Claude, AccountLogin::Stored { .. }) => {
                 activation::claude_credential_home(self.account_home())
             }
             _ => self.account_home().to_path_buf(),
         }
     }
 
-    /// Provider arguments that must precede the subcommand. An isolated Codex
-    /// home keeps its login in a file whatever the mirrored config selects.
+    /// Provider arguments that must precede the subcommand. A replayed Codex
+    /// profile keeps its login in a file whatever the mirrored config selects.
     pub(crate) fn provider_args(&self) -> &'static [&'static str] {
-        match (self.provider, &self.home) {
-            (Provider::Codex, RouteHome::Isolated) => {
+        match (self.provider, &self.login) {
+            (Provider::Codex, AccountLogin::Replayed { .. }) => {
                 &["-c", "cli_auth_credentials_store=\"file\""]
             }
             _ => &[],
@@ -526,7 +464,8 @@ impl ProviderAccountRoute {
             reason,
         };
         if self.provider == Provider::Codex {
-            let preferred = matches!(self.home, RouteHome::Isolated).then(|| self.account_home());
+            let preferred =
+                matches!(self.login, AccountLogin::Replayed { .. }).then(|| self.account_home());
             let access = codex_access::resolve(&account, preferred)
                 .await
                 .map_err(|error| unavailable(error.to_string()))?;
@@ -579,11 +518,12 @@ impl ProviderAccountRoute {
     }
 
     fn apply(&self, command: &mut Command) {
+        let replayed = matches!(self.login, AccountLogin::Replayed { .. });
         for name in PROVIDER_CREDENTIAL_ENV_VARS {
-            // A shared launch keeps the home its caller chose. A home inherited
-            // from an isolated parent is cleared, so the provider falls back to
-            // its native one.
-            let kept_home = matches!(self.home, RouteHome::Shared { .. })
+            // A launch keeps the home its caller chose. A stored profile
+            // inherited from a parent is cleared, so the provider falls back
+            // to its shared home.
+            let kept_home = !replayed
                 && matches!(name, "CODEX_HOME" | "CLAUDE_CONFIG_DIR")
                 && !launch_env(command, name)
                     .is_some_and(|home| activation::is_account_home(Path::new(&home)));
@@ -591,36 +531,27 @@ impl ProviderAccountRoute {
                 command.env_remove(name);
             }
         }
-        if let (RouteHome::Isolated, Some(name)) = (&self.home, activation::home_env(self.provider))
-        {
+        if let (true, Some(name)) = (replayed, activation::home_env(self.provider)) {
             command.env(name, self.account_home());
         }
     }
 
     /// The one place a launch takes on an account. Every route configures
-    /// `command`; a shared route on a stored login first signs the native home
-    /// in as its account, doing nothing when that account is already active.
-    /// Hold the returned lock until the child has spawned.
+    /// `command`; a stored login first signs the shared home in as its
+    /// account, doing nothing when that account is already active. Hold the
+    /// returned lock until the child has spawned.
     pub(crate) async fn launch_as(
         &self,
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {
         self.apply(command);
-        let AccountLogin::Stored { store, .. } = &self.login else {
+        let AccountLogin::Stored { store, cause, .. } = &self.login else {
             return Ok(None);
         };
-        match &self.home {
-            RouteHome::Isolated if self.provider == Provider::Codex => {
-                activation::prepare_isolated_codex(store, &self.account_id).await
-            }
-            RouteHome::Isolated => Ok(None),
-            RouteHome::Shared { cause, .. } => {
-                let launch_home =
-                    activation::home_env(self.provider).and_then(|name| launch_env(command, name));
-                let native = activation::native_home(self.provider, launch_home.as_deref());
-                activation::activate(store, self.provider, &self.account_id, &native, *cause).await
-            }
-        }
+        let launch_home =
+            activation::home_env(self.provider).and_then(|name| launch_env(command, name));
+        let native = activation::native_home(self.provider, launch_home.as_deref());
+        activation::activate(store, self.provider, &self.account_id, &native, *cause).await
     }
 
     pub(crate) fn launch_as_blocking(
@@ -639,12 +570,7 @@ impl ProviderAccountRoute {
         match &self.login {
             AccountLogin::Stored { store, .. } => {
                 store
-                    .pin_provider_session_route(
-                        self.provider,
-                        agent_session,
-                        &self.account_id,
-                        matches!(self.home, RouteHome::Isolated),
-                    )
+                    .pin_provider_session_route(self.provider, agent_session, &self.account_id)
                     .await?;
             }
             AccountLogin::Replayed { .. } => {}
@@ -956,7 +882,7 @@ pub(crate) async fn resolve_provider_account(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact(provider, agent_session, None, None, None, None).await
+    resolve_provider_account_exact(provider, agent_session, None, None, None).await
 }
 
 /// Native Claude reported a limit through `StopFailure`, on stdin. Its stream is
@@ -986,20 +912,6 @@ async fn record_native_limit(
         return Ok(());
     };
     let signal = RateLimitSignal::stated(reason);
-    let launch_home = activation::home_env(provider).and_then(std::env::var_os);
-    if let Some(home) = launch_home.filter(|home| activation::is_account_home(Path::new(home))) {
-        // An isolated Session stays where it is; its next resume moves it.
-        let accounts = store
-            .list_provider_accounts(Some(provider.as_str()))
-            .await?;
-        if let Some(account) = accounts
-            .iter()
-            .find(|account| account.home.as_deref() == Some(Path::new(&home)))
-        {
-            record_rate_limit_signal(&store, provider, &account.account_id, &signal).await?;
-        }
-        return Ok(());
-    }
     let settled = now_unix() - SWITCH_SETTLE_SECS;
     if store
         .provider_account_switched_since(provider, settled)
@@ -1018,7 +930,7 @@ async fn record_native_limit(
         return Ok(());
     }
     let wave = crate::work::wave::context::ambient_wave_id();
-    match select_route(provider, None, None, wave.as_ref(), Some(false), None).await {
+    match select_route(provider, None, None, wave.as_ref(), None).await {
         Ok(Some(route)) => {
             activation::activate(
                 &store,
@@ -1036,32 +948,6 @@ async fn record_native_limit(
     }
 }
 
-/// The `provider` login this launch's `--account` names when it differs from
-/// the one conversation `agent_session` is pinned to: a request to move it.
-pub(crate) async fn names_another_account(
-    store: &SharedStore,
-    provider: Provider,
-    agent_session: &AgentSessionId,
-) -> Result<Option<ProviderAccountId>, ProviderAccountError> {
-    let selection = selection::AccountSelection::from_env()?;
-    if selection.is_default() {
-        return Ok(None);
-    }
-    let named = selection
-        .resolved_accounts(&store.list_provider_accounts(None).await?)?
-        .into_iter()
-        .filter(|(selected, _)| *selected == provider)
-        .map(|(_, account_id)| account_id)
-        .collect::<Vec<_>>();
-    let pinned = store
-        .provider_session_account(provider, agent_session)
-        .await?;
-    if pinned.is_some_and(|pinned| named.contains(&pinned)) {
-        return Ok(None);
-    }
-    Ok(named.into_iter().next())
-}
-
 /// The route a launch in `wave_id`'s work takes, if any. A conversation it resumes is brought into the
 /// route's home first, whichever account held it before.
 pub(crate) async fn resolve_provider_account_exact(
@@ -1069,18 +955,9 @@ pub(crate) async fn resolve_provider_account_exact(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
-    isolate: Option<bool>,
     model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let route = select_route(
-        provider,
-        agent_session,
-        exact_account_id,
-        wave_id,
-        isolate,
-        model,
-    )
-    .await?;
+    let route = select_route(provider, agent_session, exact_account_id, wave_id, model).await?;
     if let (Some(route), Some(agent_session)) = (&route, agent_session) {
         route.adopt(agent_session).await?;
     }
@@ -1088,41 +965,31 @@ pub(crate) async fn resolve_provider_account_exact(
 }
 
 /// `model` is the launch's, when it names one; a scoped limit on another
-/// model leaves an account eligible for this launch.
+/// model leaves an account eligible for this launch. A resumed conversation
+/// runs under whichever account the shared home routes to; the account it
+/// began under is history, not a pin.
 async fn select_route(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
-    isolate: Option<bool>,
     model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
-    // A conversation resumes in the home it started in; a new one follows the
-    // launch's mode.
-    let recorded = match (&store, agent_session) {
+    let resumed = match (&store, agent_session) {
         (Some(store), Some(session_id)) => {
-            store
-                .provider_session_isolated(provider, session_id)
-                .await?
+            store.provider_session_routed(provider, session_id).await?
         }
-        _ => None,
+        _ => false,
     };
-    let isolated = recorded
-        .or(isolate)
-        .unwrap_or_else(activation::launch_isolated);
-    // A shared conversation resumes under whichever account is active; the
-    // account it began under is history, not a pin.
-    let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
+    let exact_account_id = exact_account_id.filter(|_| !resumed);
     if !selection::AccountSelection::from_env()?.is_default() {
         return resolve_selected_provider_account(
             provider,
-            agent_session,
             exact_account_id,
             wave_id,
             store,
-            isolated,
             model,
         )
         .await;
@@ -1196,13 +1063,7 @@ async fn select_route(
             retry_at: None,
         });
     }
-    let selection = if isolated {
-        store
-            .select_provider_account(provider, &eligible, agent_session, model)
-            .await?
-    } else {
-        select_shared_account(&store, provider, &eligible, model).await?
-    };
+    let selection = select_shared_account(&store, provider, &eligible, model).await?;
     let Some(selection) = selection else {
         let accounts = store
             .list_provider_accounts(Some(provider.as_str()))
@@ -1246,24 +1107,13 @@ async fn select_route(
             )))
         }
     };
-    if !isolated {
-        return Ok(Some(ProviderAccountRoute::shared(
-            provider,
-            account_id,
-            store,
-            home,
-            exact_account_id.is_some(),
-        )));
-    }
-    Ok(Some(ProviderAccountRoute {
+    Ok(Some(ProviderAccountRoute::shared(
         provider,
         account_id,
-        home: RouteHome::Isolated,
-        login: AccountLogin::Stored {
-            store,
-            profile: home,
-        },
-    }))
+        store,
+        home,
+        exact_account_id.is_some(),
+    )))
 }
 
 /// Shared routing takes the eligible account that resets soonest. The
@@ -1283,24 +1133,21 @@ async fn select_shared_account(
         ordered.insert(0, active);
     }
     Ok(store
-        .select_provider_account(provider, &ordered, None, model)
+        .select_provider_account(provider, &ordered, model)
         .await?)
 }
 
 async fn resolve_selected_provider_account(
     provider: Provider,
-    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
     local_store: Option<SharedStore>,
-    isolated: bool,
     model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let repo_id = current_repo_id()?;
     let Some(mut candidates) = ordered_selected_candidates(
         provider,
         LaunchAsk {
-            agent_session,
             exact_account_id,
             model,
         },
@@ -1316,13 +1163,11 @@ async fn resolve_selected_provider_account(
     let store = local_store
         .as_ref()
         .expect("candidates belong to the machine store");
-    if !isolated {
-        let native = activation::native_home(provider, None);
-        let active = activation::observe_active_account(store, provider, &native).await?;
-        if let Some(index) = active.and_then(|active| active_candidate(&active, &candidates)) {
-            let active = candidates.remove(index);
-            candidates.insert(0, active);
-        }
+    let native = activation::native_home(provider, None);
+    let active = activation::observe_active_account(store, provider, &native).await?;
+    if let Some(index) = active.and_then(|active| active_candidate(&active, &candidates)) {
+        let active = candidates.remove(index);
+        candidates.insert(0, active);
     }
     let limits = store
         .provider_account_limits(Some(provider.as_str()))
@@ -1340,7 +1185,6 @@ async fn resolve_selected_provider_account(
                 .select_provider_account(
                     provider,
                     std::slice::from_ref(&candidate.account.account_id),
-                    agent_session,
                     model,
                 )
                 .await?
@@ -1350,24 +1194,13 @@ async fn resolve_selected_provider_account(
         }
         let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         ensure_account_home_at(&operator_home, home, provider)?;
-        if !isolated {
-            return Ok(Some(ProviderAccountRoute::shared(
-                provider,
-                candidate.account.account_id.clone(),
-                Arc::clone(store),
-                home.clone(),
-                explicit,
-            )));
-        }
-        return Ok(Some(ProviderAccountRoute {
+        return Ok(Some(ProviderAccountRoute::shared(
             provider,
-            account_id: candidate.account.account_id.clone(),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored {
-                store: Arc::clone(store),
-                profile: home.clone(),
-            },
-        }));
+            candidate.account.account_id.clone(),
+            Arc::clone(store),
+            home.clone(),
+            explicit,
+        )));
     }
 
     Err(ProviderAccountError::NoEligibleAccount {
@@ -1399,11 +1232,9 @@ fn active_candidate(
     })
 }
 
-/// What a launch asks of the route: the thread it continues, the login it
-/// names, and the model it runs.
+/// What a launch asks of the route: the login it names and the model it runs.
 #[derive(Debug, Clone, Copy, Default)]
 struct LaunchAsk<'a> {
-    agent_session: Option<&'a AgentSessionId>,
     exact_account_id: Option<&'a ProviderAccountId>,
     model: Option<&'a str>,
 }
@@ -1417,7 +1248,6 @@ async fn ordered_selected_candidates(
     verify_identity: bool,
 ) -> Result<Option<Vec<(AccountCandidate, bool)>>, ProviderAccountError> {
     let LaunchAsk {
-        agent_session,
         exact_account_id,
         model,
     } = ask;
@@ -1492,11 +1322,8 @@ async fn ordered_selected_candidates(
         }
     }
 
-    // A resumed conversation moves to the login named for it and never falls
-    // back to the one it ran on.
-    let moving = agent_session.is_some() && !explicitly_preferred.is_empty();
     let mut order = explicitly_preferred.clone();
-    if !selection.is_restricted() && !moving {
+    if !selection.is_restricted() {
         for account_id in &local_route {
             if let Some(index) = candidates
                 .iter()
@@ -1511,9 +1338,7 @@ async fn ordered_selected_candidates(
         }
     }
 
-    // A resume replays the login the conversation last ran on; one named for
-    // it replaces that login.
-    if let Some(account_id) = exact_account_id.filter(|_| !moving) {
+    if let Some(account_id) = exact_account_id {
         order.retain(|index| candidates[*index].account.account_id == *account_id);
     }
     if order.is_empty() {
@@ -1522,23 +1347,6 @@ async fn ordered_selected_candidates(
             accounts: "the account selection is empty".to_string(),
             retry_at: None,
         });
-    }
-
-    if let Some(session_id) = agent_session.filter(|_| !moving) {
-        let local_pin = match &local_store {
-            Some(store) => store.provider_session_account(provider, session_id).await?,
-            None => None,
-        };
-        if let Some(index) = order.iter().position(|index| {
-            let candidate = &candidates[*index];
-            local_pin
-                .as_ref()
-                .is_some_and(|account_id| *account_id == candidate.account.account_id)
-        }) {
-            let pinned = order.remove(index);
-            push_candidate(&mut explicitly_preferred, pinned);
-            order.insert(0, pinned);
-        }
     }
 
     let now = now_unix();
@@ -1558,28 +1366,6 @@ async fn ordered_selected_candidates(
             .then(|| (candidate.clone(), explicit))
         })
         .collect::<Vec<_>>();
-    if moving && ordered.is_empty() {
-        return Err(ProviderAccountError::NoEligibleAccount {
-            provider,
-            accounts: order
-                .iter()
-                .map(|index| match candidates[*index].account.credential_state {
-                    CredentialState::Connected => format!(
-                        "'{}' does not match its stored login",
-                        account_login(&candidates[*index].account)
-                    ),
-                    _ => account_unavailable_reason(
-                        &candidates[*index].account,
-                        &limits,
-                        model,
-                        now_unix(),
-                    ),
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-            retry_at: None,
-        });
-    }
     Ok(Some(ordered))
 }
 
@@ -1828,7 +1614,6 @@ pub(crate) fn resolve_provider_account_exact_blocking(
     agent_session: Option<AgentSessionId>,
     exact_account_id: Option<ProviderAccountId>,
     wave_id: Option<WaveId>,
-    isolate: Option<bool>,
     model: Option<String>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
@@ -1837,7 +1622,6 @@ pub(crate) fn resolve_provider_account_exact_blocking(
             agent_session.as_ref(),
             exact_account_id.as_ref(),
             wave_id.as_ref(),
-            isolate,
             model.as_deref(),
         ))
     })
@@ -1885,7 +1669,6 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
             let route = ProviderAccountRoute {
                 provider,
                 account_id,
-                home: RouteHome::Isolated,
                 login: AccountLogin::Replayed {
                     catalog,
                     profile: home,
@@ -2176,9 +1959,8 @@ mod tests {
         let route = ProviderAccountRoute {
             provider: Provider::Codex,
             account_id: parse_account_id("reserve").unwrap(),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored {
-                store,
+            login: AccountLogin::Replayed {
+                catalog: store,
                 profile: temp.path().join("codex-reserve"),
             },
         };
@@ -2215,7 +1997,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_routes_select_independent_provider_homes() {
+    async fn replayed_routes_run_in_their_recorded_profiles() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2231,9 +2013,8 @@ mod tests {
                 ProviderAccountRoute {
                     provider: Provider::Claude,
                     account_id: parse_account_id("primary").unwrap(),
-                    home: RouteHome::Isolated,
-                    login: AccountLogin::Stored {
-                        store: store.clone(),
+                    login: AccountLogin::Replayed {
+                        catalog: store.clone(),
                         profile: claude_home.clone(),
                     },
                 },
@@ -2244,9 +2025,8 @@ mod tests {
                 ProviderAccountRoute {
                     provider: Provider::Codex,
                     account_id: parse_account_id("reserve").unwrap(),
-                    home: RouteHome::Isolated,
-                    login: AccountLogin::Stored {
-                        store,
+                    login: AccountLogin::Replayed {
+                        catalog: store,
                         profile: codex_home.clone(),
                     },
                 },
@@ -2285,15 +2065,13 @@ mod tests {
             None,
         );
         store.upsert_provider_account(&account).await.unwrap();
-        let route = ProviderAccountRoute {
-            provider: Provider::Claude,
-            account_id: account_id.clone(),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored {
-                store: store.clone(),
-                profile: temp.path().join("primary"),
-            },
-        };
+        let route = ProviderAccountRoute::shared(
+            Provider::Claude,
+            account_id.clone(),
+            store.clone(),
+            temp.path().join("primary"),
+            true,
+        );
 
         route
             .record_rate_limit(&RateLimitSignal {
@@ -2788,60 +2566,6 @@ mod account_first_tests {
     }
 
     #[tokio::test]
-    async fn a_resumed_conversation_prefers_its_pinned_account_over_strain() {
-        let temp = tempdir().unwrap();
-        let store = Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                temp.path().join("store.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let first = account(Provider::Codex, "first", temp.path());
-        let second = account(Provider::Codex, "second", temp.path());
-        store.upsert_provider_account(&first).await.unwrap();
-        store.upsert_provider_account(&second).await.unwrap();
-        store
-            .upsert_provider_account_limits(
-                Provider::Codex.as_str(),
-                &second.account_id,
-                &[crate::store::AccountLimitWindow {
-                    window: "weekly".to_string(),
-                    used_percent: 95,
-                    resets_at: Some(now_unix() + 3600),
-                    plan: None,
-                    model: None,
-                    limited_until: None,
-                }],
-                "poll",
-            )
-            .await
-            .unwrap();
-        store
-            .pin_provider_session_route(
-                Provider::Codex,
-                &"session".into(),
-                &second.account_id,
-                true,
-            )
-            .await
-            .unwrap();
-
-        let selection = store
-            .select_provider_account(
-                Provider::Codex,
-                &[first.account_id, second.account_id.clone()],
-                Some(&"session".into()),
-                None,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(selection.account.account_id, second.account_id);
-    }
-
-    #[tokio::test]
     async fn automatic_selection_prefers_the_account_that_resets_soonest() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
@@ -2870,7 +2594,7 @@ mod account_first_tests {
             let both = both.clone();
             async move {
                 store
-                    .select_provider_account(Provider::Codex, &both, None, None)
+                    .select_provider_account(Provider::Codex, &both, None)
                     .await
                     .unwrap()
                     .unwrap()
@@ -2902,7 +2626,6 @@ mod account_first_tests {
             .select_provider_account(
                 Provider::Codex,
                 std::slice::from_ref(&first.account_id),
-                None,
                 None,
             )
             .await
@@ -3009,25 +2732,18 @@ mod account_first_tests {
         assert_eq!(route.account_id(), &healthy.account_id);
     }
 
-    const SHARED_ENV: [&str; 5] = [
+    const SHARED_ENV: [&str; 4] = [
         "LF_HOME",
         "CODEX_HOME",
         "CLAUDE_CONFIG_DIR",
         "LF_TEST_CLAUDE_PROFILE_URL",
-        activation::ACCOUNT_ISOLATION_ENV,
     ];
-
-    fn set_isolation(isolate: bool) {
-        let (name, mode) = activation::isolation_env(isolate);
-        std::env::set_var(name, mode);
-    }
 
     /// A Machine with `provider` accounts `first` and `second` on the default
     /// route and a native home signed in as `active`; `native` is a login no
     /// stored account holds.
     async fn shared_home(provider: Provider, temp: &Path, active: &str) -> (SharedStore, PathBuf) {
         std::env::set_var("LF_HOME", temp);
-        std::env::remove_var(activation::ACCOUNT_ISOLATION_ENV);
         let native = temp.join("native");
         fs::create_dir_all(&native).unwrap();
         std::env::set_var(activation::home_env(provider).unwrap(), &native);
@@ -3207,7 +2923,6 @@ mod account_first_tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(resumed.is_shared());
         assert_eq!(resumed.account_id(), route.account_id());
         let lock = resumed.launch_as(&mut command).await.unwrap();
         assert!(command.output().unwrap().status.success());
@@ -3281,7 +2996,7 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn codex_same_login_recovery_uses_custom_and_isolated_homes() {
+    async fn codex_same_login_recovery_uses_a_custom_home() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
@@ -3304,16 +3019,6 @@ mod account_first_tests {
         drop(lock);
         assert_eq!(fs::read(custom.join("auth.json")).unwrap(), good);
         assert_eq!(fs::read(native.join("auth.json")).unwrap(), ambient);
-        set_isolation(true);
-        set_codex_fixture_access(&profile, "rejected");
-        let route = resolve_provider_account(Provider::Codex, None)
-            .await
-            .unwrap()
-            .unwrap();
-        let lock = route.launch_as(&mut command).await.unwrap();
-        drop(lock);
-        assert_eq!(fs::read(profile.join("auth.json")).unwrap(), ambient);
-        assert_eq!(launch_home(&command), Some(Some(profile)));
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -3588,7 +3293,6 @@ mod account_first_tests {
         command.env("CLAUDE_CODE_OAUTH_TOKEN", "inherited");
         let switched = route.launch_as(&mut command).await.unwrap();
 
-        assert!(route.is_shared());
         assert_eq!(route.account_id().as_str(), "second");
         assert!(switched.is_none());
         let set = |name: &str| {
@@ -3626,7 +3330,6 @@ mod account_first_tests {
         let mut command = Command::new("codex");
         let switched = route.launch_as(&mut command).await.unwrap();
 
-        assert!(route.is_shared());
         assert_eq!(route.account_id().as_str(), "second");
         assert!(switched.is_none());
         assert_eq!(launch_home(&command), None);
@@ -3726,37 +3429,6 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn isolated_launch_and_its_conversation_stay_in_the_account_home() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
-        set_isolation(true);
-
-        let route = resolve_provider_account(Provider::Codex, None)
-            .await
-            .unwrap()
-            .unwrap();
-        let mut command = Command::new("codex");
-        let switched = route.launch_as(&mut command).await.unwrap();
-        route.pin_session(&"conversation".into()).await.unwrap();
-
-        assert!(switched.is_none());
-        assert_eq!(launch_home(&command), Some(Some(temp.path().join("first"))));
-        assert_eq!(codex_login(&native), "second@example.com");
-
-        // Resumed from a shared launch, it returns to the home it started in.
-        set_isolation(false);
-        let resumed = resolve_provider_account(Provider::Codex, Some(&"conversation".into()))
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(!resumed.is_shared());
-        assert_eq!(resumed.account_id().as_str(), "first");
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
     async fn shared_conversation_resumes_in_the_native_home_after_a_switch() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
@@ -3769,13 +3441,11 @@ mod account_first_tests {
         route.pin_session(&"conversation".into()).await.unwrap();
         assert!(activate(&store, Provider::Codex, "second", &native).await);
 
-        set_isolation(true);
         let resumed = resolve_provider_account(Provider::Codex, Some(&"conversation".into()))
             .await
             .unwrap()
             .unwrap();
 
-        assert!(resumed.is_shared());
         assert_eq!(resumed.account_id().as_str(), "second");
 
         // The account it began under is history: resuming does not switch back.
@@ -3784,7 +3454,6 @@ mod account_first_tests {
             Provider::Codex,
             Some(&"conversation".into()),
             Some(&began),
-            None,
             None,
             None,
         )
@@ -3862,7 +3531,6 @@ mod account_first_tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(route.is_shared());
         assert_eq!(route.account_id().as_str(), "second");
 
         // A named account that resets sooner displaces the active one.
@@ -3903,117 +3571,30 @@ mod account_first_tests {
         assert_eq!(codex_login(&native), "first@example.com");
     }
 
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
-    async fn naming_another_login_moves_an_isolated_conversation_with_its_transcript() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (store, _native) = shared_home(Provider::Codex, temp.path(), "first").await;
-        set_isolation(true);
-        // A Claude login on the same email never competes for a Codex launch.
+    /// Record that `conversation` ran in `account`'s own home, before every
+    /// launch shared one.
+    fn ran_in_account_home(store: &SharedStore, conversation: &str, account: &str) {
         store
-            .upsert_provider_account(&account(Provider::Claude, "second", temp.path()))
-            .await
-            .unwrap();
-        let id = "0199a213-81c0-7800-8aa1-bbab2a035a53";
-        let rollout = format!("sessions/2026/10/02/rollout-2026-10-02T10-00-00-{id}.jsonl");
-        let first_home = temp.path().join("first");
-        fs::create_dir_all(first_home.join(&rollout).parent().unwrap()).unwrap();
-        fs::write(first_home.join(&rollout), "{\"type\":\"session_meta\"}\n").unwrap();
-        let conversation: AgentSessionId = id.into();
-        let first = parse_account_id("first").unwrap();
-        store
-            .pin_provider_session_route(Provider::Codex, &conversation, &first, true)
-            .await
-            .unwrap();
-        let named = |login: &str| {
-            let selection =
-                selection::AccountSelection::from_flags(&[login.to_string()], &[]).unwrap();
-            std::env::set_var(
-                selection::ACCOUNT_SELECTION_ENV,
-                selection.env_value().unwrap(),
-            );
-        };
-
-        // A resume replays the login it last ran on; naming another moves it.
-        named("second@example.com");
-        let route = resolve_provider_account_exact(
-            Provider::Codex,
-            Some(&conversation),
-            Some(&first),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(route.account_id().as_str(), "second");
-        assert!(!route.is_shared());
-        assert!(temp.path().join("second").join(&rollout).is_file());
-        // Choosing an account is no proof it ran the thread; the launch pins it.
-        let pinned = |store: SharedStore, conversation: AgentSessionId| async move {
-            store
-                .provider_session_account(Provider::Codex, &conversation)
-                .await
-                .unwrap()
-                .unwrap()
-                .as_str()
-                .to_string()
-        };
-        assert_eq!(
-            pinned(Arc::clone(&store), conversation.clone()).await,
-            "first"
-        );
-        route.pin_session(&conversation).await.unwrap();
-        assert_eq!(
-            pinned(Arc::clone(&store), conversation.clone()).await,
-            "second"
-        );
-
-        // A conversation whose transcript is nowhere fails instead of starting empty.
-        let lost: AgentSessionId = "0199a213-81c0-7800-8aa1-bbab2a035a54".into();
-        store
-            .pin_provider_session_route(Provider::Codex, &lost, &first, true)
-            .await
-            .unwrap();
-        let error = resolve_provider_account(Provider::Codex, Some(&lost))
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("transcript"), "{error}");
-
-        // A named login that cannot launch fails rather than falling back.
-        let mut second = store
-            .list_provider_accounts(Some("codex"))
-            .await
+            .sqlite
+            .conn
+            .lock()
             .unwrap()
-            .into_iter()
-            .find(|account| account.account_id.as_str() == "second")
+            .execute(
+                "INSERT INTO provider_session_accounts
+                    (provider, provider_session_id, account_id, created_at, isolated)
+                 VALUES ('claude', ?1, ?2, 1, 1)",
+                rusqlite::params![conversation, account],
+            )
             .unwrap();
-        second.credential_state = CredentialState::Missing;
-        store.upsert_provider_account(&second).await.unwrap();
-        named("first@example.com");
-        resolve_provider_account(Provider::Codex, Some(&conversation))
-            .await
-            .unwrap();
-        named("second@example.com");
-        let error = resolve_provider_account(Provider::Codex, Some(&conversation))
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("second@example.com"), "{error}");
     }
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn naming_another_login_moves_an_isolated_claude_conversation_with_its_transcript() {
+    async fn a_conversation_from_an_account_home_resumes_in_the_shared_home() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
-        set_isolation(true);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
         let id = "0199a213-81c0-7800-8aa1-bbab2a035a55";
         let project = "projects/-Users-jack-src-loopflow";
         let first_home = temp.path().join("first");
@@ -4030,62 +3611,33 @@ mod account_first_tests {
             "{}\n",
         )
         .unwrap();
+        ran_in_account_home(&store, id, "first");
         let conversation: AgentSessionId = id.into();
-        let first = parse_account_id("first").unwrap();
-        store
-            .pin_provider_session_route(Provider::Claude, &conversation, &first, true)
-            .await
-            .unwrap();
-        let selection =
-            selection::AccountSelection::from_flags(&["second@example.com".to_string()], &[])
-                .unwrap();
-        std::env::set_var(
-            selection::ACCOUNT_SELECTION_ENV,
-            selection.env_value().unwrap(),
-        );
 
         let route = resolve_provider_account(Provider::Claude, Some(&conversation))
             .await
             .unwrap()
             .unwrap();
         assert_eq!(route.account_id().as_str(), "second");
-        assert!(!route.is_shared());
-        let second_project = temp.path().join("second").join(project);
-        assert!(second_project.join(format!("{id}.jsonl")).is_file());
-        assert!(second_project
-            .join(format!("{id}/subagents/agent.jsonl"))
-            .is_file());
-
-        // A conversation whose id lf assigned before its first launch starts there.
-        let fresh: AgentSessionId = "0199a213-81c0-7800-8aa1-bbab2a035a56".into();
-        let route = resolve_provider_account(Provider::Claude, Some(&fresh))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(route.account_id().as_str(), "second");
+        let shared = native.join(project);
+        assert!(shared.join(format!("{id}.jsonl")).is_file());
+        assert!(shared.join(format!("{id}/subagents/agent.jsonl")).is_file());
+        // Read from the account home until a launch runs it in the shared one.
+        let home = || {
+            crate::transcript::conversation_home(&store.sqlite, Provider::Claude, &conversation)
+                .unwrap()
+        };
+        assert_eq!(home(), Some(first_home.clone()));
         route.pin_session(&conversation).await.unwrap();
-        assert_eq!(
-            store
-                .provider_session_account(Provider::Claude, &conversation)
-                .await
-                .unwrap()
-                .unwrap()
-                .as_str(),
-            "second"
-        );
+        assert_eq!(home(), Some(native.clone()));
 
-        // One that arrived from another Machine sits in the native home, unrecorded here.
-        let received = "0199a213-81c0-7800-8aa1-bbab2a035a57";
-        fs::create_dir_all(native.join(project)).unwrap();
-        fs::write(
-            native.join(project).join(format!("{received}.jsonl")),
-            format!("{{\"type\":\"user\",\"sessionId\":\"{received}\"}}\n"),
-        )
-        .unwrap();
-        resolve_provider_account(Provider::Claude, Some(&received.into()))
+        // A conversation whose transcript is nowhere fails instead of starting empty.
+        let lost = "0199a213-81c0-7800-8aa1-bbab2a035a54";
+        ran_in_account_home(&store, lost, "first");
+        let error = resolve_provider_account(Provider::Claude, Some(&lost.into()))
             .await
-            .unwrap();
-        assert!(second_project.join(format!("{received}.jsonl")).is_file());
+            .unwrap_err();
+        assert!(error.to_string().contains("transcript"), "{error}");
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -4123,7 +3675,7 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn shared_launch_under_an_isolated_parent_drops_the_inherited_home() {
+    async fn a_launch_under_a_stored_profile_home_drops_the_inherited_home() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
@@ -4252,7 +3804,6 @@ mod inspection_tests {
                         .iter()
                         .map(|a| a.account_id.clone())
                         .collect::<Vec<_>>(),
-                    None,
                     None,
                 )
                 .await

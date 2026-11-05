@@ -27,10 +27,9 @@ pub(crate) struct NativeExit {
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
     pub capture: Option<CaptureHandoff>,
-    /// The input whose provider session names the account home to return to.
+    /// The input whose provider session names the conversation to pin.
     pub capture_key: Option<String>,
     pub account: Option<ProviderAccountId>,
-    pub isolate: Option<bool>,
     /// The launcher's diagnostics log and its size before the provider ran.
     pub diagnostics: (PathBuf, u64),
 }
@@ -71,8 +70,10 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             attachment_lost(owner).map_err(Into::into),
         )
     });
-    if let (Some(account), Some(key), false) = (&exit.account, &exit.capture_key, lost) {
-        pin_account_home(&exit.provider, account, key, exit.isolate);
+    if let (Some((store, ..)), Some(account), Some(key), false) =
+        (&owner, &exit.account, &exit.capture_key, lost)
+    {
+        pin_account(store, &exit.provider, account, key);
     }
     let command = crate::lf::commands::util::SessionCommandOutcome {
         status,
@@ -179,13 +180,13 @@ pub(crate) fn departure((store, session, attachment): &AttachmentOwner) -> Optio
     })
 }
 
-/// Record which account home the provider session lives in, so reopening
-/// returns there.
-fn pin_account_home(
+/// Record the account the provider session ran on, now that it has: the
+/// conversation lives in the shared home from here on.
+fn pin_account(
+    store: &SqliteStore,
     provider: &str,
     account: &ProviderAccountId,
     capture_key: &str,
-    isolate: Option<bool>,
 ) {
     let pinned = (|| -> Result<()> {
         let Ok(provider) = provider.parse::<crate::provider_auth::Provider>() else {
@@ -195,21 +196,11 @@ fn pin_account_home(
         let Some(session) = crate::session_record::read_provider_session(&dir)? else {
             return Ok(());
         };
-        let route = crate::provider_account::resolve_provider_account_exact_blocking(
-            provider,
-            Some(session.agent_session.clone()),
-            Some(account.clone()),
-            None,
-            isolate,
-            None,
-        )?;
-        if let Some(route) = route {
-            route.pin_session_blocking(Some(session.agent_session))?;
-        }
+        store.pin_provider_session_route(provider, &session.agent_session, account)?;
         Ok(())
     })();
     if let Err(error) = pinned {
-        tracing::warn!(%error, "failed to record the provider session's account home");
+        tracing::warn!(%error, "failed to record the provider session's account");
     }
 }
 
@@ -264,7 +255,6 @@ mod tests {
                 capture: Some(capture.hand_off()),
                 capture_key: Some(capture.artifact_key()),
                 account: None,
-                isolate: None,
                 diagnostics: (home.join("absent.log"), 0),
             };
             // The store this build knows is gone by the time the provider quits.
@@ -325,7 +315,6 @@ mod tests {
                 capture: Some(capture.hand_off()),
                 capture_key: Some(capture.artifact_key()),
                 account: None,
-                isolate: None,
                 diagnostics: (home.join("absent.log"), 0),
             };
             store

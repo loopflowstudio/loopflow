@@ -729,7 +729,7 @@ case "$1 $2 $3" in
 "--version  ") echo 'lf {}';;
 "machine id ") echo 'home_11111111111111111111111111111111';;
 "machine credentials inspect") cat "$HOME/connected";;
-*) printf 'selection: %s\nisolation: %s\n' "$LF_ACCOUNT_SELECTION" "$LF_ACCOUNT_ISOLATION"; printf 'argument: %s\n' "$@";;
+*) printf 'selection: %s\n' "$LF_ACCOUNT_SELECTION"; printf 'argument: %s\n' "$@";;
 esac
 "#,
             loopflow::build_info::BUILD_VERSION
@@ -740,7 +740,6 @@ esac
         "mini",
         "--account",
         "codex=person@",
-        "--shared",
         "skill",
         "implement",
         "--",
@@ -753,7 +752,6 @@ esac
         "implement",
         "--account",
         "codex=person@",
-        "--shared",
         "--",
         "--account=other@",
         "--shared",
@@ -773,8 +771,6 @@ esac
             selection,
             serde_json::json!({"Restrict": [{"provider": "codex", "account": "person@example.com"}]})
         );
-        assert!(stdout.contains("isolation: isolated\n"), "{stdout}");
-        assert!(stdout.contains("argument: --isolate\n"), "{stdout}");
         assert!(
             stdout.contains("argument: --\nargument: --account=other@\nargument: --shared\n"),
             "{stdout}"
@@ -998,7 +994,6 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
                 selector,
                 "--account",
                 "unconnected@example.invalid",
-                "--shared",
                 "skill",
                 "probe",
                 "literal 'draft'; $(false)",

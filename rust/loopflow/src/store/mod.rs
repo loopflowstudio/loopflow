@@ -590,36 +590,6 @@ impl Store {
         .await
     }
 
-    pub async fn set_long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        token: &secrecy::SecretString,
-        minted_at: i64,
-    ) -> StoreResult<bool> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        let token = token.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            use secrecy::ExposeSecret;
-            store.set_long_lived_token(&provider, &account_id, token.expose_secret(), minted_at)
-        })
-        .await
-    }
-
-    pub async fn long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<Option<LongLivedToken>> {
-        let provider = provider.to_string();
-        let account_id = account_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.long_lived_token(&provider, &account_id)
-        })
-        .await
-    }
-
     pub async fn list_provider_accounts(
         &self,
         provider: Option<&str>,
@@ -831,24 +801,23 @@ impl Store {
         provider: Provider,
         agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
-        isolated: bool,
     ) -> StoreResult<()> {
         let agent_session = agent_session.clone();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pin_provider_session_route(provider, &agent_session, &account_id, isolated)
+            store.pin_provider_session_route(provider, &agent_session, &account_id)
         })
         .await
     }
 
-    pub async fn provider_session_isolated(
+    pub async fn provider_session_routed(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<bool>> {
+    ) -> StoreResult<bool> {
         let agent_session = agent_session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_isolated(provider, &agent_session)
+            store.provider_session_routed(provider, &agent_session)
         })
         .await
     }
@@ -893,19 +862,12 @@ impl Store {
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        agent_session: Option<&AgentSessionId>,
         model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         let candidates = candidates.to_vec();
-        let agent_session = agent_session.cloned();
         let model = model.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(
-                provider,
-                &candidates,
-                agent_session.as_ref(),
-                model.as_deref(),
-            )
+            store.select_provider_account(provider, &candidates, model.as_deref())
         })
         .await
     }
@@ -953,34 +915,6 @@ pub(crate) enum ProviderTokenReplacement {
     Replaced,
     Changed(ProviderToken),
     Missing,
-}
-
-/// A subscription token for machines that cannot refresh a login: Claude's
-/// `setup-token`, approved once and valid about a year.
-#[derive(Debug, Clone)]
-pub struct LongLivedToken {
-    pub token: secrecy::SecretString,
-    pub minted_at: i64,
-}
-
-impl LongLivedToken {
-    /// Anthropic honors a `setup-token` for a year. A token supplied by hand
-    /// is dated from when lf stored it, since lf cannot read its mint date.
-    const LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
-
-    pub fn expires_at(&self) -> i64 {
-        self.minted_at + Self::LIFETIME_SECONDS
-    }
-
-    pub fn expires_on(&self) -> time::Date {
-        time::OffsetDateTime::from_unix_timestamp(self.expires_at())
-            .expect("a year after a stored unix time is representable")
-            .date()
-    }
-
-    pub fn is_current(&self, now: i64) -> bool {
-        now < self.expires_at()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

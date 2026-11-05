@@ -141,8 +141,7 @@ pub(crate) async fn move_sessions(
     Ok(report)
 }
 
-/// Switch the provider's shared login once; every Session on it follows. A
-/// Session pinned to its own login is named for `lf resume --account`.
+/// Switch the provider's shared login once; every Session on it follows.
 async fn move_login(
     store: &SharedStore,
     session: &SessionRecord,
@@ -158,16 +157,6 @@ async fn move_login(
         report.skip(session, "its provider has no managed logins");
         return;
     };
-    if let Some(account) = &session.account {
-        report.skip(
-            session,
-            format!(
-                "pinned to {account}; `lf resume --account {email} {}` moves it",
-                session.id
-            ),
-        );
-        return;
-    }
     let switched = match logins
         .iter()
         .position(|(switched, _)| *switched == provider)

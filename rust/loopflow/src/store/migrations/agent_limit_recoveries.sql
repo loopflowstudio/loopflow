@@ -27,3 +27,9 @@ CREATE TABLE session_moves (
     agent TEXT NOT NULL,
     requested_at INTEGER NOT NULL
 );
+
+-- Long-lived Claude tokens are gone: every machine login is a full login or a
+-- laptop-renewed access token. The stored tokens are deleted now; their
+-- columns stay until the released lf stops reading them (staged drop).
+UPDATE provider_accounts SET long_lived_token = NULL, long_lived_token_minted_at = NULL
+WHERE long_lived_token IS NOT NULL OR long_lived_token_minted_at IS NOT NULL;

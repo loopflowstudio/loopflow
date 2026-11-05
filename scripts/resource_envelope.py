@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import IO, Optional
 
+from cleanup_evidence import evidence_outcome
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POLICY_PATH = REPO_ROOT / "scripts" / "performance-budgets.json"
 BUILD_RELATIVE_PATHS = (
@@ -669,6 +671,24 @@ def _assess_sources(
     return issues
 
 
+def _gate_artifacts_expired(root: Path, cutoff: float) -> bool:
+    # Manual recovery shares the saved-evidence contract with the hourly runner.
+    # Directory mtime alone says nothing about writes to existing artifacts.
+    if evidence_outcome(root) == "saved":
+        return False
+    deadline = time.time() + INVENTORY_TIMEOUT_SECONDS
+    pending = [root]
+    while pending:
+        if time.time() >= deadline:
+            raise TimeoutError("gate artifact inspection exceeded its budget")
+        path = pending.pop()
+        if path.name == ".cleanup-keep" or path.lstat().st_mtime >= cutoff:
+            return False
+        if path.is_dir() and not path.is_symlink():
+            pending.extend(path.iterdir())
+    return True
+
+
 def _prune_old_gate_artifacts(
     source: ResourceSource,
     policy: ResourcePolicy,
@@ -689,7 +709,7 @@ def _prune_old_gate_artifacts(
     removed_bytes = 0
     if gate_root.is_dir():
         for child in gate_root.iterdir():
-            if child.stat().st_mtime >= cutoff:
+            if not _gate_artifacts_expired(child, cutoff):
                 continue
             measured = _allocated_bytes(child)
             if child.is_dir() and not child.is_symlink():

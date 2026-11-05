@@ -37,6 +37,8 @@ from functools import partial
 from pathlib import Path
 from typing import IO, Callable, Optional
 
+from cleanup_evidence import record_outcome
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 XCODE_LOCAL_SIGNING = [
     "CODE_SIGNING_ALLOWED=YES",
@@ -327,9 +329,9 @@ def _python_commands(changed: list[str]) -> list[Command]:
         ),
     ]
     if platform.system() == "Darwin" and (
-        not test_files or touches_source or "python/tests/test_disk_cleanup.py" in test_files
+        not test_files or touches_source or "python/tests/test_checkout_refresh.py" in test_files
     ):
-        # The cleanup proof builds lf under network isolation. Fetch native
+        # The checkout refresh proofs use lf under network isolation. Fetch native
         # archives and Cargo dependencies before entering that boundary.
         commands.insert(
             1,
@@ -1725,6 +1727,10 @@ def run_plans(
     phases = [phase for outcome in outcomes.values() for phase in outcome.phases]
     postflight, postflight_failure = _run_resource_check(False)
     resource_breach = postflight_failure if postflight is not None else None
+    try:
+        record_outcome(artifact_root, passed=not (failed or resource_breach))
+    except OSError as exc:
+        print(f"MEASUREMENT WARNING: artifact outcome remains unknown: {exc}", file=sys.stderr)
     if postflight is not None:
         print(_resource_summary(postflight, "postflight"))
     elif postflight is None and postflight_failure is not None:

@@ -300,15 +300,11 @@ pub(crate) fn run_sync_in(
         .and_then(|stacked| stacked.parent_branch.as_ref())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let default_target = if on_main {
-        upstream.clone()
-    } else {
-        default.clone()
-    };
+    let default_target = if on_main { &upstream } else { &default };
     let target = if detach {
         upstream.as_str()
     } else {
-        stacked_onto.as_deref().or(onto).unwrap_or(&default_target)
+        stacked_onto.as_deref().or(onto).unwrap_or(default_target)
     };
     if !plan_only {
         crate::git::fetch_tracking_ref(repo_root, target)?;

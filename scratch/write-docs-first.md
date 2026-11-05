@@ -64,9 +64,16 @@ Failure leaves placement retryable; no direct database writes or branch rename.
 - Repeated stacked demo reports and inherited parent notes: condensed here and
   in `docs-first-demo.md`; complete evidence remains at the checkpoint above.
 
+The extraction completed those deletions. The surviving Files path uses its
+relative-path conversion as the single checkout-containment check. Merge retains
+the comparison base from its ancestry check instead of checking it twice; sync
+borrows the selected target. No replacement abstraction or new state is needed.
+
 ## Remaining work and acceptance
 
-Complete the managed main sync; verify Git tree, Task base and PR #1817 base agree.
+Publish the local independent-main commits through the primary conversation's
+delivery steps. Managed placement and PR #1817 now target main; recovery details
+and the installed/main schema boundary are in `recovery.md`.
 Focused checks cover absent-Desktop behavior, original paths, no extra Session,
 active draft/tab retention, and clean/conflicted detachment preserving parent and
 child identities. Gate owns affected graph/progression, world recipes, goldens,
@@ -84,5 +91,4 @@ The earlier broad Swift suite exited without an assertion or timeout; focused
 Files/pane/DTO and Theme tests passed. That unexplained exit remains historical,
 not a passing full suite. No parent landing or installation is required here.
 
-Check: focused implementation validation pending on the extracted tree; gate and
-demo retain their respective boundaries.
+Check: `cargo test -p loopflow --test integration` with the separate filters `sync_tests::explicit_main_sync_detaches_only_the_child_and_preserves_its_pr` and `work_open_tests::desktop_file_presentation_without_desktop_never_falls_back_to_a_terminal` passed after compression, with inherited LF_* unset and stdin closed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. The earlier focused Task-context pass still applies to unchanged code. Gate owns affected suites and Swift; demo owns mounted UI evidence.

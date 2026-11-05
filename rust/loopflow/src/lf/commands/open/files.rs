@@ -38,13 +38,11 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
     };
     // Desktop reads remote paths through its existing Files transport.
     let remote = target.execution_machine.is_some();
-    if !remote {
-        anyhow::ensure!(
-            target.execution_machine.is_none() && target.execution_unavailable.is_none(),
-            "Present files on the Task's recorded Machine; no local editor was opened"
-        );
-    }
-    // Compare canonical paths, but keep the recorded checkout spelling for launch.
+    anyhow::ensure!(
+        remote || target.execution_unavailable.is_none(),
+        "Present files on the Task's recorded Machine; nothing opened"
+    );
+    // Canonicalize local paths; remote paths belong to Desktop's Files transport.
     let root = if remote {
         cwd.clone()
     } else {
@@ -63,9 +61,6 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
             path.canonicalize()
                 .with_context(|| format!("Cannot open {}", path.display()))?
         };
-        if target.task.is_some() && !remote {
-            anyhow::ensure!(path.starts_with(&root), "File is outside the Task checkout");
-        }
         if !paths.contains(&path) {
             paths.push(path);
         }

@@ -9,6 +9,10 @@ Desktop-only automatic presentation remains accepted. Task identity, checkout,
 conversation and PR #1817 remain; source PR #1810 and parent PR #1814 stay intact.
 Landing is authorized, through the existing code Graph's delivery steps.
 
+Reconciled November 4, 2026: implementation and independent placement exist.
+PR #1817 is open against main at `582201f7996dc28aa2ccbc75fd6d735c4e995b80`,
+matching this checkout. Review, gate, landing and verification remain.
+
 The complete stacked implementation, prior dirty gate repairs, decisions and
 contrary evidence are preserved at
 `ea0e0781b22f092b6a0169802997ff7a3628c65c:scratch/`.
@@ -51,6 +55,15 @@ short-circuit the explicit fork comparison. After successful integration, retarg
 the existing PR and clear the Task's parent while recording the pinned main SHA.
 Failure leaves placement retryable; no direct database writes or branch rename.
 
+Recovery first detached onto `a5000ef889`; the subsequent sync at `582201f799`
+integrated main `c59cfcc631`, now the supplied Task comparison base. Upstream
+LOO-582 adds explicit adoption of existing work and Session binding. File
+presentation continues through the existing Work resolution and Desktop Files
+action; it neither adopts work nor binds a conversation. Those upstream changes
+need no duplicate ownership mechanism here. The missing-base startup fallback
+reports unavailable comparison evidence while leaving the actual checkout
+available; the cause of the missing historical base remains unproven.
+
 ## Delete — do not maintain
 
 - LOO-498 native workspaces, host locators, draft migration, installer/transport
@@ -71,17 +84,44 @@ borrows the selected target. No replacement abstraction or new state is needed.
 
 ## Remaining work and acceptance
 
-Publish the local independent-main commits through the primary conversation's
-delivery steps. Managed placement and PR #1817 now target main; recovery details
-and the installed/main schema boundary are in `recovery.md`.
-Focused checks cover absent-Desktop behavior, original paths, no extra Session,
+Concept review, November 4: no design change and no unresolved product choice.
+Jack Heart's accepted experience maps to three existing owners: checkout files
+hold saved documentation, Desktop Files holds drafts and attention, and the
+Graph controls execution. Presentation is an action on those files, not a new
+document lifecycle, review state, Session bind or approval. The current usage
+docs and skill instructions express that contract; keep them unchanged.
+
+Normal path: write the original guide, present it in matching attached Files,
+save a correction, then read the saved guide during implementation. On repeat,
+active editing retains its draft and selection; another document becomes a tab.
+Absent or unmatched Desktop leaves the original files available and work
+continues; retry only presentation after correcting the destination. An unsaved
+edit being treated as implementation input, an automatic host launch, or a graph
+loop regenerating the guide would invalidate this model. Immediate direction
+continues through the conversation; live document synchronization is excluded.
+
+Independent delivery changes the integration target, not the Task's identity.
+The owned sync records placement after integration and PR retargeting; conflicts
+and retarget failures retain recovery through the existing operation. Missing
+comparison history remains unknown evidence, never an empty diff. No additional
+placement lifecycle is needed. Next proof remains the combined candidate's
+affected gate checks and Desktop interaction coverage listed below; this review
+does not promote historical passes or headless evidence into mounted UI proof.
+
+Review and gate the published independent-main candidate, then land and verify
+the delivered behavior. Managed detachment and publication are complete;
+recovery history and its evidence limits are in `recovery.md`.
+Recorded focused checks cover absent-Desktop behavior, original paths, no extra Session,
 active draft/tab retention, and clean/conflicted detachment preserving parent and
 child identities. Gate owns affected graph/progression, world recipes, goldens,
 DTO/action fixtures, sync/recovery callers, docs and headless Swift checks.
 Relevant Rust modules: `git`, `ops::sync`, `lf::commands::ops`,
 `lf::commands::open`, `lf::commands::desktop`, `graph::compiled`, `task_graph`;
 integration `sync_tests`, `work_open_tests`; world recipe and prompt binaries.
-Git sync callers also reach startup/release boundaries in the tests README.
+Git sync callers also reach `agent_startup_tests`, `release_tests` and
+`release_lock_tests` in the tests README. The latest main integration changed
+Task/Session ownership and transport code; the earlier passes do not establish
+that the combined candidate passes these affected suites.
 
 Demo/review owns configured attached Files rendering, an active draft surviving
 repeat presentation, saving/rereading the correction and conversation continuity.
@@ -91,4 +131,4 @@ The earlier broad Swift suite exited without an assertion or timeout; focused
 Files/pane/DTO and Theme tests passed. That unexplained exit remains historical,
 not a passing full suite. No parent landing or installation is required here.
 
-Check: `cargo test -p loopflow --test integration` with the separate filters `sync_tests::explicit_main_sync_detaches_only_the_child_and_preserves_its_pr` and `work_open_tests::desktop_file_presentation_without_desktop_never_falls_back_to_a_terminal` passed after compression, with inherited LF_* unset and stdin closed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. The earlier focused Task-context pass still applies to unchanged code. Gate owns affected suites and Swift; demo owns mounted UI evidence.
+Check: `gh pr view 1817 --json baseRefName,headRefOid,state` confirmed open/main/`582201f799`; prior focused detachment, Desktop-fallback and Task-context tests plus fmt/clippy passed before the latest main sync; no code changed during realign, so no tests rerun; combined affected suites and Swift remain with gate, mounted UI evidence with demo/review.

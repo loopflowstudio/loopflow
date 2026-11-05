@@ -20,7 +20,8 @@ Full commands, hashes, screenshots, native IDs, failure details and decisions:
 `scratch/write-docs-first.md` at that same commit. Source and parent work remain
 preserved; there is no authorization here to install a build or restart an owner.
 
-The latest demo returned to implement because detachment had not occurred.
-The next demo evaluates the independent candidate. Attached rendering, active
+The earlier demo returned to implement because detachment had not occurred;
+detachment and publication have since completed (see `write-docs-first.md`).
+The remaining walkthrough concerns the independent candidate. Attached rendering, active
 draft retention on repeat, UI save/readback and conversation continuity remain
 unobserved; headless equivalents are automated evidence, never mounted UI proof.

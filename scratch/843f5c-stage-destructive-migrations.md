@@ -238,9 +238,15 @@ Jack's next real `lf install` (or `lf monitor rollover --dry-run` before and aft
 is its demo. Decision: advance to gate, which runs `local_promotion` and
 `one_machine_tests`.
 
+## Gate (2026-11-05, headless)
+
+`scripts/test.py --reuse-passing --rust-filter 'test(lf::commands::install::) | test(lf::commands::rollover::) | test(store::migrations::) | test(local_promotion::) | binary(one_machine_tests) | binary(lf)'`:
+PASS in 667 s (architecture, python 331 s, rust 197 passed + fmt + clippy, website).
+An earlier attempt hit the session's 30-minute background cap during a cold
+`cargo build` and pytest, not a suite budget; the rerun on a warm build passed.
+No code change from review. Swift, e2e and the Xcode build are not reached; CI owns them.
+
 ## Remaining
 
-- Gate runs the affected suites. The install integration suites
-  (`local_promotion`, `one_machine_tests`) were not run here.
 - Demo: `lf install` on a Machine with live Sessions shows the inventory line
   before the switch and the result last; a stale-build process keeps the clone.

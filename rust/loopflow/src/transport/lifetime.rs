@@ -21,7 +21,6 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 
-use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 use crate::store::sqlite::sessions::OwnerRetention;
@@ -71,19 +70,16 @@ impl Ending {
         owner: &LfProcessId,
         activity: Activity,
         input_queued: bool,
-    ) -> Result<Option<Event>> {
+    ) -> Result<bool> {
         if !self.may_end(activity, input_queued) {
-            return Ok(None);
+            return Ok(false);
         }
         let store = crate::journal::process_ledger()?;
         if store.owner_retention(owner)?.is_some() {
-            return Ok(None);
+            return Ok(false);
         }
         tracing::info!(%owner, "ending a Session nobody has viewed");
-        Ok(Some(Event::Control {
-            held: false,
-            notice: None,
-        }))
+        Ok(true)
     }
 }
 

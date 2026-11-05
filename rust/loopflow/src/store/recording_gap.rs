@@ -9,20 +9,15 @@ use std::path::PathBuf;
 /// fresh process at every boundary, keeps the open gap in a marker file.
 #[derive(Debug, Default)]
 pub struct RecordingGap {
-    open: Option<Open>,
+    open: Option<GapSpan>,
     marker: Option<PathBuf>,
 }
 
+/// An open gap: what lf could not record, and when it first and last met the
+/// failure, in Unix seconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Open {
-    what: String,
-    first_miss: i64,
-    last_miss: i64,
-}
-
-/// When an open gap was first and last met, in Unix seconds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GapSpan {
+    pub what: String,
     pub first_miss: i64,
     pub last_miss: i64,
 }
@@ -44,31 +39,19 @@ impl RecordingGap {
     pub fn note(&mut self, what: &str, error: &dyn Display) {
         let now = crate::store::rows::now_unix();
         let what = format!("{what}: {error}");
-        match &mut self.open {
-            Some(open) if open.what == what => {
-                open.last_miss = now;
-                tracing::debug!("recording gap continues: {what}");
-            }
-            Some(open) => {
-                open.last_miss = now;
-                open.what = what;
-                tracing::warn!(
-                    "recording gap: {}; the conversation goes on without lf's records",
-                    open.what
-                );
-            }
-            None => {
-                tracing::warn!(
-                    "recording gap: {what}; the conversation goes on without lf's records"
-                );
-                self.open = Some(Open {
-                    what,
-                    first_miss: now,
-                    last_miss: now,
-                });
-            }
+        if self.open.as_ref().is_some_and(|open| open.what == what) {
+            tracing::debug!("recording gap continues: {what}");
+        } else {
+            tracing::warn!("recording gap: {what}; the conversation goes on without lf's records");
         }
-        if let (Some(marker), Some(open)) = (&self.marker, &self.open) {
+        let open = self.open.get_or_insert_with(|| GapSpan {
+            what: String::new(),
+            first_miss: now,
+            last_miss: now,
+        });
+        open.what = what;
+        open.last_miss = now;
+        if let Some(marker) = &self.marker {
             if let Some(parent) = marker.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -79,11 +62,8 @@ impl RecordingGap {
         }
     }
 
-    pub fn span(&self) -> Option<GapSpan> {
-        self.open.as_ref().map(|open| GapSpan {
-            first_miss: open.first_miss,
-            last_miss: open.last_miss,
-        })
+    pub fn span(&self) -> Option<&GapSpan> {
+        self.open.as_ref()
     }
 
     /// The store answered: close the gap, if one was open.
@@ -98,11 +78,11 @@ impl RecordingGap {
     }
 }
 
-fn parse(text: &str) -> Option<Open> {
+fn parse(text: &str) -> Option<GapSpan> {
     let mut lines = text.lines();
     let first_miss = lines.next()?.parse().ok()?;
     let last_miss = lines.next()?.parse().ok()?;
-    Some(Open {
+    Some(GapSpan {
         what: lines.next().unwrap_or_default().to_owned(),
         first_miss,
         last_miss,
@@ -120,7 +100,7 @@ mod tests {
         let mut gap = RecordingGap::marked(marker.clone());
         assert!(gap.span().is_none());
         gap.note("turn evidence", &"database is locked");
-        let first = gap.span().unwrap();
+        let first = gap.span().unwrap().clone();
         assert_eq!(first.first_miss, first.last_miss);
 
         let mut later = RecordingGap::marked(marker.clone());
@@ -128,6 +108,7 @@ mod tests {
         let span = later.span().unwrap();
         assert_eq!(span.first_miss, first.first_miss);
         assert!(span.last_miss >= span.first_miss);
+        assert_eq!(span.what, "steers: no such column: route");
 
         later.recovered();
         assert!(later.span().is_none());

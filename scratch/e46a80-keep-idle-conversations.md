@@ -112,39 +112,14 @@ change, the contract holds at each layer:
   retention read retries at the next poll, and `lf resume` is the only thing
   that ends an idle superseded owner.
 
-Settled by the accepted decisions and built in the implement pass that followed
-(each item is now in Decisions above; kept here as the trace):
-
-1. **One recording-gap concept.** "Log once per changed failure, log recovery"
-   now has four bodies: `lifetime::warn_changed` (input and lifetime),
-   `codex_connection::store_unavailable`/`store_recovered` (19 call sites),
-   `context::store_gap`/`store_recovered` (the per-thread file marker) and Pi's
-   `recordingGap`. The in-process ones are one type, `store::RecordingGap`
-   (`note(what, error)`, `recovered()`), used by the owner's input path, the
-   lifetime policy, the relay and the Claude task-update watcher (which today
-   warns on every poll). The hook keeps the file marker because each hook is a
-   fresh process; same name, same two verbs. AGENTS.md says "records a gap";
-   the code should have one thing called that.
-2. **The gap enters the Session's history.** Jack's steer: a turn lf could not
-   record is recorded as unknown at the next boundary that succeeds. Today the
-   marker clears with a log line; derived state heals only because the next
-   boundary's own activity row overwrites `yielded`. Until that boundary a
-   missed Stop leaves the Session reading as a live turn: rollover keeps it and
-   the detached ending retains it (`lf resume` attaches, which is fine). Settle
-   it as asked: the marker carries the first miss time; on recovery the hook
-   writes one `session_events` observation (`source: store-gap`, first and last
-   miss) before clearing. Desktop and `lf session` then show the hole where
-   `logs/lf.log` alone would not.
-3. **Name the delivery file for what it is.** `codex_delivery_path` now names
-   Claude, Pi and OpenCode threads' delivery files and the gap marker beside
-   them. Rename to `native_delivery_path`.
-4. **Claude is the reference behavior for every harness.** On a gap Claude shows
-   nothing (hook exits 0, lf.log has the line). Pi raises a UI warning toast and
-   OpenCode prints to stderr on every prompt. Jack's quiet-terminal rule
-   (2026-10-21: no diagnostics banners, tracing to lf.log) and the steer's
-   "logged to logs/lf.log" settle this: both JS hooks log once per changed
-   failure to their plugin log and show no UI notice; lf's own process already
-   records the gap when it runs.
+The review found four seams and the implement pass closed them, each now in
+Decisions: one `store::RecordingGap` where four log-once bodies had grown; the
+gap written into the Session's history as a `store-gap` observation at the next
+successful boundary (Jack's steer), instead of a marker that cleared with a log
+line while a missed Stop read as a live turn; `native_delivery_path` for the
+file every native thread shares; and Claude as the reference behavior, so Pi's
+toasts and OpenCode's per-prompt stderr line became one log line per changed
+failure (Jack's quiet-terminal rule, 2026-10-21).
 
 Kept after challenge: the saved launch prompt still waits for its receipt under
 a broken store (double-dispatch protection from the codex-resume work outranks
@@ -199,3 +174,5 @@ Implement pass (RecordingGap, gap observation, native_delivery_path, quiet Pi/Op
 `cargo test -p loopflow --test integration context_block_tests::` 2 passed;
 `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed;
 `node --check` on both JS hooks; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. Gate owns the affected suites.
+
+Compress pass (one `GapSpan` in `RecordingGap`, one `Settling` slot in the owner, `Ending::confirm` answers yes/no): the same `--lib` filter 34 passed, the same `transport_tests` filter 5 passed, fmt and clippy clean.

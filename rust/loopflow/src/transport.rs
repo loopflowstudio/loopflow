@@ -72,6 +72,8 @@ struct Settling {
     since: Instant,
     code: u8,
     process: String,
+    /// The terminal has its exit; only the records are still being written.
+    delivered: bool,
 }
 
 impl Settling {
@@ -94,27 +96,32 @@ impl Settling {
             since: Instant::now(),
             code: provider_exit_code(status),
             process,
+            delivered: false,
         }
     }
 
-    fn deadline(&self) -> Instant {
-        self.since + SETTLE_WAIT
+    /// When the terminal stops waiting for records, while it still waits.
+    fn deadline(&self) -> Option<Instant> {
+        (!self.delivered).then(|| self.since + SETTLE_WAIT)
     }
 
     /// The settlement once its records are written, or the provider's own exit
-    /// once the terminal has waited long enough for them.
-    fn poll(&self) -> Option<Settled> {
-        match self.settled.try_recv() {
-            Ok(settled) => Some(settled),
-            Err(mpsc::TryRecvError::Empty) if Instant::now() < self.deadline() => None,
+    /// once the terminal has waited long enough for them. Delivered once.
+    fn poll(&mut self) -> Option<Settled> {
+        let deadline = self.deadline()?;
+        let settled = match self.settled.try_recv() {
+            Ok(settled) => settled,
+            Err(mpsc::TryRecvError::Empty) if Instant::now() < deadline => return None,
             Err(_) => {
                 tracing::warn!(process = self.process, "exit records are still being written; returning the terminal with the provider's own exit");
-                Some(Settled {
+                Settled {
                     code: self.code,
                     lines: Vec::new(),
-                })
+                }
             }
-        }
+        };
+        self.delivered = true;
+        Some(settled)
     }
 
     /// Give records still being written time to land before the owner exits.
@@ -852,7 +859,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         let _ = (&waker).write_all(&[1]);
     });
     let mut settling: Option<Settling> = None;
-    let mut lingering: Option<Settling> = None;
     let mut observed = lifetime::Activity::default();
     let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
@@ -1326,8 +1332,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 exit = Some((provider_exit_code(status), Instant::now()));
             }
         }
-        if let Some(settled) = settling.as_ref().and_then(Settling::poll) {
-            let settling = settling.take().expect("settlement in progress");
+        let delivered = settling.as_mut().and_then(|settling| {
+            let settled = settling.poll()?;
+            Some((settled, settling.process.clone()))
+        });
+        if let Some((settled, process)) = delivered {
             for line in &settled.lines {
                 deliver(
                     &mut output,
@@ -1339,12 +1348,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 );
             }
             output.report(
-                format!("{}/step", settling.process),
+                format!("{process}/step"),
                 crate::program_status::State::Clear,
                 None,
             );
             output.report(
-                settling.process.clone(),
+                process,
                 match settled.code {
                     0 => crate::program_status::State::Done,
                     130 => crate::program_status::State::Idle,
@@ -1354,8 +1363,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             );
             planning = None;
             exit = Some((settled.code, Instant::now()));
-            // Records still being written finish before this process exits.
-            lingering = Some(settling);
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
@@ -1371,7 +1378,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
                 snapshot::leave(&id, &output);
-                if let Some(settling) = lingering.take() {
+                // Records still being written finish before this process exits.
+                if let Some(settling) = settling.take() {
                     settling.linger();
                 }
                 return if code == 0 {
@@ -1389,14 +1397,19 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         #[cfg(test)]
         lifetime_tests::before_judgment();
         if let Ok(ending) = ending.try_recv() {
-            let event = lifetime::report_result(
+            let confirmed = lifetime::report_result(
                 &mut ending_failure,
                 "Session ending",
                 ending.confirm(&id, observed, pending_input.holds_owner()),
-            )
-            .flatten();
-            if let Some(event) = event {
-                end_viewers(&mut viewers, event);
+            );
+            if confirmed == Some(true) {
+                end_viewers(
+                    &mut viewers,
+                    Event::Control {
+                        held: false,
+                        notice: None,
+                    },
+                );
                 snapshot::leave(&id, &output);
                 crate::platform::kill_process(std::process::id());
             }
@@ -1423,7 +1436,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             })
             .chain(deadline)
             .chain(pending_input.retry_at())
-            .chain(settling.as_ref().map(Settling::deadline))
+            .chain(settling.as_ref().and_then(Settling::deadline))
             .min();
         wait_for_activity(
             &listener,

@@ -343,7 +343,7 @@ fn recording_gap(home: &std::path::Path, thread: &str) -> RecordingGap {
     )
 }
 
-/// A boundary lf could not record enters the Session.s history as unknown at the
+/// A boundary lf could not record enters the Session's history as unknown at the
 /// next one that succeeds (Jack Heart, 2026-11-05): one observation per gap,
 /// written before the gap closes so a failed write keeps it open.
 fn close_gap(
@@ -720,7 +720,7 @@ mod tests {
         recording_gap(home.path(), "thread").note("turn evidence", &"database is locked");
         recording_gap(home.path(), "thread").note("steers", &"database is locked");
         let mut gap = recording_gap(home.path(), "thread");
-        let span = gap.span().unwrap();
+        let span = gap.span().unwrap().clone();
         close_gap(&store, "session", &mut gap).unwrap();
         assert!(gap.span().is_none());
         assert_eq!(observations(), 1);

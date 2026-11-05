@@ -52,3 +52,18 @@ Drain (Jack, November 5): `lf account drain` is accepted as the gentle account-f
 
 Worker fallback (Jack, November 5): an explicit agent is followed only within itself. `claude:<model>` stays on that model; bare `claude` may fall back across Claude models (e.g. Fable to Opus) and accounts. Preferences (default agent, no explicit agent) are where cross-provider fall-through lives. Before landing, nothing built-in or in this repo's config requires Claude or Codex explicitly; Jack only ever sets preferences.
 Interactive automatic moves: start shared-only (Jack); trade-offs explained at review.
+
+# Why isolation exists (research, November 5)
+Jack's goal: use several Max accounts to spread work without thinking about which one is in use. Jack wants isolation settled in this Task (#1828).
+- Before October 4 every launch ran in its account's own home: that was the load-balancing mechanism. #1416 (October 4) made the shared native home the default because conversations scattered across homes and plain `claude --resume` / `codex resume` could not find them. Isolation stayed for already-pinned conversations and explicit `--isolate`.
+- Today only `lf ssh` sets isolation automatically (remote Machines). Locally, no isolated Claude conversation since October 27 and no Codex one since October 28; none of the running Claude processes are isolated. Shared: 5,312 Claude conversations since November 2.
+- Weekly limits make sequential use as good as concurrent for total capacity; isolation's concurrency helps only short windows (5-hour) or throughput. Capacity is lost only when an account resets with room left, which suggests routing by soonest reset among accounts with room rather than most room.
+- Gaps that kept shared mode from meeting the goal: the switch did not reach running Claude (stub file; mtime fix), and limits were misclassified or unhandled (this PR).
+
+# Assumptions while building the demo decisions (November 5, 2026)
+
+6. **Model scope names.** Claude 2.1.318 knows `five_hour`, `seven_day`, `seven_day_overage_included`, `seven_day_opus`, `seven_day_sonnet`, `seven_day_cowork`, `seven_day_omelette`, `seven_day_oauth_apps`. Only a suffix naming a model lf can launch (`opus`, `sonnet`, `haiku`, `fable`) scopes a limit; `seven_day_omelette` cools the whole account until its model is known.
+7. **A launch with no model** (bare `claude`) is held back by every scoped limit on an account, since lf cannot tell which model Claude would pick. Model fall-through then names one.
+8. **Ordered preferences** are a comma list in `default_agent` (`lf set default_agent claude,codex`), mirroring account routes. The first entry is the agent; the rest are providers a headless step may fall through to.
+9. **Claude model rungs** are `opus`, `sonnet`, `haiku` in that order, skipping the model already running; Codex limits are account-wide, so it has no model rungs.
+10. **Busy Sessions** move at their next Stop hook rather than mid-turn; a Session whose program status reports a draft is skipped and listed.

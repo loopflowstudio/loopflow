@@ -1,11 +1,13 @@
-//! Input stays queued while retention is busy, then advances only by bytes written.
-//! A failed store never holds a person's input; the owner holds it instead.
+//! Input stays queued while retention is busy, for at most the hook budget, then
+//! advances only by bytes written. A failed or locked store never holds a
+//! person's input; the owner holds it instead.
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crate::id::LfProcessId;
+use crate::store::sqlite::HOOK_BUSY_TIMEOUT;
 use crate::store::RecordingGap;
 
 #[derive(Debug, Default)]
@@ -13,6 +15,10 @@ pub(super) struct PendingInput {
     bytes: VecDeque<u8>,
     recorded: usize,
     retry_at: Option<Instant>,
+    /// When the store first answered busy since its last successful record.
+    /// Past [`HOOK_BUSY_TIMEOUT`] a busy store is a recording gap, as it is
+    /// for hooks, and every later busy answer delivers at once until it records.
+    busy_since: Option<Instant>,
     failure: RecordingGap,
     /// Bytes reached the provider without a retention record. The owner holds
     /// them in memory until the native client ends, since the store cannot.
@@ -23,9 +29,10 @@ pub(super) struct PendingInput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Retained {
     Recorded,
-    /// A busy store: wait and try the same bytes again.
+    /// A busy store: wait and try the same bytes again, within the hook budget.
     Busy,
-    /// A failed store: deliver the bytes; the person's turn is not lost for a record.
+    /// A failed store, or one busy past the budget: deliver the bytes; the
+    /// person's turn is not lost for a record.
     Failed,
 }
 
@@ -63,7 +70,10 @@ impl PendingInput {
         }
         if terminal && self.recorded < self.bytes.len() {
             match self.retain(owner) {
-                Retained::Recorded => self.failure.recovered(),
+                Retained::Recorded => {
+                    self.busy_since = None;
+                    self.failure.recovered();
+                }
                 Retained::Busy => {
                     self.retry_at = Some(Instant::now() + Duration::from_millis(100));
                     return;
@@ -92,7 +102,17 @@ impl PendingInput {
             .and_then(|store| store.try_record_owner_input(owner, bytes))
         {
             Ok(true) => Retained::Recorded,
-            Ok(false) => Retained::Busy,
+            Ok(false) => {
+                let since = *self.busy_since.get_or_insert_with(Instant::now);
+                if since.elapsed() < HOOK_BUSY_TIMEOUT {
+                    return Retained::Busy;
+                }
+                self.failure.note(
+                    "terminal input, delivered unrecorded",
+                    &format!("store busy past the {HOOK_BUSY_TIMEOUT:?} hook budget"),
+                );
+                Retained::Failed
+            }
             Err(error) => {
                 self.failure
                     .note("terminal input, delivered unrecorded", &error);

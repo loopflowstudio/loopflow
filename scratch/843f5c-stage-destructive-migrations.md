@@ -215,6 +215,29 @@ settlement, so a process that exits between the two reads prints the clone as
 
 Nothing to change and no open product choice. Gate next.
 
+## Demo (2026-11-05, headless, standing in for Jack Heart)
+
+Real path: `uv run python scripts/check_migrations.py` on this tree with a probe
+slug `zz_demo_probe.sql` written into `rust/loopflow/src/store/migrations/`, then
+removed (tree clean after). Observed:
+
+1. Bare `ALTER TABLE tasks DROP COLUMN ship_stopped_lf_process_id`: exit 1, "drops
+   column ... without naming its expand step", with the expand/wait/export/drop
+   instruction and both markers.
+2. Same drop with `-- expand: ship_stop` / `-- exports:`: exit 1, "contracts
+   ship_stop, which merged 6 days ago; its contract clears on 2026-11-29 (30 days)".
+3. `ADD COLUMN demo_note TEXT`: exit 0.
+4. A new unique index on `tasks` over a new column with no `WHERE`: exit 1,
+   "an older writer may violate it. Stage it".
+Unmodified tree: "No unmerged migration", exit 0; pytest 21 passed.
+
+Not demonstrated: `lf install`'s before/after output and the kept clone. Running a
+real install here would replace the Machine's lf under live Sessions, the very
+hazard this Task addresses; the lib tests cover the report and settlement, and
+Jack's next real `lf install` (or `lf monitor rollover --dry-run` before and after)
+is its demo. Decision: advance to gate, which runs `local_promotion` and
+`one_machine_tests`.
+
 ## Remaining
 
 - Gate runs the affected suites. The install integration suites

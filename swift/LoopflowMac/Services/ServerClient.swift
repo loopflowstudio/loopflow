@@ -154,6 +154,8 @@ final class ServerLink: @unchecked Sendable {
     /// How long the server has to welcome the connection; the session's reads
     /// are then unbounded, so a stalled open releases `ServerLinks` to back off.
     static let handshakeSeconds = 10
+    /// A lost connection: requests in flight have unknown outcomes, not failures.
+    static let disconnected = "Server disconnected; refresh state before retrying a command"
 
     private init(path: String) throws {
         fd = try Self.connect(path)
@@ -240,7 +242,7 @@ final class ServerLink: @unchecked Sendable {
         let ended: any Error
         do {
             while let line = try reader.next() { try dispatch(line) }
-            ended = RegistryQueryError("Server disconnected; refresh state before retrying a command")
+            ended = RegistryQueryError(Self.disconnected)
         } catch { ended = error }
         fail(ended)
     }
@@ -270,9 +272,7 @@ final class ServerLink: @unchecked Sendable {
             defer { pending = [:]; subscriptions = [:] }
             return (Array(pending.values), Array(subscriptions.values))
         }
-        // Outcomes of requests in flight are unknown, not failed.
-        let unknown = RegistryQueryError("Server disconnected; refresh state before retrying a command")
-        for continuation in waiting { continuation.resume(throwing: unknown) }
+        for continuation in waiting { continuation.resume(throwing: RegistryQueryError(Self.disconnected)) }
         for subscription in watching { subscription.finish(throwing: error) }
         writes.withLock { Darwin.close(fd) }
     }
@@ -363,7 +363,7 @@ private struct LineReader {
                 if errno == EAGAIN || errno == EWOULDBLOCK {
                     throw RegistryQueryError("Loopflow server did not answer within \(ServerLink.handshakeSeconds)s; check `lf server status`")
                 }
-                throw RegistryQueryError("Server disconnected; refresh state before retrying a command")
+                throw RegistryQueryError(ServerLink.disconnected)
             }
             if received == 0 { ended = true; continue }
             buffer.append(contentsOf: chunk[..<received])

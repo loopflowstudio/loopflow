@@ -158,3 +158,14 @@ Parent scratch notes were removed from this checkout (see
   Not a product choice; a later slice may time-box it.
 - **Check line:** no code changed since compress (`git status` clean at
   `b0f4de675e`); its results stand.
+
+## Decided during pr-publish — November 5, 2026 (headless)
+
+- **Published as PR #1832 stacked on #1813** (base
+  `jack/loo-593-decide-the-desktop-servers-roles-and-long-term-architecture`),
+  the declared step's default; folding into #1813 and completing this Task
+  against the parent's delivery stays Jack's call. No merge, Auto-Ship or
+  completion requested. `lf sync` was a no-op against the parent.
+- **Check line:** `cargo test -p loopflow --lib server::` 11/11 (10 s); `cargo
+  fmt --check` and `cargo clippy --all-targets -- -D warnings` clean on
+  `0c43b79a1e`; Swift and served_reads results stand (only scratch changed).

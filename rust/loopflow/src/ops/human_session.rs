@@ -678,7 +678,7 @@ async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> R
     let mut args = vec![
         "-i".to_string(),
         "--agent".to_string(),
-        config.agent().to_owned(),
+        config.agent()?.to_owned(),
         "--cwd".to_string(),
         session.cwd.display().to_string(),
     ];

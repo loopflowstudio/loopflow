@@ -1765,11 +1765,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
-    // Saved Task defaults stay local to each Task. An explicit --agent would
-    // override Y too, selecting OpenCode without a managed checkout boundary.
-    // Y's mechanical Graph never starts a provider; X's OpenCode issues the command.
-    store.set_task_agent(&caller.id, "opencode").unwrap();
-    store.set_task_agent(&target.task.id, "claude").unwrap();
+    // X's explicit Session selection must not become Y's Graph policy.
     support::select_wave_graph(
         fixture.repo.path(),
         &store,
@@ -1791,14 +1787,13 @@ fn declared_agent_can_start_another_tasks_graph() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "switch-proof"], "cwd": x,
+            "argv": ["env", format!("LF_BIN={}", bin.join("lf").display()), env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "switch-proof"], "cwd": x,
         }))
         .unwrap(),
     )
     .unwrap();
     let output = fixture
-        .command(&["--task", "INF-124", "-i", ":", "Start Y"])
-        .env("LF_BIN", bin.join("lf"))
+        .command(&["--task", "INF-124", "-a", "opencode", "-i", ":", "Start Y"])
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
@@ -2396,7 +2391,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     let before = native();
     let machine: String = fixture
         .db()
-        .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
+        .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
             row.get(0)
         })
         .unwrap();

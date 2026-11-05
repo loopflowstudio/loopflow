@@ -56,6 +56,24 @@ struct ServerProtocolTests {
         #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("view_plan")))
     }
 
+    @Test func transportReadinessDoesNotRequireWorkBootstrap() throws {
+        let request = ServerRequest(version: 1, id: "status-1", operation: .status)
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)) == JSONDecoder().decode(JSONValue.self, from: fixture("status_request")))
+        let response = try JSONDecoder().decode(ServerResponse.self, from: fixture("status"))
+        guard case .status(let version, let hash) = response.result else { Issue.record("Missing status"); return }
+        #expect(version == 1)
+        #expect(hash == String(repeating: "a", count: 64))
+    }
+
+    @Test func configurationUsesTheSharedDestinationContract() throws {
+        let raw = try fixture("configuration")
+        let value = try JSONDecoder().decode(JSONValue.self, from: raw)
+        guard case .object(let root) = value, case .object(let operation) = root["operation"],
+              let request = operation["request"] else { Issue.record("Missing configuration request"); return }
+        let encoded = ServerRequest(version: 1, id: "config-1", operation: .configuration(request))
+        #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(encoded)) == value)
+    }
+
     @Test func missingRequiredReplyDoesNotBecomeAnEmptyReading() {
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerResponse.self, from: Data(#"{"id":"x","instance":"i","result":{"kind":"reading","generation":1}}"#.utf8))

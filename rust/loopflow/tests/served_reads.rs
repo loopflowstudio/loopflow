@@ -14,6 +14,136 @@ use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
 #[test]
+fn configuration_readiness_recognizes_an_older_server_for_replacement() {
+    use loopflow::server::wire::{ErrorCode, Reply, Response};
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixListener;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let listener = UnixListener::bind(loopflow::server::socket_path().unwrap()).unwrap();
+    let older = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut header = [0; 4];
+        socket.read_exact(&mut header).unwrap();
+        let mut bytes = vec![0; u32::from_be_bytes(header) as usize];
+        socket.read_exact(&mut bytes).unwrap();
+        let request: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(request["operation"]["kind"], "status");
+        let response = serde_json::to_vec(&Response {
+            id: String::new(),
+            instance: "older-listener".into(),
+            result: Reply::Error {
+                code: ErrorCode::Invalid,
+                message: "unknown variant status".into(),
+            },
+        })
+        .unwrap();
+        socket
+            .write_all(&(response.len() as u32).to_be_bytes())
+            .unwrap();
+        socket.write_all(&response).unwrap();
+    });
+    let status = loopflow::server::client::status().unwrap();
+    older.join().unwrap();
+    assert!(!status.ready);
+    assert_eq!(status.instance.as_deref(), Some("older-listener"));
+    assert!(status.error.unwrap().contains("unknown variant status"));
+    assert!(!home.path().join("loopflow.db").exists());
+}
+
+#[test]
+fn configuration_edits_use_the_server_without_work_processes() {
+    use loopflow::config::api::Request;
+    use loopflow::config::files::Destination;
+    use loopflow::server::wire::{Operation, Reply};
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let _server = Server(isolated_lf(repo.path(), home.path(), &["server", "run"]));
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while loopflow::server::client::connect(Operation::Status).is_err() {
+        assert!(std::time::Instant::now() < deadline, "server did not start");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let database = home.path().join("loopflow.db");
+    fs::write(&database, "unreadable Work registry").unwrap();
+    let before = fs::read(&database).unwrap();
+    let status: Value =
+        serde_json::from_str(&read(repo.path(), home.path(), &["server", "status"], None)).unwrap();
+    assert_eq!(status["ready"], true, "{status}");
+    let request = |request| {
+        let (_, response) =
+            loopflow::server::client::connect(Operation::Configuration { request }).unwrap();
+        let Reply::Command {
+            code,
+            output,
+            stderr,
+            trace_id,
+        } = response.result
+        else {
+            panic!("configuration did not return a command result")
+        };
+        (code, output, stderr, trace_id)
+    };
+    let (code, output, error, _) = request(Request::Catalog);
+    assert_eq!(code, 0, "{error}");
+    let catalog: Value = serde_json::from_str(&output).unwrap();
+    assert!(catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["key"] == "theme"));
+    fs::write(
+        home.path().join("config.yaml"),
+        "# retained\ntheme: Linen\n",
+    )
+    .unwrap();
+    let declaration = |value: &str| Request::Declaration {
+        destination: Destination::PersonalGlobal {},
+        key: "theme".into(),
+        value: Some(value.into()),
+        unset: false,
+    };
+    let (code, output, error, trace) = request(declaration("Hearth"));
+    assert_eq!(code, 0, "{error}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&output).unwrap()["value"],
+        "Hearth"
+    );
+    let saved = fs::read_to_string(home.path().join("config.yaml")).unwrap();
+    assert!(saved.contains("# retained"));
+    assert!(saved.contains("Hearth"));
+    let (code, _, error, failed_trace) = request(Request::Declaration {
+        destination: Destination::SharedRepository {
+            repository: repo.path().to_owned(),
+        },
+        key: "user.name".into(),
+        value: Some("Wrong scope".into()),
+        unset: false,
+    });
+    assert_ne!(code, 0);
+    assert!(error.contains("does not apply"), "{error}");
+    assert_ne!(trace, failed_trace);
+    assert!(!repo.path().join(".lf/config.yaml").exists());
+    let (_, output, _, _) = request(Request::Theme {
+        path: home.path().join("config.yaml"),
+        value: None,
+    });
+    assert_eq!(
+        serde_json::from_str::<Value>(&output).unwrap()["value"],
+        "Hearth"
+    );
+    assert_eq!(fs::read(&database).unwrap(), before);
+}
+
+#[test]
 fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;
@@ -25,6 +155,7 @@ fn server_operations_match_their_lf_commands() {
     // As the children resolve it: `doctor` prints the store's path.
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: codex\n");
     repo.create_file("edit.txt", "before\n");
     repo.stage_all();
     repo.commit("Comparison base");
@@ -138,6 +269,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::Waves
         | Read::MachineId
         | Read::Portfolio
+        | Read::Settings { .. }
         | Read::PaneLayout { .. }
         | Read::People { .. }
         | Read::Graphs { .. }
@@ -179,6 +311,13 @@ fn server_operations_match_their_lf_commands() {
                 Read::Waves,
                 Read::MachineId,
                 Read::Portfolio,
+                Read::Settings {
+                    directory: repo.path().to_owned(),
+                    wave: None,
+                    skill: Some("implement".into()),
+                    graph: None,
+                    step: None,
+                },
                 Read::PaneLayout {
                     directory: repo.path().to_owned(),
                     work: "repository".into(),

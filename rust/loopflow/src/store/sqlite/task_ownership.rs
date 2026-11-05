@@ -6,7 +6,7 @@
 //! ends this Machine's own open claim; only its own unclaim or handoff does.
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, TransactionBehavior};
 
 use crate::durable::{
     MachineId, MachineRef, OwnershipEntryId, OwnershipKind, TaskExecutionSource, TaskId, TaskOwner,
@@ -88,15 +88,11 @@ pub(super) fn owners_in(
     tasks: &[TaskId],
 ) -> StoreResult<HashMap<TaskId, TaskOwner>> {
     let local = local_machine_in(conn)?;
-    let mut labels = conn.prepare("SELECT id,label FROM machines WHERE label IS NOT NULL")?;
-    let labels = labels
-        .query_map([], |row| {
-            Ok((
-                MachineId::from_raw(row.get::<_, String>(0)?),
-                row.get::<_, String>(1)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    let labels: HashMap<_, _> = crate::config::placement::machine_declarations(conn)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?
+        .into_iter()
+        .map(|(name, declaration)| (declaration.id, name))
+        .collect();
     let mut owners = HashMap::new();
     for (task, rows) in logs_in(conn, tasks)? {
         let Some(mut owner) = read_log(&rows, &local).owner else {
@@ -209,14 +205,9 @@ fn machine_ref_in(
     let label = if *machine == local_machine_in(conn)? {
         Some(local_label())
     } else {
-        conn.query_row(
-            "SELECT label FROM machines WHERE id=?1",
-            [machine.as_str()],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten()
-        .or(written.map(Into::into))
+        super::durable::map_machine_by_id(conn, machine)?
+            .and_then(|machine| machine.label)
+            .or(written.map(Into::into))
     };
     Ok(MachineRef {
         id: Some(machine.clone()),
@@ -264,14 +255,11 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
 
 /// This Machine, or one registered with `lf machine add`.
 fn is_my_machine_in(conn: &Connection, machine: &MachineId) -> StoreResult<bool> {
-    Ok(conn
-        .query_row(
-            "SELECT 1 FROM machines WHERE id=?1 AND (route='local' OR label IS NOT NULL)",
-            [machine.as_str()],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
+    Ok(machine == &local_machine_in(conn)?
+        || crate::config::placement::machine_declarations(conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .values()
+            .any(|declaration| &declaration.id == machine))
 }
 
 /// Whether a holder is you. A holder with a person key (Git `user.email`) is

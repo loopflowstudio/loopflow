@@ -564,6 +564,7 @@ fn membership_wire_ids_are_derived_from_their_captures() {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             interactive: human,
+            interactive_name: None,
             id: None,
             returns: None,
             sources: Vec::new(),

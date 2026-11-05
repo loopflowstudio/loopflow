@@ -14,20 +14,23 @@ public struct ServerRequest: Encodable, Sendable {
 }
 
 public enum ServerOperation: Encodable, Sendable {
+    case status
     case bootstrap
     case sessionOwner(session: String)
     case read(ServedRead)
     case subscribe(ServedRead, generation: UInt64)
     case command(ServedWrite)
+    case configuration(JSONValue)
     case attach(owner: String)
 
-    private enum Keys: String, CodingKey { case kind, query, generation, change, owner, session }
+    private enum Keys: String, CodingKey { case kind, query, generation, change, owner, session, request }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
         case .sessionOwner(let session):
             try box.encode("session_owner", forKey: .kind)
             try box.encode(session, forKey: .session)
+        case .status: try box.encode("status", forKey: .kind)
         case .bootstrap: try box.encode("bootstrap", forKey: .kind)
         case .read(let query):
             try box.encode("read", forKey: .kind)
@@ -36,6 +39,9 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode("subscribe", forKey: .kind)
             try box.encode(query, forKey: .query)
             try box.encode(generation, forKey: .generation)
+        case .configuration(let request):
+            try box.encode("configuration", forKey: .kind)
+            try box.encode(request, forKey: .request)
         case .command(let change):
             try box.encode("command", forKey: .kind)
             try box.encode(change, forKey: .change)
@@ -53,6 +59,7 @@ public struct ServerResponse: Decodable, Sendable {
 }
 
 public enum ServerReply: Decodable, Sendable {
+    case status(version: Int, executableSHA256: String)
     case bootstrap(version: Int, build: String, executableSHA256: String, machine: JSONValue, capabilities: [String], maxFrame: Int, maxConnections: Int)
     case read(String)
     case reading(generation: UInt64, frame: JSONValue)
@@ -69,6 +76,7 @@ public enum ServerReply: Decodable, Sendable {
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .kind) {
+        case "status": self = .status(version: try box.decode(Int.self, forKey: .version), executableSHA256: try box.decode(String.self, forKey: .executableSHA256))
         case "bootstrap":
             self = .bootstrap(version: try box.decode(Int.self, forKey: .version), build: try box.decode(String.self, forKey: .build),
                               executableSHA256: try box.decode(String.self, forKey: .executableSHA256),

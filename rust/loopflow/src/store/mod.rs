@@ -973,7 +973,16 @@ pub struct ProviderToken {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    schemars::JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[serde(transparent)]
 pub struct ProviderAccountId(String);
@@ -1074,7 +1083,9 @@ impl CredentialState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingState {
     Automatic,
@@ -1322,7 +1333,6 @@ mod tests {
             branch: format!("jack/task-{}", &id.as_str()[3..11]),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
@@ -1568,6 +1578,7 @@ mod tests {
                         skill: crate::graph::Skill::named("review"),
                         id: None,
                         interactive: true,
+                        interactive_name: None,
                         returns: None,
                         sources: Vec::new(),
                     },
@@ -3762,6 +3773,11 @@ mod tests {
 
         store.upsert_provider_account(&primary).await.unwrap();
         assert!(store.upsert_provider_account(&duplicate).await.is_err());
+        assert!(store
+            .get_provider_account("claude", &duplicate.account_id)
+            .await
+            .unwrap()
+            .is_none());
 
         duplicate.provider = "codex".to_string();
         store.upsert_provider_account(&duplicate).await.unwrap();

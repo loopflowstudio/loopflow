@@ -12,6 +12,14 @@ use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
+pub fn selects_current_machine(target: &str) -> anyhow::Result<bool> {
+    let Some(store) = crate::store::read_existing_registry()? else {
+        return Ok(false);
+    };
+    let selected = crate::ops::task_ownership::resolve_machine(&store.sqlite, target)?;
+    Ok(selected == store.sqlite.local_machine()?.id)
+}
+
 pub fn run(
     target: &str,
     forward_agent: bool,
@@ -147,7 +155,11 @@ pub(super) fn run_with_io(
     };
     let source_json = source.as_ref().map(serde_json::to_string).transpose()?;
     let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
+    let origin = runtime.block_on(super::machine::local_machine())?;
+    let profile = crate::config::remote::outgoing(Some(directory), origin.id.as_str())?;
+    let profile = serde_json::to_string(&profile)?;
     let mut extra_env = vec![
+        (crate::config::remote::PROFILE_ENV, profile.as_str()),
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
         (crate::config::USER_NAME_ENV, user_name.as_str()),
     ];
@@ -158,9 +170,13 @@ pub(super) fn run_with_io(
         ));
         extra_env.push(crate::provider_account::activation::isolation_env(true));
     }
-    let agent = crate::config::agent_override();
+    let agent = std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok();
     if let Some(agent) = agent.as_deref() {
         extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
+    }
+    let settings = std::env::var("LF_SETTINGS").ok();
+    if let Some(settings) = settings.as_deref() {
+        extra_env.push(("LF_SETTINGS", settings));
     }
     if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
@@ -428,6 +444,9 @@ pub(super) async fn resolve_target(
         .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     let machine = super::machine::find_machine(&store, target).await?;
+    if machine.id == store.sqlite.local_machine()?.id {
+        return Ok(machine);
+    }
     let probe = super::machine::probe(&machine.route, forward_agent).await?;
     super::machine::report_version(&machine.route, &probe.version);
     let reached = probe.id?;

@@ -73,18 +73,31 @@ historical authorship from later Machine settings; older unknown names stay unkn
 - Desktop FFI crate/adapter/module-map/linking/packaging are deleted. Provider
   launches and remote streams retain their existing owners.
 
-Focused parity covers every wire variant, >64 KiB saves, failed writes, normal
-request logs, concurrent traces, no fabricated Processes and admitted lost replies.
-Remote ownership verifies no local fallback. The final audit also carries the
-request directory into native-conversation adoption and remote source resolution,
-keeps pending-sync diagnostics in the request, and avoids waiting for terminal
-EOF when a remote CLI mutation takes no body. Saved pre-sync checks passed:
-`journal::request::` (2), `served_reads` (1), and the served-ownership routing
-regression (1), in `/tmp/loo593-compress-{request,parity}.log` and
-`/tmp/loo593-direct-routing-final.log`. The provider-cwd assertion's macOS
-path-spelling failure was repaired by canonical comparison and passed in
-`/tmp/loo593-direct-parity-final.log`. These are not post-merge suite results.
-No product decision is missing for the accepted local implementation.
+Pre-sync parity and routing evidence is retained at
+`b702602ee1:scratch/mobile-backend.md`; it predates the settings merge and does
+not establish current-build acceptance.
+
+### Settings merge continuation — November 4
+
+The resolved merge of `a5000ef889` adds a file-backed settings resolver and native
+Configuration/Appearance consumers. Keep its declarations, migrations, UI and
+behavior tests; remove its newly added FFI carrier with the existing deletion.
+`config::api` remains the common CLI/server file owner. The additive local
+`configuration` operation uses the same command telemetry/error/no-replay receipt.
+A lightweight `status` operation establishes transport readiness without opening
+Work; full Machine bootstrap retains its existing fields and behavior.
+
+The resolver's invocation settings replace the retired per-call agent override.
+Client operations mask launcher environment/profile/CLI settings, nested blocking
+workers carry the complete request selection, and SSH derives profiles from the
+request directory. Native settings/theme saves await acknowledgement without
+blocking the UI or overwriting a newer selection with an older read.
+
+The added FFI destination/launch tests move to `config::api`; focused server
+coverage checks configuration with an unreadable registry and preserves its bytes.
+Gate additionally owns settings consumers, Swift themes/configuration/protocol,
+server transport/status and packaging on the merged tree. Publication and
+interactive demo remain the existing Graph's later steps.
 
 ### Documentation and surviving-path reductions
 
@@ -307,4 +320,4 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Check (November 4 reduction): `cargo fmt --check`, `git diff --check`, focused `transport_tests::server_subscriptions_refresh_work_and_resolve_primary_session` (1), `integration session_cli_tests::` (21), and `served_reads` (1) passed with inherited `LF_*` unset and stdin closed for tests; the Session group initially exposed the expired fake-provider lifetime, then passed after repair. Logs: `/tmp/loo593-compress-{subscription,session-fixed,served}.log`. Gate owns remaining merged-build checks; demo/review owns installed replacement and rendered acceptance.
+Check (November 4 settings merge): `config::api::` (3), `journal::request::` (3), server wire round-trip (1), `served_reads configuration_` (2), focused Swift configuration/protocol/theme suites (35), Swift boundaries, `cargo fmt`, `git diff --check`, and `cargo clippy --all-targets --jobs 4 -- -D warnings` passed. Logs: `/tmp/loo593-settings-{api,request-reuse,wire,server,swift,clippy}.log`. An unchanged library-test rebuild was stopped after prolonged compilation; request/wire checks reused the binary built by the passing API check. Gate owns full merged suites/packaging; demo owns rendered and installed-replacement acceptance.

@@ -64,6 +64,7 @@ pub fn run(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
 }
 
 fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>) -> Result<()> {
+    let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
     if let Some(forward) = super::work_route::forward(cli, args, directory)? {
         return forward.run(cli, directory, io);
     }
@@ -98,17 +99,12 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
         .as_ref()
         .map(|binding| cli.cwd.as_deref().unwrap_or(&binding.cwd))
         .unwrap_or(directory);
-    let agent = cli.agent.as_deref().or_else(|| {
-        binding
-            .as_ref()
-            .and_then(|binding| binding.agent.as_deref())
-    });
     let wave = cli.wave.as_deref().or_else(|| {
         binding
             .as_ref()
             .and_then(|binding| binding.wave_name.as_deref())
     });
-    crate::config::with_agent_override(agent, || local(cli, directory, wave, io))
+    local(cli, directory, wave, io)
 }
 
 fn local(

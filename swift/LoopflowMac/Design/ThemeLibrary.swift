@@ -102,45 +102,20 @@ enum ThemeConfig {
         return .pair(light: light, dark: dark)
     }
 
-    /// The raw `theme:` value from the top level of a YAML file, or nil when absent.
-    static func read(_ url: URL) -> String? {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        for line in text.components(separatedBy: .newlines) {
-            guard let value = value(of: line) else { continue }
-            return unquoted(value)
-        }
-        return nil
+    /// Read and edit the same typed declaration as the CLI through the server.
+    static func read(_ url: URL, location: ServerLocation = .shared) async throws -> String? {
+        let data = try await ServerClient.configuration(request(url, value: nil), location: location)
+        let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: data)
+        guard case .string(let value) = result.value else { return nil }
+        return value
     }
 
-    /// Replace only the `theme:` line, appending one when absent; every other byte stays.
-    static func write(_ value: String, to url: URL) throws {
-        let line = "theme: \"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
-        var lines = (try? String(contentsOf: url, encoding: .utf8))?.components(separatedBy: "\n") ?? []
-        if let index = lines.firstIndex(where: { self.value(of: $0) != nil }) {
-            lines[index] = line
-        } else {
-            if lines.last == "" { lines.removeLast() }
-            lines.append(line)
-            lines.append("")
-        }
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(lines.joined(separator: "\n").utf8).write(to: url, options: .atomic)
+    static func write(_ value: String, to url: URL, location: ServerLocation = .shared) async throws {
+        let encoded = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+        _ = try await ServerClient.configuration(request(url, value: encoded), location: location)
     }
 
-    private static func value(of line: String) -> String? {
-        guard line.hasPrefix("theme:") else { return nil }
-        return String(line.dropFirst("theme:".count)).trimmingCharacters(in: .whitespaces)
-    }
-
-    private static func unquoted(_ value: String) -> String {
-        if value.hasPrefix("\""), let end = value.dropFirst().lastIndex(of: "\"") {
-            return String(value[value.index(after: value.startIndex)..<end])
-                .replacingOccurrences(of: "\\\"", with: "\"").replacingOccurrences(of: "\\\\", with: "\\")
-        }
-        if value.hasPrefix("'"), let end = value.dropFirst().lastIndex(of: "'") {
-            return String(value[value.index(after: value.startIndex)..<end]).replacingOccurrences(of: "''", with: "'")
-        }
-        let plain = value.range(of: " #").map { String(value[..<$0.lowerBound]) } ?? value
-        return plain.trimmingCharacters(in: .whitespaces)
+    private static func request(_ url: URL, value: String?) -> JSONValue {
+        .object(["action": .string("theme"), "path": .string(url.path), "value": value.map(JSONValue.string) ?? .null])
     }
 }

@@ -53,9 +53,13 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Override agents named in Tasks, Graphs and skills, including child commands (claude, codex, opencode, pi; harness[:model])
+    /// Select this conversation or all agent steps of this Graph (harness[:model])
     #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
+
+    /// Override a typed preference for this invocation (KEY=YAML); repeatable
+    #[arg(long = "setting", global = true)]
+    pub settings: Vec<String>,
 
     /// Read the skill and its arguments from this captured invocation file, as a Graph step does
     #[arg(long, value_name = "PATH")]
@@ -159,6 +163,61 @@ pub struct Cli {
 }
 
 impl Cli {
+    pub fn setting_values(&self) -> anyhow::Result<serde_yaml_ng::Value> {
+        let mut value = serde_yaml_ng::Value::Mapping(Default::default());
+        for setting in &self.settings {
+            let (key, text) = setting
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
+            let parsed = crate::config::settings::parse_value(key, text)?;
+            crate::config::settings::insert(
+                &mut value,
+                &key.split('.').collect::<Vec<_>>(),
+                parsed,
+            );
+        }
+        for (key, enabled) in [
+            ("yolo", self.yolo.then_some(true)),
+            ("context.paste", self.clipboard.then_some(true)),
+            (
+                "isolate",
+                self.shared
+                    .then_some(false)
+                    .or(self.isolate.then_some(true)),
+            ),
+            ("chrome", self.chrome.map(|mode| mode == BrowserMode::On)),
+            (
+                "context.diff",
+                self.diff
+                    .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both)),
+            ),
+            (
+                "context.diff_files",
+                self.diff
+                    .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both)),
+            ),
+        ] {
+            if let Some(enabled) = enabled {
+                crate::config::settings::insert(
+                    &mut value,
+                    &key.split('.').collect::<Vec<_>>(),
+                    enabled.into(),
+                );
+            }
+        }
+        if let Some(agent) = &self.agent {
+            crate::config::settings::insert(&mut value, &["agent"], agent.clone().into());
+        }
+        if !self.docs.is_empty() {
+            crate::config::settings::insert(
+                &mut value,
+                &["context", "docs"],
+                serde_yaml_ng::to_value(&self.docs)?,
+            );
+        }
+        Ok(value)
+    }
+
     /// The global `--repo` or `--repository` selector names a repository.
     pub fn selects_repository(&self) -> bool {
         self.repo.is_some() || self.repository.is_some()
@@ -321,6 +380,7 @@ impl Cli {
             }
         }
         for (flag, values) in [
+            ("--setting", &self.settings),
             ("--docs", &self.docs),
             ("--account", &self.account),
             ("--only-account", &self.only_account),
@@ -343,6 +403,9 @@ impl Cli {
                 args.extend([flag.to_string(), value.get_name().to_string()]);
             }
         }
+        if let Some(agent) = &self.agent {
+            args.extend(["--agent".to_owned(), agent.clone()]);
+        }
         if let Some(input) = &self.skill_input {
             args.extend([
                 "--skill-input".to_string(),
@@ -364,6 +427,7 @@ impl Cli {
             docs: self.docs.clone(),
             clipboard: self.clipboard,
             agent: self.agent.clone(),
+            settings: self.settings.clone(),
             skill_input: self.skill_input.clone(),
             output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
@@ -387,24 +451,6 @@ impl Cli {
             cwd: self.cwd.clone(),
             resume: self.resume.clone(),
         }
-    }
-
-    pub fn chrome_setting(&self) -> Option<bool> {
-        self.chrome.map(|mode| mode == BrowserMode::On).or_else(|| {
-            std::env::var(crate::config::CHROME_OVERRIDE_ENV)
-                .ok()
-                .map(|value| value == "on")
-        })
-    }
-
-    pub fn diff_files_setting(&self) -> Option<bool> {
-        self.diff
-            .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both))
-    }
-
-    pub fn diff_setting(&self) -> Option<bool> {
-        self.diff
-            .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both))
     }
 
     /// The most specific Work selected for direct execution.
@@ -517,9 +563,9 @@ pub enum Commands {
         /// Every repository
         #[arg(long)]
         global: bool,
-        /// Apply on this Machine only; set by the copy to your other Machines
-        #[arg(long, hide = true)]
-        here: bool,
+        /// Edit the committed repository or Wave configuration explicitly
+        #[arg(long, id = "set_shared", conflicts_with = "global")]
+        shared: bool,
     },
     /// Clear your own value of a setting, so the committed config chooses
     #[command(after_help = SETTING_KEYS)]
@@ -528,9 +574,9 @@ pub enum Commands {
         /// Every repository
         #[arg(long)]
         global: bool,
-        /// Apply on this Machine only; set by the copy to your other Machines
-        #[arg(long, hide = true)]
-        here: bool,
+        /// Edit the committed repository or Wave configuration explicitly
+        #[arg(long, id = "unset_shared", conflicts_with = "global")]
+        shared: bool,
     },
     /// Read Loopflow configuration
     Config {
@@ -1352,7 +1398,10 @@ impl MachineCommand {
 impl ConfigCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::User { .. } => false,
+            Self::User { .. } | Self::Show { .. } | Self::Catalog { .. } => false,
+            Self::Import { .. } => true,
+            Self::Migrate { accept } => *accept,
+            Self::Retained { replace, keep } => *replace || *keep,
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
             Self::Planning { cmd } => match cmd {
                 PlanningCommand::Key { new, recover } => *new || recover.is_some(),
@@ -1444,19 +1493,12 @@ impl WavePlanTarget {
     }
 }
 
-const SETTING_KEYS: &str = "Keys:
-  graph                 the graph new Tasks take up
-  agent                 the agent work launches on, such as claude:opus
-  skill_agents.<skill>  the agent one skill launches on
-  machine               where new Tasks and the Session run; copied to your other
-                        Machines. A pool or on-demand sends new Tasks there.
-  machine.tasks         where new Tasks run
-  machine.session       where the Session runs; it moves there
-  account.<provider>    the logins that pay, in order: work@,personal@
-
-Scope: this repository; `lf --wave <wave> set` a Wave; --global every repository.
-Yours wins over the committed .lf/config.yaml and .lf/wave/<name>/config.yaml,
-for you only; `lf wave status` shows each value and its source.";
+const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
+Values use YAML; false disables and [] clears an additive list.
+The default destination is root lf.config.local.yaml, shared across Task worktrees.
+--global edits ~/.lf/config.yaml; --shared explicitly edits committed configuration.
+`lf --wave <name> set` selects a Wave; unset removes only that declaration.
+`lf config show --skill <name> --json` explains effective values and sources.";
 
 #[derive(Subcommand, Debug)]
 pub enum WaveGraphCommand {
@@ -2564,6 +2606,46 @@ A stream whose build cannot open this Machine's store keeps the installed lf unt
 /// Read Loopflow configuration.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
+    /// Adopt a recovery mapping into this clone, or personal global configuration
+    Import {
+        path: PathBuf,
+        /// JSON pointer to the authored mapping, for example /repo/owner~1project
+        #[arg(long, default_value = "")]
+        pointer: String,
+        #[arg(long)]
+        global: bool,
+        /// Replace conflicting declarations explicitly
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Inspect origin profile retention and explicitly keep or replace divergent files
+    Retained {
+        #[arg(long, conflicts_with = "keep")]
+        replace: bool,
+        #[arg(long)]
+        keep: bool,
+    },
+    /// Inspect the preference cutover; explicitly accept changed file precedence
+    Migrate {
+        #[arg(long)]
+        accept: bool,
+    },
+    /// Discover typed settings, destinations, combination rules and portability
+    Catalog {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show effective preferences without launching
+    Show {
+        #[arg(long)]
+        skill: Option<String>,
+        #[arg(long)]
+        graph: Option<String>,
+        #[arg(long, requires = "graph")]
+        step: Option<String>,
+        #[command(flatten)]
+        output: commands::config::ShowOptions,
+    },
     /// Print the configured participant display name.
     User {
         #[arg(long)]

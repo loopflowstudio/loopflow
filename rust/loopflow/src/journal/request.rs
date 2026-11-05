@@ -24,7 +24,7 @@ pub(crate) fn run<T>(
     target: &serde_json::Value,
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    scope(true, DIAGNOSTICS.with(|sink| sink.borrow().clone()), || {
+    isolate(|| {
         let started = Instant::now();
         let span = tracing::info_span!(target: "loopflow::server::request", "server_request", trace_id = %trace, target = %target);
         let _entered = span.enter();
@@ -47,6 +47,12 @@ pub(crate) fn run<T>(
             }
         }
     })
+}
+
+/// Give a client operation its own settings and caller scope, including reads.
+pub(crate) fn isolate<T>(run: impl FnOnce() -> T) -> T {
+    let _settings = crate::config::settings::replace_invocation(serde_yaml_ng::Value::Null);
+    scope(true, DIAGNOSTICS.with(|sink| sink.borrow().clone()), run)
 }
 
 type Diagnostics = Arc<Mutex<Vec<u8>>>;
@@ -93,12 +99,13 @@ where
 {
     let active = active();
     let diagnostics = DIAGNOSTICS.with(|sink| sink.borrow().clone());
-    let agent = crate::config::agent_override();
+    let settings = crate::config::settings::invocation_values();
     let span = tracing::Span::current();
     tokio::task::spawn_blocking(move || {
         let _entered = span.enter();
         scope(active, diagnostics, || {
-            crate::config::with_agent_override(agent.as_deref(), run)
+            let _settings = crate::config::settings::replace_invocation(settings);
+            run()
         })
     })
 }
@@ -145,6 +152,33 @@ mod tests {
     }
 
     #[test]
+    fn request_settings_ignore_the_launcher_and_restore_after_failure() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let _agent = crate::lf::commands::graph::EnvVarGuard::set(
+            crate::config::AGENT_OVERRIDE_ENV,
+            "claude",
+        );
+        let _profile = crate::lf::commands::graph::EnvVarGuard::set(
+            crate::config::remote::PROFILE_ENV,
+            "invalid launcher profile",
+        );
+        let _settings = crate::config::settings::select_invocation(
+            serde_yaml_ng::from_str("agent: codex\nyolo: true").unwrap(),
+        );
+        let result: anyhow::Result<()> = run(&TraceId::default(), &serde_json::json!({}), || {
+            assert!(crate::config::agent_override().is_none());
+            assert!(crate::config::remote::incoming()?.is_none());
+            anyhow::bail!("failed request")
+        });
+        assert!(result.is_err());
+        assert_eq!(crate::config::agent_override().as_deref(), Some("codex"));
+        assert_eq!(
+            crate::config::settings::invocation_values()["yolo"],
+            serde_yaml_ng::Value::Bool(true)
+        );
+    }
+
+    #[test]
     fn concurrent_requests_keep_their_own_diagnostics_and_agent_defaults() {
         let barrier = std::sync::Barrier::new(2);
         std::thread::scope(|threads| {
@@ -158,24 +192,27 @@ mod tests {
                             &TraceId::default(),
                             &serde_json::json!({"agent": agent}),
                             || {
-                                crate::config::with_agent_override(Some(agent), || {
-                                    diagnostics(&mut output, || {
-                                        barrier.wait();
-                                        assert_eq!(
-                                            crate::config::agent_override().as_deref(),
-                                            Some(agent)
-                                        );
-                                        tokio::runtime::Runtime::new().unwrap().block_on(async {
-                                            spawn_blocking(|| {
-                                                let agent =
-                                                    crate::config::agent_override().unwrap();
-                                                diagnostic(format_args!("{agent}"));
-                                            })
-                                            .await
-                                            .unwrap();
-                                        });
-                                        Ok(())
-                                    })
+                                let _settings = crate::config::settings::select_invocation(
+                                    serde_yaml_ng::from_str(&format!(
+                                        "agent: {agent}\nyolo: false"
+                                    ))
+                                    .unwrap(),
+                                );
+                                diagnostics(&mut output, || {
+                                    barrier.wait();
+                                    assert_eq!(
+                                        crate::config::agent_override().as_deref(),
+                                        Some(agent)
+                                    );
+                                    tokio::runtime::Runtime::new().unwrap().block_on(async {
+                                        spawn_blocking(|| {
+                                            let agent = crate::config::agent_override().unwrap();
+                                            diagnostic(format_args!("{agent}"));
+                                        })
+                                        .await
+                                        .unwrap();
+                                    });
+                                    Ok(())
                                 })
                             },
                         )

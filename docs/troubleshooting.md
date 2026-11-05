@@ -152,8 +152,9 @@ npm install -g @anthropic-ai/claude-code
 lf account connect claude
 ```
 
-With no `agent` configured, lf uses the first of Codex, Claude Code, OpenCode
-and Pi it finds, so one is enough.
+With no agent preference configured, lf uses the sole installed harness. If more
+than one is installed, choose with `lf set --global default_agent claude` or pass
+`-a claude` for one command. `lf config show --explain` shows the selection.
 
 ## Context too large
 

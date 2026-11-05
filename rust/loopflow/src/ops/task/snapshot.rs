@@ -108,10 +108,9 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         task.worktree.as_deref().unwrap_or(&repo),
         wave.as_ref().map(|w| w.slug()),
         &personal,
-        task.agent.as_deref(),
         None,
     );
-    let (provider, _) = parse_agent(&agent);
+    let provider = agent.ok().map(|agent| parse_agent(&agent).0);
     let machine_id = store
         .task_checkout(&task.id)
         .await
@@ -185,7 +184,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         workspace_slug: task.workspace_slug,
         branch: task.worktree.as_ref().map(|_| task.branch.clone()),
         base_commit: task.worktree.as_ref().map(|_| task.base_commit.clone()),
-        agent: task.agent,
         provider,
         pr,
         latest_event,

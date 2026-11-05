@@ -34,6 +34,7 @@ mod scratch_tests;
 mod session_cli_tests;
 mod session_list_watch;
 mod session_steers;
+mod settings_launch_tests;
 mod store_contention;
 mod sync_tests;
 mod task_abandonment;

@@ -18,6 +18,7 @@ pub struct Request {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    Status,
     Bootstrap,
     SessionOwner {
         session: crate::id::LfSessionId,
@@ -28,6 +29,9 @@ pub enum Operation {
     Subscribe {
         query: Read,
         generation: u64,
+    },
+    Configuration {
+        request: crate::config::api::Request,
     },
     Command {
         change: Write,
@@ -49,6 +53,10 @@ pub struct Response {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
+    Status {
+        version: u32,
+        executable_sha256: String,
+    },
     Bootstrap {
         version: u32,
         build: String,
@@ -102,6 +110,8 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/attach.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_owner.json"),
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
+            include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
+            include_str!("../../../../tests/fixtures/dto/server/status_request.json"),
         ] {
             let request: Request = serde_json::from_str(raw).unwrap();
             let actual = serde_json::to_value(&request).unwrap();
@@ -112,6 +122,7 @@ mod tests {
         }
         for raw in [
             include_str!("../../../../tests/fixtures/dto/server/bootstrap.json"),
+            include_str!("../../../../tests/fixtures/dto/server/status.json"),
             include_str!("../../../../tests/fixtures/dto/server/command.json"),
             include_str!("../../../../tests/fixtures/dto/server/owner.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),

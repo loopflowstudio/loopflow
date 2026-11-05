@@ -32,3 +32,8 @@ and sync; the former absence of a live Graph is historical. No credential or
 account-routing change was selected. Original retry evidence and stopped Graph
 IDs remain at `0e597c17a1:scratch/questions.md`. No additional product decision
 is required for the local cutover; final acceptance is still outstanding.
+
+Settings-merge assumption (November 4): file settings retain access before Work
+is compatible. The additive status/configuration operations preserve existing
+bootstrap fields and route the incoming FFI consumers through the shared server.
+This is an implementation choice within Jack Heart's complete FFI deletion.

@@ -47,6 +47,13 @@ revision, limits and capabilities. Each restart changes `instance`. Default-Mach
 setup delegates to the promoted installation; source builds use an explicit
 `LF_HOME` to keep experiments separate.
 
+- `status` reports protocol and executable identity without opening Work. Readiness
+  uses it so file settings remain available with an uninitialized or incompatible
+  registry; `bootstrap` still returns the full Machine reading.
+- `configuration {request}` uses `config::api::Request` for catalogue, declaration,
+  explanation and theme access. CLI and Desktop share the same Rust validation
+  and file writer. It returns the ordinary command receipt and never replays a
+  failed or uncertain save. Setting values are omitted from request telemetry.
 - `read {query}` uses the existing `Read` shape. Every shared read is supported. Repository IDs resolve on the
   destination with `repository_path`; paths in local reads are destination paths.
   `view_plan` returns the existing WorkViewPlan, including the recorded primary

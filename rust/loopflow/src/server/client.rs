@@ -14,10 +14,10 @@ pub struct Status {
 
 pub fn status() -> Result<Status> {
     let socket = super::socket_path()?;
-    let (instance, error) = match connect(Operation::Bootstrap) {
+    let (instance, error) = match connect(Operation::Status) {
         Ok((_, response)) => {
             let error = match response.result {
-                Reply::Bootstrap {
+                Reply::Status {
                     version,
                     executable_sha256,
                     ..
@@ -68,10 +68,15 @@ pub fn connect(operation: Operation) -> Result<(UnixStream, Response)> {
     socket.write_all(&(bytes.len() as u32).to_be_bytes())?;
     socket.write_all(&bytes)?;
     let response = receive(&mut socket)?;
-    anyhow::ensure!(
-        response.id == id,
-        "Server response does not answer this request"
-    );
+    // A protocol refusal can precede decoding the request ID. Preserve the
+    // listener's incarnation so installation can replace a live older server.
+    // Successful receipts must still answer this exact request.
+    if !matches!(response.result, Reply::Error { .. }) {
+        anyhow::ensure!(
+            response.id == id,
+            "Server response does not answer this request"
+        );
+    }
     Ok((socket, response))
 }
 

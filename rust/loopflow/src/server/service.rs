@@ -136,6 +136,10 @@ async fn operation(
     operation: Operation,
 ) -> Result<()> {
     let reply = match operation {
+        Operation::Status => Reply::Status {
+            version: VERSION,
+            executable_sha256: executable_sha256.into(),
+        },
         Operation::SessionOwner { session } => {
             let owner = tokio::task::spawn_blocking(move || -> Result<_> {
                 let registry = crate::store::read_existing_registry()?
@@ -156,6 +160,7 @@ async fn operation(
                     "reads".into(),
                     "subscriptions".into(),
                     "commands".into(),
+                    "configuration".into(),
                     "roadmap".into(),
                     "machine_id".into(),
                     "portfolio".into(),
@@ -171,19 +176,31 @@ async fn operation(
             }
         }
         Operation::Read { query } => Reply::Read {
-            output: tokio::task::spawn_blocking(move || query.read()).await??,
+            output: tokio::task::spawn_blocking(move || {
+                crate::journal::request::isolate(|| query.read())
+            })
+            .await??,
         },
         Operation::Subscribe { query, generation } => {
             return subscribe(socket, id, instance, query, generation).await;
         }
-        Operation::Command { change } => {
-            command(change, id, instance)
-                .await
-                .unwrap_or_else(|error| Reply::Error {
-                    code: ErrorCode::OutcomeUnknown,
-                    message: format!("{error}; inspect the affected work before retrying"),
-                })
+        Operation::Configuration { request } => {
+            let mut target = serde_json::to_value(&request)?;
+            target
+                .as_object_mut()
+                .expect("configuration request is an object")
+                .remove("value");
+            execute_command(target, id, instance, move |output, _errors| {
+                use std::io::Write;
+                writeln!(output, "{}", crate::config::api::run(request)?)?;
+                Ok(())
+            })
+            .await
+            .unwrap_or_else(command_outcome_unknown)
         }
+        Operation::Command { change } => command(change, id, instance)
+            .await
+            .unwrap_or_else(command_outcome_unknown),
         Operation::Attach { owner } => {
             let mut destination = UnixStream::connect(crate::transport::endpoint(&owner)?)
                 .await
@@ -214,7 +231,10 @@ async fn subscribe(
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
     let subscription = Arc::new(
-        tokio::task::spawn_blocking(move || query.subscribe(move || wake.notify_one())).await??,
+        tokio::task::spawn_blocking(move || {
+            crate::journal::request::isolate(|| query.subscribe(move || wake.notify_one()))
+        })
+        .await??,
     );
     // Keep the in-flight read future across wakes; cancellation cannot discard a
     // partial frame then interpret its payload as the next length prefix.
@@ -232,7 +252,7 @@ async fn subscribe(
             }
             () = notify.notified() => {
                 let pull = subscription.clone();
-                let frame = tokio::task::spawn_blocking(move || pull.pull()).await?;
+                let frame = tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| pull.pull())).await?;
                 if let Some(frame) = frame {
                     respond(&mut writer, id, instance, Reply::Reading {
                         generation, frame: serde_json::from_slice(&frame)?,
@@ -244,59 +264,75 @@ async fn subscribe(
     }
 }
 
+fn command_outcome_unknown(error: anyhow::Error) -> Reply {
+    Reply::Error {
+        code: ErrorCode::OutcomeUnknown,
+        message: format!("{error}; inspect the affected work before retrying"),
+    }
+}
+
 async fn command(change: Write, id: &str, instance: &str) -> Result<Reply> {
+    use clap::Parser;
+    let mut target = serde_json::to_value(&change)?;
+    if let Some(fields) = target.as_object_mut() {
+        for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
+            fields.remove(field);
+        }
+    }
+    execute_command(target, id, instance, move |output, errors| {
+        let args: Vec<_> = std::iter::once("lf".to_owned())
+            .chain(change.argv())
+            .collect();
+        let cli = match crate::lf::Cli::try_parse_from(&args).and_then(crate::lf::Cli::checked) {
+            Ok(cli) => cli,
+            Err(error) => {
+                use std::io::Write;
+                let stream = if error.use_stderr() {
+                    &mut *errors
+                } else {
+                    &mut *output
+                };
+                write!(stream, "{error}")?;
+                return Err(crate::process::CommandExit(
+                    u8::try_from(error.exit_code()).expect("Clap exit code fits a byte"),
+                )
+                .into());
+            }
+        };
+        anyhow::ensure!(
+            crate::lf::commands::mutation::accepts(&cli),
+            "unsupported mutation"
+        );
+        let mut input = change.input().unwrap_or_default().as_bytes();
+        crate::lf::commands::mutation::run(
+            &cli,
+            &args,
+            change.directory(),
+            &mut crate::lf::commands::mutation::CommandIo {
+                input: &mut input,
+                output,
+                error: errors,
+            },
+        )
+    })
+    .await
+}
+
+async fn execute_command(
+    target: serde_json::Value,
+    id: &str,
+    instance: &str,
+    execute: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>) -> Result<()> + Send + 'static,
+) -> Result<Reply> {
     let id = id.to_owned();
     let instance = instance.to_owned();
-    // Once admitted, a disconnected caller does not cancel or replay effects.
-    // Dropping this join releases the viewer; the worker can finish.
+    // Once admitted, disconnection releases the viewer; effects finish without replay.
     tokio::task::spawn_blocking(move || {
-        use clap::Parser;
         let trace_id = crate::id::TraceId::default();
-        let mut target = serde_json::to_value(&change)?;
-        if let Some(fields) = target.as_object_mut() {
-            for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
-                fields.remove(field);
-            }
-        }
         let mut output = Vec::new();
         let mut errors = Vec::new();
-        let result = crate::journal::request::run(&trace_id, &target, || {
-            let args: Vec<_> = std::iter::once("lf".to_owned())
-                .chain(change.argv())
-                .collect();
-            let cli = match crate::lf::Cli::try_parse_from(&args).and_then(crate::lf::Cli::checked)
-            {
-                Ok(cli) => cli,
-                Err(error) => {
-                    use std::io::Write;
-                    let stream = if error.use_stderr() {
-                        &mut errors
-                    } else {
-                        &mut output
-                    };
-                    write!(stream, "{error}")?;
-                    return Err(crate::process::CommandExit(
-                        u8::try_from(error.exit_code()).expect("Clap exit code fits a byte"),
-                    )
-                    .into());
-                }
-            };
-            anyhow::ensure!(
-                crate::lf::commands::mutation::accepts(&cli),
-                "unsupported mutation"
-            );
-            let mut input = change.input().unwrap_or_default().as_bytes();
-            crate::lf::commands::mutation::run(
-                &cli,
-                &args,
-                change.directory(),
-                &mut crate::lf::commands::mutation::CommandIo {
-                    input: &mut input,
-                    output: &mut output,
-                    error: &mut errors,
-                },
-            )
-        });
+        let result =
+            crate::journal::request::run(&trace_id, &target, || execute(&mut output, &mut errors));
         let code = i32::from(crate::journal::command_exit_code(&result));
         if let Err(error) = result {
             use std::io::Write;

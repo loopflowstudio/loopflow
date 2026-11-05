@@ -170,7 +170,7 @@ pub struct TaskRuntimeSnapshot {
     pub completion_pending: Option<String>,
     pub reason: String,
     pub updated_at: String,
-    pub provider: String,
+    pub provider: Option<String>,
     /// Who owns the Task on which Machine, as this Machine reads the ownership
     /// log; absent when the Task is unowned.
     pub owner: Option<crate::durable::TaskOwner>,
@@ -547,7 +547,7 @@ pub struct RoadmapTask {
     /// The graph the Task took up, else the one its first `lf task run` takes up.
     pub graph_name: Option<String>,
     /// The layer that chose it: `task`, `personal`, `wave`, `repo`, `global` or `default`.
-    pub graph_source: Option<crate::work::wave::setup::SetupSource>,
+    pub graph_source: Option<crate::config::ConfigSource>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -1659,7 +1659,7 @@ fn snapshot_task_runtime(
     status: TaskState,
     completion_pending: Option<String>,
     owner: Option<crate::durable::TaskOwner>,
-    provider: String,
+    provider: Option<String>,
 ) -> TaskRuntimeSnapshot {
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
@@ -1763,7 +1763,7 @@ fn snapshot_task_details(
     let mut details: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
-                scope.spawn(|| {
+                scope.spawn(crate::config::observation::inherit(|| {
                     let mut details = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
@@ -1778,7 +1778,7 @@ fn snapshot_task_details(
                         ));
                         details.push((index, detail));
                     }
-                })
+                }))
             })
             .collect();
         handles
@@ -1797,7 +1797,7 @@ struct DetailReads<'a> {
     facts: crate::store::sqlite::TaskDetailFacts,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
-    selections: HashMap<crate::durable::TaskId, (String, crate::work::wave::setup::SetupSource)>,
+    selections: HashMap<crate::durable::TaskId, (String, Option<crate::config::ConfigSource>)>,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
     wave_names: HashMap<crate::id::WaveId, String>,
     /// Each Task Wave's and repository's checkout with your `lf set` values,
@@ -1820,17 +1820,20 @@ impl<'a> DetailReads<'a> {
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
         let execution = store.sqlite.graph_execution_facts(graphs.values())?;
-        let mut defaults = HashMap::<_, (String, crate::work::wave::setup::SetupSource)>::new();
+        let mut defaults = HashMap::<_, (String, Option<crate::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
         let mut personal = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
-                Some(name) => (name.clone(), crate::work::wave::setup::SetupSource::Task),
+                Some(name) => (name.clone(), None),
                 None => match defaults.entry((task.wave_id.clone(), task.repository_id.clone())) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
                     std::collections::hash_map::Entry::Vacant(entry) => entry
-                        .insert(crate::ops::task::task_graph_default(store, task)?)
+                        .insert({
+                            let (name, source) = crate::ops::task::task_graph_default(store, task)?;
+                            (name, Some(source))
+                        })
                         .clone(),
                 },
             };
@@ -1939,10 +1942,9 @@ async fn snapshot_task_detail(
         task.worktree.as_deref().unwrap_or(repo),
         wave,
         personal,
-        task.agent.as_deref(),
         None,
     );
-    let (provider, _) = crate::config::parse_agent(&agent);
+    let provider = agent.ok().map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let machine_id = shared
         .checkouts
@@ -2109,7 +2111,7 @@ async fn snapshot_task_detail(
         condition,
         actions,
         graph_name: Some(graph_name),
-        graph_source: Some(graph_source),
+        graph_source,
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
@@ -3929,7 +3931,7 @@ mod tests {
                 status,
                 reason: "settled".to_string(),
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
-                provider: "codex".to_string(),
+                provider: Some("codex".to_string()),
                 owner: Some(owned()),
                 completion_pending: None,
             };
@@ -4012,7 +4014,7 @@ mod tests {
             status: TaskState::Moving,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
-            provider: "codex".to_string(),
+            provider: Some("codex".to_string()),
             owner: Some(owned()),
             completion_pending: None,
         };
@@ -4120,7 +4122,7 @@ mod tests {
                         status,
                         reason: "terminal".into(),
                         updated_at: "2026-07-21T00:00:00Z".into(),
-                        provider: "codex".into(),
+                        provider: Some("codex".into()),
                         owner: Some(owned()),
                         completion_pending: None,
                     };
@@ -4183,7 +4185,7 @@ mod tests {
                 status,
                 reason: "terminal".into(),
                 updated_at: "2026-07-21T00:00:00Z".into(),
-                provider: "codex".into(),
+                provider: Some("codex".into()),
                 owner: Some(owned()),
                 completion_pending: None,
             };

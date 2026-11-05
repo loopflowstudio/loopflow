@@ -1,7 +1,6 @@
 ---
 requires: product direction, an existing design, or a Task brief
 produces: an implementation plan with resolved risks, sequencing and acceptance checks
-default_agent: claude
 ---
 Shape the supplied product direction into an implementation plan.
 

@@ -13,6 +13,15 @@ enum ServerClient {
 
     static func write(_ change: ServedWrite, location: ServerLocation = .shared) async throws -> String {
         let response = try await request(.command(change), location: location)
+        return try commandOutput(response)
+    }
+
+    static func configuration(_ value: JSONValue, location: ServerLocation = .shared) async throws -> Data {
+        let response = try await request(.configuration(value), location: location)
+        return Data(try commandOutput(response).utf8)
+    }
+
+    private static func commandOutput(_ response: ServerReply) throws -> String {
         guard case .command(_, let output, let stderr, let code) = response else {
             throw RegistryQueryError("Server command outcome unknown; inspect the affected work before retrying")
         }

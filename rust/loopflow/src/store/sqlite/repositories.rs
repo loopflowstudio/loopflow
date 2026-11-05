@@ -41,7 +41,7 @@ fn retained_checkout_matches(conn: &Connection, repo: &str) -> StoreResult<bool>
     let mut statement = conn.prepare(
         "SELECT t.worktree,t.branch FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
-         WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
+         WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
            AND t.worktree IS NOT NULL AND t.worktree<>?1 AND t.branch IS NOT NULL",
     )?;
     let retained = statement
@@ -168,7 +168,7 @@ impl SqliteStore {
             "INSERT OR IGNORE INTO relocated_task_processes(task_id,process_id)
              SELECT t.id,e.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
                ON e.cwd=rtrim(t.worktree,'/') OR instr(e.cwd,rtrim(t.worktree,'/')||'/')=1
-             WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
+             WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
                AND (t.worktree=?1 OR instr(t.worktree,?1||'/')=1)",
             [&source],
         )?;
@@ -192,7 +192,7 @@ impl SqliteStore {
         // their actual paths, even when their names retain the old prefix.
         for (table, column, scope) in [
             ("agent_sessions", "cwd", "repo=?2"),
-            ("tasks", "worktree", "checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND repository_id IN (SELECT id FROM repository_plans WHERE repo=?2)"),
+            ("tasks", "worktree", "checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND repository_id IN (SELECT id FROM repository_plans WHERE repo=?2)"),
         ] {
             tx.execute(
                 &format!("UPDATE {table} SET {column}=?2 || substr({column},length(?1)+1)
@@ -406,7 +406,7 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/before/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/before/task',1,(SELECT id FROM machines WHERE is_local=1))",params![task.as_str(),project.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',1)",params![process,TraceId::new()]).unwrap();
             conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON tasks BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
         }
@@ -462,7 +462,10 @@ mod tests {
         use crate::durable::{
             DefaultScope, MachineSetting, OwningMachineSource, TaskExecutionSource,
         };
+        let _env = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
@@ -496,12 +499,9 @@ mod tests {
             .unwrap();
         let task = new_task("Routed");
         let route = store.task_execution_route(&task.id).unwrap();
-        assert_eq!(
-            (route.machine_id, route.source),
-            (
-                worker.clone(),
-                TaskExecutionSource::OwningMachine(OwningMachineSource::Repository)
-            )
+        assert_eq!(route.machine_id, worker);
+        assert!(
+            matches!(route.source, TaskExecutionSource::OwningMachine(OwningMachineSource::Preference(selected)) if selected.scope == crate::config::settings::SettingScope::Repository)
         );
         // The Wave's Session Machine places no Task.
         store
@@ -518,8 +518,9 @@ mod tests {
         assert_eq!(
             store
                 .wave_owning_machine(&wave, MachineSetting::Session)
-                .unwrap(),
-            (local.clone(), OwningMachineSource::Wave("work".into()))
+                .unwrap()
+                .0,
+            local.clone()
         );
         // The Wave's default outranks the repository's.
         store
@@ -530,12 +531,9 @@ mod tests {
             )
             .unwrap();
         let route = store.task_execution_route(&task.id).unwrap();
-        assert_eq!(
-            (route.machine_id, route.source),
-            (
-                mini,
-                TaskExecutionSource::OwningMachine(OwningMachineSource::Wave("work".into()))
-            )
+        assert_eq!(route.machine_id, mini);
+        assert!(
+            matches!(route.source, TaskExecutionSource::OwningMachine(OwningMachineSource::Preference(selected)) if selected.scope == crate::config::settings::SettingScope::Wave)
         );
         // Only your Machine for the Wave claims; this one refuses without writing.
         assert!(store.claim_task(&task.id).is_err());
@@ -551,7 +549,7 @@ mod tests {
 
     #[test]
     fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
-        use crate::durable::{DefaultScope, MachineSetting, OwningMachineSource};
+        use crate::durable::{DefaultScope, MachineSetting};
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
@@ -589,11 +587,9 @@ mod tests {
         assert_eq!(
             store
                 .wave_owning_machine(&project.wave_id, MachineSetting::Tasks)
-                .unwrap(),
-            (
-                store.local_machine().unwrap().id,
-                OwningMachineSource::Wave("infrastructure".into())
-            )
+                .unwrap()
+                .0,
+            store.local_machine().unwrap().id
         );
         assert_eq!(store.capacity_defaults().unwrap().len(), 1);
 

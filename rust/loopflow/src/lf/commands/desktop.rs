@@ -3234,6 +3234,37 @@ impl DesktopTextUnavailable {
     }
 }
 
+pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
+    use crate::lf::DesktopCommand;
+    if matches!(
+        command,
+        DesktopCommand::Query { .. }
+            | DesktopCommand::Pin { .. }
+            | DesktopCommand::Unpin { .. }
+            | DesktopCommand::Rename { .. }
+            | DesktopCommand::Layout { save: true, .. }
+    ) {
+        return true;
+    }
+    if !matches!(
+        command,
+        DesktopCommand::Hide { .. }
+            | DesktopCommand::Show { .. }
+            | DesktopCommand::Move { .. }
+            | DesktopCommand::Do { .. }
+    ) {
+        return false;
+    }
+    match Verb::parse(command) {
+        Ok(Verb {
+            kind: VerbKind::Action { name, .. },
+            target,
+            ..
+        }) => saved_tile(&name, target.pane.as_deref()).is_some(),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -3655,36 +3686,5 @@ mod tests {
                 "{text:?}"
             );
         }
-    }
-}
-
-pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
-    use crate::lf::DesktopCommand;
-    if matches!(
-        command,
-        DesktopCommand::Query { .. }
-            | DesktopCommand::Pin { .. }
-            | DesktopCommand::Unpin { .. }
-            | DesktopCommand::Rename { .. }
-            | DesktopCommand::Layout { save: true, .. }
-    ) {
-        return true;
-    }
-    if !matches!(
-        command,
-        DesktopCommand::Hide { .. }
-            | DesktopCommand::Show { .. }
-            | DesktopCommand::Move { .. }
-            | DesktopCommand::Do { .. }
-    ) {
-        return false;
-    }
-    match Verb::parse(command) {
-        Ok(Verb {
-            kind: VerbKind::Action { name, .. },
-            target,
-            ..
-        }) => saved_tile(&name, target.pane.as_deref()).is_some(),
-        _ => false,
     }
 }

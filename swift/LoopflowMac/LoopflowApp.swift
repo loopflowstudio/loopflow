@@ -171,6 +171,7 @@ struct LoopflowApp: App {
                 ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
                 Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
                     .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
+                ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
             }.modifier(AppAppearance(appearance: appearance))
         }

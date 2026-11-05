@@ -108,8 +108,6 @@ Rollover names the same retention reasons. Resume, rollover and the detached
 limit share this judgment; work holds independent of reachability. Only resume asks
 whether the owner answers, and only for no open Session.
 Graph runners keep running and launch each next step through the entry.
-Owners and runners whose store has advanced beyond their reader floor cannot
-recover themselves through this policy.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

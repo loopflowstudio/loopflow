@@ -656,12 +656,6 @@ impl SqliteStore {
         Ok(store)
     }
 
-    /// The migration a reader must know to open this store; `None` when it is empty.
-    pub(crate) fn reader_floor(&self) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        crate::store::migrations::store_reader_floor(&conn)
-    }
-
     /// Append process evidence to an existing compatible store, never initialize it.
     pub(crate) fn open_existing_processes(path: &Path, wait: Duration) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
@@ -2196,8 +2190,8 @@ mod frontier_tests {
         open(&path, &shared.home, Forbidden).unwrap();
     }
 
-    /// A newer build that only adds leaves this lf reading and writing the
-    /// shared store; one that breaks names the migration that locked it out.
+    /// A newer build leaves this lf reading and writing the shared store.
+    /// Promotion selecting this build applies nothing to history it does not know.
     #[test]
     fn an_older_lf_keeps_working_on_a_store_a_newer_build_extended() {
         let shared = SharedMachine::new();
@@ -2209,13 +2203,12 @@ mod frontier_tests {
             &conn,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
         let newer = frontier(&path);
 
-        let store = open(&path, &shared.home, Forbidden)
-            .expect("an additive newer release leaves the store readable");
+        let store =
+            open(&path, &shared.home, Forbidden).expect("a newer build leaves the store readable");
         let wave = Wave::new(WaveId::new(), "From older lf".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         assert_eq!(
@@ -2227,36 +2220,38 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), newer);
-        open(&path, &shared.home, Authorized)
-            .expect_err("promotion never accepts history it does not know");
+        open(&path, &shared.home, Authorized).expect("selecting an older build applies nothing");
+        assert_eq!(frontier(&path), newer);
+    }
 
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
+    /// A contract migration past its staging window still opens: the one
+    /// statement that reads what it dropped fails, naming the column.
+    #[test]
+    fn a_dropped_column_fails_the_statement_that_reads_it_and_nothing_else() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        let newer = apply_newer_migration(
-            &conn,
-            "CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            false,
-        )
-        .unwrap();
-        let refusal = open(&path, &broken.home, Forbidden)
-            .expect_err("a breaking newer migration locks this lf out")
-            .to_string();
-        assert!(
-            refusal.contains(&format!(
-                "this store needs an lf that knows {newer} (it has "
-            )) && refusal.ends_with("run `lf install`"),
-            "{refusal}"
-        );
+        apply_newer_migration(&conn, "ALTER TABLE waves DROP COLUMN promoted_at;").unwrap();
+
+        running
+            .validate_current_schema()
+            .expect("the running reader keeps its store");
+        let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
+
+        let error = store.get_wave(&WaveId::new()).unwrap_err().to_string();
+
+        assert!(error.contains("promoted_at"), "{error}");
+        assert!(!error.contains("lf install"), "{error}");
+        store.health_check().expect("the rest of the store answers");
     }
 
     /// A Graph holds its store across steps and revalidates it after each one
     /// (`validate_current_schema`). A newer build that adds a slug migration
-    /// meanwhile leaves that running reader working; one that breaks stops it
-    /// with the skew and `lf install`, never advice to delete the database.
+    /// meanwhile leaves that running reader working.
     #[test]
-    fn a_running_older_reader_survives_an_additive_upgrade_under_it() {
+    fn a_running_older_reader_survives_an_upgrade_under_it() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, &shared.home, Authorized).unwrap();
@@ -2269,13 +2264,12 @@ mod frontier_tests {
             &newer,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
 
         running
             .validate_current_schema()
-            .expect("an additive newer migration keeps the running reader valid");
+            .expect("a newer migration keeps the running reader valid");
         let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
         running.create_wave(&after).unwrap();
         for wave in [&before, &after] {
@@ -2287,27 +2281,6 @@ mod frontier_tests {
                 Some(wave.name().to_string())
             );
         }
-
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
-        let running = open(&path, &broken.home, Forbidden).unwrap();
-        let newer = apply_newer_migration(
-            &rusqlite::Connection::open(&path).unwrap(),
-            "CREATE TABLE wave_marks (wave_id TEXT NOT NULL);",
-            false,
-        )
-        .unwrap();
-        let refusal = running
-            .validate_current_schema()
-            .expect_err("a breaking newer migration stops the running reader")
-            .to_string();
-        assert!(
-            refusal.contains(&format!("this store needs an lf that knows {newer}"))
-                && refusal.ends_with("run `lf install`")
-                && !refusal.contains("delete"),
-            "{refusal}"
-        );
     }
 
     #[test]

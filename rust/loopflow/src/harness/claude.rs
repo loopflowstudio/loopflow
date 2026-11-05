@@ -419,6 +419,7 @@ impl Harness for ClaudeHarness {
             requested_session.as_ref(),
             self.requested_account_id.as_ref(),
             crate::work::wave::context::ambient_wave_id().as_ref(),
+            config.isolate,
         )
         .await?;
         self.account_route = account_route;
@@ -789,6 +790,7 @@ mod tests {
                 let (tx, _rx) = mpsc::unbounded_channel();
                 let mut harness = ClaudeHarness::new(tx);
                 harness.config = Some(AgentConfig {
+                    isolate: None,
                     agent: settings.agent,
                     chrome: settings.chrome,
                     skip_permissions: settings.yolo,
@@ -882,6 +884,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
+            isolate: None,
             chrome: false,
             session_attachment: None,
             system_prompt: String::new(),
@@ -1160,6 +1163,7 @@ cat > /dev/null
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
+            isolate: None,
             chrome: false,
             session_attachment: None,
             system_prompt: String::new(),

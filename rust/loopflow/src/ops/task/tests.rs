@@ -269,7 +269,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             workspace_slug: "reserved-checkout".into(),
             stack_parent: None,
             github: None,
-            requested_agent: None,
             directive: None,
         };
         let saved = runtime
@@ -587,7 +586,6 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         branch: "test/task-recovery-fixture".to_string(),
         base_commit: "deadbeef".to_string(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

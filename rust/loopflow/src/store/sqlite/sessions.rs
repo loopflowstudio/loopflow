@@ -12,6 +12,28 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
+/// Why a Session owner cannot retire without losing work or native input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnerRetention {
+    NativeInput,
+    RunningGraph,
+    MissingSession,
+    HeadlessRun,
+    LiveTurn,
+}
+
+impl std::fmt::Display for OwnerRetention {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            OwnerRetention::NativeInput => "native input",
+            OwnerRetention::RunningGraph => "a running Graph",
+            OwnerRetention::MissingSession => "a missing Session",
+            OwnerRetention::HeadlessRun => "a headless Run",
+            OwnerRetention::LiveTurn => "a live turn",
+        })
+    }
+}
+
 /// The Graph whose process recorded, as a step, the Process that captured session
 /// `s`'s current input. Sessions carry no Graph column of their own.
 macro_rules! session_graph {
@@ -591,18 +613,16 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Whether every Session execution owner `owner` holds is a standalone
-    /// interactive conversation waiting for a person. A step of a running
-    /// Graph, a headless Run, or a turn in progress keeps it running; a Graph
-    /// that finished holds nothing.
-    pub(crate) fn owner_waits_for_person(
+    /// What keeps execution owner `owner` running. None means its standalone
+    /// interactive Sessions hold no work or native input; finished Graphs hold nothing.
+    pub(crate) fn owner_retention(
         &self,
         owner: &crate::id::LfProcessId,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<OwnerRetention>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         if super::native_input::pending(&conn, owner)? {
-            return Ok(false);
+            return Ok(Some(OwnerRetention::NativeInput));
         }
         // A running Graph started inside an owner, as from a terminal, holds
         // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
@@ -615,18 +635,36 @@ impl SqliteStore {
                          WHERE p.completed_at IS NULL
                      UNION SELECT p.parent_lf_process_id FROM processes p
                          JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT ?1 NOT IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                 AND EXISTS(SELECT 1 FROM agent_sessions s
+                 SELECT ?1 IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
+                     OR EXISTS(SELECT 1 FROM agent_sessions s
+                         JOIN processes g ON g.id={SESSION_GRAPH}
+                         WHERE s.transport_lf_process_id=?1 AND g.completed_at IS NULL)
+                     AS running_graph,
+                 NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
-                 AND NOT EXISTS(SELECT 1 FROM agent_sessions s
+                     AS missing_session,
+                 EXISTS(SELECT 1 FROM agent_sessions s
+                     WHERE s.transport_lf_process_id=?1 AND s.interactive=0)
+                     AS headless_run,
+                 EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1
-                     AND (s.interactive=0
-                         OR EXISTS(SELECT 1 FROM processes g
-                             WHERE g.id={SESSION_GRAPH} AND g.completed_at IS NULL)
-                         OR (s.completed_at IS NULL AND {TURN_LIVE})))"
+                         AND s.completed_at IS NULL AND {TURN_LIVE})
+                     AS live_turn"
             ),
             [owner.as_str()],
-            |row| row.get(0),
+            |row| {
+                Ok(if row.get("running_graph")? {
+                    Some(OwnerRetention::RunningGraph)
+                } else if row.get("missing_session")? {
+                    Some(OwnerRetention::MissingSession)
+                } else if row.get("headless_run")? {
+                    Some(OwnerRetention::HeadlessRun)
+                } else if row.get("live_turn")? {
+                    Some(OwnerRetention::LiveTurn)
+                } else {
+                    None
+                })
+            },
         )?)
     }
 
@@ -2061,7 +2099,7 @@ mod metadata_tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE is_local=1))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
         }
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
         let exclusion = store.lock_checkout(&session.cwd).unwrap();

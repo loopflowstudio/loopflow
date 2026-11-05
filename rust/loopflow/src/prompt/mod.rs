@@ -356,7 +356,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     let mut spec = opts.gather_spec();
     if let Some(skill) = &skill {
-        spec.docs.extend(skill.docs.iter().cloned());
+        spec.docs.extend(skill.docs.iter().flatten().cloned());
     }
 
     // Gather document sources through a single pipeline.
@@ -2157,9 +2157,10 @@ mod tests {
                 name: "implement".to_string(),
                 content: Some("Implement the feature described.".to_string()),
                 agent: None,
-                default_agent: None,
+                occurrence: None,
+                settings: Default::default(),
                 action_style: None,
-                docs: Vec::new(),
+                docs: None,
             }),
             ..Default::default()
         };
@@ -2178,9 +2179,10 @@ mod tests {
                 name: "review".to_string(),
                 content: None,
                 agent: None,
-                default_agent: None,
+                occurrence: None,
+                settings: Default::default(),
                 action_style: None,
-                docs: Vec::new(),
+                docs: None,
             }),
             ..Default::default()
         };

@@ -15,13 +15,18 @@ lf resume <session>                # an exact conversation
 lf session list --available        # conversations available for your next turn, across this repository
 ```
 
-`lf resume` always gets you back, with no flags to choose:
+`lf resume` reconnects to the conversation's running provider or continues its
+saved thread after safe replacement.
+
+A live turn, draft or pending request keeps its provider. If attachment fails,
+resume reports the failure and leaves that work intact. Returning does not
+resend input.
 
 | The conversation is… | `lf resume` |
 |---|---|
 | running with no terminal showing it (`detached`) | reattaches; nothing restarts |
 | shown in another lf terminal | takes it over; that terminal says where it went |
-| running in a provider client lf started elsewhere | stops that client and continues here |
+| running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
 | ended or crashed | continues the same provider thread from its history |
 | missing for this scope | starts one and says so |
 
@@ -34,7 +39,7 @@ Returning paints its saved screen while the provider reopens its history, withou
 replaying input. Active turns, watches, running Graphs, drafts and pending requests
 keep their owner. Drafts remain editable and requests remain answerable there.
 Edited, pasted or unacknowledged native input can retain the owner until the
-provider exits; the saved screen alone cannot restore an editor or request.
+provider exits; saved history and screens cannot restore an editor or request.
 
 ```bash
 lf resume <session> --fork         # leave the other client running; continue in a new conversation from it

@@ -741,7 +741,7 @@ mod tests {
         let mut step = step(dir.path(), Vec::new());
         let mut config = crate::config::Config::default();
         for key in crate::prompt::context_budget::BudgetKey::ALL {
-            config.context_budgets.insert(key, 50);
+            config.context.budgets.insert(key, 50);
         }
         let budgets = crate::prompt::context_budget::ContextBudgets::resolve(&config).unwrap();
         super::flag(&mut step, &budgets);

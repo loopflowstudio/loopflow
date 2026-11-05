@@ -135,7 +135,7 @@ struct ThemeTests {
         #expect(throws: ThemeError.self) { try imported("background=171924\nforeground=CAD2EF\nloopflow-accent=blue") }
     }
 
-    @Test func applyWritesOnlyTheThemeLineInEachModesFormat() throws {
+    @Test func applyChangesOnlyTheThemeAndCancelLeavesTheFileUntouched() throws {
         let paths = ThemePaths.temporary()
         try paths.writeConfig("agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
         let store = AppearanceStore(paths: paths, systemDark: false)
@@ -147,9 +147,11 @@ struct ThemeTests {
         #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
         #expect(store.effectiveTheme.name == "Hearth")
         store.beginPreview(); store.previewMode(.system); store.showPicker(.light); store.previewTheme("Linen"); store.apply()
-        #expect(paths.configText() == "agent: claude\n# keep me\ntheme: \"light:Linen,dark:Hearth\"\nyolo: true\n")
+        #expect(ThemeConfig.read(paths.config) == "light:Linen,dark:Hearth")
+        #expect(paths.configText()?.split(separator: "\n").filter { !$0.hasPrefix("theme:") } == ["agent: claude", "# keep me", "yolo: true"])
         store.beginPreview(); store.previewMode(.light); store.apply()
-        #expect(paths.configText() == "agent: claude\n# keep me\ntheme: \"Linen\"\nyolo: true\n")
+        #expect(ThemeConfig.read(paths.config) == "Linen")
+        #expect(paths.configText()?.split(separator: "\n").filter { !$0.hasPrefix("theme:") } == ["agent: claude", "# keep me", "yolo: true"])
         // Returning to System restores the dark side remembered in this session.
         store.applyMode(.system)
         #expect(ThemeConfig.read(paths.config) == "light:Linen,dark:Hearth")
@@ -169,7 +171,7 @@ struct ThemeTests {
         #expect(store.effectiveTheme.name == "Loopflow Dark")
         #expect(paths.configText() == nil)
         store.applyMode(.light)
-        #expect(paths.configText() == "theme: \"Loopflow Light\"\n")
+        #expect(ThemeConfig.read(paths.config) == "Loopflow Light")
     }
 
     @Test func outsideEditsReloadAndUnknownNamesKeepTheLastGoodTheme() throws {

@@ -41,7 +41,7 @@ Issues = "https://github.com/loopflowstudio/loopflow/issues"
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "scripts"]
 markers = ["docker: tests requiring Docker and Claude credentials"]
 
 [tool.ruff]

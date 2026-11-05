@@ -118,7 +118,7 @@ def _check_against_main(local: dict[str, bytes], main: dict[str, bytes] | None) 
         return []
     for name, content in main.items():
         if name not in local:
-            _fail(f"{name} is on origin/main but missing here — a merged migration is never deleted")
+            _fail(f"{name} is on origin/main but missing here; a merged migration is never deleted")
         if local[name] != content:
             _fail(f"{name} differs from origin/main — add a forward migration instead")
     for name in local:
@@ -201,15 +201,16 @@ class Column:
 @dataclass(frozen=True)
 class Schema:
     tables: dict[str, dict[str, Column]]
-    views: dict[str, str]
+    views: dict[str, dict[str, Column]]
     unique_indexes: dict[str, str]
 
     def members(self) -> set[str]:
         """`table waves`, `column waves.id`, `view wave_health`: what a drop names."""
-        members = {f"view {view}" for view in self.views}
-        for table, columns in self.tables.items():
-            members.add(f"table {table}")
-            members.update(f"column {table}.{column}" for column in columns)
+        members = set()
+        for kind, relations in (("table", self.tables), ("view", self.views)):
+            for name, columns in relations.items():
+                members.add(f"{kind} {name}")
+                members.update(f"column {name}.{column}" for column in columns)
         return members
 
 
@@ -237,27 +238,32 @@ def _schema(conn: sqlite3.Connection) -> Schema:
         " WHERE name NOT LIKE 'sqlite_%' AND name != 'schema_migrations'"
     ).fetchall()
     tables: dict[str, dict[str, Column]] = {}
-    views: dict[str, str] = {}
+    views: dict[str, dict[str, Column]] = {}
     unique_indexes: dict[str, str] = {}
     for kind, name, table, sql in rows:
         if kind == "table":
-            quoted = '"' + name.replace('"', '""') + '"'
-            tables[name] = {
-                column: Column(
-                    declared_type=declared_type.upper(),
-                    required=bool(required),
-                    defaulted=default is not None and default.upper() != "NULL",
-                    primary_key=bool(primary_key),
-                )
-                for _, column, declared_type, required, default, primary_key, _ in conn.execute(
-                    f"PRAGMA table_xinfo({quoted})"
-                )
-            }
+            tables[name] = _columns(conn, name)
         elif kind == "view":
-            views[name] = " ".join((sql or "").split())
+            views[name] = _columns(conn, name)
         elif kind == "index" and sql and sql.upper().startswith("CREATE UNIQUE"):
             unique_indexes[name] = table
     return Schema(tables, views, unique_indexes)
+
+
+def _columns(conn: sqlite3.Connection, relation: str) -> dict[str, Column]:
+    """A table's or view's columns; a view is read like the table it presents."""
+    quoted = '"' + relation.replace('"', '""') + '"'
+    return {
+        column: Column(
+            declared_type=declared_type.upper(),
+            required=bool(required),
+            defaulted=default is not None and default.upper() != "NULL",
+            primary_key=bool(primary_key),
+        )
+        for _, column, declared_type, required, default, primary_key, _ in conn.execute(
+            f"PRAGMA table_xinfo({quoted})"
+        )
+    }
 
 
 def _compare(before: Schema, after: Schema) -> tuple[list[str], list[str]]:
@@ -285,11 +291,13 @@ def _compare(before: Schema, after: Schema) -> tuple[list[str], list[str]]:
                     f"new column {table}.{column} is required without a default;"
                     " an older INSERT omits it"
                 )
-    for view, definition in before.views.items():
-        if view not in after.views:
+    # A view is only read, so its definition may change as long as it keeps its columns.
+    for view, old_columns in before.views.items():
+        new_columns = after.views.get(view)
+        if new_columns is None:
             drops.append(f"view {view}")
-        elif after.views[view] != definition:
-            breaks.append(f"view {view} changed; older SELECTs expect its columns")
+            continue
+        drops.extend(f"column {view}.{column}" for column in old_columns - new_columns.keys())
     for index, table in after.unique_indexes.items():
         if index not in before.unique_indexes and table in before.tables:
             breaks.append(f"unique index {index} on {table}; an older writer may violate it")

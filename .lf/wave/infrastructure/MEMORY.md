@@ -597,17 +597,6 @@ deleting probes. Exact proofs and references:
 `5948e490eb7414a059f27ba39f838423a4730465:wave/infrastructure/MEMORY.md`
 under this heading.
 
-## Review replacement (2026-10-04)
-
-Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`. Installed
-acceptance is unproved; LOO-373 owns landing-placement reconciliation.
-
-Save service, attached lf and provider identities before stop removes receipts.
-Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
-Retain native history without inventing review success; protect unknown owners
-and independent reviews. Evidence:
-`c28b7d0197:wave/infrastructure/MEMORY.md`, this heading.
-
 ## Transient recovery (LOO-326, curated 2026-10-09)
 
 Jack Heart approved cached planning regardless of age for existing Task restart,
@@ -697,13 +686,18 @@ Jack Heart decided on 2026-11-02 (LOO-693) that a build may migrate `~/.lf`
 under running readers: one lf per Mac on every stream (LOO-669/688), additive
 migrations never break an older reader, and no process rollover at install.
 The 2026-10-30 outage came from 0.15.0 readers predating slug ids, not from
-additive tails. Lesson: store skew must surface as an error naming the skew and
-`lf install`, never read as an empty registry — agents take "nothing here" as
-fact. `open_existing_store` is the one opener (`Ok(None)` only when no file).
-A refusal names one fix: callers prefix who refused and the path, then pass the
-store's error through verbatim; appending `lf doctor` after it sent operators to
-a command that installs nothing. Limit: a step's own long-lived connection that
-meets a `-- breaks:` migration mid-write still fails with raw SQLite text.
+additive tails; 2026-11-04's came from `settings_authority` dropping columns in
+one step under 177 older processes. Jack's rule (2026-10-27; 843f5c):
+destructive change is staged — expand, 30 days on origin/main, export, contract;
+`check_migrations.py` measures, runtime never refuses. `lf install` prints live
+processes before promoting and its result last, keeps the pre-migration clone
+while an older build runs, and records itself as a Process after the commit.
+Lesson: store skew surfaces as an error naming the skew and `lf install`, never
+as an empty registry — agents take "nothing here" as fact.
+`open_existing_store` is the one opener (`Ok(None)` only when no file). A refusal
+names one fix, passed through verbatim; appending `lf doctor` sent operators to a
+command that installs nothing. Limit: a step's long-lived connection meeting a
+`-- breaks:` migration mid-write still fails with raw SQLite text.
 
 ## One main Home (LOO-342, curated 2026-10-10)
 
@@ -1096,6 +1090,8 @@ Archives authorize no work; installed worker recovery is under Shipped history.
 Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
 earlier follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths”
 referent: `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.
+Review replacement (LOO-377, #1429):
+`3b07e13404:.lf/wave/infrastructure/MEMORY.md`, that heading.
 
 ## Direct invocation and large inputs (curated 2026-11-03)
 

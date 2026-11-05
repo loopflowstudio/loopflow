@@ -2,17 +2,19 @@
 
 Jack Heart's Task brief (2026-11-05), re-scoped by his steer the same day after
 the upgrade audit (`loopflow.codex-resume/scratch/upgrade-audit-2026-11-05.md`,
-sections 4(b) and 6). Status: accepted, implemented; gate next. The reader floor
-is deleted by a separate Task; nothing here touches floor code.
+sections 4(b) and 6). Status: accepted, implemented, including the concept
+review's view refinement (below); gate next. The reader floor is deleted by a
+separate Task; nothing here touches floor code.
 
 ## Outcomes
 
 1. **Destructive migrations are staged.** Jack's 2026-10-27 rule: expand, wait
    for older lf to exit, export, drop. MIGRATIONS.md and AGENTS.md carry it;
    `check_migrations.py` applies the branch's slugs over `origin/main`'s schema in
-   `build.rs` order and compares shapes. A slug is additive (tables keep their
-   columns, views their definitions, new columns optional, no unique index on an
-   old table; CHECK-only rebuilds, trigger and index changes and data writes pass)
+   `build.rs` order and compares shapes. A slug is additive (tables and views
+   keep their columns, new columns optional, no unique index on an old table;
+   CHECK-only rebuilds, view redefinitions, trigger and index changes and data
+   writes pass)
    or a contract: `-- expand: <migration>` on `origin/main` for `STAGING_DAYS`
    (30, one place) by first-parent add date, `-- exports: <where>`, dropping only
    what the expand step superseded. CI measurement only.
@@ -38,8 +40,17 @@ is deleted by a separate Task; nothing here touches floor code.
 - 19:57 `lf install` has no Process row (ledger empty 03:50Z to 04:10Z for it);
   design since #1074 plus a debug-only observation failure. The 09:15 row's origin
   stays unknown (`scratch/questions.md`).
-- The disk cleanup never touches database clones; `docs/troubleshooting.md`
-  claimed a week's retention and is corrected.
+- The disk cleanup (`scripts/disk_cleanup.py`) removes nothing under `~/.lf`;
+  `docs/troubleshooting.md` and `docs/architecture-reference.md` claimed a week's
+  retention of captures, logs and all but the newest backup and are corrected.
+  Nothing in lf writes `~/.lf/backups`; MIGRATIONS.md names the clone's real
+  location and no longer describes that directory.
+- `rust/loopflow/src/store/MIGRATIONS.md` keeps its reader-floor section
+  ("Older lf keeps opening an additively extended store") for the floor Task;
+  it sits beside the staging section until that Task removes it.
+- Wave memory (LOO-656 section) now carries the staging rule, the 2026-11-04
+  cause and what `lf install` shows; "Review replacement (2026-10-04)" retired to
+  `3b07e13404` to stay under the memory budget.
 
 ## Delete — do not maintain
 
@@ -58,9 +69,45 @@ is deleted by a separate Task; nothing here touches floor code.
 --all-targets -D warnings` clean; `cargo fmt --check` clean. After compress (one
 first-parent `git log` gives slug order and add dates; drops are checked against
 `Schema.members()`; `_check_contract` split out): `uv run pytest
-python/tests/test_check_migrations.py` 17 passed; `check_migrations.py` on this
+python/tests/test_check_migrations.py` 19 passed (views, 2026-11-05); `check_migrations.py` on this
 tree: no unmerged migration, and a probe contract against real history reported
-`ship_stop` merged 6 days ago, clears 2026-11-29.
+`ship_stop` merged 6 days ago, clears 2026-11-29. Realign (2026-11-05): doc-only
+corrections, no code change; `lf context` shows memory and scratch under budget.
+
+## Concept review (2026-11-05, headless)
+
+What a person meets: `lf install` prints the live processes and the store
+advance, proceeds, and ends with the promoted line, the previous-lf report and
+any kept clone, so `tail` reads the result. A migration author meets one rule in
+AGENTS.md and MIGRATIONS.md with two markers, and CI names the day a contract
+clears. The concepts hold: additive-or-contract, expand step, export, clone kept
+while an older build runs, install as a Process. Nothing here needs a person's
+decision; the floor's absence is the floor Task's.
+
+One mismatch the accepted rule already settles. The rule is "older SQL still
+works": a `waves` rebuild that keeps every column is additive even though its
+`CREATE TABLE` text changed. `_compare` applies that to tables (column maps from
+`PRAGMA table_xinfo`) but holds views to whitespace-normalized definition text, so
+redefining `wave_addresses` to add a column fails as "not additive" with advice to
+stage it, which for a view means a second name and a 30-day drop of the first: an
+action the rule imposes without benefit. The text check also misses the opposite
+case: `wave_removal` recreates `wave_addresses` byte-identical (`SELECT w.*`), so
+a rebuild that dropped a `waves` column would pass the view while its columns
+shrank. Views are read like tables; measure them like tables.
+
+Implemented the same day: `Schema.views` is `dict[str, dict[str, Column]]` read
+through the same `PRAGMA table_xinfo`; `_compare` treats a view like a table (a
+lost view column is a drop a contract may stage, `members()` includes
+`column <view>.<col>`, an unchanged column set passes whatever the definition
+says); the view-changed break is gone. MIGRATIONS.md says "every view keeps its
+columns". Tests: a redefined view that adds a column passes; one that loses a
+column needs a contract.
+
+Recorded, not changed: the kept clone's test is "any superseded process", so an
+install with no migration also keeps the clone while a process on the prior build
+runs, though that build reads the current generation. Without the floor the
+inventory has no per-build generation to compare, and the clone's cost is disk
+until the next commit; a finer test is the floor Task's to want.
 
 ## Remaining
 

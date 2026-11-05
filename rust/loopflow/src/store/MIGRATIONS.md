@@ -81,8 +81,8 @@ Machine claim. Historical PIDs are evidence only; they must never be signaled lo
 
 Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the
-database as `loopflow.db.backup-<previous migration>-<16 hex>` (`~/.lf/backups`
-holds hand-made copies). The name carries the previously applied migration and a
+database as `loopflow.db.backup-<previous migration>-<16 hex>`, never under
+`~/.lf/backups`. The name carries the previously applied migration and a
 fingerprint of the complete ledger plus product schema, so a backup from another
 branch-local history cannot be mistaken for the state being repaired. Once a
 migration commits, only the clone it made stays. When the install settles it goes
@@ -123,16 +123,17 @@ ALTER TABLE waves DROP COLUMN hue;
 
 `check_migrations.py` applies the branch's migrations over `origin/main`'s and
 compares shapes. Additive: every table keeps its columns (a rebuild that changes a
-CHECK and copies every column counts), every view keeps its definition, new
-columns are nullable or defaulted, and no unique index joins an existing table.
-Trigger and index changes and data writes are additive too. A type change, a
-column made `NOT NULL` or a required column without a default fails: stage it as
-an expand now and a contract later. A contract may drop tables, columns and views
-that its expand step superseded, once that step has been on `origin/main` for the
-staging window (`STAGING_DAYS` in `check_migrations.py`), and it names where its
-preflight exported the data before the SQL ran. The settings cutover is the
-template: `config::migrate::preflight` writes `settings-cutover.json` under the
-migration fence, so an interrupted upgrade still has every document it replaced.
+CHECK and copies every column counts), every view keeps its columns (its definition
+may change), new columns are nullable or defaulted, and no unique index joins an
+existing table. Trigger and index changes and data writes are additive too. A type
+change, a column made `NOT NULL` or a required column without a default fails:
+stage it as an expand now and a contract later. A contract may drop tables, views
+and their columns that its expand step superseded, once that step has been on
+`origin/main` for the staging window (`STAGING_DAYS` in `check_migrations.py`), and
+it names where its preflight exported the data before the SQL ran. The settings
+cutover is the template: `config::migrate::preflight` writes `settings-cutover.json`
+under the migration fence, so an interrupted upgrade still has every document it
+replaced.
 The check measures; nothing at runtime refuses to install or migrate.
 
 New code must accept what an older writer leaves behind. While older lf still

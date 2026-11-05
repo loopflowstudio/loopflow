@@ -140,6 +140,34 @@ def test_a_rebuild_that_keeps_every_column_is_additive(repo: Path):
     assert result.returncode == 0, result.stderr
 
 
+def test_a_redefined_view_that_keeps_its_columns_is_additive(repo: Path):
+    merge(repo, "wave_names.sql", "CREATE VIEW wave_names AS SELECT id FROM waves;\n", 40)
+    (repo / MIGRATIONS / "widen_view.sql").write_text(
+        "ALTER TABLE waves ADD COLUMN name TEXT;\n"
+        "DROP VIEW wave_names;\n"
+        "CREATE VIEW wave_names AS SELECT w.id, w.name FROM waves w;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_view_losing_a_column_needs_a_contract(repo: Path):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    merge(repo, "wave_names.sql", "CREATE VIEW wave_names AS SELECT id, name FROM waves;\n", 40)
+    merge(repo, "add_title.sql", "ALTER TABLE waves ADD COLUMN title TEXT;\n", 31)
+    narrow = repo / MIGRATIONS / "narrow_view.sql"
+    sql = "DROP VIEW wave_names;\nCREATE VIEW wave_names AS SELECT id FROM waves;\n"
+
+    narrow.write_text(sql)
+    result = check(repo)
+    assert result.returncode == 1
+    assert "drops column wave_names.name without naming its expand step" in result.stderr
+
+    narrow.write_text(CONTRACT + sql)
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+
 def test_a_dropped_column_needs_a_dated_contract_that_exports(repo: Path):
     merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
     merge(repo, "add_title.sql", "ALTER TABLE waves ADD COLUMN title TEXT;\n", 31)

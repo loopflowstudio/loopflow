@@ -2,8 +2,8 @@
 
 - Stop records that fail are logged and marked (`<delivery>.store-gap`); Jack's
   steer asked for them to be "recorded as unknown at the next successful
-  boundary". The marker could drive that write later; this change clears it
-  and logs recovery instead. Assumption: a logged gap is enough for now.
+  boundary". Settled by the 2026-11-05 concept review: the marker drives one
+  Session observation on recovery (design item 2); the implement pass adds it.
 - `lf resume` on a superseded idle owner still ends that owner and reopens the
   Session on the installed lf (`ops/human_session.rs attaches`). Read as "lf
   resume taking it over", one of the endings Jack kept; the integration test

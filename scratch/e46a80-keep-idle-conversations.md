@@ -78,6 +78,68 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   shipped Session titles and Agent startup profiling detail retired to
   `a5000ef889` to stay under the 16000-token budget.
 
+## Concept review (2026-11-05, headless)
+
+The person's experience is one sentence: whatever lf's store does, your
+conversation keeps accepting input, answering and quitting. Traced through the
+change, the contract holds at each layer:
+
+- Typed bytes: `try_record_owner_input` runs with a zero busy timeout, so a
+  locked store answers `Ok(false)` at once and never stalls the serve loop; a
+  failed store delivers unrecorded and the in-memory hold keeps the owner.
+- A person's Codex turn: the dispatch fence is a file lock plus one read (WAL
+  readers do not wait on an install's exclusive write), then an unfenced send if
+  the fence cannot be read. Only the saved launch prompt waits for its receipt,
+  and the TUI says so.
+- Quit: the terminal returns in 800 ms. If the exit records never land, `lf
+  resume` still continues the conversation: `owner_running` reads OS evidence,
+  not the unrecorded `completed_at`. The demo's last step survives lost records.
+- Lifetime: no store judgment or executable change ends an owner; a failed
+  retention read retries at the next poll, and `lf resume` is the only thing
+  that ends an idle superseded owner.
+
+Settled by the accepted decisions, for the next implement pass (no code here):
+
+1. **One recording-gap concept.** "Log once per changed failure, log recovery"
+   now has four bodies: `lifetime::warn_changed` (input and lifetime),
+   `codex_connection::store_unavailable`/`store_recovered` (19 call sites),
+   `context::store_gap`/`store_recovered` (the per-thread file marker) and Pi's
+   `recordingGap`. The in-process ones are one type, `store::RecordingGap`
+   (`note(what, error)`, `recovered()`), used by the owner's input path, the
+   lifetime policy, the relay and the Claude task-update watcher (which today
+   warns on every poll). The hook keeps the file marker because each hook is a
+   fresh process; same name, same two verbs. AGENTS.md says "records a gap";
+   the code should have one thing called that.
+2. **The gap enters the Session's history.** Jack's steer: a turn lf could not
+   record is recorded as unknown at the next boundary that succeeds. Today the
+   marker clears with a log line; derived state heals only because the next
+   boundary's own activity row overwrites `yielded`. Until that boundary a
+   missed Stop leaves the Session reading as a live turn: rollover keeps it and
+   the detached ending retains it (`lf resume` attaches, which is fine). Settle
+   it as asked: the marker carries the first miss time; on recovery the hook
+   writes one `session_events` observation (`source: store-gap`, first and last
+   miss) before clearing. Desktop and `lf session` then show the hole where
+   `logs/lf.log` alone would not.
+3. **Name the delivery file for what it is.** `codex_delivery_path` now names
+   Claude, Pi and OpenCode threads' delivery files and the gap marker beside
+   them. Rename to `native_delivery_path`.
+4. **Claude is the reference behavior for every harness.** On a gap Claude shows
+   nothing (hook exits 0, lf.log has the line). Pi raises a UI warning toast and
+   OpenCode prints to stderr on every prompt. Jack's quiet-terminal rule
+   (2026-10-21: no diagnostics banners, tracing to lf.log) and the steer's
+   "logged to logs/lf.log" settle this: both JS hooks log once per changed
+   failure to their plugin log and show no UI notice; lf's own process already
+   records the gap when it runs.
+
+Kept after challenge: the saved launch prompt still waits for its receipt under
+a broken store (double-dispatch protection from the codex-resume work outranks
+sending it blind); `InvalidAuthority` still ends a relay (authority loss is not
+store loss); exit records open the store with the full 15 s budget because the
+terminal no longer waits on them.
+
+No open product choice. Nothing here changes what the product is; each item
+follows from Jack's steers and the written principle.
+
 ## Delete — do not maintain
 
 All done; nothing left to remove. Gone: the relay's fatal `return Err` arms on

@@ -205,7 +205,9 @@ Earlier inheritance proof and unresolved lock cause:
 
 Jack Heart resolved clone scope November 3: private preferences, including account
 order, belong to independent clones; linked worktrees share root
-`lf.config.local.yaml`. Legacy routes materialize after collision checks.
+`lf.config.local.yaml`. Legacy routes materialize after collision checks, naming
+accounts by login email (id only without one); exported ids stopped route
+selection until 3fcb3f (2026-11-05).
 Unavailable destinations retain non-executing exports; future clones inherit
 nothing. Reads need no checkout registration.
 
@@ -605,10 +607,8 @@ under this heading.
 Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`. Installed
 acceptance is unproved; LOO-373 owns landing-placement reconciliation.
 
-Save service, attached lf and provider identities before stop removes receipts.
-Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
 Retain native history without inventing review success; protect unknown owners
-and independent reviews. Evidence:
+and independent reviews. Stop/launch ordering and evidence:
 `c28b7d0197:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Transient recovery (LOO-326, curated 2026-10-09)
@@ -812,9 +812,9 @@ with five-minute turn grace. Configured acceptance remains open.
 LOO-665 (2026-10-28): Jack Heart authorized the same-login Codex hotfix through
 merge; Infrastructure owns installation/acceptance. Mini's stored limits succeed
 while native returns 401 despite account/read; rotation order remains unknown.
-Jack's 04:13 UTC steer reports isolated same-Session marker recall after upgrading
-Codex to 0.165.0, but shared status still unavailable. This proves neither shared
-recovery nor a fresh 401 diagnosis. Identity alone proves no usable access.
+Jack's 04:13 UTC steer after upgrading Codex to 0.165.0 reports same-Session marker
+recall but no shared status: neither shared recovery nor a fresh 401 diagnosis is
+proved. Identity alone proves no usable access.
 
 Recovery needs definite target rejection and alternate acceptance; transient
 failure stays unknown. Keep conversation placement independent of credential
@@ -832,8 +832,8 @@ inference or installed recovery.
 Jack Heart approved delivery, excluding cross-account continuation, native refresh
 coordination and headroom ranking. Selected account precedes native history;
 usage proves no login or capacity. Browser login, first connection, remembered
-Linear profile and live usage windows remain unproved; Claude returned
-`invalid_grant`. Branch binaries never migrate the installed Home.
+Linear profile and live usage windows remain unproved. Branch binaries never
+migrate the installed Home.
 [Mechanics](../../../docs/subscriptions.md); constraints and proof limits: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading and its
 `b2228bce8` archive.
 
@@ -1095,7 +1095,7 @@ was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this h
 
 ## Archived pointers
 
-Archives authorize no work; installed worker recovery is under Shipped history.
+Installed worker recovery is under Shipped history.
 Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
 follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths” referent:
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.

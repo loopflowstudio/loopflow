@@ -233,8 +233,8 @@ Rex shell joins that session; source drafts never reach argv (layout unit test).
 
 Compress (November 5): `cargo clippy -p loopflow --all-targets -- -D warnings` clean
 after merging template validation into `instantiate`, sharing Task-tab creation
-between launch and follower, and deleting unreachable Herdr/cmux focus arms; gate
-reruns `open::`, `config::`, `work_open_tests::`.
+between launch and follower, and deleting unreachable Herdr/cmux focus arms; lib
+`open::` 16/16 and `configured_task_layout…` passed; gate owns the rest.
 
 Check (November 5 fresh-launch pass): lib `open::` 16/16, `config::` 76/76,
 `work_open_tests::` 21/21 (+2 ignored native), native `rex_native_fresh…` and

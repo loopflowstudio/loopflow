@@ -177,7 +177,7 @@ final class ServerLink: @unchecked Sendable {
             }
             switch try JSONDecoder().decode(ServerMessage.self, from: first) {
             case .welcome(let welcome): self.welcome = welcome
-            case .error(_, let code, let message): throw RegistryQueryError("\(code): \(message)")
+            case .error(_, let code, let message, _): throw RegistryQueryError("\(code): \(message)")
             default: throw RegistryQueryError("Server did not welcome the connection")
             }
             Self.setReceiveTimeout(fd, seconds: 0)
@@ -262,11 +262,11 @@ final class ServerLink: @unchecked Sendable {
             // a late answer to a forgotten request.
         case .reading(let id, let frame):
             state.withLock { subscriptions[id] }?.receive(frame)
-        case .error(let id?, let code, let message):
+        case .error(let id?, let code, let message, _):
             let refusal = RegistryQueryError("\(code): \(message)")
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: refusal); return }
             state.withLock { subscriptions.removeValue(forKey: id) }?.finish(throwing: refusal)
-        case .error(nil, let code, let message):
+        case .error(nil, let code, let message, _):
             throw RegistryQueryError("\(code): \(message)")
         case .welcome, .status:
             throw RegistryQueryError("Server repeated its greeting; update the client")

@@ -61,8 +61,8 @@ chooses the newest revision both sides speak and answers `welcome` with it, a
 server-assigned `client_id`, the server's own range, its incarnation (`instance` changes with every start), build,
 executable SHA-256, the Machine reading (`null` while the registry is
 unavailable or uninitialized), capabilities and limits. With no revision in
-common it answers `error {code: incompatible}` naming the side to update, then
-closes. This build speaks revision 2 only; the shape lets a later server speak
+common it answers `error {code: incompatible}` naming the side to update in
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 2 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -80,14 +80,27 @@ installation, an installation check that never applies to a remote client.
 After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
 `operation`; the server answers `response {id, result}` or `error {id, code,
-message}` in whatever order work finishes. `cancel {id}` forgets a request's
+message, data}` in whatever order work finishes. `cancel {id}` forgets a request's
 answer or ends a subscription; a command already dispatched still completes and
 answers nothing. Closing the connection cancels every subscription and releases
 every wait; admitted mutations finish. An `error` with a null `id` is about the
 connection and is its last message: the server closes after `busy` at capacity
 (nothing ran; retry shortly) and after `invalid` for a malformed line or a
-repeated `hello`/`status`. `ErrorCode` is `incompatible, invalid, unavailable,
-outcome_unknown, busy`.
+repeated `hello`/`status`. `data` is structured detail or null. Clients branch
+on `code`; only `outcome_unknown` means the request may have taken effect:
+
+| `code` | Meaning | `data` |
+| --- | --- | --- |
+| `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
+| `invalid` | Malformed message or refused arguments, such as subscribing to a read with no watch | null |
+| `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner}`, `{id}`, `{repository}`, `{expression}` |
+| `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
+| `unavailable` | A dependency is missing or failed: the Machine registry, a watch, a read | `{resource}` when one is named |
+| `outcome_unknown` | The operation may have run; inspect state before retrying | null |
+| `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
+
+A shared operation names its code by returning `wire::ServerError` inside its
+error; anything else a read returns is `unavailable`.
 
 - `configuration {request}` uses `config::api::Request` for catalogue, declaration,
   explanation and theme access. CLI and Desktop share the same Rust validation
@@ -107,8 +120,9 @@ outcome_unknown, busy`.
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
   that number, changed or not. A subscription's arguments are fixed: new
   arguments are a new subscription with a complete first reading. A watch that
-  fails sends its `unavailable` reading, then `error {id, unavailable}` ends the
-  subscription; the connection stays open. Reconnect opens a fresh subscription
+  fails sends its `unavailable` reading, then `error {id, code: unavailable}`
+  ends the subscription; the connection stays open. A read with no watch is
+  `invalid`. Reconnect opens a fresh subscription
   and receives a complete reading; no replay cursor exists.
 - `command {change}` accepts the shared `Write` shape. The server calls the same
   Rust mutation dispatcher as the CLI, with the request's directory and streams.
@@ -126,7 +140,8 @@ outcome_unknown, busy`.
   An owner can finish between lookup and attachment, which then fails explicitly.
 - `attach {owner}` takes the exact existing owner Process ID on a connection of
   its own: hello, one attach request, `bridged`, then the unchanged binary owner
-  protocol in `transport/README.md` and `transport/wire.rs`. Each terminal has
+  protocol in `transport/README.md` and `transport/wire.rs`. An owner whose
+  endpoint refuses is `not_found {owner}`: it ended. Each terminal has
   its own socket, so readings never wait behind terminal bytes and a control
   failure never closes a bridged terminal. The owner alone grants input/geometry,
   handles bounded output continuation and revokes stale control. No automatic

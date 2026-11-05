@@ -421,7 +421,11 @@ impl Read {
                 let plan = super::desktop::plan_view(None, directory, expression.as_deref())?;
                 // The command prints this plan, then exits 3.
                 if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
-                    anyhow::bail!("{}", plan.resolution.unavailable.join("; "));
+                    return Err(not_found(
+                        plan.resolution.unavailable.join("; "),
+                        serde_json::json!({ "expression": expression }),
+                    )
+                    .into());
                 }
                 value(&plan)
             }
@@ -492,8 +496,13 @@ impl Read {
             // The command prints the path alone.
             Self::RepositoryPath { id } => {
                 let checkout = super::work_route::repository_path(id)?;
-                let repo = crate::repository::CanonicalRepo::containing(&checkout)?
-                    .ok_or_else(|| anyhow::anyhow!("repository plan {id} has no local checkout"))?;
+                let repo =
+                    crate::repository::CanonicalRepo::containing(&checkout)?.ok_or_else(|| {
+                        not_found(
+                            format!("repository plan {id} has no local checkout"),
+                            serde_json::json!({ "repository": id }),
+                        )
+                    })?;
                 Ok(repo.to_string().into())
             }
             Self::WaveGraph { directory, wave } => {
@@ -505,10 +514,14 @@ impl Read {
                 ))??)
             }
             Self::Tokens { directory, days } => super::tokens::codebase(directory, *days),
-            Self::Retention => value(
-                &super::history_transcript::retention_summary()?
-                    .ok_or_else(|| anyhow::anyhow!("No Sessions recorded."))?,
-            ),
+            Self::Retention => value(&super::history_transcript::retention_summary()?.ok_or_else(
+                || {
+                    not_found(
+                        "No Sessions recorded.",
+                        serde_json::json!({ "resource": "sessions" }),
+                    )
+                },
+            )?),
             Self::Doctor => value(&super::doctor::report()?),
             Self::BindPreview { session, task } => {
                 value(&super::session::binding_preview(session, task)?)
@@ -549,7 +562,13 @@ impl Read {
                 &super::planning::status_repository(&directory)?,
                 transport,
             ),
-            other => anyhow::bail!("`lf {}` has no --watch", other.argv().join(" ")),
+            other => {
+                return Err(crate::server::wire::ServerError::new(
+                    crate::server::wire::ErrorCode::Invalid,
+                    format!("`lf {}` has no --watch", other.argv().join(" ")),
+                )
+                .into())
+            }
         }?;
         Ok(subscription.expect("a pulled watch returns its subscription"))
     }
@@ -576,6 +595,15 @@ fn session_flags(headless: bool) -> &'static [&'static str] {
 /// `future` run to completion on a runtime of its own, as its command does.
 fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
     Ok(tokio::runtime::Runtime::new()?.block_on(future))
+}
+
+/// A served read's named absence; the CLI prints its message.
+fn not_found(
+    message: impl Into<String>,
+    data: serde_json::Value,
+) -> crate::server::wire::ServerError {
+    crate::server::wire::ServerError::new(crate::server::wire::ErrorCode::NotFound, message)
+        .with(data)
 }
 
 fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {

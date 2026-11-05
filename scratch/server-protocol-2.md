@@ -159,8 +159,11 @@ lists those rows as `clients`.
   server parses stdout into `value`; otherwise `value` is null and `output`
   holds the text. Diagnostics stay beside the value. No second mutation
   implementation: the shared dispatcher still produces the text.
-- Errors stay `{code, message}` with the existing `ErrorCode`. Rex adds an
-  HTTP-style status; we have no HTTP consumer and add none.
+- Errors are `{code, message, data}`. `code` is a domain code a client can
+  branch on (`incompatible, invalid, not_found, conflict, unavailable,
+  outcome_unknown, busy`); `data` is structured detail such as the missing
+  resource or the side to update. Rex adds an HTTP-style status; we have no
+  HTTP consumer and add none.
 
 ### Reconnect, cancellation and liveness
 

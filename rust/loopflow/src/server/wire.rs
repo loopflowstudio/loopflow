@@ -92,6 +92,8 @@ pub enum ServerMessage {
         id: Option<String>,
         code: ErrorCode,
         message: String,
+        /// Structured detail a client can act on, such as the missing resource.
+        data: Option<serde_json::Value>,
     },
 }
 
@@ -165,14 +167,58 @@ pub enum Reply {
     Bridged,
 }
 
+/// What a client can branch on. Nothing ran for any code but `outcome_unknown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
+    /// No protocol revision in common; `data` names the side to update.
     Incompatible,
+    /// The message or request is malformed or its arguments are refused.
     Invalid,
+    /// The named Task, Session, owner or subscription does not exist; `data` names it.
+    NotFound,
+    /// The request contradicts current state: a reused id or a stale revision.
+    Conflict,
+    /// A dependency is missing or failed: the Machine registry, a watch, a provider.
     Unavailable,
+    /// The operation may have taken effect; inspect state before retrying.
     OutcomeUnknown,
+    /// The server is at capacity or the client fell behind; retry shortly.
     Busy,
+}
+
+/// A refused request, as an `error` message carries it. Shared operations
+/// return it inside `anyhow::Error` to name their code; the server sends it as is.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("{code}: {message}")]
+pub struct ServerError {
+    pub code: ErrorCode,
+    pub message: String,
+    pub data: Option<serde_json::Value>,
+}
+
+impl ServerError {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
+    }
+
+    pub fn with(mut self, data: serde_json::Value) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn into_message(self, id: Option<String>) -> ServerMessage {
+        ServerMessage::Error {
+            id,
+            code: self.code,
+            message: self.message,
+            data: self.data,
+        }
+    }
 }
 
 /// The wire name, so a message reads `outcome_unknown: …` on every client.
@@ -214,6 +260,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/owner.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
+            include_str!("../../../../tests/fixtures/dto/server/not_found.json"),
         ] {
             let message: ServerMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(

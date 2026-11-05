@@ -123,7 +123,7 @@ struct ServerClientTests {
                 #expect(message["checkpoint"] as? Int == 4)
                 let id = subscription.get()!
                 respond(["type": "reading", "id": id, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
-                respond(["type": "error", "id": id, "code": "unavailable", "message": "gone"])
+                respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
                 respond(["type": "response", "id": message["id"]!, "result": ["kind": "read", "value": "still here"]])
             default: break

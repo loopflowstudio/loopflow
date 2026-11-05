@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Operation, Reply,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, Reply, ServerError,
     ServerMessage, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::id::LfProcessId;
@@ -93,14 +93,6 @@ pub fn status() -> Result<Status> {
 /// A revision-1 server reads `{"ty` as an absurd frame length and closes.
 const OLDER_PROTOCOL: &str = "Loopflow server closed the connection without answering; it may speak an older protocol; update the selected installation";
 
-/// The server answered a request with an error instead of a result.
-#[derive(Debug, thiserror::Error)]
-#[error("{code}: {message}")]
-pub struct ServerError {
-    pub code: ErrorCode,
-    pub message: String,
-}
-
 /// One connection: hello and welcome once, then requests, subscriptions and
 /// cancels by id for its lifetime.
 #[derive(Debug)]
@@ -145,9 +137,17 @@ impl Connection {
                 welcome,
                 pending: VecDeque::new(),
             }),
-            Some(ServerMessage::Error { code, message, .. }) => {
-                Err(ServerError { code, message }.into())
+            Some(ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            }) => Err(ServerError {
+                code,
+                message,
+                data,
             }
+            .into()),
             Some(other) => anyhow::bail!("Server did not welcome the connection: {other:?}"),
             None => anyhow::bail!(OLDER_PROTOCOL),
         }
@@ -177,7 +177,17 @@ impl Connection {
         let id = self.send(operation)?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { result, .. } => Ok(result),
-            ServerMessage::Error { code, message, .. } => Err(ServerError { code, message }.into()),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(ServerError {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -190,7 +200,17 @@ impl Connection {
                 result: Reply::Subscribed,
                 ..
             } => Ok(id),
-            ServerMessage::Error { code, message, .. } => Err(ServerError { code, message }.into()),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(ServerError {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -202,7 +222,17 @@ impl Connection {
                 || answers(message, id)
         })? {
             ServerMessage::Reading { frame, .. } => Ok(frame),
-            ServerMessage::Error { code, message, .. } => Err(ServerError { code, message }.into()),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(ServerError {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }

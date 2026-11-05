@@ -17,7 +17,8 @@ use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation, Reply,
-    ServerMessage, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ServerError, ServerMessage, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
+    REVISION,
 };
 use crate::lf::commands::{read::Read, watch::Subscription, write::Write};
 
@@ -159,11 +160,14 @@ pub(super) async fn run() -> Result<()> {
 
 /// Capacity answers before closing, so the client knows nothing ran.
 async fn refuse_busy(mut socket: UnixStream) {
-    let line = line(&error(
-        None,
-        ErrorCode::Busy,
-        format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
-    ));
+    let line = line(
+        &ServerError::new(
+            ErrorCode::Busy,
+            format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
+        )
+        .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS }))
+        .into_message(None),
+    );
     let _ = tokio::time::timeout(SEND, socket.write_all(line.as_bytes())).await;
 }
 
@@ -225,14 +229,18 @@ async fn connection(
         };
         return send(
             &mut lines,
-            &error(
-                None,
+            &ServerError::new(
                 ErrorCode::Incompatible,
                 format!(
                     "Server speaks protocol revisions {MIN_REVISION}–{REVISION}; the client speaks {}–{}; update the {side}",
                     hello.min_revision, hello.revision
                 ),
-            ),
+            )
+            .with(serde_json::json!({
+                "server": { "revision": REVISION, "min_revision": MIN_REVISION },
+                "update": if hello.min_revision > REVISION { "server" } else { "client" },
+            }))
+            .into_message(None),
         )
         .await;
     };
@@ -325,7 +333,7 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                             continue;
                         }
                         if inflight.contains_key(&id) {
-                            send(&mut lines, &error(Some(id), ErrorCode::Invalid, "request ID is still unanswered")).await?;
+                            send(&mut lines, &ServerError::new(ErrorCode::Conflict, "request ID is still unanswered").with(serde_json::json!({ "id": id })).into_message(Some(id))).await?;
                             continue;
                         }
                         let entry = match operation {
@@ -333,9 +341,10 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                                 let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
                                     Ok(destination) => destination,
                                     Err(failure) => {
-                                        send(&mut lines, &error(Some(id), ErrorCode::Unavailable, format!(
-                                            "Session owner is unavailable; no provider restarted and no input replayed: {failure}"
-                                        ))).await?;
+                                        // A missing owner endpoint means the owner ended.
+                                        send(&mut lines, &ServerError::new(ErrorCode::NotFound, format!(
+                                            "Session owner is not running; no provider restarted and no input replayed: {failure}"
+                                        )).with(serde_json::json!({ "owner": owner })).into_message(Some(id))).await?;
                                         continue;
                                     }
                                 };
@@ -363,10 +372,10 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                                     // Ending the subscription tells the client to reopen it
                                     // for a complete reading rather than drop a checkpoint.
                                     if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
-                                    send(&mut lines, &error(Some(id), ErrorCode::Unavailable, "subscription fell behind its checkpoints; subscribe again")).await?;
+                                    send(&mut lines, &error(Some(id), ErrorCode::Busy, "subscription fell behind its checkpoints; subscribe again")).await?;
                                 }
                             }
-                            None => send(&mut lines, &error(Some(id), ErrorCode::Invalid, "no live subscription has this ID")).await?,
+                            None => send(&mut lines, &ServerError::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })).into_message(Some(id))).await?,
                         }
                     }
                     ClientMessage::Cancel { id } => {
@@ -415,19 +424,21 @@ async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
     Ok(())
 }
 
-/// Why a request was not answered with a `Reply`.
-struct Refusal {
-    code: ErrorCode,
-    message: String,
+/// The [`ServerError`] a shared operation named anywhere in `error`'s chain,
+/// else `otherwise` with the error's text.
+fn refused(error: anyhow::Error, otherwise: ErrorCode) -> ServerError {
+    match error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<ServerError>())
+    {
+        Some(named) => named.clone(),
+        None => ServerError::new(otherwise, error.to_string()),
+    }
 }
 
-impl From<anyhow::Error> for Refusal {
-    fn from(error: anyhow::Error) -> Self {
-        Self {
-            code: ErrorCode::Unavailable,
-            message: error.to_string(),
-        }
-    }
+/// A read that failed without naming a code depends on something unavailable.
+fn unavailable(error: impl Into<anyhow::Error>) -> ServerError {
+    refused(error.into(), ErrorCode::Unavailable)
 }
 
 async fn request(
@@ -445,8 +456,8 @@ async fn request(
             result,
         },
         Err(refusal) => {
-            tracing::warn!(request = %id, %instance, error = %refusal.message, "Server request failed");
-            error(Some(id.clone()), refusal.code, refusal.message)
+            tracing::warn!(request = %id, %instance, code = %refusal.code, error = %refusal.message, "Server request failed");
+            refusal.into_message(Some(id.clone()))
         }
     };
     // A closed connection drops the answer; the effect stands.
@@ -454,16 +465,19 @@ async fn request(
     id
 }
 
-async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply, Refusal> {
+async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply, ServerError> {
     Ok(match operation {
         Operation::SessionOwner { session } => {
             let owner = tokio::task::spawn_blocking(move || -> Result<_> {
-                let registry = crate::store::read_existing_registry()?
-                    .context("Machine registry is unavailable")?;
+                let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
+                    ServerError::new(ErrorCode::Unavailable, "Machine registry is unavailable")
+                        .with(serde_json::json!({ "resource": "machine_registry" }))
+                })?;
                 Ok(registry.sqlite.session_transport(session.as_str())?)
             })
             .await
-            .map_err(anyhow::Error::from)??;
+            .map_err(unavailable)?
+            .map_err(unavailable)?;
             Reply::SessionOwner { owner }
         }
         Operation::Read { query } => Reply::Read {
@@ -471,10 +485,11 @@ async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply
                 crate::journal::request::isolate(|| query.read())
             })
             .await
-            .map_err(anyhow::Error::from)??,
+            .map_err(unavailable)?
+            .map_err(unavailable)?,
         },
         Operation::Configuration { request } => {
-            let mut target = serde_json::to_value(&request).map_err(anyhow::Error::from)?;
+            let mut target = serde_json::to_value(&request).map_err(unavailable)?;
             target
                 .as_object_mut()
                 .expect("configuration request is an object")
@@ -496,11 +511,11 @@ async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply
     })
 }
 
-fn outcome_unknown(error: anyhow::Error) -> Refusal {
-    Refusal {
-        code: ErrorCode::OutcomeUnknown,
-        message: format!("{error}; inspect the affected work before retrying"),
-    }
+fn outcome_unknown(error: anyhow::Error) -> ServerError {
+    ServerError::new(
+        ErrorCode::OutcomeUnknown,
+        format!("{error}; inspect the affected work before retrying"),
+    )
 }
 
 async fn subscription(
@@ -510,14 +525,10 @@ async fn subscription(
     checkpoints: mpsc::Receiver<u64>,
 ) -> String {
     if let Err(failure) = watch(&id, query, &outgoing, checkpoints).await {
-        // The error ends the subscription for the client; its last reading
-        // already carried the watch's failure.
+        // The error ends the subscription for the client; a watch that
+        // started sent its failure as its last reading.
         let _ = outgoing
-            .send(error(
-                Some(id.clone()),
-                ErrorCode::Unavailable,
-                failure.to_string(),
-            ))
+            .send(unavailable(failure).into_message(Some(id.clone())))
             .await;
     }
     id
@@ -677,11 +688,7 @@ async fn execute_command(
 }
 
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
-    ServerMessage::Error {
-        id,
-        code,
-        message: message.into(),
-    }
+    ServerError::new(code, message).into_message(id)
 }
 
 fn line(message: &ServerMessage) -> String {
@@ -856,13 +863,19 @@ mod tests {
             (REVISION - 1, REVISION - 1, "client"),
         ] {
             let mut client = Client::connect();
-            let ServerMessage::Error { id, code, message } =
-                client.hello(revision, min_revision).await
+            let ServerMessage::Error {
+                id,
+                code,
+                message,
+                data,
+            } = client.hello(revision, min_revision).await
             else {
                 panic!("expected an error")
             };
             assert_eq!(id, None);
             assert_eq!(code, ErrorCode::Incompatible);
+            let update = if side == "client" { "client" } else { "server" };
+            assert_eq!(data.unwrap()["update"], update);
             assert!(
                 message.ends_with(&format!("update the {side}")),
                 "{message}"
@@ -999,7 +1012,7 @@ mod tests {
                 .await;
             assert!(matches!(
                 client.receive().await.unwrap(),
-                ServerMessage::Error { id: Some(id), code: ErrorCode::Invalid, .. } if id == "ps"
+                ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "ps"
             ));
             drop(client.writer);
             client.server.await.unwrap().unwrap();

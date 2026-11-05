@@ -101,10 +101,18 @@ struct ServerProtocolTests {
     }
 
     @Test func connectionErrorsHaveNoRequestId() throws {
-        guard case .error(let id, let code, let message) = try message("error") else { Issue.record("Missing error"); return }
+        guard case .error(let id, let code, let message, let data) = try message("error") else { Issue.record("Missing error"); return }
         #expect(id == nil)
         #expect(code == "incompatible")
         #expect(message.contains("update the selected installation"))
+        guard case .object(let detail) = data else { Issue.record("Missing error data"); return }
+        #expect(detail["update"] == .string("server"))
+        guard case .error(let missing, let absent, _, .object(let named)) = try self.message("not_found") else {
+            Issue.record("Missing not_found"); return
+        }
+        #expect(missing == "view-1")
+        #expect(absent == "not_found")
+        #expect(named["expression"] == .string("task:INF-404"))
     }
 
     @Test func missingRequiredFieldsDoNotBecomeDefaults() {

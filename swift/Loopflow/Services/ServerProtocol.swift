@@ -116,9 +116,12 @@ public enum ServerMessage: Decodable, Sendable {
     case response(id: String, result: ServerReply)
     case reading(id: String, frame: JSONValue)
     /// `id` is nil before a request exists. An error for a subscription ends it.
-    case error(id: String?, code: String, message: String)
+    /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
+    /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
+    /// structured detail, `.null` when there is none.
+    case error(id: String?, code: String, message: String, data: JSONValue)
 
-    private enum Keys: String, CodingKey { case type, id, result, frame, code, message }
+    private enum Keys: String, CodingKey { case type, id, result, frame, code, message, data }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .type) {
@@ -130,7 +133,7 @@ public enum ServerMessage: Decodable, Sendable {
             self = .reading(id: try box.decode(String.self, forKey: .id), frame: try box.decode(JSONValue.self, forKey: .frame))
         case "error":
             self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
-                          message: try box.decode(String.self, forKey: .message))
+                          message: try box.decode(String.self, forKey: .message), data: try box.decode(JSONValue.self, forKey: .data))
         default: throw DecodingError.dataCorruptedError(forKey: .type, in: box, debugDescription: "Unsupported server message; update the client")
         }
     }

@@ -582,10 +582,9 @@ launch on every `lf open` with no LF persistence of hosts, host workspaces or
 occurrences anywhere. Config `task_layout` owns templates, the DB
 owns Desktop's sticky Task layouts, Rex owns sessions, tabs, splits, shells and
 restoration. Repository or Wave → session, Task → tab, workspace → splits; a Task
-joins the caller's container. Superseded at `9187804aee`: reopen reuse, named
-copies, inventory holds, `--retry-observers`, marker recovery. Arrivals follow in
-memory from a Workspace tab; closed tabs stay closed; an uncertain create is
-reported once, never retried. Native IDs never prove continuity or authorize
+joins the caller's container (cmux: its group). Reuse, copies, holds and marker
+recovery are superseded (`9187804aee`). One in-memory follower serves every
+Machine's arrivals; closed tabs stay closed; an uncertain create is reported once, never retried. Native IDs never prove continuity or authorize
 replay; invalid cwd falls back home, so LF checks the checkout first. Rex inventory
 exposes block label, window and owner plus per-block `pwd`/`process`, never argv.
 
@@ -597,11 +596,11 @@ skew and a vanished session.
 
 Jack superseded Rex away/native-settlement: retained Task Session terminals prevent
 cleanup regardless of focus; confirmed final removal releases, unknown does not.
-LF cleans Desktop-owned shells only. LOO-717 (#1811) persists `task_host_occurrences`
-leases via `lf task presence`, which conflicts with the no-occurrence decision;
-unresolved. Requested work finishes first; unfinished checkouts survive Close;
-deleted-checkout reconstruction is excluded. Desktop keeps 717's 2/15-minute
-grace; return cancels.
+LF cleans Desktop-owned shells only. LOO-717 (#1811) still persists
+`task_host_occurrences` leases; Jack's prohibition covers them (settled), so its
+API must become stateless for LOO-498. Requested work finishes first; unfinished
+checkouts survive Close; deleted-checkout reconstruction is excluded. Desktop
+keeps 717's 2/15-minute grace; return cancels.
 
 #1818 protects active input on failed attachment; #1807 binding keeps the provider's
 cwd; later attachments report the selected directory. Contract: docs/workspaces.md.

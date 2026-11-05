@@ -27,12 +27,11 @@ Older judgments are in `9187804aee:scratch/questions.md`.
   command reads them. "View again" is another fresh launch with `--session`;
   `--retry-observers` and its beside-the-pane retries were removed.
 - **Template validation.** `task_layout` must hold Desktop's three Task panes (hide
-  unused ones); Session/location/file capture is rejected when a launch reads it,
-  not at `lf set` time.
+  unused ones); `lf set` and config reads reject Session/location/file capture.
 - **cmux.** Surface commands are typed into a shell (`cd <checkout> && <argv>`),
-  so they leave a shell in the checkout after the tool exits. Group and workspace
-  references are parsed from CLI output; neither has native proof here because
-  running cmux would act on Jack's live app.
+  so they leave a shell in the checkout after the tool exits. The caller's group
+  comes from `workspace-group list --json`; neither it nor workspace creation has
+  native proof here because running cmux would act on Jack's live app.
 
 ## Explicit Rex regression acceptance
 

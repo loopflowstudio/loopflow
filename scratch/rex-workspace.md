@@ -176,7 +176,7 @@ order). Any detected host is the only route: no Desktop/terminal fallback.
 
 | Step | Rex | Herdr | cmux |
 | --- | --- | --- | --- |
-| Task inside a container | caller's session (`REX_SESSION`/viewer) | `pane.current` workspace | caller's window |
+| Task inside a container | caller's session (`REX_SESSION`/viewer) | `pane.current` workspace | caller's group, else window |
 | Otherwise / repo / Wave | `session.create` | `workspace.create` (its tab is reused for the first Task) | `workspace-group create` |
 | Task tab | `session.new_window` + split tree | `tab.create` + `layout.apply` (reply names the replacement tab) | `new-workspace --layout --group` |
 | Follow | Workspace tab running `open <url> --follow <session> --seen …` | — | — |
@@ -263,6 +263,8 @@ Rex shell joins that session; source drafts never reach argv (layout unit test).
   `/Applications/cmux.app/Contents/Resources/bin/cmux`) capabilities as above.
 
 ## Verification
+
+Realign pass 2 (November 5): notes only, no code change; prior results stand.
 
 Pass 2 (November 5): lib `open::` 18/18, `config::` 77/77, `work_open_tests::`
 23/23 (+2 ignored), native `rex_native_fresh…` with `--host rex` on an isolated

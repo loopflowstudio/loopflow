@@ -980,7 +980,7 @@ async fn open_codex_native(
         Ok(result) => result?,
         Err(_) => {
             harness.stop().await?;
-            bail!("Codex conversation startup timed out after 20s; the owned provider was stopped");
+            bail!("Codex app-server did not open the conversation within 20s; the owned provider was stopped");
         }
     }
     let account = harness.provider_account_id();

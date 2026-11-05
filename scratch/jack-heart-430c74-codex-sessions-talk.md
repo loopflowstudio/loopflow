@@ -2,7 +2,7 @@
 
 Status: implemented, compressed, synced onto main through #1826, thread following
 implemented and compressed (no cuts), realigned 2026-11-05; concept review 2 moved lf's
-configuration onto the app-server (implemented and compressed 2026-11-05); concept review 3 found nothing to change; headless demo passed at ae3f1466d4 (2026-11-05; gate next).
+configuration onto the app-server (implemented and compressed 2026-11-05); concept review 3 found nothing to change; headless demo passed at ae3f1466d4; gated 2026-11-05.
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -112,9 +112,7 @@ carries lf's instructions (an `LF_USER_NAME` marker) and its SessionStart hook c
 
 ## Remaining
 
-- Gate: affected suites once (integration `context_launch_tests::`, `session_launch_contract`,
-  `session_lifecycle_tests`, `agent_tests`, `settings_launch_tests`, `session_cli_tests`,
-  `transport_tests` reach `native_codex.py`; lib `harness::`, `context_block::`).
+- Publish. Gate 2026-11-05 found nothing left in this Task's code.
 
 ## Related work
 
@@ -154,4 +152,15 @@ directory in its place, a typed prompt ran its tool and answered; `/exit` return
 idle; the next prompt still answered and `/exit` returned 0; zero live agent rows, no leftover
 processes. `codex_terminal.py --new-thread` (plain and wrapped) also passed at this HEAD.
 Durable root `~/.lf-demos/430c74-100155` (`LF_HOME` there/lf, `CODEX_HOME` there/codex) kept as
-evidence; no owners remain, nothing to tear down. Next: gate.
+evidence; no owners remain, nothing to tear down.
+
+Gate 2026-11-05: `scripts/test.py --reuse-passing` (lib `harness::`, `context_block::`, `agent::`,
+`os_process::`, `provider_account::`, `transport::`, `lf::commands::util::`, the Linear hooks test;
+`context_launch_tests::`, `settings_launch_tests::`, `session_cli_tests::`, `context_block_tests::`;
+binaries `session_launch_contract`, `agent_tests`, `transport_tests`, `process_ownership_tests`,
+`session_lifecycle_tests`, `lf`): 598/621 passed; website passed; fmt and clippy clean.
+Fixed: the architecture map lacked `lf __codex-observe`; the 20 s outer startup limit now names the
+app-server (under load the new `config/read` probe let it fire before the 15 s socket wait, so
+`codex_startup_failures...` stall-server missed "app-server"; passes alone). Another 21 failures
+come from this Machine, not the branch (scratch/questions.md); the Linear hooks barrier test
+failed under load and passed alone (98 s).

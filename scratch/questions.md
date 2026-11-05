@@ -29,3 +29,10 @@
   of a Run that is refused (read from the code, not run). `actual_agent_process_children...` (ignored) passes its Codex half on
   0.166.0, then asserts on Process rows for `lf session list`, a read that records
   none since `changes_work`. Left unrepaired; each needs a re-author or retirement.
+- Gate 2026-11-05: 21 local failures come from this Machine, not the branch; CI owns them.
+  15 `provider_account::account_first_tests` and `agent_tests` cases read the main checkout's
+  personal `lf.config.local.yaml` (`account.codex: [manabot-eng]`, Jack Heart's, 2026-11-04)
+  through repository discovery from the test's cwd. 6 `session_lifecycle_tests` cases append the
+  inherited PATH, where claude, codex, opencode and pi are all installed, so `lf resume --prepare`
+  finds no single default harness. Both are test-isolation gaps that predate this Task; neither
+  touches code it changed. Not filed as Tasks from this headless run.

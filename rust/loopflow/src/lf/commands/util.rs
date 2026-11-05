@@ -420,6 +420,8 @@ fn session_command_status_with_env(
         let outcome = result
             .as_ref()
             .map_or("failed", SessionCommandOutcome::capture_outcome);
+        // Records of the exit are best-effort: the provider's own result is
+        // what the person gets back, whatever the store says.
         if let Some((store, session, attachment)) = admitted {
             match crate::session_record::finish_session_attachment(
                 &store,
@@ -428,11 +430,15 @@ fn session_command_status_with_env(
                 outcome,
             ) {
                 Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+                }
             }
         }
         if let Some(capture) = capture {
-            capture.finish(outcome)?;
+            if let Err(error) = capture.finish(outcome) {
+                tracing::warn!(%error, "cannot settle the Session capture at exit");
+            }
         }
         result
     })
@@ -649,7 +655,10 @@ fn run_native_session(
         }
     };
     let interrupted = match owned {
-        Some(owner) => crate::harness::native_exit::record_exit(owner)?,
+        Some(owner) => crate::harness::native_exit::record_exit(owner).unwrap_or_else(|error| {
+            tracing::warn!(%error, "cannot record the provider's exit");
+            false
+        }),
         None => false,
     };
     // A mover ended this attachment; the conversation's home is now its business.
@@ -1059,6 +1068,7 @@ async fn serve_codex_native(
         params: Some(params),
         text: connection.recover_input(&launch.task_prompt)?,
         context: launch.conversation_context.clone(),
+        thread: thread.clone(),
     }));
     let directory = tempfile::tempdir()?;
     let relay = directory.path().join("client.sock");
@@ -1094,13 +1104,26 @@ async fn serve_codex_native(
             }
         }
     }
-    // A mover took the conversation; its new attachment owns recovery.
-    if attachment_lost(&owner)? {
-        return Ok(());
-    }
-    connection.ensure_thread_resolved()?;
-    if connection.submission()? == Some(NativeSubmission::InputDispatched) {
-        bail!("Codex initial input was dispatched without acknowledgement; resume saved history before sending again");
+    let verdict = (|| -> Result<()> {
+        // A mover took the conversation; its new attachment owns recovery.
+        if attachment_lost(&owner)? {
+            return Ok(());
+        }
+        connection.ensure_thread_resolved()?;
+        if connection.submission()? == Some(NativeSubmission::InputDispatched) {
+            bail!("Codex initial input was dispatched without acknowledgement; resume saved history before sending again");
+        }
+        Ok(())
+    })();
+    match verdict {
+        Ok(()) => {}
+        // Without the store the launch's receipts cannot be judged; the
+        // conversation still ended the way the person asked.
+        Err(error) if error.downcast_ref::<crate::store::StoreError>().is_some() => {
+            tracing::warn!(%error, session = %owner.1, "store unavailable at exit; receipts were not judged");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
     }
     if initial.lock().await.text.is_some() {
         bail!(

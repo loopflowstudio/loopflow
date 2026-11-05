@@ -1250,9 +1250,8 @@ fn attaches(
     Ok(false)
 }
 
-/// End the execution owner running as `pid` as its lifetime policy does: its
-/// signal handler stops the agent and records the exit. Returns once the
-/// owner is gone.
+/// End the execution owner running as `pid`: its signal handler stops the
+/// agent and records the exit. Returns once the owner is gone.
 pub(crate) fn end_owner(
     store: &SqliteStore,
     owner: &crate::id::LfProcessId,

@@ -346,7 +346,8 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
     result
 }
 
-/// Observe an early command without creating a Machine, migrating, or requiring Git.
+/// Observe a command without creating a Machine, migrating, or requiring Git:
+/// doctor before admission, and an install once its store has committed.
 /// Failure to observe never prevents help or installation recovery.
 pub fn observe_process(command: &[String]) {
     let wait = receipt_wait();
@@ -361,6 +362,10 @@ pub fn observe_process(command: &[String]) {
     }
     let observe = || -> anyhow::Result<()> {
         let path = crate::store::database_path_from_env()?;
+        // A Machine without a store (a fresh or disposable home) has nothing to record into.
+        if !path.exists() {
+            return Ok(());
+        }
         let ledger = SqliteStore::open_existing_processes(&path, wait)?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {
@@ -373,7 +378,7 @@ pub fn observe_process(command: &[String]) {
         Ok(())
     };
     if let Err(error) = observe() {
-        debug!(%error, "early Process observation unavailable");
+        warn!(%error, "Process observation unavailable; this command is not recorded");
     }
 }
 
@@ -1245,15 +1250,6 @@ pub(crate) fn live_process_pid(store: &SqliteStore, process: &LfProcessId) -> Op
         evidence
     });
     live
-}
-
-/// The executable this process runs, as the kernel names it: the file itself,
-/// even when the symlink it was launched through has since been re-pointed.
-pub(crate) fn current_executable() -> std::io::Result<PathBuf> {
-    match OsProcess::executable(std::process::id()) {
-        Some(path) => Ok(path),
-        None => std::env::current_exe().and_then(fs::canonicalize),
-    }
 }
 
 /// The recorded Process's own receipt, read by its locator without listing others.

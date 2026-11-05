@@ -257,3 +257,5 @@ two concurrent reads; `boundedSelectedFirstPreparation` proves admission order, 
 that assertion now checks the prepared set.
 
 Checks, November 4, through realign: `cargo test -p loopflow --lib ops::human_session::` 37 passed (compress; Rust code unchanged since); `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkDestinationTests'` 89 passed after the link repair, and `WorkspacePanesTests|SessionsStoreTests|WorkspaceRetentionTests|WorkNavigationTests|DesktopPaneControlTests|DTOFixtureTests|WorkCLISubscriptionTests` passed at compress; clippy, gate, candidate and rendered native proof (idle Task, stopped run, no new Graph) deferred to the Graph.
+
+Checks before publication, November 4: see `loo-672-demo.md`, “Current candidate: automatic opening”. Clippy and the 714-test Desktop suite passed; `scripts/test_desktop.sh` crashes in `ghostty_config_finalize` at some environment sizes, independent of this change. Gate and rendered native proof remain.

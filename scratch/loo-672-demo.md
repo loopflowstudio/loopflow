@@ -1,5 +1,52 @@
 # LOO-672 — Task conversation demo, November 4, 2026
 
+## Current candidate: automatic opening — November 4
+
+Candidate for Jack Heart's re-demo of automatic opening, built from a tree identical to
+`7b23c50c20` (its `lf` reports `3ef57e857.dirty` only because it was built before that
+commit; `git diff HEAD -- rust swift` was empty at preparation).
+
+- App: `/private/tmp/loo-672-redemo-eh8h08q0/Loopflow LOO-672 Redemo.app`
+- Launch from a display session: `/private/tmp/loo-672-redemo-eh8h08q0/launch.sh`
+- [Manifest](demo-evidence/automatic-manifest.json): repository, Machine, Tasks and checkouts.
+
+Preparation is the only thing exercised so far. Fresh data holds four owned idle Tasks:
+**Automatic conversation** (absent Session), **Claude continuity** and **Codex continuity**
+(prepared Sessions, no native history), and **Stopped run** (stopped Graph, comment “start it”).
+`lf ps` was empty and no process referenced the candidate. No app window or provider has run,
+so **automatic opening has not yet been observed in the native app**. That remains the demo's
+acceptance, with no Start or Open click: load opens all four; selection and relaunch keep
+identity; Stopped run reports its status and the comment, and `lf ps` shows no new Graph.
+Drafts, Rex Take back, cold return, first paint against usable input, and the twenty-Task
+footprint and first-turn cost also remain unmeasured.
+
+Checks on this tree, headless: `ops::human_session` 37 passed; `context_launch` 15 passed;
+`claude_trust` 7 passed; `cargo fmt --check` and clippy with warnings denied clean; Desktop
+714 tests in 88 suites passed, in the runs described below. The whole gate has not run.
+
+### Desktop suite crash that depends on environment size
+
+`scripts/test_desktop.sh` failed three of three times here with exit 1, stopping in
+`defaultConfigurationLoadsAfterInitialAppearance` at 402 passes with no summary. Breakpad's
+minidump puts the fault (EXC_BAD_ACCESS) in `ghostty_config_finalize`. The same binary and
+command gave:
+
+| Launch | Result |
+| --- | --- |
+| Wrapper, filtered to all tests | crash |
+| Wrapper's final command in bash, no build, twice | crash, crash |
+| Same, one unrelated added variable | crash |
+| Same, two added variables | 714 passed |
+| Same, three added variables | 714 passed |
+| zsh, relative paths | 714 passed |
+
+The test passes alone and within its suite. Only the count of unrelated variables changed
+between crash and pass, so this is not a result of this branch's behaviour; the branch adds no
+`setenv` and does not touch the test. Inferred, not observed: libghostty holds an `environ`
+pointer that an earlier test's `setenv` reallocates. Whether the parent crashes in the same
+environment was not tested. Gate may hit this. Not fixed here: a fix belongs in a separate Task
+if Jack Heart wants one. Logs: `/tmp/loo672-desktop-full2.log`, `/tmp/loo672-P{1,2,3}.log`.
+
 ## Latest review: automatic startup still missing
 
 Jack Heart supplied the Codex continuity screenshot showing **Conversation

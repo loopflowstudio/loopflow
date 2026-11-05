@@ -203,27 +203,29 @@ fn doctor_does_not_initialize_a_missing_database() {
         .any(|check| check["name"] == "install-selection"));
 }
 
+/// A store a newer lf migrated stays readable: doctor and status reads answer
+/// from it instead of refusing the migration they don't know.
 #[test]
-fn doctor_reports_processes_despite_an_unknown_migration() {
+fn reads_answer_from_a_store_a_newer_build_migrated() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
     let store = SqliteStore::new(&path).unwrap();
     insert_process(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();
+
     let output = run_lf(home.path(), &["self", "doctor", "--json"]);
-    assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(report["store"]["migration_error"]
-        .as_str()
-        .unwrap()
-        .contains("9.0.001_future"));
+    assert!(report["store"]["migration_error"].is_null(), "{report}");
     assert!(report["rows"].as_u64().unwrap() >= 1);
-    assert!(report["checks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|check| check["name"] == "attribution" && check["status"] == "ok"));
+
+    let output = run_lf(home.path(), &["wave", "list"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
     let latest: String = connection
         .query_row(
             "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1",
@@ -232,39 +234,6 @@ fn doctor_reports_processes_despite_an_unknown_migration() {
         )
         .unwrap();
     assert_eq!(latest, "9.0.001_future");
-}
-
-/// An agent reading status through an lf older than the store sees the skew
-/// and its fix and a failing exit, never an empty registry.
-#[test]
-fn status_reads_name_a_newer_store_instead_of_reading_empty() {
-    let home = TestRepo::new();
-    let path = home.path().join("loopflow.db");
-    SqliteStore::new(&path).unwrap();
-    rusqlite::Connection::open(&path)
-        .unwrap()
-        .execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)",
-            [],
-        )
-        .unwrap();
-    for args in [
-        &["wave", "status"][..],
-        &["wave", "status", "--json"],
-        &["wave", "list"],
-        &["task", "status"],
-    ] {
-        let output = run_lf(home.path(), args);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(!output.status.success(), "{args:?} succeeded: {stderr}");
-        assert!(
-            stderr.contains("9.0.001_future")
-                && stderr.contains("run `lf install`")
-                && !stderr.contains("delete"),
-            "{args:?}: {stderr}"
-        );
-        assert!(output.stdout.is_empty(), "{args:?} printed a result");
-    }
 }
 
 #[test]

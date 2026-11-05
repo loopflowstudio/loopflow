@@ -68,8 +68,6 @@ jobs:
           set -euo pipefail
           cd target/${{ matrix.target }}/release
           tar czf ../../../lf-${{ matrix.target }}.tar.gz lf
-          # Lets an updater check store compatibility before downloading.
-          ./lf self install reader-catalog > ../../../reader-catalog.txt
       - name: Smoke test package
         run: |
           set -euo pipefail
@@ -89,7 +87,5 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: lf-${{ matrix.target }}
-          path: |
-            lf-${{ matrix.target }}.tar.gz
-            reader-catalog.txt
+          path: lf-${{ matrix.target }}.tar.gz
           retention-days: 14

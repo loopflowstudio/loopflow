@@ -675,8 +675,7 @@ database. Private `LF_HOME` experiments remain disposable and explicit.
 
 The installed app updates itself (`AppUpdater`, Sparkle), including a custom
 location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
-reads its stream from `~/.lf/config.yaml`, asks its bundled
-`lf install can-open` before installing, and runs `lf install adopt` on the first
+reads its stream from `~/.lf/config.yaml` and runs `lf install adopt` on the first
 launch of a new version. Dev builds, and a Machine recording `dev` (which has no
 appcast), never check for updates.
 

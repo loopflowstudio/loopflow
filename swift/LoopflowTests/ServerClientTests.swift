@@ -120,7 +120,7 @@ struct ServerClientTests {
                 respond(["type": "response", "id": id, "result": ["kind": "subscribed"]])
                 respond(["type": "reading", "id": id, "generation": 1, "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
-                #expect((message["frame"] as? [String: Any])?["id"] as? Int == 4)
+                #expect(message["checkpoint"] as? Int == 4)
                 let id = subscription.get()!
                 respond(["type": "reading", "id": id, "generation": 1, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone"])

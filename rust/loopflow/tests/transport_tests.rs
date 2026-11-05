@@ -4676,45 +4676,6 @@ fn server_status_does_not_install_or_create_work() {
 }
 
 #[test]
-fn server_invalid_checkpoints_use_shared_watch_errors() {
-    use loopflow::server::client::ServerError;
-    use loopflow::server::wire::ErrorCode;
-
-    let fixture = Fixture::new();
-    let service = ServerProof::start(&fixture, false);
-    let query = || {
-        serde_json::from_value(
-            json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true}),
-        )
-        .unwrap()
-    };
-    for checkpoint in [json!({"unknown": 1}), json!({"id": 1, "args": false})] {
-        let mut connection = service.connect();
-        let id = connection.subscribe(query(), 7).unwrap();
-        let initial = connection.reading(&id).unwrap();
-        assert!(initial["unavailable"].is_null(), "{initial}");
-        connection.checkpoint(&id, checkpoint).unwrap();
-        loop {
-            let frame = connection.reading(&id).unwrap();
-            if let Some(error) = frame["unavailable"].as_str() {
-                assert!(error.contains("invalid watch request"), "{error}");
-                assert!(frame["body"].is_null());
-                break;
-            }
-        }
-        // The watch's failure ends its subscription; the connection stays open.
-        let ended = connection.reading(&id).unwrap_err();
-        let ended = ended
-            .downcast::<ServerError>()
-            .unwrap_or_else(|other| panic!("not a server error: {other:?}"));
-        assert_eq!(ended.code, ErrorCode::Unavailable);
-        assert!(ended.message.contains("invalid watch request"), "{ended}");
-        let again = connection.subscribe(query(), 8).unwrap();
-        assert!(connection.reading(&again).unwrap()["unavailable"].is_null());
-    }
-}
-
-#[test]
 fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     use loopflow::server::wire::Reply;
 
@@ -4730,7 +4691,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
         .unwrap();
     let initial = watch.reading(&tasks).unwrap();
     assert!(initial["unavailable"].is_null(), "{initial}");
-    watch.checkpoint(&tasks, json!({"id":17})).unwrap();
+    watch.checkpoint(&tasks, 17).unwrap();
     let confirmed = watch.reading(&tasks).unwrap();
     assert_eq!(confirmed["answers"], 17);
 
@@ -4772,7 +4733,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let cli_plan: Value = serde_json::from_slice(&cli.stdout).unwrap();
     assert_eq!(socket_plan, cli_plan);
     assert_eq!(socket_plan["contents"][0]["primary_session"], session);
-    watch.checkpoint(&tasks, json!({"id":18})).unwrap();
+    watch.checkpoint(&tasks, 18).unwrap();
     loop {
         let changed = watch.reading(&tasks).unwrap();
         if changed["answers"] == 18 {

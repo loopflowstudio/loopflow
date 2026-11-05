@@ -23,11 +23,9 @@ pub enum ClientMessage {
     Status,
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
     Request { id: String, operation: Operation },
-    /// One request line for the live subscription `id`, as the watch's stdin takes it.
-    Checkpoint {
-        id: String,
-        frame: serde_json::Value,
-    },
+    /// Ask the live subscription `id` for a reading now; the next reading's
+    /// `answers` carries `checkpoint`, changed or not.
+    Checkpoint { id: String, checkpoint: u64 },
     /// Forget a request's answer, or end a subscription.
     Cancel { id: String },
 }

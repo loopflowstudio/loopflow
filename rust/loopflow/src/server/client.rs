@@ -203,10 +203,11 @@ impl Connection {
         }
     }
 
-    pub fn checkpoint(&mut self, id: &str, frame: serde_json::Value) -> Result<()> {
+    /// Ask subscription `id` for a reading whose `answers` is `checkpoint`.
+    pub fn checkpoint(&mut self, id: &str, checkpoint: u64) -> Result<()> {
         self.socket.send(&ClientMessage::Checkpoint {
             id: id.into(),
-            frame,
+            checkpoint,
         })
     }
 

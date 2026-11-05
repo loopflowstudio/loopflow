@@ -51,7 +51,7 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 ← {"type":"response","id":"a","result":{"kind":"read","value":{…}}}
 ← {"type":"response","id":"b","result":{"kind":"subscribed"}}
 ← {"type":"reading","id":"b","generation":1,"frame":{"answers":null,"unavailable":null,"body":{…}}}
-→ {"type":"checkpoint","id":"b","frame":{"id":3}}
+→ {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","generation":1,"frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 ```
@@ -101,8 +101,9 @@ outcome_unknown, busy`.
 - `subscribe {query,generation}` supports every shared read with a watch. It
   answers `subscribed`, then `reading {id,generation,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
-  {id,frame}` carries the watch's request lines (`{"id":3}` or argument changes);
-  the shared watch validates them, including its 16 KiB limit. A watch that
+  {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
+  that number, changed or not. A subscription's arguments are fixed: new
+  arguments are a new subscription with a complete first reading. A watch that
   fails sends its `unavailable` reading, then `error {id, unavailable}` ends the
   subscription; the connection stays open. Reconnect opens a fresh subscription
   and receives a complete reading; no replay cursor exists.

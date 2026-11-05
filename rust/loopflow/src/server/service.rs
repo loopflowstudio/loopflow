@@ -232,7 +232,7 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
 /// A request's task and, for a subscription, where its checkpoints go.
 struct Inflight {
     task: AbortHandle,
-    checkpoints: Option<mpsc::Sender<serde_json::Value>>,
+    checkpoints: Option<mpsc::Sender<u64>>,
 }
 
 async fn session(mut lines: Lines, instance: Arc<str>) -> Result<()> {
@@ -291,10 +291,10 @@ async fn session(mut lines: Lines, instance: Arc<str>) -> Result<()> {
                         };
                         inflight.insert(id, entry);
                     }
-                    ClientMessage::Checkpoint { id, frame } => {
+                    ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
-                                if checkpoints.try_send(frame).is_err() {
+                                if checkpoints.try_send(checkpoint).is_err() {
                                     // Ending the subscription tells the client to reopen it
                                     // for a complete reading rather than drop a checkpoint.
                                     if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
@@ -443,7 +443,7 @@ async fn subscription(
     query: Read,
     generation: u64,
     outgoing: mpsc::Sender<ServerMessage>,
-    checkpoints: mpsc::Receiver<serde_json::Value>,
+    checkpoints: mpsc::Receiver<u64>,
 ) -> String {
     if let Err(failure) = watch(&id, query, generation, &outgoing, checkpoints).await {
         // The error ends the subscription for the client; its last reading
@@ -483,7 +483,7 @@ async fn watch(
     query: Read,
     generation: u64,
     outgoing: &mpsc::Sender<ServerMessage>,
-    mut checkpoints: mpsc::Receiver<serde_json::Value>,
+    mut checkpoints: mpsc::Receiver<u64>,
 ) -> Result<()> {
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
@@ -503,11 +503,9 @@ async fn watch(
     .await?;
     loop {
         tokio::select! {
-            frame = checkpoints.recv() => {
-                let Some(frame) = frame else { return Ok(()) };
-                // The shared watch owns checkpoint parsing and its final error
-                // reading, including argument validation and request limits.
-                watch.request(&serde_json::to_vec(&frame)?);
+            checkpoint = checkpoints.recv() => {
+                let Some(checkpoint) = checkpoint else { return Ok(()) };
+                watch.checkpoint(checkpoint);
             }
             () = notify.notified() => {
                 let pull = Arc::clone(&watch);
@@ -871,7 +869,7 @@ mod tests {
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
-                    frame: serde_json::json!({"id": 3}),
+                    checkpoint: 3,
                 })
                 .await;
             let ServerMessage::Reading { frame, .. } = client.receive().await.unwrap() else {
@@ -896,7 +894,7 @@ mod tests {
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
-                    frame: serde_json::json!({"id": 5}),
+                    checkpoint: 5,
                 })
                 .await;
             assert!(matches!(

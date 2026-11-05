@@ -88,7 +88,7 @@ client ── request{id b, subscribe desktop_sessions} ──▶
 client ◀── response{id a, value}
 client ◀── response{id b, subscribed}
 client ◀── reading{id b, generation, frame}
-client ── checkpoint{id b, frame} ──▶
+client ── checkpoint{id b, checkpoint 3} ──▶
 client ◀── reading{id b, …}
 client ── cancel{id b} ──▶
 ```
@@ -148,7 +148,9 @@ protocol check, and it never applies to a phone or a shed.
   value in hand before `pretty()`; the server serializes once and the client
   decodes once.
 - `reading {id, generation, frame}` is unchanged apart from carrying the
-  subscription's request id.
+  subscription's request id. `checkpoint {id, checkpoint}` is typed: the next
+  reading's `answers` carries the number. A subscription's arguments are fixed;
+  changing them is a new subscription.
 - `command` answers `response {id, trace_id, code, value, output, stderr}`.
   When the write's CLI spelling prints JSON (its `argv` carries `--json`), the
   server parses stdout into `value`; otherwise `value` is null and `output`

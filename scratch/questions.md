@@ -39,3 +39,15 @@ Settings-merge assumption (November 4): file settings retain access before Work
 is compatible. The additive status/configuration operations preserve existing
 bootstrap fields and route the incoming FFI consumers through the shared server.
 This is an implementation choice within Jack Heart's complete FFI deletion.
+
+## Revision-2 follow-ups — November 5, 2026
+
+Jack Heart approved seven protocol follow-ups after reviewing revision 2. Choices
+made while delivering them, for Jack to confirm or reverse:
+
+- **Checkpoints carry no argument changes.** The shared watch's stdin takes
+  `{"id":n,"args":…}`, but `args` is each watch's private argument type
+  (`SessionWatchArgs`, `TaskStatusArgs`, `HistoryWindow`), not the served read's
+  shape, and no client sent one. `checkpoint {id, checkpoint}` is the only
+  subscription message; new arguments are a new subscription, whose first
+  reading is complete anyway. The CLI's `--watch` stdin keeps `args`.

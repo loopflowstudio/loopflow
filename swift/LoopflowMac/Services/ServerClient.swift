@@ -386,7 +386,7 @@ private final class ServerSubscription: @unchecked Sendable {
     private let continuation: AsyncThrowingStream<Data, any Error>.Continuation
     private let lock = NSLock()
     private var link: ServerLink?
-    private var queued: [Data] = []
+    private var queued: [UInt64] = []
     private var stopped = false
 
     init(_ continuation: AsyncThrowingStream<Data, any Error>.Continuation) {
@@ -397,18 +397,22 @@ private final class ServerSubscription: @unchecked Sendable {
     func start(on link: ServerLink, query: ServedRead) throws {
         guard !lock.withLock({ stopped }) else { return }
         try link.subscribe(self, query: query)
-        let queued: [Data] = lock.withLock {
+        let queued: [UInt64] = lock.withLock {
             guard !stopped else { return [] }
             self.link = link
             defer { self.queued = [] }
             return self.queued
         }
-        for line in queued { send(line) }
+        for checkpoint in queued {
+            do { try link.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error); return }
+        }
     }
 
+    /// A watch's stdin line, `{"id": n}`: a checkpoint. A subscription's
+    /// arguments are fixed; new arguments are a new subscription.
     func send(_ line: Data) {
-        let frame: JSONValue
-        do { frame = try JSONDecoder().decode(JSONValue.self, from: line) } catch {
+        let checkpoint: UInt64
+        do { checkpoint = try JSONDecoder().decode(Checkpoint.self, from: line).id } catch {
             finish(throwing: RegistryQueryError("Invalid watch request: \(error.localizedDescription)"))
             return
         }
@@ -416,7 +420,7 @@ private final class ServerSubscription: @unchecked Sendable {
             guard !stopped else { return (nil, false) }
             if let link { return (link, false) }
             guard queued.count < 64 else { return (nil, true) }
-            queued.append(line)
+            queued.append(checkpoint)
             return (nil, false)
         }
         if overflow {
@@ -424,7 +428,19 @@ private final class ServerSubscription: @unchecked Sendable {
             return
         }
         guard let target else { return }
-        do { try target.send(.checkpoint(id: id, frame: frame)) } catch { finish(throwing: error) }
+        do { try target.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error) }
+    }
+
+    private struct Checkpoint: Decodable {
+        let id: UInt64
+        init(from decoder: Decoder) throws {
+            let box = try decoder.container(keyedBy: Keys.self)
+            guard box.allKeys == [.id] else {
+                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "a subscription takes only checkpoints"))
+            }
+            id = try box.decode(UInt64.self, forKey: .id)
+        }
+        private enum Keys: String, CodingKey { case id, args }
     }
 
     /// From the reader thread: one complete reading.

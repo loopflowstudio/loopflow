@@ -57,7 +57,7 @@ struct ServerProtocolTests {
         guard case .object(let fields) = frame else { Issue.record("Missing watch frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
-        #expect(try encoded(.checkpoint(id: "tasks-1", frame: .object(["id": .integer(3)]))) == value("checkpoint"))
+        #expect(try encoded(.checkpoint(id: "tasks-1", checkpoint: 3)) == value("checkpoint"))
         #expect(try encoded(.cancel(id: "tasks-1")) == value("cancel"))
     }
 

@@ -44,12 +44,13 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// A pre-hello readiness probe; the server answers `status` and closes.
     case status
     case request(id: String, operation: ServerOperation)
-    /// One request line for the live subscription `id`.
-    case checkpoint(id: String, frame: JSONValue)
+    /// Ask the live subscription `id` for a reading now; the next reading's
+    /// `answers` carries `checkpoint`, changed or not.
+    case checkpoint(id: String, checkpoint: UInt64)
     /// Forget a request's answer, or end a subscription.
     case cancel(id: String)
 
-    private enum Keys: String, CodingKey { case type, id, operation, frame, revision, client, minRevision = "min_revision" }
+    private enum Keys: String, CodingKey { case type, id, operation, checkpoint, revision, client, minRevision = "min_revision" }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -63,10 +64,10 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode("request", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
-        case .checkpoint(let id, let frame):
+        case .checkpoint(let id, let checkpoint):
             try box.encode("checkpoint", forKey: .type)
             try box.encode(id, forKey: .id)
-            try box.encode(frame, forKey: .frame)
+            try box.encode(checkpoint, forKey: .checkpoint)
         case .cancel(let id):
             try box.encode("cancel", forKey: .type)
             try box.encode(id, forKey: .id)

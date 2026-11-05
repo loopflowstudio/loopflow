@@ -180,15 +180,11 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             "{value}"
         ),
         "codex" => {
-            assert_eq!(
-                value["params"]["sandbox"],
-                if enabled {
-                    "danger-full-access"
-                } else {
-                    "workspace-write"
-                },
-                "{value}"
-            );
+            if enabled {
+                assert_eq!(value["params"]["sandbox"], "danger-full-access", "{value}");
+            } else {
+                assert!(value["params"].get("sandbox").is_none(), "{value}");
+            }
             assert_eq!(
                 value["params"]["approvalPolicy"],
                 if enabled { "never" } else { "on-request" },
@@ -484,6 +480,32 @@ fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
     ]);
     bypass(&explicit, "claude", false);
     assert!(args(&explicit).contains(&"--no-chrome"));
+}
+
+#[test]
+fn unset_chrome_leaves_the_claude_setting_alone_until_a_choice_is_explicit() {
+    let fixture = Fixture::new("claude");
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "agent: claude\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
+    fn chrome_flags(value: &Value) -> Vec<&str> {
+        args(value)
+            .into_iter()
+            .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
+            .collect()
+    }
+    let attended = fixture.run(&["-i", ":", "hello"]);
+    assert!(chrome_flags(&attended).is_empty(), "{attended}");
+    let session = fixture.session();
+    let resumed = fixture.run(&["session", "resume", &session]);
+    assert!(chrome_flags(&resumed).is_empty(), "{resumed}");
+    let headless = fixture.run(&["-b", ":", "hello"]);
+    assert!(chrome_flags(&headless).is_empty(), "{headless}");
+    let off = fixture.run(&["-i", "--chrome", "off", ":", "hello"]);
+    assert_eq!(chrome_flags(&off), ["--no-chrome"]);
+    let on = fixture.run(&["-i", "--chrome", "on", ":", "hello"]);
+    assert_eq!(chrome_flags(&on), ["--chrome"]);
 }
 
 #[test]

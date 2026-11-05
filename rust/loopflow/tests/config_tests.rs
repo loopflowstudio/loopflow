@@ -66,7 +66,7 @@ fn load_config_or_default_returns_defaults() {
 
     assert!(config.agent.is_none());
     assert!(!config.yolo);
-    assert!(!config.chrome);
+    assert_eq!(config.chrome, None);
 }
 
 // =============================================================================
@@ -115,7 +115,7 @@ pr: true
         .unwrap()
         .unwrap();
     assert!(config.yolo);
-    assert!(config.chrome);
+    assert_eq!(config.chrome, Some(true));
     assert!(config.pr);
 }
 

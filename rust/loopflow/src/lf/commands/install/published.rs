@@ -1,4 +1,4 @@
-//! Stream installs (green main builds and published releases) and the optional
+//! Stream installs (green main builds and published releases) and the
 //! machine-local schedule that follows the recorded stream.
 
 use std::fs;

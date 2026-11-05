@@ -290,7 +290,7 @@ rate-limit recovery; formatting, Clippy and architecture checks pass. A schedule
 release child signal did not recur; cause unknown. Hosted candidate CI, live
 request counts and installed acceptance remain unproved. `rust/loopflow/tests/README.md` retains
 Linux HTTPS reconnect as CI's obligation. Exact failures, commands and counts:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
+`6935bfbadb:wave/infrastructure/MEMORY.md`,
 On-demand Linear acquisition.
 
 Jack authorized landing after checks. His `6d169dc1` permits publication before live
@@ -306,10 +306,9 @@ Jack Heart requested shipping after review; complete after merge.
 interactive/headless, Task/taskless starts. Existing conversations and provider
 changes are out. Shared LOOPFLOW.md teaches self-renaming.
 Fake-API Claude TUI/headless and shared Codex TUI pass; embedded Codex/exec lack
-the endpoint. Live cmux workspace/tab rename passed with a stand-in
-(`/tmp/lf-cmux-demo-owapn43t/`). Docker promotion/retry preserves hooks, settings
+the endpoint. Live cmux workspace/tab rename passed with a stand-in.
+Docker promotion/retry preserves hooks, settings
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
-Plan: `scratch/every-lf-session-in-cmux.md`.
 
 October 11 hook repair: Jack Heart's comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26`
 requests landing PR #1530 after sync. A held WAL writer reproduced a callback
@@ -319,7 +318,6 @@ wait. Optional prompt hooks bound observation and ownership reads separately
 never retry failed early observation at exit. Unavailable ownership leaves names
 unchanged. Lock fixtures prove source behavior only; installed concurrent-Flow
 acceptance and the slow status/ensure cause remain unproved.
-Plan: `scratch/stop-the-session-title-hook.md`.
 
 Jack Heart's October 11 Kata report (`d4991d61`): prompt timeouts recurred outside
 Loopflow; the Kata lock holder/cause remain unknown. Evidence:
@@ -422,8 +420,7 @@ Demo evidence: `353cd661e:scratch/machine-sign-in-demo.md`.
 
 Gate repaired build-version comparison; OAuth's output-handle warning did not
 reproduce, without a known cause or repair. CI retains Rust and
-macOS sandbox Python checks. Earlier proofs: `178abab13:wave/infrastructure/MEMORY.md`;
-current checks: `scratch/work-on-another-machine-name.md`.
+macOS sandbox Python checks. Earlier proofs: `178abab13:wave/infrastructure/MEMORY.md`.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 
@@ -778,7 +775,7 @@ remains Infrastructure-owned. Main #1523's terminal draft stays separate.
 
 Status preserves pending-publication uncertainty. Real SSH, live Linear, installation and cron activation
 remain unproved. Candidate/run IDs and repairs:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Tasks across machines.
+`6935bfbadb:wave/infrastructure/MEMORY.md`, Tasks across machines.
 
 ## Planning and launch preservation (curated 2026-10-13)
 
@@ -1073,8 +1070,8 @@ telemetry red; fresh failures join existing work.
 
 ## Durable model lessons (curated 2026-10-02)
 
-[Earlier model and planning records](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#model-design-settled)
-preserve their exact decisions and implementation history. Current planning and release decisions supersede archived cadence, daemon-chat
+Earlier model and planning records (`d281370191:wave/infrastructure/MEMORY.md`,
+Model (design settled)) preserve their exact decisions and implementation history. Current planning and release decisions supersede archived cadence, daemon-chat
 and mandatory Project assumptions.
 
 Self-hosting remains the default; credentials follow the repository Doppler

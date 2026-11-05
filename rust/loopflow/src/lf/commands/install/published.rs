@@ -1,4 +1,4 @@
-//! Stream installs (green main builds and published releases) and the optional
+//! Stream installs (green main builds and published releases) and the
 //! machine-local schedule that follows the recorded stream.
 
 use std::fs;
@@ -21,8 +21,6 @@ const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 const MAIN_PACKAGES: &str = "main-packages.yml";
 /// The artifact holding that run's signed, notarized Loopflow.dmg.
 const MAIN_APP: &str = "Loopflow-dmg";
-/// The reader floors a release's build opens (`lf self install reader-catalog`).
-const READER_CATALOG: &str = "reader-catalog.txt";
 
 /// The build line an install follows (`release/README.md`, Streams).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,13 +113,6 @@ fn install_release(
         return Ok(());
     }
     let manifest = release_manifest(client, tag)?;
-    if !release_opens_store(client, tag, &manifest)? {
-        println!(
-            "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
-             Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
-        );
-        return Ok(());
-    }
     let installer = release_asset(client, tag, "install.sh")?;
     let temporary = tempfile::tempdir()?;
     run_verified_installer(directory, app, temporary.path(), tag, &manifest, &installer)?;
@@ -172,21 +163,6 @@ fn app_destination(cli: &Path) -> Option<PathBuf> {
     .then_some(app)
 }
 
-/// Succeed only when release `tag` can open this Machine's store; Loopflow.app's
-/// updater asks before installing a release.
-pub fn can_open(tag: &str) -> Result<()> {
-    let client = http_client()?;
-    let manifest = release_manifest(&client, tag)?;
-    if !release_opens_store(&client, tag, &manifest)? {
-        bail!(
-            "{tag} cannot open this Machine's store: a newer lf migrated it. \
-             Loopflow stays on this build until its stream reaches one that opens the store."
-        );
-    }
-    println!("{tag} opens this Machine's store");
-    Ok(())
-}
-
 fn http_client() -> Result<Client> {
     Ok(Client::builder()
         .timeout(Duration::from_secs(30))
@@ -212,20 +188,6 @@ fn release_manifest(client: &Client, tag: &str) -> Result<String> {
     )?)?)
 }
 
-/// Whether release `tag` opens the store, from its digest-checked reader catalog.
-fn release_opens_store(client: &Client, tag: &str, manifest: &str) -> Result<bool> {
-    // Releases before v0.16 publish no catalog; promotion still refuses them.
-    if manifest_digest(manifest, READER_CATALOG).is_none() {
-        return Ok(true);
-    }
-    let catalog = release_asset(client, tag, READER_CATALOG)?;
-    verify_asset(manifest, READER_CATALOG, &catalog)?;
-    opens_store(
-        &crate::store::production_database_path(),
-        &String::from_utf8_lossy(&catalog),
-    )
-}
-
 /// The newest published release in the GitHub releases list, which is newest first.
 fn newest_release(json: &str) -> Result<String> {
     #[derive(serde::Deserialize)]
@@ -240,24 +202,6 @@ fn newest_release(json: &str) -> Result<String> {
         .find(|release| !release.draft && !release.prerelease)
         .map(|release| release.tag_name)
         .ok_or_else(|| anyhow!("no published Loopflow release"))
-}
-
-/// Whether a build with this reader catalog opens the store. An absent store opens.
-fn opens_store(store: &Path, catalog: &str) -> Result<bool> {
-    if !store.exists() {
-        return Ok(true);
-    }
-    let conn = rusqlite::Connection::open_with_flags(
-        store,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    let catalog: Vec<String> = catalog
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect();
-    Ok(crate::store::migrations::can_open(&conn, &catalog)?)
 }
 
 /// The stream recorded in `home`'s config.yaml.
@@ -868,8 +812,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::{checked, launchd_schedule, DiskImage, InstallFrequency};
     use super::{
-        cron_table, is_current, newest_release, newest_run, opens_store, package_target,
-        record_stream, recorded_stream, release_tag, run_verified_installer, Stream, CRON_MARKER,
+        cron_table, is_current, newest_release, newest_run, package_target, record_stream,
+        recorded_stream, release_tag, run_verified_installer, Stream, CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -1312,24 +1256,6 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
         ]"#;
         assert_eq!(newest_release(releases).unwrap(), "v0.16.2");
         assert!(newest_release("[]").is_err());
-    }
-
-    #[test]
-    fn a_build_whose_catalog_lacks_the_stores_floor_cannot_open_it() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = temp.path().join("loopflow.db");
-        assert!(opens_store(&store, "").unwrap());
-        let connection = rusqlite::Connection::open(&store).unwrap();
-        crate::store::migrations::apply_sqlite(&connection).unwrap();
-        drop(connection);
-        let current = crate::store::migrations::reader_catalog().join("\n");
-        assert!(opens_store(&store, &current).unwrap());
-        let older = crate::store::migrations::reader_catalog()
-            .split_last()
-            .unwrap()
-            .1
-            .join("\n");
-        assert!(!opens_store(&store, &older).unwrap());
     }
 
     #[test]

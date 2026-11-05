@@ -508,7 +508,8 @@ pub fn native_event() -> anyhow::Result<()> {
     let value: Value = serde_json::from_slice(&bytes)?;
     let adapter: crate::steer::SteerAdapter =
         serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store =
+        crate::store::sqlite::SqliteStore::open_for_hook(&crate::store::database_path_from_env()?)?;
     observe_native(&store, &adapter, &value)
 }
 

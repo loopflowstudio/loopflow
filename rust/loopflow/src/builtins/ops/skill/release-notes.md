@@ -17,14 +17,9 @@ Write release notes that tie why the release changed to what actually shipped.
    git or GitHub for more.
 4. Combine them: what users, operators and contributors can do differently
    now. Ground every claim in a commit or PR.
-5. Each `breaking` line is a compatibility break the release cut found, such as
-   `lf < 0.15.0 can no longer open the store (raised by: drop_waves)`. Quote it
-   verbatim in the opening story and explain the upgrade in operational notes.
-   Loopflow adds any line the notes leave out. An empty list means older
-   versions keep working; never make up a break.
-6. Keep the voice of `previous_release_notes` if present, but fix structure
+5. Keep the voice of `previous_release_notes` if present, but fix structure
    when they were too raw.
-7. Write to `LF_RELEASE_NOTES_OUTPUT` when set, otherwise `RELEASE_NOTES.md`.
+6. Write to `LF_RELEASE_NOTES_OUTPUT` when set, otherwise `RELEASE_NOTES.md`.
    A preview passes a temporary path; don't edit the repository's release
    files or publish anything.
 

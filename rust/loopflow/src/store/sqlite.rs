@@ -77,6 +77,10 @@ pub(crate) use task_work::TaskShipping;
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// A provider hook at a turn or tool boundary waits this long for a locked
+/// store, then treats it as unavailable: a busy install never stalls a turn.
+pub(crate) const HOOK_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Bytes of write-ahead log kept on disk after a checkpoint resets it.
 const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 
@@ -100,8 +104,12 @@ fn unapplied_message(path: &Path, pending: &str) -> String {
     }
 }
 
-fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult<()> {
-    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+fn configure_write_connection(
+    conn: &mut Connection,
+    path: &Path,
+    busy: Duration,
+) -> StoreResult<()> {
+    conn.busy_timeout(busy)?;
     // A deferred transaction that reads, then writes after another process
     // committed, fails at once with SQLITE_BUSY_SNAPSHOT: the busy handler
     // never runs. Taking the write lock at BEGIN makes it wait instead.
@@ -491,7 +499,18 @@ impl SqliteStore {
     /// shared frontier is the promotion boundary's job — see
     /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden)
+        Self::open(
+            path,
+            super::FrontierAdvance::Forbidden,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
+    }
+
+    /// Open for a provider hook at a turn or tool boundary. It waits at most
+    /// [`HOOK_BUSY_TIMEOUT`] for a locked store; the caller treats any error as
+    /// a recording gap and lets the turn continue.
+    pub(crate) fn open_for_hook(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Forbidden, HOOK_BUSY_TIMEOUT)
     }
 
     /// Revalidate a connection after a child executable may have upgraded it.
@@ -504,7 +523,11 @@ impl SqliteStore {
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Authorized)
+        Self::open(
+            path,
+            super::FrontierAdvance::Authorized,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
     }
 
     /// Open a hermetic, fully-migrated store at `path`: this build's whole
@@ -522,18 +545,18 @@ impl SqliteStore {
         }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migrations::apply_sqlite(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+    fn open(path: &Path, advance: super::FrontierAdvance, busy: Duration) -> StoreResult<Self> {
         if super::serves_in_app() {
             return Self::open_in_app(path);
         }
-        Self::open_with(path, &super::machine_home_dir(), advance)
+        Self::open_with(path, &super::machine_home_dir(), advance, busy)
     }
 
     /// An app's in-process reads and writes: the store `lf` prepared, at this
@@ -557,7 +580,7 @@ impl SqliteStore {
                 path.display()
             )));
         }
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -566,7 +589,12 @@ impl SqliteStore {
     /// Open resolving the migration decision against an explicit machine home.
     /// Production opens pass the real one through [`Self::open`]; the
     /// same-module shared-frontier regressions pass a temp home.
-    fn open_with(path: &Path, home: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+    fn open_with(
+        path: &Path,
+        home: &Path,
+        advance: super::FrontierAdvance,
+        busy: Duration,
+    ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
@@ -600,7 +628,7 @@ impl SqliteStore {
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, busy)?;
 
         if shared_database && !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
@@ -647,12 +675,6 @@ impl SqliteStore {
             validate_process_schema(&conn)?;
         }
         Ok(store)
-    }
-
-    /// The migration a reader must know to open this store; `None` when it is empty.
-    pub(crate) fn reader_floor(&self) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        crate::store::migrations::store_reader_floor(&conn)
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
@@ -2142,7 +2164,7 @@ mod frontier_tests {
         home: &Path,
         advance: FrontierAdvance,
     ) -> crate::store::StoreResult<SqliteStore> {
-        SqliteStore::open_with(path, home, advance)
+        SqliteStore::open_with(path, home, advance, super::SQLITE_WRITE_BUSY_TIMEOUT)
     }
 
     fn frontier(path: &Path) -> Option<String> {
@@ -2189,8 +2211,8 @@ mod frontier_tests {
         open(&path, &shared.home, Forbidden).unwrap();
     }
 
-    /// A newer build that only adds leaves this lf reading and writing the
-    /// shared store; one that breaks names the migration that locked it out.
+    /// A newer build leaves this lf reading and writing the shared store.
+    /// Promotion selecting this build applies nothing to history it does not know.
     #[test]
     fn an_older_lf_keeps_working_on_a_store_a_newer_build_extended() {
         let shared = SharedMachine::new();
@@ -2202,13 +2224,12 @@ mod frontier_tests {
             &conn,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
         let newer = frontier(&path);
 
-        let store = open(&path, &shared.home, Forbidden)
-            .expect("an additive newer release leaves the store readable");
+        let store =
+            open(&path, &shared.home, Forbidden).expect("a newer build leaves the store readable");
         let wave = Wave::new(WaveId::new(), "From older lf".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         assert_eq!(
@@ -2220,36 +2241,38 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), newer);
-        open(&path, &shared.home, Authorized)
-            .expect_err("promotion never accepts history it does not know");
+        open(&path, &shared.home, Authorized).expect("selecting an older build applies nothing");
+        assert_eq!(frontier(&path), newer);
+    }
 
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
+    /// A contract migration past its staging window still opens: the one
+    /// statement that reads what it dropped fails, naming the column.
+    #[test]
+    fn a_dropped_column_fails_the_statement_that_reads_it_and_nothing_else() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        let newer = apply_newer_migration(
-            &conn,
-            "CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            false,
-        )
-        .unwrap();
-        let refusal = open(&path, &broken.home, Forbidden)
-            .expect_err("a breaking newer migration locks this lf out")
-            .to_string();
-        assert!(
-            refusal.contains(&format!(
-                "this store needs an lf that knows {newer} (it has "
-            )) && refusal.ends_with("run `lf install`"),
-            "{refusal}"
-        );
+        apply_newer_migration(&conn, "ALTER TABLE waves DROP COLUMN promoted_at;").unwrap();
+
+        running
+            .validate_current_schema()
+            .expect("the running reader keeps its store");
+        let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
+
+        let error = store.get_wave(&WaveId::new()).unwrap_err().to_string();
+
+        assert!(error.contains("promoted_at"), "{error}");
+        assert!(!error.contains("lf install"), "{error}");
+        store.health_check().expect("the rest of the store answers");
     }
 
     /// A Graph holds its store across steps and revalidates it after each one
     /// (`validate_current_schema`). A newer build that adds a slug migration
-    /// meanwhile leaves that running reader working; one that breaks stops it
-    /// with the skew and `lf install`, never advice to delete the database.
+    /// meanwhile leaves that running reader working.
     #[test]
-    fn a_running_older_reader_survives_an_additive_upgrade_under_it() {
+    fn a_running_older_reader_survives_an_upgrade_under_it() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, &shared.home, Authorized).unwrap();
@@ -2262,13 +2285,12 @@ mod frontier_tests {
             &newer,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
 
         running
             .validate_current_schema()
-            .expect("an additive newer migration keeps the running reader valid");
+            .expect("a newer migration keeps the running reader valid");
         let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
         running.create_wave(&after).unwrap();
         for wave in [&before, &after] {
@@ -2280,27 +2302,6 @@ mod frontier_tests {
                 Some(wave.name().to_string())
             );
         }
-
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
-        let running = open(&path, &broken.home, Forbidden).unwrap();
-        let newer = apply_newer_migration(
-            &rusqlite::Connection::open(&path).unwrap(),
-            "CREATE TABLE wave_marks (wave_id TEXT NOT NULL);",
-            false,
-        )
-        .unwrap();
-        let refusal = running
-            .validate_current_schema()
-            .expect_err("a breaking newer migration stops the running reader")
-            .to_string();
-        assert!(
-            refusal.contains(&format!("this store needs an lf that knows {newer}"))
-                && refusal.ends_with("run `lf install`")
-                && !refusal.contains("delete"),
-            "{refusal}"
-        );
     }
 
     #[test]
@@ -2506,14 +2507,14 @@ mod frontier_tests {
 
 #[cfg(test)]
 mod wal_tests {
-    use super::{configure_write_connection, WAL_SIZE_LIMIT_BYTES};
+    use super::{configure_write_connection, SQLITE_WRITE_BUSY_TIMEOUT, WAL_SIZE_LIMIT_BYTES};
 
     #[test]
     fn a_burst_does_not_leave_its_wal_on_disk() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let mut conn = rusqlite::Connection::open(&path).unwrap();
-        configure_write_connection(&mut conn, &path).unwrap();
+        configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
         conn.execute_batch("CREATE TABLE history (payload BLOB)")
             .unwrap();
         let wal = directory.path().join("loopflow.db-wal");
@@ -2537,7 +2538,7 @@ mod wal_tests {
         let path = directory.path().join("loopflow.db");
         let open = || {
             let mut conn = rusqlite::Connection::open(&path).unwrap();
-            configure_write_connection(&mut conn, &path).unwrap();
+            configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
             conn
         };
         let mut first = open();

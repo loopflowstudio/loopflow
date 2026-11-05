@@ -3,14 +3,13 @@
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
 //! and version, and flags the ones a launch through the entry no longer runs
-//! (`installation::superseded`, the judgement owners and `lf resume` share) or
-//! that can't open the store any more. A superseded owner ends itself once its
-//! Sessions hold no work or input and `lf resume` reopens them on the installed lf;
-//! rollover does that for every superseded owner at once, including owners that
-//! predate the policy: an idle owner with saved provider history is ended the
-//! way its lifetime policy ends it, and each of its Sessions resumes on the
+//! (`installation::superseded`, the judgement `lf resume` shares). A superseded
+//! owner keeps serving on its own; `lf resume` reopens one Session on the
+//! installed lf when a person asks, and rollover does that for every superseded
+//! owner at once: an idle owner with saved provider history is ended and each of
+//! its Sessions resumes on the
 //! selected lf. The sweep signals owners directly, so existing viewers may
-//! need to reopen; the lifetime policy itself sends the successor command.
+//! need to reopen.
 //! An owner holding a turn, draft or pending request stays, answering or not:
 //! saved history cannot restore its native editor. A Graph runner isn't
 //! stopped: each step resolves the installed entry when it launches, so its next
@@ -44,8 +43,6 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct BinaryInventory {
     /// The lf a launch through the entry runs now; `None` when no entry resolves.
     pub selected: Option<SelectedBinary>,
-    /// The migration a binary must know to open the store.
-    pub store_floor: Option<String>,
     pub binaries: Vec<RunningBinary>,
 }
 
@@ -62,8 +59,6 @@ pub struct RunningBinary {
     pub version: Option<String>,
     /// One build with `selected`: the same file, or the same bytes.
     pub selected: bool,
-    /// It does not know the store's reader floor, so it fails every store open.
-    pub cannot_open_store: bool,
     pub processes: Vec<RunningLfProcess>,
 }
 
@@ -114,16 +109,10 @@ impl RunningBinary {
         }
     }
 
-    /// `lf-d49c57c (0.14.16, can't open the store)`.
+    /// `lf-d49c57c (0.14.16)`.
     pub fn describe(&self) -> String {
-        let mut facts = vec![self
-            .version
-            .clone()
-            .unwrap_or_else(|| "version unknown".into())];
-        if self.cannot_open_store {
-            facts.push("can't open the store".into());
-        }
-        format!("{} ({})", self.name(), facts.join(", "))
+        let version = self.version.as_deref().unwrap_or("version unknown");
+        format!("{} ({version})", self.name())
     }
 }
 
@@ -134,15 +123,10 @@ pub fn inventory() -> Result<BinaryInventory> {
     let target = crate::installation::launch_target()
         .inspect_err(|error| tracing::warn!(%error, "the lf a launch runs now is unknown"))
         .ok();
-    let (store_floor, processes) = if database.exists() {
-        let store = SqliteStore::open_processes_read_only(&database)?;
-        let floor = store.reader_floor().unwrap_or_else(|error| {
-            tracing::warn!(%error, "store reader floor unreadable");
-            None
-        });
-        (floor, live_lf_processes(&store, now)?)
+    let processes = if database.exists() {
+        live_lf_processes(&SqliteStore::open_processes_read_only(&database)?, now)?
     } else {
-        (None, Vec::new())
+        Vec::new()
     };
     let mut versions = HashMap::new();
     let mut version_of = |path: &Path| {
@@ -155,7 +139,7 @@ pub fn inventory() -> Result<BinaryInventory> {
         version: version_of(&path),
         path,
     });
-    let mut binaries = group(processes, |path| {
+    let binaries = group(processes, |path| {
         let version = path.and_then(&mut version_of);
         let is_selected = match path {
             Some(path) => !crate::installation::superseded(path),
@@ -164,19 +148,7 @@ pub fn inventory() -> Result<BinaryInventory> {
         };
         (version, is_selected)
     });
-    if store_floor.is_some() {
-        for binary in &mut binaries {
-            binary.cannot_open_store = binary
-                .path
-                .as_deref()
-                .is_some_and(|path| !binary_opens_store(path));
-        }
-    }
-    Ok(BinaryInventory {
-        selected,
-        store_floor,
-        binaries,
-    })
+    Ok(BinaryInventory { selected, binaries })
 }
 
 fn live_lf_processes(
@@ -241,7 +213,6 @@ fn group(
                 path,
                 version,
                 selected,
-                cannot_open_store: false,
                 processes,
             }
         })
@@ -265,31 +236,12 @@ fn binary_version(path: &Path) -> Option<String> {
     parse_version(&String::from_utf8_lossy(&output.stdout))
 }
 
-/// Whether the binary reads the selected store, by its own read-only
-/// promotion preview; a binary that cannot answer is not judged.
-fn binary_opens_store(path: &Path) -> bool {
-    let mut command = Command::new(path);
-    command
-        .args(["self", "install", "preflight", "--json"])
-        .env_clear()
-        .env("LF_HOME", crate::store::lf_home_dir());
-    if let Some(home) = std::env::var_os("HOME") {
-        command.env("HOME", home);
-    }
-    let Ok(output) = crate::os_process::bounded_output(&mut command, VERSION_TIMEOUT) else {
-        return true;
-    };
-    serde_json::from_slice::<serde_json::Value>(&output.stdout).map_or(true, |preview| {
-        preview["compatibility"]["kind"] != "incompatible"
-    })
-}
-
 fn parse_version(output: &str) -> Option<String> {
     let version = output.trim().strip_prefix("lf ")?.trim();
     (!version.is_empty() && !version.contains(char::is_whitespace)).then(|| version.to_owned())
 }
 
-/// `3 processes on lf-d49c57c (0.14.16); 2 on lf-270110a (0.14.15, can't open the store)`.
+/// `3 processes on lf-d49c57c (0.14.16); 2 on lf-270110a (0.14.15)`.
 pub fn superseded_summary(inventory: &BinaryInventory) -> Option<String> {
     let parts = inventory
         .superseded()
@@ -315,20 +267,17 @@ pub fn render_binaries(inventory: &BinaryInventory) -> String {
         return output;
     }
     for binary in &inventory.binaries {
-        let mut state = vec![if binary.selected {
+        let state = if binary.selected {
             "selected"
         } else {
             "superseded"
-        }];
-        if binary.cannot_open_store {
-            state.push("can't open the store");
-        }
+        };
         output.push_str(&format!(
             "  {:>4}  {:<20} {:<22} {}\n",
             binary.processes.len(),
             binary.name(),
             binary.version.as_deref().unwrap_or("unknown"),
-            state.join(" · "),
+            state,
         ));
     }
     if inventory.superseded().next().is_some() {
@@ -418,18 +367,11 @@ fn owner_disposition(store: &SqliteStore, owner: &LfProcessId) -> Result<Disposi
 }
 
 /// A Graph runner's steps resolve the installed entry at each launch, except
-/// in Desktop's helper, which keeps itself; a runner below the store floor
-/// fails at its next step instead.
+/// in Desktop's helper, which keeps itself.
 fn graph_runner(binary: &RunningBinary) -> Disposition {
     if binary.is_app_helper() {
         return Disposition::Stays(
             "its steps follow Loopflow.app's bundled lf; update Desktop".into(),
-        );
-    }
-    if binary.cannot_open_store {
-        return Disposition::Stays(
-            "can't open the store; it fails at its next step; rerun the Graph (`lf task run` for a Task's route)"
-                .into(),
         );
     }
     Disposition::NextStep
@@ -596,10 +538,41 @@ fn render_report(report: &RolloverReport) -> String {
     lines.join("\n")
 }
 
-/// Shown after a promote: which processes still run what it replaced. A promote
-/// that replaced Loopflow.app already moved Desktop's bundled lf.
-pub fn report_after_promote(replaced_app: bool) {
+/// Every live lf process by binary, for an install that has not changed anything
+/// yet. Each keeps its binary through the install and reads the store the install
+/// leaves behind; `lf install` prints this so the person sees what will meet the
+/// new schema before it commits, then proceeds.
+pub fn report_before_promote() {
     match inventory() {
+        Ok(inventory) => {
+            if inventory.binaries.is_empty() {
+                println!("no live lf process runs on this Machine");
+                return;
+            }
+            let total = inventory
+                .binaries
+                .iter()
+                .map(|binary| binary.processes.len())
+                .sum::<usize>();
+            let parts = inventory
+                .binaries
+                .iter()
+                .map(|binary| format!("{} on {}", binary.processes.len(), binary.describe()))
+                .collect::<Vec<_>>();
+            println!(
+                "{total} live lf process(es) keep their binary through this install: {}",
+                parts.join("; ")
+            );
+        }
+        Err(error) => eprintln!("warning: could not list live lf processes ({error:#})"),
+    }
+}
+
+/// Shown last after a promote: which processes still run what it replaced, and
+/// the pre-migration clone kept while they do, or while they are unknown. A
+/// promote that replaced Loopflow.app already moved Desktop's bundled lf.
+pub fn report_after_promote(replaced_app: bool, store: &Path) {
+    let clone_reason = match inventory() {
         Ok(inventory) => {
             if let Some(summary) = superseded_summary(&inventory) {
                 println!("still running the previous lf: {summary}");
@@ -609,11 +582,18 @@ pub fn report_after_promote(replaced_app: bool) {
                     );
                 }
                 println!(
-                    "each ends as its Session goes idle and `lf resume` reopens it on this lf; `lf monitor rollover` moves the idle ones now (`--dry-run` lists them)"
+                    "each ends as its Session goes idle; a Session on one comes back through `lf resume` once its client is stopped (Ctrl-C) and that lf has exited; `lf monitor rollover` moves the idle ones now (`--dry-run` lists them)"
                 );
             }
+            "kept while they run"
         }
-        Err(error) => eprintln!("warning: could not list processes on the previous lf ({error:#})"),
+        Err(error) => {
+            eprintln!("warning: could not list processes on the previous lf ({error:#})");
+            "kept: live lf processes are unknown"
+        }
+    };
+    for backup in crate::store::migrations::migration_backups(store) {
+        println!("pre-migration clone {clone_reason}: {}", backup.display());
     }
 }
 
@@ -663,7 +643,6 @@ mod tests {
         assert_eq!(binaries[1].processes.len(), 2);
         let inventory = BinaryInventory {
             selected: None,
-            store_floor: Some("0.14.16".into()),
             binaries,
         };
         assert_eq!(
@@ -701,23 +680,17 @@ mod tests {
             )
             .unwrap();
         }
-        let binary = |path: &str, cannot_open_store| RunningBinary {
+        let binary = |path: &str| RunningBinary {
             path: Some(PathBuf::from(path)),
             version: Some("0.14.16".into()),
             selected: false,
-            cannot_open_store,
             processes: Vec::new(),
         };
-        let installed = binary("/home/.lf/bin/lf-d49c57c", false);
-        let below_floor = binary("/home/.lf/bin/lf-270110a", true);
-        let helper = binary("/Applications/Loopflow.app/Contents/MacOS/lf", false);
+        let installed = binary("/home/.lf/bin/lf-d49c57c");
+        let helper = binary("/Applications/Loopflow.app/Contents/MacOS/lf");
 
         let of = |binary, process| disposition(&store, binary, process).unwrap();
         assert!(matches!(of(&installed, &runner), Disposition::NextStep));
-        let Disposition::Stays(reason) = of(&below_floor, &runner) else {
-            panic!("a runner below the floor stays");
-        };
-        assert!(reason.contains("rerun the Graph"), "{reason}");
         let Disposition::Stays(reason) = of(&helper, &runner) else {
             panic!("a Desktop helper runner stays");
         };

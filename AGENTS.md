@@ -254,10 +254,24 @@ plan, code and memory and keeps open findings with the work.
 **SQLite schema:**
 - One migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the branch's existing one.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
+- Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.
 - Test the merged frontier against the finished migration, not the steps between.
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
 - Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns.
+
+**Harness, transport and hook code (`rust/loopflow/src/harness/**`, `transport*`):**
+lf is a session manager, context adder and hook interjector on top of a
+harness, never a middleman that can break the conversation. It is never in the
+byte path between a person and their provider except as a pass-through that
+keeps passing when lf's own state (the store, a hook, a lock) is unavailable.
+Every lf invocation at a turn or tool boundary is best-effort: it records a gap
+in `logs/lf.log` instead of failing the turn, the tool or the quit. A recording
+gap is one type, `store::RecordingGap` (`note` once per changed failure,
+`recovered` once); hooks keep theirs in a marker file and write the gap into the
+Session history as a `store-gap` observation when the store answers again. The
+Codex relay is the one remaining in-path piece; it tolerates store loss, and its
+removal is a separate Task.
 
 **`*.rs`:**
 - Delete dead code; don't comment it out. Intentionally unused code (FFI, PyO3) gets `#[allow(dead_code)]` with a comment saying why.

@@ -1403,11 +1403,7 @@ impl SelfCommand {
         match self {
             Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
-                Some(
-                    InstallCommand::Preflight { .. }
-                    | InstallCommand::ReaderCatalog
-                    | InstallCommand::CanOpen { .. },
-                ) => false,
+                Some(InstallCommand::Preflight { .. }) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
@@ -2340,7 +2336,7 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
+    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux)
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
         /// Defaults to the installed schedule's, else daily.
@@ -2351,9 +2347,6 @@ pub enum InstallCommand {
     /// store and link `lf` into it. Moves no files.
     #[command(hide = true)]
     Adopt,
-    /// Exit 0 only when release TAG's build can open this Machine's store.
-    #[command(hide = true)]
-    CanOpen { tag: String },
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
@@ -2371,9 +2364,6 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print the reader floors this build knows, one per line.
-    #[command(hide = true)]
-    ReaderCatalog,
     /// Advance the receipt-selected store with this exact candidate's registry.
     #[command(hide = true)]
     AdvanceSwitch {
@@ -2405,8 +2395,9 @@ pub enum InstallCommand {
         #[arg(long)]
         preview: bool,
     },
-    /// Repoint the global CLI at retained prior bytes only after that binary's
-    /// own preflight proves it recognizes the current store frontier.
+    /// Repoint a legacy global CLI at retained prior bytes only after that
+    /// binary's own preflight proves it recognizes the current store frontier.
+    /// Refuses receipt-managed installs.
     #[command(hide = true)]
     Rollback {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).

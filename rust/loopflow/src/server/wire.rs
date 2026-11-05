@@ -60,7 +60,6 @@ pub enum Operation {
     /// Answers `subscribed`, then `reading` messages until cancelled.
     Subscribe {
         query: Read,
-        generation: u64,
     },
     Configuration {
         request: crate::config::api::Request,
@@ -86,7 +85,6 @@ pub enum ServerMessage {
     },
     Reading {
         id: String,
-        generation: u64,
         frame: serde_json::Value,
     },
     /// `id` is null before a request exists. An error for a subscription ends it.
@@ -212,10 +210,9 @@ mod tests {
             r#"{"type":"hello","revision":2,"min_revision":2}"#
         )
         .is_err());
-        assert!(serde_json::from_str::<ServerMessage>(
-            r#"{"type":"reading","id":"tasks-1","generation":1}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<ServerMessage>(r#"{"type":"reading","id":"tasks-1"}"#).is_err()
+        );
         assert!(serde_json::from_str::<ClientMessage>(
             r#"{"type":"request","id":"b","operation":{"kind":"bootstrap"}}"#
         )

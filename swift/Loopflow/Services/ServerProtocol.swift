@@ -78,12 +78,12 @@ public enum ServerClientMessage: Encodable, Sendable {
 public enum ServerOperation: Encodable, Sendable {
     case sessionOwner(session: String)
     case read(ServedRead)
-    case subscribe(ServedRead, generation: UInt64)
+    case subscribe(ServedRead)
     case command(ServedWrite)
     case configuration(JSONValue)
     case attach(owner: String)
 
-    private enum Keys: String, CodingKey { case kind, query, generation, change, owner, session, request }
+    private enum Keys: String, CodingKey { case kind, query, change, owner, session, request }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -93,10 +93,9 @@ public enum ServerOperation: Encodable, Sendable {
         case .read(let query):
             try box.encode("read", forKey: .kind)
             try box.encode(query, forKey: .query)
-        case .subscribe(let query, let generation):
+        case .subscribe(let query):
             try box.encode("subscribe", forKey: .kind)
             try box.encode(query, forKey: .query)
-            try box.encode(generation, forKey: .generation)
         case .configuration(let request):
             try box.encode("configuration", forKey: .kind)
             try box.encode(request, forKey: .request)
@@ -115,11 +114,11 @@ public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
     case response(id: String, result: ServerReply)
-    case reading(id: String, generation: UInt64, frame: JSONValue)
+    case reading(id: String, frame: JSONValue)
     /// `id` is nil before a request exists. An error for a subscription ends it.
     case error(id: String?, code: String, message: String)
 
-    private enum Keys: String, CodingKey { case type, id, result, generation, frame, code, message }
+    private enum Keys: String, CodingKey { case type, id, result, frame, code, message }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .type) {
@@ -128,8 +127,7 @@ public enum ServerMessage: Decodable, Sendable {
         case "response":
             self = .response(id: try box.decode(String.self, forKey: .id), result: try box.decode(ServerReply.self, forKey: .result))
         case "reading":
-            self = .reading(id: try box.decode(String.self, forKey: .id), generation: try box.decode(UInt64.self, forKey: .generation),
-                            frame: try box.decode(JSONValue.self, forKey: .frame))
+            self = .reading(id: try box.decode(String.self, forKey: .id), frame: try box.decode(JSONValue.self, forKey: .frame))
         case "error":
             self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
                           message: try box.decode(String.self, forKey: .message))

@@ -179,8 +179,8 @@ impl Connection {
     }
 
     /// Start a subscription and return its id once the server confirms it.
-    pub fn subscribe(&mut self, query: Read, generation: u64) -> Result<String> {
-        let id = self.send(Operation::Subscribe { query, generation })?;
+    pub fn subscribe(&mut self, query: Read) -> Result<String> {
+        let id = self.send(Operation::Subscribe { query })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response {
                 result: Reply::Subscribed,

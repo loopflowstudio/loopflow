@@ -47,12 +47,12 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"read","query":{"read":"roadmap",…}}}
-→ {"type":"request","id":"b","operation":{"kind":"subscribe","query":{…},"generation":1}}
+→ {"type":"request","id":"b","operation":{"kind":"subscribe","query":{…}}}
 ← {"type":"response","id":"a","result":{"kind":"read","value":{…}}}
 ← {"type":"response","id":"b","result":{"kind":"subscribed"}}
-← {"type":"reading","id":"b","generation":1,"frame":{"answers":null,"unavailable":null,"body":{…}}}
+← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
 → {"type":"checkpoint","id":"b","checkpoint":3}
-← {"type":"reading","id":"b","generation":1,"frame":{"answers":3,…}}
+← {"type":"reading","id":"b","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 ```
 
@@ -98,8 +98,8 @@ outcome_unknown, busy`.
   WorkViewPlan, including the recorded primary Session; roadmap membership alone
   cannot select one. A missing primary stays absent. Resolve its owner with
   `session_owner` before attachment.
-- `subscribe {query,generation}` supports every shared read with a watch. It
-  answers `subscribed`, then `reading {id,generation,frame}` messages wrapping
+- `subscribe {query}` supports every shared read with a watch. It answers
+  `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
   that number, changed or not. A subscription's arguments are fixed: new

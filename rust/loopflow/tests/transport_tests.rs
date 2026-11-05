@@ -4687,7 +4687,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let tasks = watch
-        .subscribe(serde_json::from_value(query).unwrap(), 7)
+        .subscribe(serde_json::from_value(query).unwrap())
         .unwrap();
     let initial = watch.reading(&tasks).unwrap();
     assert!(initial["unavailable"].is_null(), "{initial}");

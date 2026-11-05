@@ -49,11 +49,10 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.request(id: "tasks-1", operation: .subscribe(
-            .roadmap(directory: "/", wave: nil, task: nil, all: true), generation: 7))
+            .roadmap(directory: "/", wave: nil, task: nil, all: true)))
         #expect(try encoded(request) == value("subscribe"))
-        guard case .reading(let id, let generation, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
+        guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
-        #expect(generation == 7)
         guard case .object(let fields) = frame else { Issue.record("Missing watch frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
@@ -106,7 +105,7 @@ struct ServerProtocolTests {
 
     @Test func missingRequiredFieldsDoNotBecomeDefaults() {
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x","generation":1}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":2}"#.utf8))

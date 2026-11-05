@@ -653,7 +653,7 @@ fn server_operations_match_their_lf_commands() {
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
             let mut connection = loopflow::server::client::Connection::open().unwrap();
-            let id = connection.subscribe(served.clone(), 1).unwrap();
+            let id = connection.subscribe(served.clone()).unwrap();
             frame = connection.reading(&id).unwrap();
         });
         let served = frame;

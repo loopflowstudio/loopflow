@@ -223,7 +223,7 @@ final class ServerLink: @unchecked Sendable {
             return nil
         }
         if let refused { throw refused }
-        do { try send(.request(id: subscription.id, operation: .subscribe(query, generation: 1))) } catch {
+        do { try send(.request(id: subscription.id, operation: .subscribe(query))) } catch {
             _ = state.withLock { subscriptions.removeValue(forKey: subscription.id) }
             throw error
         }
@@ -260,7 +260,7 @@ final class ServerLink: @unchecked Sendable {
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(returning: result) }
             // `subscribed` confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
-        case .reading(let id, _, let frame):
+        case .reading(let id, let frame):
             state.withLock { subscriptions[id] }?.receive(frame)
         case .error(let id?, let code, let message):
             let refusal = RegistryQueryError("\(code): \(message)")

@@ -279,9 +279,9 @@ async fn session(mut lines: Lines, instance: Arc<str>) -> Result<()> {
                                 // answers on it are dropped with the task set.
                                 return bridge(lines, destination).await;
                             }
-                            Operation::Subscribe { query, generation } => {
+                            Operation::Subscribe { query } => {
                                 let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                                let task = tasks.spawn(subscription(id.clone(), query, generation, outgoing.clone(), inbox));
+                                let task = tasks.spawn(subscription(id.clone(), query, outgoing.clone(), inbox));
                                 Inflight { task, checkpoints: Some(checkpoints) }
                             }
                             operation => {
@@ -441,11 +441,10 @@ fn outcome_unknown(error: anyhow::Error) -> Refusal {
 async fn subscription(
     id: String,
     query: Read,
-    generation: u64,
     outgoing: mpsc::Sender<ServerMessage>,
     checkpoints: mpsc::Receiver<u64>,
 ) -> String {
-    if let Err(failure) = watch(&id, query, generation, &outgoing, checkpoints).await {
+    if let Err(failure) = watch(&id, query, &outgoing, checkpoints).await {
         // The error ends the subscription for the client; its last reading
         // already carried the watch's failure.
         let _ = outgoing
@@ -481,7 +480,6 @@ impl Drop for Watch {
 async fn watch(
     id: &str,
     query: Read,
-    generation: u64,
     outgoing: &mpsc::Sender<ServerMessage>,
     mut checkpoints: mpsc::Receiver<u64>,
 ) -> Result<()> {
@@ -514,7 +512,7 @@ async fn watch(
                 if let Some(frame) = frame {
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
                     reason = frame["unavailable"].as_str().map(str::to_owned);
-                    deliver(outgoing, ServerMessage::Reading { id: id.into(), generation, frame }).await?;
+                    deliver(outgoing, ServerMessage::Reading { id: id.into(), frame }).await?;
                 }
                 if watch.ended() {
                     anyhow::bail!("{}", reason.unwrap_or_else(|| "the watch ended".into()));
@@ -848,7 +846,6 @@ mod tests {
                     id: "ps".into(),
                     operation: Operation::Subscribe {
                         query: Read::MonitorPs,
-                        generation: 4,
                     },
                 })
                 .await;
@@ -856,15 +853,10 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, result: Reply::Subscribed } if id == "ps"
             ));
-            let ServerMessage::Reading {
-                id,
-                generation,
-                frame,
-            } = client.receive().await.unwrap()
-            else {
+            let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
                 panic!("expected the first reading")
             };
-            assert_eq!((id.as_str(), generation), ("ps", 4));
+            assert_eq!(id, "ps");
             assert!(frame["unavailable"].is_null(), "{frame}");
             client
                 .send(&ClientMessage::Checkpoint {

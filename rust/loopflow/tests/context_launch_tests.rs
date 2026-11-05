@@ -28,6 +28,26 @@ fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[
     command
 }
 
+/// Live agent Processes once a quit owner has finished its exit records. The
+/// terminal gets the provider's exit after a short wait; the owner lingers to
+/// settle its provider, so a reader waits for it.
+fn settled_live_agents(database: &rusqlite::Connection) -> i64 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let live: i64 = database
+            .query_row(
+                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if live == 0 || std::time::Instant::now() >= deadline {
+            return live;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 #[test]
 fn codex_startup_failures_preserve_input_and_allow_reconnect() {
     for failure in [
@@ -69,8 +89,17 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+        // A quit owner still writing its records returns the terminal's own
+        // exit (the fixture's 24 or 25) instead of its own message.
+        let terminal_exit = match failure {
+            "fail-terminal" => Some(24),
+            "fail-after-submit" => Some(25),
+            _ => None,
+        };
         assert!(
-            (failure == "fail-after-submit" && stderr.contains("native terminal connection"))
+            (terminal_exit.is_some() && output.status.code() == terminal_exit)
+                || (failure == "fail-after-submit"
+                    && stderr.contains("native terminal connection"))
                 || stderr.contains(if failure == "fail-terminal" {
                     "exited with"
                 } else if failure == "fail-after-submit" {
@@ -81,14 +110,11 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             "{failure}: {stderr}"
         );
         let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let live: i64 = database
-            .query_row(
-                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(live, 0, "{failure} must settle the owned provider");
+        assert_eq!(
+            settled_live_agents(&database),
+            0,
+            "{failure} must settle the owned provider"
+        );
         assert_eq!(
             fs::read_to_string(native.join("config.toml")).unwrap(),
             config
@@ -250,14 +276,11 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         turns[1]["items"][0]["content"][0]["text"],
         "Native follow-up"
     );
-    let live: i64 = database
-        .query_row(
-            "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(live, 0, "both launches must settle their owned providers");
+    assert_eq!(
+        settled_live_agents(&database),
+        0,
+        "both launches must settle their owned providers"
+    );
 }
 
 #[test]

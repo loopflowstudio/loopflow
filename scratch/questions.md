@@ -11,9 +11,10 @@
   to `attaches`, not to the lifetime policy.
 - `docs/sessions.md` never described the executable-replacement ending, so it
   needed no edit.
-- `.lf/wave/infrastructure/MEMORY.md` is 89 tokens over its 16000 budget. It is
-  read-only in this Graph; the Session continuity section could absorb the
-  11-04 incident paragraph above it when a Wave step curates it.
+- The realign step of the Task's `code` graph curated
+  `.lf/wave/infrastructure/MEMORY.md` (the earlier pass read it as read-only).
+  "Idle owners end" no longer names executable rollover as an ending; `lf monitor
+  rollover` under "Moving onto the installed lf" remains the one operator move.
 - Why quitting on 11-04 left the terminal ignoring Ctrl-C/Ctrl-D is untraced;
   the candidate is a launcher blocked on the Session fence and SQLite busy
   timeout after the client exited. Settlement now returns within 800 ms either way.

@@ -56,7 +56,7 @@ assigned or not (`task claim/unassign`, no deferred state). Scope still comes fr
 recency; preparation launches no provider. LOO-499 history:
 `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, its heading.
 
-## Idle owners end (LOO-709, reconciled 2026-11-03)
+## Idle owners end (LOO-709/e46a80, reconciled 2026-11-05)
 
 Jack Heart requires idle conversations to cost nothing. Detached settled owners
 end after `session.end_detached_after` (default 2m, configurable/off). Jack selected
@@ -65,8 +65,8 @@ and authorized delivery after checks. Single-Session resume never replays.
 LOO-498 owns workspace restoration (Rex first, Herder second); unselected open
 Rex tabs retain viewers.
 
-Finished Graphs and stale unviewed status retained idle owners; store errors killed
-the watcher. Use wall time and retry judgments. Fenced unyielded turns, including
+Finished Graphs and stale unviewed status retained idle owners; store errors once
+killed the watcher and now log a gap. Use wall time and retry judgments. Fenced unyielded turns, including
 quiet Graph supervision, outrank viewed idle reports; preserve running Graphs and
 Runs. Claude records activity before context delivery; Stop needs complete task/cron
 evidence to settle watches/wakeups. Same-provider handoff carries activity to its
@@ -74,8 +74,11 @@ new fence; replacement cannot inherit it.
 
 Queued endings are candidates: drain ready output, recheck output revisions even
 when reports are throttled, and restart quiet after new activity. Idle ending also
-checks viewer history and current viewers; executable rollover ignores viewers.
-Recheck input/store protection at consumption. LOO-705 shares that owner judgment.
+checks viewer history and current viewers. Recheck input/store protection at
+consumption. LOO-705 shares that owner judgment. Jack Heart, 2026-11-05 (e46a80):
+a removed, rebuilt or superseded lf executable ends nothing; only the person
+quitting, `lf resume`, `lf monitor rollover`, the detached limit or an explicit
+end does. `installation::superseded` stays for resume, rollover and doctor.
 
 Native editors need retained owners. Record input before delivery; exact plain
 Claude text plus matching prompt-ID settlement can release it. Enter, submission
@@ -301,29 +304,15 @@ etude, kata and fantasia precedes measurement; rollout notes belong in the PR.
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart requested shipping after review; complete after merge.
-`283fa7b5-3fdd-4457-9170-0de821534803` selects supported future lf/plain,
-interactive/headless, Task/taskless starts. Existing conversations and provider
-changes are out. Shared LOOPFLOW.md teaches self-renaming.
-Fake-API Claude TUI/headless and shared Codex TUI pass; embedded Codex/exec lack
-the endpoint. Live cmux workspace/tab rename passed with a stand-in
-(`/tmp/lf-cmux-demo-owapn43t/`). Docker promotion/retry preserves hooks, settings
-and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
-Plan: `scratch/every-lf-session-in-cmux.md`.
-
-October 11 hook repair: Jack Heart's comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26`
-requests landing PR #1530 after sync. A held WAL writer reproduced a callback
-over six seconds before naming; Process admission permits a 15-second receipt
-wait. Optional prompt hooks bound observation and ownership reads separately
-(lock waits vs history scans), reuse the bounded connection for parent reads and
-never retry failed early observation at exit. Unavailable ownership leaves names
-unchanged. Lock fixtures prove source behavior only; installed concurrent-Flow
-acceptance and the slow status/ensure cause remain unproved.
-Plan: `scratch/stop-the-session-title-hook.md`.
-
-Jack Heart's October 11 Kata report (`d4991d61`): prompt timeouts recurred outside
-Loopflow; the Kata lock holder/cause remain unknown. Evidence:
-`4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Session titles.
+Jack Heart requested shipping after review; shared LOOPFLOW.md teaches
+self-renaming for lf/plain, interactive/headless, Task/taskless starts. The
+October 11 hook repair (PR #1530) bounds observation and ownership reads
+separately, permits a 15-second receipt wait at Process admission and never
+retries failed early observation at exit; unavailable ownership leaves names
+unchanged. Installed concurrent-Flow acceptance, embedded Codex/exec naming and
+the Kata lock holder behind recurring prompt timeouts (`d4991d61`) remain
+unproved. Demo, lock-fixture and Kata evidence:
+`a5000ef889:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Program Status direction (LOO-398/415/720, reconciled 2026-11-03)
 
@@ -964,7 +953,16 @@ downloaded installers need the resolved target even when their scripts are older
 
 Promotion stops only Desktop; helpers retain images/bundles until retirement.
 Jack's November 4 report of reopened Sessions losing input/crashing supersedes
-liveness as recovery proof. LOO-724 owns hooks/reconnect; causation remains unproved.
+liveness as recovery proof. e46a80 traced the November 4 Codex loss: `lf install`
+raised the reader floor under 177 live processes, the relay treated every store
+error as fatal and read the store before accepting reconnects. Claude, OpenCode
+and Pi survived because lf only observes them through hooks. Jack Heart's rule
+(2026-11-05): lf is a session manager, context adder and hook interjector on top
+of a harness, never a middleman; the store records a conversation and never
+carries it. Relay, owner input, settlement and every hook are best-effort and log
+gaps to `logs/lf.log`; hooks wait 1 s for a locked store. Fixtures prove the
+surviving relay, unrecorded input delivery and the provider's own exit, not a
+live install; Sessions already on old builds need `lf resume`.
 Release's entry-point lesson applies: fixtures and interim main repair prove no
 corrected-build rollout. Both Machines need identity/store/scheduled checks and
 existing Sessions completing turns with continued interaction. Landing is insufficient.
@@ -1153,21 +1151,11 @@ test removal, cache relaxation or retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart requested landing #1505 October 8, superseding review-only feedback.
-The Task stays open for cold-cache verification; Git retains measurements and
-rejected patches. Provider-probe removal, absent-Wave resolution and directory reuse
-matched evidence; capture-store reuse and ancestor-probe deferral did not and were
-removed.
-Claude reconnect's native median worsens; the later handoff gain cannot repair it.
-
-Readiness requires raw-mode echo of unsubmitted text; Codex reconnect needs an
-untimed seed turn. Fresh Homes are not cold OS caches.
-LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache control
-and native login, reporting the limitation and reset method. SVG readability awaits review. Neither gap is waived.
-
-Copied databases keep absolute provider-home paths: strip routes before launch and
-connect only benchmark-created Sessions. Early excluded probes reached those
-paths without a write audit; isolation remains unproved. Fixtures prove no
-installed gain or managed-account continuity. The network-isolated CI smoke
-bounds launch work and preserves identity, context and history; nested-directory
-launch retains the repository root. Hosted success remains unproved.
+Jack Heart requested landing #1505 October 8; the Task stays open for cold-cache
+verification on dedicated macOS with exclusive cache control and native login.
+Fresh Homes are not cold OS caches; readiness requires raw-mode echo of
+unsubmitted text, and Codex reconnect needs an untimed seed turn. Copied databases
+keep absolute provider-home paths: strip routes before launch and connect only
+benchmark-created Sessions. Fixtures prove no installed gain; measurements,
+rejected patches and the isolation gap:
+`a5000ef889:.lf/wave/infrastructure/MEMORY.md`, this heading.

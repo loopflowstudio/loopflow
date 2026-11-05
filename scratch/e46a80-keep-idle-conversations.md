@@ -72,7 +72,11 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   command; a viewer that loses input restores the terminal, prints the notice
   and leaves.
 - Principle written where exercised: AGENTS.md harness guidance and
-  `rust/loopflow/src/harness/README.md`.
+  `rust/loopflow/src/harness/README.md`. Wave memory (`.lf/wave/infrastructure/
+  MEMORY.md`) carries the lifetime decision under "Idle owners end" and the
+  traced 11-04 cause plus the middleman rule under "Upgrade continuity"; the
+  shipped Session titles and Agent startup profiling detail retired to
+  `a5000ef889` to stay under the 16000-token budget.
 
 ## Delete — do not maintain
 
@@ -108,4 +112,5 @@ Not runnable headless here; fixtures below stand in.
 
 ## Checks
 
-- Compress pass: `cargo test -p loopflow --lib -- transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::native_exit:: store::sqlite::wal_tests:: lf::commands::context::` 29 passed (the context test passed beside the context_block tests this time); `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed; `cargo fmt`, `cargo clippy --all-targets -D warnings` clean. Gate owns the affected suites.
+Compress pass, unchanged since (tree identical, no upstream drift at realign on
+2026-11-05): `cargo test -p loopflow --lib -- transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::native_exit:: store::sqlite::wal_tests:: lf::commands::context::` 29 passed; `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes control_handoff_restores_the_terminal_and_prints_the_notice a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit native_exit_preserves_returning_launcher_results failed_native_exec_settles_once_without_launching_a_provider` 5 passed; `cargo fmt` and `cargo clippy --all-targets -D warnings` clean. Gate owns the affected suites.

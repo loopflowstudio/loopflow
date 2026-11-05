@@ -187,6 +187,13 @@ async fn planning_graphql(
         .into_response()
 }
 
+impl PlanningState {
+    /// Requests sent for one operation since `operations` was last cleared.
+    fn sent(&self, operation: &str) -> usize {
+        self.operations.get(operation).copied().unwrap_or_default()
+    }
+}
+
 /// The operation name a request log records, such as `FindExportIssue`.
 fn operation_name(query: &str) -> String {
     query
@@ -4018,14 +4025,7 @@ fn uncertain_creation_is_resent_once_per_window_and_on_task_sync() {
             .is_err());
             state.lock().await.hide_exports = true;
         });
-        let sent = |operation: &str| {
-            runtime
-                .block_on(state.lock())
-                .operations
-                .get(operation)
-                .copied()
-                .unwrap_or_default()
-        };
+        let sent = |operation: &str| runtime.block_on(state.lock()).sent(operation);
         // The lost reply earns one look on the next sync, which re-sends the
         // saved id; Linear refuses the duplicate, so nothing is created twice.
         let error = crate::ops::task::task_sync(task.id.as_str(), false).unwrap_err();
@@ -4199,17 +4199,22 @@ fn uncertain_exports_inside_their_window_cost_a_pass_no_requests() {
             let repository = repo.to_str().unwrap();
             state.lock().await.operations.clear();
             crate::ops::linear_observe::sync_repository(&fixture.store, repository).await;
-            let operations = state.lock().await.operations.clone();
-            assert_eq!(operations.get("FindExportIssue"), None, "{operations:?}");
-            assert_eq!(
-                operations.get("DeliverTaskCreation"),
-                None,
-                "{operations:?}"
-            );
-            assert!(
-                operations.get("ListTeams").copied().unwrap_or_default() <= 1,
-                "{operations:?}"
-            );
+            {
+                let provider = state.lock().await;
+                assert_eq!(
+                    provider.sent("FindExportIssue"),
+                    0,
+                    "{:?}",
+                    provider.operations
+                );
+                assert_eq!(
+                    provider.sent("DeliverTaskCreation"),
+                    0,
+                    "{:?}",
+                    provider.operations
+                );
+                assert!(provider.sent("ListTeams") <= 1, "{:?}", provider.operations);
+            }
             // Once the window passes, one pass looks once per export and re-sends
             // each absent creation with its saved id.
             for id in &uncertain {
@@ -4226,21 +4231,22 @@ fn uncertain_exports_inside_their_window_cost_a_pass_no_requests() {
             crate::ops::planning_export::sync_repository_exports(&fixture.store, repository)
                 .await
                 .unwrap();
-            let operations = state.lock().await.operations.clone();
-            assert_eq!(
-                operations.get("FindExportIssue"),
-                Some(&20),
-                "{operations:?}"
-            );
-            assert_eq!(
-                operations.get("DeliverTaskCreation"),
-                Some(&20),
-                "{operations:?}"
-            );
-            assert!(
-                operations.get("ListTeams").copied().unwrap_or_default() <= 1,
-                "{operations:?}"
-            );
+            {
+                let provider = state.lock().await;
+                assert_eq!(
+                    provider.sent("FindExportIssue"),
+                    20,
+                    "{:?}",
+                    provider.operations
+                );
+                assert_eq!(
+                    provider.sent("DeliverTaskCreation"),
+                    20,
+                    "{:?}",
+                    provider.operations
+                );
+                assert!(provider.sent("ListTeams") <= 1, "{:?}", provider.operations);
+            }
             for id in &uncertain {
                 let saved = fixture.store.get_task(id).await.unwrap().unwrap();
                 let receipt = fixture
@@ -4309,22 +4315,21 @@ fn task_create_reaches_linear_past_pending_exports_and_a_slow_provider() {
             crate::ops::task::TaskAdoptionOptions::default(),
         )
         .unwrap();
-        let operations = runtime.block_on(state.lock()).operations.clone();
-        assert!(saved.linear_id.is_some(), "{operations:?}");
+        let provider = runtime.block_on(state.lock());
+        assert!(saved.linear_id.is_some(), "{:?}", provider.operations);
         assert_eq!(
-            operations.get("DeliverTaskCreation"),
-            Some(&1),
-            "{operations:?}"
+            provider.sent("DeliverTaskCreation"),
+            1,
+            "{:?}",
+            provider.operations
         );
         assert_eq!(
-            operations.get("FindExportIssue"),
-            Some(&1),
-            "{operations:?}"
+            provider.sent("FindExportIssue"),
+            1,
+            "{:?}",
+            provider.operations
         );
-        assert!(
-            operations.get("ListTeams").copied().unwrap_or_default() <= 1,
-            "{operations:?}"
-        );
+        assert!(provider.sent("ListTeams") <= 1, "{:?}", provider.operations);
     });
 }
 

@@ -388,8 +388,8 @@ position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 **Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
 it with its saved ID when absent; between syncs, every `lf` command looks for an
 uncertain creation once per window. `--retry-updates` retries saved field
-changes after reading the tracker again. `lf wave status
---sync` refreshes from Linear first.
+changes after reading the tracker again. `lf wave status --sync` refreshes from
+Linear first.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::durable::WorkRef;
 use crate::store::sqlite::planning_changes::PlanningChanges;
-use crate::store::sqlite::planning_export::PlanningExport;
+use crate::store::sqlite::planning_export::{ExportAttempts, PlanningExport};
 use crate::store::Store;
 
 use super::planning_client::{PlanningClient, StateScope};
@@ -25,14 +25,6 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 
 fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
-}
-
-fn uncertain_export_window_secs(linear: bool) -> i64 {
-    if linear {
-        UNCERTAIN_EXPORT_WINDOW_SECS.max(crate::linear::delta_fresh_secs())
-    } else {
-        UNCERTAIN_EXPORT_WINDOW_SECS
-    }
 }
 
 pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsResult<()> {
@@ -74,10 +66,7 @@ struct PreparedExport {
     wave_id: Option<crate::id::WaveId>,
     team: String,
     export: PlanningExport,
-    /// The creation was sent and its outcome is unknown.
-    attempted: bool,
-    /// When a pass last looked for the uncertain creation.
-    observed_at: Option<i64>,
+    attempts: ExportAttempts,
 }
 
 async fn prepare(
@@ -134,8 +123,7 @@ async fn prepare(
         wave_id,
         team,
         export,
-        attempted: attempts.creation,
-        observed_at: attempts.observed_at,
+        attempts,
     }))
 }
 
@@ -159,9 +147,14 @@ async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> Ops
     };
     // An uncertain creation is looked for once per window. The refusal is not
     // recorded: the receipt keeps the error that made the creation uncertain.
-    if prepared.attempted && !force {
-        let window = uncertain_export_window_secs(linear);
+    if prepared.attempts.creation && !force {
+        let window = if linear {
+            UNCERTAIN_EXPORT_WINDOW_SECS.max(crate::linear::delta_fresh_secs())
+        } else {
+            UNCERTAIN_EXPORT_WINDOW_SECS
+        };
         if let Some(ago) = prepared
+            .attempts
             .observed_at
             .map(|at| now() - at)
             .filter(|ago| *ago < window)
@@ -180,8 +173,7 @@ async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> Ops
             wave_id,
             team,
             export,
-            attempted,
-            ..
+            attempts,
         } = &prepared;
         let client = PlanningClient::for_repository(repo).await?;
         set_step("looking for the saved creation");
@@ -192,13 +184,13 @@ async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> Ops
             &client,
             export,
             wave_id.as_ref(),
-            *attempted,
+            attempts.creation,
         )
         .await?
         {
             return Ok(());
         }
-        if *attempted {
+        if attempts.creation {
             tracing::info!(
                 id = %export.id,
                 "uncertain creation is absent; re-sending it with its saved id"
@@ -260,7 +252,9 @@ async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> Ops
             Ok(response) => response,
             Err(error) => {
                 // A rejected retry cannot disprove the earlier uncertain attempt.
-                if !*attempted && matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+                if !attempts.creation
+                    && matches!(error, crate::linear::LinearError::RateLimited { .. })
+                {
                     store
                         .sqlite
                         .reject_planning_export(owner, false)

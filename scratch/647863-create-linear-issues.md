@@ -70,6 +70,10 @@ Pass cost over N pending exports when nothing changed: 0 requests. Documented in
   `({column}=0 OR ?4)` clause: the caller holds the object's delivery lock and
   has just read the receipt, so the guard was always true. A `Cell` for the
   timeout step name does not compile; the Graph runner's futures must be `Send`.
+  Third pass (after the flag cut): `PreparedExport` carries the receipt's
+  `ExportAttempts` instead of copying two of its fields, the one-caller window
+  helper is inlined at its check, and the fixture's `PlanningState::sent(op)`
+  replaces the per-test `operations.get(..).copied().unwrap_or_default()`.
 
 ## Acceptance (from the Task)
 
@@ -126,7 +130,9 @@ logs it at debug. docs/work.md, `ops/README.md` and the renamed test
 in-window wait asserted on `sync_export` and the look on `task_sync`.
 Check: `cargo test -p loopflow --lib -- uncertain_creation task_sync
 planning_export_lost` 7 passed; clippy clean; `grep retry_creation` over
-`rust/loopflow/src docs` empty.
+`rust/loopflow/src docs` empty. Third compress pass: the same filter plus
+`uncertain_exports task_create_reaches_linear timed_out_creation
+exports_later_tasks standalone_export` 13 passed (108 s); clippy and fmt clean.
 
 Kept as recorded assumptions, not blocking: the ten-minute healthy window and
 auto-retry for Projects (`scratch/questions.md`). Vocabulary split between

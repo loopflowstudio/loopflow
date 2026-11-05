@@ -13,9 +13,14 @@ decisions and remaining work.
 - **Scope (November 3, Jack Heart):** existing open Tasks → the selected existing
   Session terminal, with typing, editing, submission and prompt responses. No Wave
   view, generic shells, inspectors or changes/checks screen. Desktop typography and
-  colors; the default key bar reduced to Paste, New line, Keys and keyboard
-  visibility; contextual approval/Stop controls stay absent until the backend
-  supplies trustworthy program state. Touch selection must work natively.
+  colors; Jack's November 3 steer reduced the default row to Paste, New line and
+  keyboard visibility, superseding the arrow/modifier strip, with choice,
+  Cancel/Confirm and Stop controls appearing contextually. Contextual controls
+  stay absent until the backend supplies trustworthy program state. The
+  implementation added a fourth control, Keys (arrows, Tab, Escape inline), on
+  November 4 as the interim way to answer choices and interrupt; that addition
+  has no recorded approval (see Unresolved product choice). Touch selection must
+  work natively.
 - **New-Task flow (November 3):** Jack selected describe-first flow 1 after
   reviewing three prototypes (“1 looks good”): a compact sheet, editable
   typed/dictated request, visible changeable destination, explicit Create & start
@@ -131,6 +136,22 @@ is `portfolio.get`/`portfolio.set`; `Write::TaskStart` is `task.start` and
 `Write::TaskCreate` is `task.create` (Swift `.taskStart`); the operation table
 lists every kind. The merge's `transport_tests` compile break (moving
 `Terminal.child` out of a `Drop` type) is fixed with `wait_exit`.
+
+## Unresolved product choice — November 5 concept review
+
+The default key bar diverges from Jack Heart's accepted row. Evidence: the
+steer (comment d72340bb) names one default row of Paste, New line and keyboard
+visibility and supersedes the four-arrow strip; `SessionTerminalView.swift`
+ships Paste / New line / Keys / keyboard, where Keys swaps in arrows, Tab and
+Escape (commit 7e745926e3, November 4). The contextual controls the steer pairs
+with that row (choices, Cancel/Confirm, Stop) are deferred until trustworthy
+provider state exists, so Keys is today the only software way to send Escape
+(interrupt) or arrow through a provider menu. Digits and Return already answer
+numbered prompts by typing.
+
+Question for Jack: until contextual controls exist, (a) keep Keys in the default
+row as the interim, (b) remove it and answer prompts by typing only, accepting no
+software interrupt, or (c) remove Keys and add only an Escape/Stop control.
 
 ## Remaining work and acceptance
 

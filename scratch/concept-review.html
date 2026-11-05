@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-718 · concept review · one repository set</title>
+<title>LOO-718 · concept review · the key bar</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf8f4;--fg:#292724;--muted:#68625b;--line:#d7d0c5;--panel:#f1ede6;--accent:#76513a;--new:#3f6b4a}
 @media(prefers-color-scheme:dark){:root{--bg:#201e1c;--fg:#eee7dd;--muted:#bdb3a6;--line:#514940;--panel:#2c2824;--accent:#e2b797;--new:#9ccaa6}}
@@ -14,42 +14,37 @@ li{margin-bottom:14px}.muted{color:var(--muted)}footer{border-top:1px solid var(
 @media(max-width:420px){main{padding:28px 18px 60px}.example{padding:16px}}
 </style></head><body><main>
 <header>LOO-718 · concept-review (headless) · November 5, 2026<br>
-Built from <code>scratch/mobile-ios.md</code>, <code>scratch/questions.md</code>, <code>swift/LoopflowiOS/RemoteMobileClient.swift</code>, <code>swift/Loopflow/Services/RegistryQuery.swift</code>, <code>rust/loopflow/src/portfolio.rs</code>, <code>rust/loopflow/src/lf/commands/{read,write,desktop}.rs</code>, <code>rust/loopflow/src/server/README.md</code></header>
+Built from <code>scratch/mobile-ios.md</code>, <code>swift/LoopflowiOS/SessionTerminalView.swift</code>, commit <code>7e745926e3</code>, Jack Heart's key-bar steer (comment d72340bb), <code>4070315ab3:scratch/mobile-native-demo.md</code></header>
 
-<h1>The phone should see the same repositories Desktop does.</h1>
-<p>Outcome: <strong>the design changed</strong>; it iterates to implement. No open product choice. Each change follows from accepted decisions: Jack Heart's “existing open Tasks, like Desktop's working-task sidebar” and one shared server for Desktop and phone.</p>
+<h1>Which keys sit under the terminal until contextual controls exist?</h1>
+<p><strong>Outcome: an open product choice; this step returns Blocked.</strong> The previous review's four items (portfolio scope, <code>portfolio.get</code>, <code>task.start</code>, the operation table) are in code. Nothing else in the implemented change contradicts an accepted decision.</p>
 
 <h2>The mismatch</h2>
-<div class="example"><strong>Today <span class="tag">existing behavior</span></strong>
-<pre>Desktop sidebar   view.list {directory}  for each portfolio repository
-Phone Task list   view.select "kind:task state:open"   every repository in the store
-Phone New Task    desktop.portfolio   portfolio repositories as destinations
-
-Task in a repository outside the portfolio:
-  Desktop   hidden
-  Phone     listed, but its repository is not a destination</pre></div>
-<div class="example proposed"><strong>Next <span class="tag">proposed</span></strong>
-<pre>Portfolio (Machine-local repository membership)
-  ├─ Desktop sidebar     Tasks in portfolio repositories
-  ├─ Phone Task list     view.select scoped to the portfolio, server-side
-  └─ Phone New Task      portfolio.get   destinations</pre></div>
+<div class="example"><strong>Accepted <span class="tag">Jack Heart's steer</span></strong>
+<pre>Default row      Paste · New line · keyboard
+With a prompt    + choices · Cancel / Confirm
+While working    + Stop
+Superseded       Ctrl/Opt/Shift/Tab and the four-arrow strip</pre></div>
+<div class="example"><strong>Shipped <span class="tag">existing behavior, November 4</span></strong>
+<pre>Default row      Paste · New line · Keys · keyboard
+Keys             ← ↑ ↓ → · Tab · Esc · back to typing
+Contextual       none: provider state isn't trustworthy yet</pre></div>
+<p>Keys came in as the stand-in for the deferred contextual controls. Today it is the only software way to send Escape (interrupt an agent) or to arrow through a provider menu. Typing a digit and Return already answers numbered prompts. No recorded review approved it, and the working design had listed it as part of Jack's reduced row. That record is now corrected.</p>
 
 <h2>Actions → concepts → APIs</h2>
-<ul>
-<li><strong>See my open Tasks.</strong> Open Tasks with primary Sessions, in the portfolio → <code>view.select</code> subscription over portfolio repositories. <span class="muted">Scope changes; reading stays one subscription.</span></li>
-<li><strong>Choose where a new Task goes.</strong> Portfolio repository → <code>portfolio.get</code>, renamed from <code>desktop.portfolio</code>. The README's claim that <code>desktop.*</code> is never offered to a phone is false today. The rename makes it accurate.</li>
-<li><strong>Create &amp; start.</strong> <code>task.start</code>. The Rust variant is renamed <code>TaskCreate</code> → <code>TaskStart</code>, so it no longer collides with the wire's <code>task.create</code> (promote a Session).</li>
-<li><strong>Open, observe, Use keyboard, Reconnect.</strong> Unchanged. The Task acceptance says “distinguish viewing from control”.</li>
-</ul>
-<p>The server README's operation table also gains this Task's operations: <code>task.start</code>, <code>session.start</code>, <code>view.select</code>, <code>mobile.status</code>, <code>mobile.configure</code>, <code>request.upload</code>.</p>
+<p><b>Answer a prompt.</b> Typed input to the Session owner, through the existing input claim. It works without Keys for numbered choices.</p>
+<p><b>Interrupt the agent.</b> Escape byte through the same claim. Without Keys or a Stop control, there is no way to send it from the software keyboard.</p>
+<p><b>Contextual choices and Stop.</b> These need program-state semantics from the backend that don't exist yet (remaining work item 5). No API change follows from any answer below.</p>
 
 <h2>Challenge</h2>
-<p><strong>Normal path:</strong> scan the QR code, see the same open Tasks as Desktop's sidebar, then tap one to observe its Session. <strong>Failure:</strong> you remove a repository from the portfolio while the phone watches. The watch re-reads, and that repository's Tasks leave both clients together. <strong>Counterexample that would invalidate it:</strong> you want the phone to reach Tasks Desktop deliberately hides. Nothing on record asks for that. If you do, it becomes a product choice.</p>
+<p>Normal path: Claude asks to trust a repository. You type <code>1</code> and Return, or open Keys and press Return. Failure: the agent runs away mid-task. With (b) below you can't stop it from the phone, only watch. Counterexample to (a): Jack's steer said a generic shell needs the bigger bar and an agent Session doesn't. Keys brings that bar back one tap away.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Phone Task list scope: (a) portfolio repositories, matching Desktop (recorded direction) · (b) every repository in the store.</li>
-<li>Repository membership read: (a) <code>portfolio.get</code>/<code>portfolio.set</code> (recorded) · (b) a new <code>repository.list</code> while Desktop keeps <code>desktop.portfolio</code>.</li>
+<li>Until contextual controls exist:
+ (a) keep Keys in the default row as the interim ·
+ (b) remove Keys and answer prompts by typing only, with no software interrupt ·
+ (c) remove Keys and add only an Escape/Stop control to the row.</li>
 </ol>
-<footer>Code unchanged in this step; no tests run. Page not visually inspected.</footer>
+<footer>Design record updated in <code>scratch/mobile-ios.md</code> (Unresolved product choice). Code unchanged; no tests run. Page not visually inspected.</footer>
 </main></body></html>

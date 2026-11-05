@@ -99,7 +99,10 @@ age out inside the 30-day window a contract waits for anyway.
   branches edit `MIGRATIONS.md`, `install.rs`, `rollover.rs`, `migrations.rs`,
   `lf.rs`, `docs/architecture-reference.md`, `scratch/questions.md` and the LOO-656
   section of Wave memory, which both trimmed to fit 16000 tokens; the second to
-  land re-trims. Its install line "advances the store from X to Y" stays; only the
+  land re-trims.
+- Sync onto origin/main: 998c9b (#1826) landed 2026-11-05 and edits `release/README.md`,
+  `published.rs`, `lf/mod.rs` and Wave memory, all touched here. Its docs say retained
+  builds are not a way back, which agrees with the rollback note below. Its install line "advances the store from X to Y" stays; only the
   floor line goes. e46a80 (store-error tolerance) has no commits yet.
 
 ## PR notes
@@ -132,3 +135,4 @@ Compress (2026-11-05): `cargo nextest` over `migration_build`, `store::migration
 `frontier_tests`, rollover, `compatibility_tests`: 154 passed; `pytest
 python/tests/test_release_publisher.py` 38 passed; clippy and fmt clean. Implement (2026-11-05, floor write): `cargo test -p loopflow --lib store::migrations::` 126 passed; demo as in PR notes; clippy and whole `store::` to gate.
 Realign (2026-11-05, after the floor write): `cargo test -p loopflow --lib reader_floor` and `a_ledger_with_no_recorded_floor` 2 passed; wording edits only otherwise.
+Concept review (2026-11-05, second pass): `carry_reader_floor` and `MIGRATIONS.md` match the accepted design; no change, no open product choice.

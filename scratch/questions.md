@@ -14,3 +14,5 @@ Docs now describe these behaviors; the Task forbids changing them. Jack Heart ma
 Concept review (2026-11-05): the docs match the code and Jack Heart's "fix the words, not the code" settles this Task, so nothing here changes it. One more candidate for a follow-up:
 
 - Nothing selects the prior fallback that `retained_published_sets` keeps (`install.rs:2485`): `lf self install rollback` handles only Legacy installs (`install.rs:3004`), and the runtime check refuses retained bytes (`installation.rs:1165`). Should Loopflow offer a rollback path, or delete the retention and the hidden command?
+
+Gate 2026-11-05: `scripts/test.py --reuse-passing --rust-filter 'test(documented_commands::) | test(commands::rollover::) | test(commands::install::published::)'` passed architecture, Rust, clippy and website in 162s. Two earlier attempts stopped at preflight when `du ~/.cache/uv` passed its 15s deadline at load 165-190; no suite ran. Full Rust matrix and Desktop stay with CI.

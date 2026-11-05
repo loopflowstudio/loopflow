@@ -6,7 +6,7 @@
 mod session;
 pub(crate) use session::{
     build_session_command, native_connection_command, resolve_session_config, session_environment,
-    NativeConnection, ProviderInvocation, SessionCommand,
+    ProviderInvocation, SessionCommand,
 };
 
 use crate::id::AgentSessionId;

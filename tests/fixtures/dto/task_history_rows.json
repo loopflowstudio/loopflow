@@ -64,7 +64,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -131,7 +131,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -198,7 +198,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -265,7 +265,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -332,7 +332,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -399,7 +399,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -466,7 +466,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -533,7 +533,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -600,7 +600,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -667,7 +667,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -734,7 +734,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -801,7 +801,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -868,7 +868,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -935,7 +935,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -1002,7 +1002,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   {
     "task": {
@@ -1069,6 +1069,6 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   }
 ]

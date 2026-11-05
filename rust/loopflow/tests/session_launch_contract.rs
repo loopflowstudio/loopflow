@@ -379,7 +379,12 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             assert!(args(&first).contains(&"--chrome"));
         }
         let session = fixture.session();
-        fixture.settings(&format!("{provider}:current-model"), false, false);
+        let current_model = if provider == "opencode" {
+            "opencode/current-model"
+        } else {
+            "current-model"
+        };
+        fixture.settings(&format!("{provider}:{current_model}"), false, false);
         let resumed = fixture.run(&["session", "resume", &session]);
         bypass(&resumed, provider, false);
         assert!(args(&resumed).contains(&token.as_str()));
@@ -411,7 +416,48 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
 }
 
 #[test]
-fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
+fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
+    let fixture = Fixture::new("claude:sonnet");
+    let first = fixture.run(&["-i", ":", "Keep this conversation"]);
+    let session = fixture.session();
+    let arguments = args(&first);
+    let token = arguments[arguments
+        .iter()
+        .position(|arg| *arg == "--session-id")
+        .unwrap()
+        + 1];
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    let unresolved = fixture
+        .command()
+        .args(["config", "show", "--json"])
+        .output()
+        .unwrap();
+    success(&unresolved);
+    let settings: Value = serde_json::from_slice(&unresolved.stdout).unwrap();
+    assert!(settings[0]["settings"]["agent"]["value"].is_null());
+    let resumed = fixture.run(&["session", "resume", &session]);
+    pair(&resumed, "--resume", token);
+    pair(&resumed, "--model", "sonnet");
+    assert_eq!(fixture.session(), session);
+    for (fallback, expected) in [("codex", "sonnet"), ("claude:haiku", "haiku")] {
+        let resumed = fixture.run(&[
+            "--setting",
+            &format!("default_agent={fallback}"),
+            "session",
+            "resume",
+            &session,
+        ]);
+        pair(&resumed, "--resume", token);
+        pair(&resumed, "--model", expected);
+        assert_eq!(fixture.session(), session);
+    }
+}
+
+#[test]
+fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
     let fixture = Fixture::new("claude");
     fs::create_dir_all(fixture.home.path().join("machine")).unwrap();
     fs::write(
@@ -425,11 +471,19 @@ fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
     );
     fixture.settings("claude", false, false);
     let configured = fixture.run(&["-i", ":", "hello"]);
-    bypass(&configured, "claude", false);
-    assert!(args(&configured).contains(&"--no-chrome"));
-    let explicit = fixture.run(&["-i", "--yolo", "--chrome", "on", ":", "hello"]);
-    bypass(&explicit, "claude", true);
-    assert!(args(&explicit).contains(&"--chrome"));
+    bypass(&configured, "claude", true);
+    assert!(args(&configured).contains(&"--chrome"));
+    let explicit = fixture.run(&[
+        "-i",
+        "--setting",
+        "yolo=false",
+        "--chrome",
+        "off",
+        ":",
+        "hello",
+    ]);
+    bypass(&explicit, "claude", false);
+    assert!(args(&explicit).contains(&"--no-chrome"));
 }
 
 #[test]
@@ -613,6 +667,7 @@ mod support;
 #[test]
 fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings() {
     let fixture = Fixture::new("claude:sonnet");
+    let _env = support::EnvGuard::with_lf_home(&[], &fixture.home.path().join("machine"));
     fixture.settings("claude:sonnet", true, true);
     let base = String::from_utf8(
         Command::new("git")

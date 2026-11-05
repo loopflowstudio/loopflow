@@ -105,21 +105,23 @@ impl AgentProcessRequest {
         }
     }
 
-    pub(crate) fn from_prepared(config: &crate::agent::AgentConfig) -> Self {
-        Self {
+    pub(crate) fn from_prepared(
+        config: &crate::agent::AgentConfig,
+    ) -> Result<Self, crate::error::LoadError> {
+        Ok(Self {
             system_prompt: crate::agent::system_prompt_with_structured_replies(config),
             conversation_context: config.conversation_context.clone(),
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
             output_schema: config.output_schema.clone(),
-            agent: config.agent().to_string(),
+            agent: config.agent()?.to_string(),
             account_id: config.provider_account_id.clone(),
             max_turns: config.max_turns,
             write_scope: config.write_scope,
             execution_boundary: config.execution_boundary.clone(),
             skip_permissions: config.skip_permissions,
             chrome: config.chrome,
-        }
+        })
     }
 
     pub(crate) fn replay_unavailable_reason(&self) -> Option<&'static str> {
@@ -3034,7 +3036,8 @@ mod tests {
         let process = AgentProcessRequest::from_prepared(&AgentConfig {
             task_prompt: "repair the failed operation".into(),
             ..Default::default()
-        });
+        })
+        .unwrap();
         let capture =
             CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), process).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
@@ -3303,6 +3306,7 @@ mod tests {
     fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
+            isolate: None,
             chrome: true,
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
             task_prompt: "authored task\n\nwith trailing space ".to_string(),
@@ -3317,7 +3321,7 @@ mod tests {
             env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
             ..AgentConfig::default()
         };
-        let expected = AgentProcessRequest::from_prepared(&config);
+        let expected = AgentProcessRequest::from_prepared(&config).unwrap();
         let capture =
             CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), expected.clone())
                 .unwrap();
@@ -3545,7 +3549,8 @@ mod tests {
         let request = AgentProcessRequest::from_prepared(&AgentConfig {
             task_prompt: "the next instruction".into(),
             ..AgentConfig::default()
-        });
+        })
+        .unwrap();
         let context = crate::trace::PreparedTurnContext::from_prompts("", "the next instruction");
         crate::journal::with_runtime(ledger.home(), &command, || {
             let next = CaptureHandle::continue_with_context(
@@ -3628,7 +3633,7 @@ mod tests {
                 &session.id,
                 spec(ledger.home()),
                 &crate::trace::PreparedTurnContext::from_prompts("", "next"),
-                AgentProcessRequest::from_prepared(&AgentConfig::default()),
+                AgentProcessRequest::from_prepared(&AgentConfig::default()).unwrap(),
             )
             .is_err());
             let next = store.session(&session.id)?.unwrap();

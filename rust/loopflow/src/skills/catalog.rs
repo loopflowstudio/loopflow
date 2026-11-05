@@ -27,6 +27,8 @@ pub enum SkillDialect {
 /// File provenance and declarations retained with a resolved Graph skill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillOrigin {
+    /// Older durable captures did not record authority; their path remains the locator.
+    pub config_source: Option<crate::config::ConfigSource>,
     pub path: PathBuf,
     pub dialect: SkillDialect,
     pub frontmatter: Option<String>,
@@ -70,30 +72,43 @@ impl SkillSource {
                 self.name
             );
         }
+        let mut settings = if loopflow {
+            crate::config::settings::metadata(
+                &metadata.cloned().map(Value::Mapping).unwrap_or(Value::Null),
+            )
+            .map_err(|error| LoadError::InvalidSkill(error.to_string()))?
+        } else {
+            BTreeMap::new()
+        };
+        settings.remove("agent");
+        let docs = settings
+            .get_mut("context")
+            .and_then(Value::as_mapping_mut)
+            .and_then(|context| context.remove("docs"))
+            .map(|value| {
+                serde_yaml_ng::from_value(value).expect("metadata validates document paths")
+            });
         Ok(Skill {
             name: self.name.clone(),
             source: self.path.as_ref().map(|path| SkillOrigin {
+                config_source: Some(crate::config::settings::definition_source(Some(path))),
                 path: path.clone(),
                 dialect: self.dialect,
                 frontmatter: frontmatter.map(str::to_string),
             }),
             // Claude's `agent: Explore` describes its subagent, not an lf harness.
             agent: loopflow.then(|| field("agent")).flatten(),
-            default_agent: loopflow.then(|| field("default_agent")).flatten(),
+            occurrence: None,
+            settings,
             action_style: field("action_style"),
-            docs: loopflow
-                .then(|| metadata.and_then(|map| map.get("docs")))
-                .flatten()
-                .map(skill_docs)
-                .transpose()?
-                .unwrap_or_default(),
+            docs,
             content: Some(body.to_string()),
         })
     }
 
     pub fn read(&self) -> Result<String, LoadError> {
         match &self.path {
-            Some(path) => Ok(fs::read_to_string(path)?),
+            Some(path) => Ok(crate::config::observation::read_to_string(path)?),
             None => Ok(builtins::get_builtin_skill(&self.name)
                 .expect("embedded catalog entry names a builtin")
                 .to_string()),
@@ -101,21 +116,9 @@ impl SkillSource {
     }
 }
 
-/// `docs:` names one target or a list, each resolved like `--docs`.
-fn skill_docs(value: &Value) -> Result<Vec<String>, LoadError> {
-    let invalid = || LoadError::InvalidSkill("`docs` must be a path or a list of paths".into());
-    match value {
-        Value::String(doc) => Ok(vec![doc.clone()]),
-        Value::Sequence(docs) => docs
-            .iter()
-            .map(|doc| doc.as_str().map(str::to_string).ok_or_else(invalid))
-            .collect(),
-        _ => Err(invalid()),
-    }
-}
-
 #[derive(Debug)]
 pub struct SkillCatalog {
+    pub(crate) repo: Option<PathBuf>,
     sources: BTreeMap<String, SkillSource>,
 }
 
@@ -130,6 +133,7 @@ impl SkillCatalog {
         provider_overrides: bool,
     ) -> Result<Self, LoadError> {
         let mut catalog = Self {
+            repo: repo.map(Path::to_path_buf),
             sources: BTreeMap::new(),
         };
         if let Some(repo) = repo {
@@ -197,6 +201,7 @@ impl SkillCatalog {
             (codex.join("prompts"), SkillDialect::Codex, true),
         ] {
             let mut scope = Self {
+                repo: self.repo.clone(),
                 sources: BTreeMap::new(),
             };
             scope.collect(&root, &root, dialect, files, &mut HashSet::new())?;
@@ -215,6 +220,7 @@ impl SkillCatalog {
         files: bool,
         ancestors: &mut HashSet<PathBuf>,
     ) -> Result<(), LoadError> {
+        crate::config::observation::directory(dir);
         if !dir.is_dir() {
             return Ok(());
         }
@@ -295,7 +301,7 @@ impl SkillCatalog {
 }
 
 pub(crate) fn is_generated(path: &Path) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
+    let Ok(content) = crate::config::observation::read_to_string(path) else {
         return false;
     };
     split_frontmatter(&content)
@@ -477,6 +483,26 @@ mod tests {
     }
 
     #[test]
+    fn agent_defaults_belong_only_to_loopflow_metadata() {
+        let repo = TempDir::new().unwrap();
+        let native = "---\nagent: Explore\ndefault_agent: native-persona\n---\nAudit.";
+        write(repo.path(), ".claude/skills/native/SKILL.md", native);
+        write(
+            repo.path(),
+            ".lf/skills/owned.md",
+            "---\ndefault_agent: codex\n---\nAudit.",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let skill = catalog.load_skill("native").unwrap();
+        assert!(skill.agent.is_none());
+        assert!(skill.settings.is_empty());
+        assert_eq!(skill.source_text(), native);
+        let skill = catalog.load_skill("owned").unwrap();
+        assert!(skill.agent.is_none());
+        assert_eq!(skill.settings["default_agent"].as_str(), Some("codex"));
+    }
+
+    #[test]
     fn unfamiliar_native_frontmatter_remains_plain_instructions() {
         let repo = TempDir::new().unwrap();
         let content = "---\nallowed-tools: [\n---\nRun this unfamiliar skill.";
@@ -512,8 +538,11 @@ mod tests {
             "---\ndocs: {a: b}\n---\nBad.",
         );
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        assert_eq!(catalog.load_skill("one").unwrap().docs, ["a.md"]);
-        assert_eq!(catalog.load_skill("two").unwrap().docs, ["a.md", "docs/"]);
+        assert_eq!(catalog.load_skill("one").unwrap().docs.unwrap(), ["a.md"]);
+        assert_eq!(
+            catalog.load_skill("two").unwrap().docs.unwrap(),
+            ["a.md", "docs/"]
+        );
         assert!(matches!(
             catalog.load_skill("bad"),
             Err(crate::error::LoadError::InvalidSkill(_))

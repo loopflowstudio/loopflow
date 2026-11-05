@@ -120,20 +120,17 @@ whose target proves its Machine identity.
 person's Wave work is that person's choice, never repository content:
 
 ```bash
-lf machine use mini infrastructure            # this Wave's new Tasks and its Session
-lf machine use laptop infrastructure --session  # only the Wave Session
-lf --repo loopflow machine use mini --tasks    # only the repository's new Tasks
+lf --wave infrastructure set machine mini            # this Wave's new Tasks and its Session
+lf --wave infrastructure set machine.session laptop  # only the Wave Session
+lf --repo loopflow set machine.tasks mini    # only the repository's new Tasks
 lf machine list                               # each Machine with the defaults naming it
 ```
 
-The setting lives in Machine-local SQLite `scope_defaults`, keyed by Wave or repository, and is copied to the
-person's other added Machines over `lf --machine`; an unreachable Machine gets a
-warning and a later rerun. Resolution for an unowned Task walks its Wave, its parent
-Waves, its repository, then this Machine, so single-Machine use needs no setup. A scope's Session Machine is a separate setting with the same
-resolution (`--session`; `--tasks` sets only the Tasks'). Setting it moves the
-Wave primary Session to the new Machine with its native provider history. `lf resume --wave <w>`, bare resumes that
-resolve to a Wave or the repository, and Desktop's Wave Session route to the Session
-Machine. A Task's Machine is captured in its claim: changing the Wave Machine moves
+Placement is declared in personal configuration. Source, scope and target use the
+shared resolver; linked Task worktrees share their clone's private file. Setting a
+preference affects later placement and does not move an existing conversation.
+Origin profiles carry portable declarations to remote execution; independent
+remote edits remain saved until explicitly reconciled. A Task's Machine is captured in its claim: changing the Wave Machine moves
 no existing Task, and `lf task move <task> --machine <machine>` moves one: its Graph stops,
 its worktree is committed and pushed, and its Workflow position and primary Session go with it.
 

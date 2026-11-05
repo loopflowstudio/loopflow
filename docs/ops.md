@@ -221,7 +221,7 @@ lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-us
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code           # a free lab machine, else rent one
-lf --wave infrastructure set machine code            # the Wave's new Tasks rent from code
+lf --wave infrastructure set machine.capacity code            # the Wave's new Tasks rent from code
 lf machine end code-1                                # give a rented machine back now
 ```
 
@@ -236,7 +236,7 @@ us-east-1's, so AWS names the region it rents in and the region it priced. When
 the repository plans in Linear, a rented machine gets an access token this
 laptop just refreshed; the refresh grant stays here, so Linear works there for
 the token's lifetime (about a day). Its provider deletes a rented machine at
-its deadline. `lf --wave infrastructure set machine code`
+its deadline. `lf --wave infrastructure set machine.capacity code`
 (or no `--wave`, for the repository) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".

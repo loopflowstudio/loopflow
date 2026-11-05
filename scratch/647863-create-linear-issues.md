@@ -61,7 +61,13 @@ Pass cost over N pending exports when nothing changed: 0 requests. Documented in
   `planning_export_owners` (the Rust check is the one window rule), the
   `CASE` clearing the stamp on first attempt, `LinearClient::endpoint()` and the
   `#[cfg(test)]` claim-key suffix, the fixture's dead `team_changes` counter and
-  `seed_finished_tasks`'s unused `count`.
+  `seed_finished_tasks`'s unused `count`. Second pass: `planning_export_observed_at`
+  (the receipt reader `planning_export_attempts` now returns `ExportAttempts`
+  with `creation`, `link` and `observed_at` instead of a `(bool, bool)` tuple)
+  and `attempt_planning_export`'s `retry_creation` flag with its
+  `({column}=0 OR ?4)` clause: the caller holds the object's delivery lock and
+  has just read the receipt, so the guard was always true. A `Cell` for the
+  timeout step name does not compile; the Graph runner's futures must be `Send`.
 
 ## Acceptance (from the Task)
 
@@ -73,9 +79,10 @@ Pass cost over N pending exports when nothing changed: 0 requests. Documented in
 
 ## Checks
 
-`cargo test -p loopflow --lib -- <19 planning export, store planning_export and
-linear_team_checks tests>` 19 passed (96 s, after compress); `cargo clippy --all-targets -D warnings`
-clean; `scripts/check_migrations.py` ok (export_observed_at unmerged). Gate filter:
+`cargo test -p loopflow --lib -- export uncertain task_sync timed_out_creation
+task_create_reaches_linear rate_limit_retries_creation store::sqlite::task_history
+store::sqlite::linear_team_checks` 52 passed (259 s, after the second compress pass);
+`cargo clippy --all-targets -D warnings` clean; `scripts/check_migrations.py` ok (export_observed_at unmerged). Gate filter:
 `test(ops::linear::task_planning_tests::) | test(store::sqlite::planning_export::) |
 test(store::sqlite::linear_team_checks::) | binary(lf)` minus the two long
 `ops::linear` fixtures named in scripts/testing.md; website suite for docs/work.md.

@@ -4097,7 +4097,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
                     crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
                 )
                 .unwrap()
-                .0
+                .creation
         );
         runtime.block_on(async {
             tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
@@ -4157,7 +4157,7 @@ fn seed_uncertain_exports(
             assert!(fixture
                 .store
                 .sqlite
-                .attempt_planning_export(owner, &export.input, false, false)
+                .attempt_planning_export(owner, &export.input, false)
                 .unwrap());
             if let Some(at) = observed_at {
                 fixture
@@ -4348,7 +4348,7 @@ fn timed_out_creation_names_its_step_and_the_next_pass_resolves_it() {
                     .sqlite
                     .planning_export_attempts(owner)
                     .unwrap()
-                    .0
+                    .creation
             );
             state.lock().await.response_delay = None;
             // A late answer may still land the creation; either way the next pass

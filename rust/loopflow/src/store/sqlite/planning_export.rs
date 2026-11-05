@@ -21,6 +21,16 @@ pub(crate) struct PlanningExport {
     pub link_id: String,
 }
 
+/// What a receipt records about its provider effects: whether the creation
+/// (and, for a Project, its Initiative link) was sent, and when a pass last
+/// looked for an uncertain creation.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ExportAttempts {
+    pub creation: bool,
+    pub link: bool,
+    pub observed_at: Option<i64>,
+}
+
 impl PlanningChanges<'_> {
     fn receipt(self) -> (&'static str, &'static str) {
         match self {
@@ -57,7 +67,7 @@ impl SqliteStore {
     pub(crate) fn planning_export_attempts(
         &self,
         owner: PlanningChanges<'_>,
-    ) -> StoreResult<(bool, bool)> {
+    ) -> StoreResult<ExportAttempts> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (table, key) = owner.receipt();
         let link = if matches!(owner, PlanningChanges::Project(_)) {
@@ -66,25 +76,10 @@ impl SqliteStore {
             "0"
         };
         conn.query_row(
-            &format!("SELECT export_attempted,{link} FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
-            [owner.owner().1], |row| Ok((row.get(0)?,row.get(1)?)),
+            &format!("SELECT export_attempted,{link},export_observed_at FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
+            [owner.owner().1],
+            |row| Ok(ExportAttempts { creation: row.get(0)?, link: row.get(1)?, observed_at: row.get(2)? }),
         ).optional()?.ok_or_else(|| StoreError::InvalidData("creation receipt is missing".into()))
-    }
-
-    pub(crate) fn planning_export_observed_at(
-        &self,
-        owner: PlanningChanges<'_>,
-    ) -> StoreResult<Option<i64>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let (table, key) = owner.receipt();
-        Ok(conn
-            .query_row(
-                &format!("SELECT export_observed_at FROM {table} WHERE {key}=?1"),
-                [owner.owner().1],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten())
     }
 
     /// Record that a pass looked for this uncertain creation in the provider.
@@ -186,7 +181,6 @@ impl SqliteStore {
         owner: PlanningChanges<'_>,
         input: &Value,
         link: bool,
-        retry_creation: bool,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (table, key) = owner.receipt();
@@ -200,8 +194,10 @@ impl SqliteStore {
         } else {
             ""
         };
+        // The caller holds the object's delivery lock and has read the receipt;
+        // whether this is a first send or a re-send is its decision.
         Ok(conn.execute(&format!("UPDATE {table} SET {column}=1,export_error=NULL,export_json=CASE WHEN ?3 THEN export_json ELSE json_set(export_json,'$.input',json(?2)) END
-            WHERE {key}=?1 AND ({column}=0 OR ?4) AND export_json IS NOT NULL {deleted}"), params![owner.owner().1,input.to_string(),link,retry_creation && !link])? == 1)
+            WHERE {key}=?1 AND export_json IS NOT NULL {deleted}"), params![owner.owner().1,input.to_string(),link])? == 1)
     }
 
     pub(crate) fn reject_planning_export(

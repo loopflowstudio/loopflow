@@ -27,8 +27,8 @@ fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
-fn uncertain_export_window_secs(repo: &str) -> i64 {
-    if super::planning_client::is_linear(repo) {
+fn uncertain_export_window_secs(linear: bool) -> i64 {
+    if linear {
         UNCERTAIN_EXPORT_WINDOW_SECS.max(crate::linear::delta_fresh_secs())
     } else {
         UNCERTAIN_EXPORT_WINDOW_SECS
@@ -68,7 +68,10 @@ struct PreparedExport {
     wave_id: Option<crate::id::WaveId>,
     team: String,
     export: PlanningExport,
+    /// The creation was sent and its outcome is unknown.
     attempted: bool,
+    /// When a pass last looked for the uncertain creation.
+    observed_at: Option<i64>,
 }
 
 async fn prepare(
@@ -117,7 +120,7 @@ async fn prepare(
         .sqlite
         .prepare_planning_export(owner, &team, initiative.as_deref())
         .map_err(message)?;
-    let (attempted, _) = store
+    let attempts = store
         .sqlite
         .planning_export_attempts(owner)
         .map_err(message)?;
@@ -125,7 +128,8 @@ async fn prepare(
         wave_id,
         team,
         export,
-        attempted,
+        attempted: attempts.creation,
+        observed_at: attempts.observed_at,
     }))
 }
 
@@ -141,6 +145,7 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsR
     let Some(_lock) = super::planning_delivery::lock_fields(store, owner)? else {
         return Ok(());
     };
+    let linear = super::planning_client::is_linear(&repo.to_string_lossy());
     let prepared = match prepare(store, repo, owner).await {
         Ok(Some(prepared)) => prepared,
         Ok(None) => return Ok(()),
@@ -149,12 +154,12 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsR
     // An uncertain creation is looked for once per window. The refusal is not
     // recorded: the receipt keeps the error that made the creation uncertain.
     if prepared.attempted && !force {
-        let window = uncertain_export_window_secs(&repo.to_string_lossy());
-        let observed_at = store
-            .sqlite
-            .planning_export_observed_at(owner)
-            .map_err(message)?;
-        if let Some(ago) = observed_at.map(|at| now() - at).filter(|ago| *ago < window) {
+        let window = uncertain_export_window_secs(linear);
+        if let Some(ago) = prepared
+            .observed_at
+            .map(|at| now() - at)
+            .filter(|ago| *ago < window)
+        {
             return Err(message(format!(
                 "Creation remains uncertain; looked {ago}s ago, next look in {}s \
                  (`lf task sync --retry-creation` looks now)",
@@ -162,7 +167,7 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsR
             )));
         }
     }
-    // The future is spawned elsewhere, so the step name needs a `Send` cell.
+    // Names the step a timeout interrupts; the future must be `Send`.
     let step = Mutex::new("validating the Team");
     let set_step = |name: &'static str| *step.lock().expect("export step poisoned") = name;
     let attempt = async {
@@ -171,8 +176,8 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsR
             team,
             export,
             attempted,
+            ..
         } = &prepared;
-        let linear = super::planning_client::is_linear(&repo.to_string_lossy());
         let client = PlanningClient::for_repository(repo).await?;
         set_step("looking for the saved creation");
         if observe(
@@ -224,7 +229,7 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsR
         }
         if !store
             .sqlite
-            .attempt_planning_export(owner, &input, false, *attempted)
+            .attempt_planning_export(owner, &input, false)
             .map_err(message)?
         {
             return Ok(());
@@ -391,18 +396,19 @@ async fn attach_project(
         .as_deref()
         .ok_or_else(|| message("Project export has no Initiative"))?;
     if project.initiative_ids.is_empty() {
-        let (_, attempted) = store
+        if store
             .sqlite
             .planning_export_attempts(owner)
-            .map_err(message)?;
-        if attempted {
+            .map_err(message)?
+            .link
+        {
             return Err(message(
                 "Project attachment remains uncertain; no repeated attachment issued",
             ));
         }
         if !store
             .sqlite
-            .attempt_planning_export(owner, &export.input, true, false)
+            .attempt_planning_export(owner, &export.input, true)
             .map_err(message)?
         {
             return Ok(());

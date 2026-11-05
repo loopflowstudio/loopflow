@@ -8,5 +8,5 @@
 - **`reader_floor` writes carry forward (resolved by concept review, 2026-11-05).** The
   earlier assumption, no write, reversed: NULL refuses every installed build at the next
   additive migration, which main does not do, so it fails the brief's "harmless" test.
-  Evidence and direction: "Next implement" in the working design. Jack Heart can overrule
+  Evidence: "Carrying the floor forward" in the working design. Jack Heart can overrule
   this by accepting one lockout in exchange for no dated write; the write comes out cleanly.

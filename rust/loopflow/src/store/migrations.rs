@@ -897,7 +897,32 @@ fn insert_applied_migration(
             [migration.version()],
         )?;
     }
+    carry_reader_floor(conn, migration)
+}
+
+/// Builds released before the floor's deletion still read a row's `reader_floor`,
+/// and refuse a store whose newest row has none. This build reads it for nothing:
+/// the new row repeats the ledger's newest floor so those builds stay admitted past
+/// additive migrations. Task f5981e removes this 30 days after that release.
+fn carry_reader_floor(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
+    if ledger_has_reader_floor(conn)? {
+        conn.execute(
+            "UPDATE schema_migrations SET reader_floor = (
+                SELECT reader_floor FROM schema_migrations
+                WHERE reader_floor IS NOT NULL ORDER BY applied_at DESC, rowid DESC LIMIT 1
+             ) WHERE version = ?1",
+            [migration.version()],
+        )?;
+    }
     Ok(())
+}
+
+fn ledger_has_reader_floor(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name='reader_floor')",
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 fn validate_applied_checksums(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
@@ -2949,6 +2974,57 @@ mod tests {
     pub(crate) fn migration_section_sql(name: &str) -> String {
         let section = section(name);
         section.sql[section.body].to_string()
+    }
+
+    fn reader_floors(conn: &rusqlite::Connection) -> Vec<Option<String>> {
+        conn.prepare("SELECT reader_floor FROM schema_migrations ORDER BY applied_at, rowid")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// Released builds check every row past their own head, and a row with no floor
+    /// names itself, so one NULL in that tail refuses them.
+    #[test]
+    fn every_new_migration_repeats_the_ledgers_newest_reader_floor() {
+        let conn = open();
+        apply_pending_migrations(&conn);
+        conn.execute_batch(
+            "UPDATE schema_migrations SET reader_floor='older_floor' WHERE rowid=1;
+             UPDATE schema_migrations SET reader_floor='recorded_floor' WHERE rowid=2;",
+        )
+        .unwrap();
+        let colour = Migration {
+            version: "add_colour",
+            sql: "ALTER TABLE waves ADD COLUMN colour TEXT;",
+            merged: true,
+        };
+        let shade = Migration {
+            version: "add_shade",
+            sql: "ALTER TABLE waves ADD COLUMN shade TEXT;",
+            merged: true,
+        };
+        let set: Vec<Migration> = MIGRATIONS.iter().copied().chain([colour, shade]).collect();
+
+        apply_set(&conn, &set, &mut Vec::new()).unwrap();
+
+        let recorded = Some("recorded_floor".to_string());
+        assert_eq!(
+            reader_floors(&conn)[MIGRATIONS.len()..],
+            [recorded.clone(), recorded]
+        );
+    }
+
+    #[test]
+    fn a_ledger_with_no_recorded_floor_stays_without_one() {
+        let conn = open();
+        apply_pending_migrations(&conn);
+
+        apply_newer_migration(&conn, "ALTER TABLE waves ADD COLUMN colour TEXT;").unwrap();
+
+        assert!(reader_floors(&conn).iter().all(Option::is_none));
     }
 
     #[test]

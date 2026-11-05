@@ -106,8 +106,10 @@ the newer columns. Runtime SQL names its columns — `check_migrations.py` rejec
 positional `INSERT ... VALUES` and `SELECT *` outside tests — and JSON persisted
 in the store tolerates fields it does not know.
 
-`schema_migrations.reader_floor` is shipped history. Nothing reads it, and new
-rows leave it `NULL`.
+`schema_migrations.reader_floor` is shipped history this build never reads. Each
+new row repeats the ledger's newest floor, because builds released before its
+deletion refuse a store whose newest row has none; Task f5981e removes the write
+30 days after that release.
 
 ## What the check enforces
 

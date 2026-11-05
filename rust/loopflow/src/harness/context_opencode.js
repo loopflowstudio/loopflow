@@ -13,17 +13,22 @@ export default {
     await session.hook("context", (input) => {
       owner ??= input.sessionID;
       if (input.sessionID !== owner) return;
-      const output = execFileSync(spec.executable, ["__context-block", "--delivery", delivery,
-        "--moment", compacted ? "compact" : "start"], {
-        env: { ...process.env, LF_HOME: spec.delivery.home },
-        cwd: spec.delivery.repo,
-        input: JSON.stringify({ session_id: input.sessionID,
-          hook_event_name: "OpenCodeMessagesTransform", adapter_invocation_id: randomUUID() }),
-        encoding: "utf8", timeout: 30000,
-      });
-      const text = JSON.parse(output).hookSpecificOutput.additionalContext;
       if (spec.instructions) input.system.push({ type: "text", text: spec.instructions });
-      input.system.push({ type: "text", text });
+      // Context lf cannot serve (a store it cannot reach) is a gap lf logs
+      // itself; the prompt goes on without it.
+      try {
+        const output = execFileSync(spec.executable, ["__context-block", "--delivery", delivery,
+          "--moment", compacted ? "compact" : "start"], {
+          env: { ...process.env, LF_HOME: spec.delivery.home },
+          cwd: spec.delivery.repo,
+          input: JSON.stringify({ session_id: input.sessionID,
+            hook_event_name: "OpenCodeMessagesTransform", adapter_invocation_id: randomUUID() }),
+          encoding: "utf8", timeout: 30000,
+        });
+        input.system.push({ type: "text", text: JSON.parse(output).hookSpecificOutput.additionalContext });
+      } catch (error) {
+        console.error(`loopflow context unavailable for this prompt: ${error.message.split("\n")[0]}`);
+      }
     });
     const controller = new AbortController();
     const watching = (async () => {

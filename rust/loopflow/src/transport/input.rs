@@ -1,4 +1,5 @@
-//! Input stays queued until retention commits, then advances only by bytes written.
+//! Input stays queued while retention is busy, then advances only by bytes written.
+//! A failed store never holds a person's input; the owner holds it instead.
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -12,6 +13,19 @@ pub(super) struct PendingInput {
     recorded: usize,
     retry_at: Option<Instant>,
     failure: Option<String>,
+    /// Bytes reached the provider without a retention record. The owner holds
+    /// them in memory until the native client ends, since the store cannot.
+    unrecorded: bool,
+}
+
+/// What retaining queued bytes in the store came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Retained {
+    Recorded,
+    /// A busy store: wait and try the same bytes again.
+    Busy,
+    /// A failed store: deliver the bytes; the person's turn is not lost for a record.
+    Failed,
 }
 
 impl PendingInput {
@@ -28,6 +42,12 @@ impl PendingInput {
         self.bytes.is_empty()
     }
 
+    /// Input that keeps this owner alive: queued bytes, or delivered bytes the
+    /// store never recorded.
+    pub fn holds_owner(&self) -> bool {
+        !self.is_empty() || self.unrecorded
+    }
+
     pub fn retry_at(&self) -> Option<Instant> {
         self.retry_at
     }
@@ -40,14 +60,21 @@ impl PendingInput {
         if self.is_empty() || self.retry_at.is_some_and(|at| Instant::now() < at) {
             return;
         }
-        if terminal && self.recorded < self.bytes.len() && !self.retain(owner) {
-            self.retry_at = Some(Instant::now() + Duration::from_millis(100));
-            return;
+        if terminal && self.recorded < self.bytes.len() {
+            match self.retain(owner) {
+                Retained::Recorded => {
+                    if self.failure.take().is_some() {
+                        tracing::info!(%owner, "terminal input store recovered; recording input again");
+                    }
+                }
+                Retained::Busy => {
+                    self.retry_at = Some(Instant::now() + Duration::from_millis(100));
+                    return;
+                }
+                Retained::Failed => self.unrecorded = true,
+            }
         }
         self.retry_at = None;
-        if self.failure.take().is_some() {
-            tracing::info!(%owner, "terminal input store recovered; delivering queued input");
-        }
         self.recorded = self.bytes.len();
         match input.write(self.bytes.as_slices().0) {
             Ok(n) => {
@@ -62,16 +89,18 @@ impl PendingInput {
         }
     }
 
-    fn retain(&mut self, owner: &LfProcessId) -> bool {
+    fn retain(&mut self, owner: &LfProcessId) -> Retained {
         let bytes = &self.bytes.make_contiguous()[self.recorded..];
         match crate::journal::process_ledger()
             .and_then(|store| store.try_record_owner_input(owner, bytes))
         {
-            Ok(recorded) => recorded,
+            Ok(true) => Retained::Recorded,
+            Ok(false) => Retained::Busy,
             Err(error) => {
-                let message = format!("cannot retain terminal input; retrying: {error}");
+                let message =
+                    format!("cannot retain terminal input; delivering it unrecorded: {error}");
                 super::lifetime::warn_changed(&mut self.failure, owner, message);
-                false
+                Retained::Failed
             }
         }
     }
@@ -83,5 +112,6 @@ impl PendingInput {
             tracing::warn!(%error, "cannot clear ended native input; retaining its owner");
         }
         self.recorded = 0;
+        self.unrecorded = false;
     }
 }

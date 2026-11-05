@@ -129,7 +129,8 @@ impl ContextDelivery {
         let Some((id, source)) = &self.repository else {
             return Ok(());
         };
-        let store = crate::store::sqlite::SqliteStore::new(&self.home.join("loopflow.db"))?;
+        let store =
+            crate::store::sqlite::SqliteStore::open_for_hook(&self.home.join("loopflow.db"))?;
         let Some(destination) = store.repository_path(id)? else {
             return Ok(());
         };

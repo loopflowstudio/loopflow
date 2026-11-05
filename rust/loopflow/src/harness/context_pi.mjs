@@ -22,8 +22,10 @@ async function guardBashTools(pi, ctx) {
         // RDWR opens without waiting for the shell's reader. OS exit also
         // closes this writer, even when Pi cannot run any shutdown handlers.
         writer = openSync(path, constants.O_RDWR);
+        // The guard records the tool boundary; a store it cannot reach is a
+        // logged gap, never a failed tool. The command runs either way.
         const guard = `${quote(spec.executable)} __context-block --moment tool-group --lifeline ${quote(path)} --provider-pid ${process.pid}`;
-        return await local.exec(`${guard} || exit $?\n${command}`, cwd, options);
+        return await local.exec(`${guard}\n${command}`, cwd, options);
       } finally {
         if (writer !== undefined) closeSync(writer);
         rmSync(directory, { recursive: true, force: true });
@@ -87,14 +89,23 @@ export default function (pi) {
     stopUpdates();
     ctx.abort(); process.exitCode = 1; ctx.shutdown();
   };
+  // lf's records are best-effort: a store lf cannot reach is a gap it logs
+  // itself, never a failed turn. One notice per change, then quiet.
+  let gap;
+  const recordingGap = (ctx, what, error) => {
+    const message = `${what}: ${error.message.split("\n")[0]}`;
+    if (gap === message) return;
+    gap = message;
+    ctx.ui.notify(`Loopflow is not recording this conversation (${message})`, "warning");
+  };
   const report = (event, ctx, extra = {}) => {
     if (!spec.native || (!started && event.type !== "session_start")) return;
     try {
       invoke("__context-block", { ...event, ...extra, sessionFile: ctx.sessionManager.getSessionFile(),
         turn, openTools: tools.size, pendingInput }, ["--moment", "pi-event"]);
+      gap = undefined;
     } catch (error) {
-      shutdown(ctx);
-      throw error;
+      recordingGap(ctx, "turn record", error);
     }
   };
   pi.on("session_start", async (event, ctx) => {
@@ -112,11 +123,16 @@ export default function (pi) {
   // into each request, without persisting it in Pi's conversation or tool state.
   pi.on("context_with_system", async (event, ctx) => {
     if (!process.env.LF_CONTEXT_DELIVERY) return;
-    try {
-      if (refreshMoment) {
+    if (refreshMoment) {
+      // A refresh lf cannot serve keeps the last context and tries again next request.
+      try {
         context = readContext(ctx, refreshMoment, "PiContext");
         refreshMoment = undefined;
+      } catch (error) {
+        recordingGap(ctx, "context refresh", error);
       }
+    }
+    try {
       const [head, ...rest] = event.messages;
       if (head?.role !== "system") throw new Error("Pi request has no leading system message");
       return { messages: [{ ...head, sections: { ...head.sections, loopflow: context } }, ...rest] };
@@ -140,8 +156,7 @@ export default function (pi) {
             pi.sendMessage({ customType: "loopflow-steer", content, display: true }, { deliverAs: "steer" });
           }
         } catch (error) {
-          ctx.ui.notify(`Loopflow steering failed: ${error.message}`, "error");
-          shutdown(ctx);
+          recordingGap(ctx, "steering", error);
         }
       }, 1000);
       steering.unref();

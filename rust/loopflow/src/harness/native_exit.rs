@@ -43,15 +43,33 @@ pub(crate) struct Settled {
     pub lines: Vec<String>,
 }
 
-/// Record a handed-off provider's exit as its launcher would have.
-pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let owner: AttachmentOwner = (store, exit.session.clone(), exit.attachment.clone());
-    let (store, session, attachment) = &owner;
-    let interrupted = record_exit(&owner)?;
-    let lost = attachment_lost(&owner).unwrap_or_else(|error| {
-        tracing::warn!(%error, "cannot read this launch's Session attachment");
-        false
+/// Record a handed-off provider's exit as its launcher would have. Every record
+/// is best-effort: the provider's own exit is what the person gets back, and a
+/// store that is locked, refused or missing only loses the records, logged.
+pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
+    let owner: Option<AttachmentOwner> = match open_store() {
+        Ok(store) => Some((store, exit.session.clone(), exit.attachment.clone())),
+        Err(error) => {
+            tracing::warn!(%error, session = %exit.session, "store unavailable at exit; the provider's own result stands");
+            None
+        }
+    };
+    // A judgment the store cannot make reads as "no": the exit stands as the
+    // provider reported it.
+    let judged = |what: &str, judgment: Result<bool>| {
+        judgment.unwrap_or_else(|error| {
+            tracing::warn!(%error, session = %exit.session, "cannot read {what}");
+            false
+        })
+    };
+    let interrupted = owner
+        .as_ref()
+        .is_some_and(|owner| judged("the provider's exit record", record_exit(owner)));
+    let lost = owner.as_ref().is_some_and(|owner| {
+        judged(
+            "this launch's Session attachment",
+            attachment_lost(owner).map_err(Into::into),
+        )
     });
     if let (Some(account), Some(key), false) = (&exit.account, &exit.capture_key, lost) {
         pin_account_home(&exit.provider, account, key, exit.isolate);
@@ -59,15 +77,24 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
     let command = crate::lf::commands::util::SessionCommandOutcome {
         status,
         interrupted: interrupted || lost,
-        moved: lost.then(|| departure(&owner)).flatten(),
+        moved: lost.then(|| owner.as_ref().and_then(departure)).flatten(),
     };
     let outcome = command.capture_outcome();
-    match crate::session_record::finish_session_attachment(store, session, attachment, outcome) {
-        Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
-        Err(error) => return Err(error.into()),
+    if let Some((store, session, attachment)) = &owner {
+        match crate::session_record::finish_session_attachment(store, session, attachment, outcome)
+        {
+            Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
+            Err(error) => {
+                tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+            }
+        }
     }
     if let Some(capture) = &exit.capture {
-        crate::session_record::CaptureHandle::adopt(capture.clone())?.finish(outcome)?;
+        if let Err(error) = crate::session_record::CaptureHandle::adopt(capture.clone())
+            .and_then(|capture| capture.finish(outcome))
+        {
+            tracing::warn!(%error, session = %exit.session, "cannot settle the Session capture");
+        }
     }
     // The command's result differs from the provider's native status. Use the
     // returning launcher's interpretation, including attachment loss.
@@ -85,22 +112,34 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
             .lines
             .push(format!("Loopflow recorded diagnostics: {}", path.display()));
     }
-    let mut process = store
-        .process(&attachment.provider_lf_process_id)?
-        .context("handed-off launcher is not recorded")?;
-    process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
-    process.outcome = Some(
-        match settled.code {
-            0 => "succeeded",
-            130 => "interrupted",
-            _ => "failed",
+    if let Some((store, _, attachment)) = &owner {
+        let recorded = (|| -> Result<()> {
+            let mut process = store
+                .process(&attachment.provider_lf_process_id)?
+                .context("handed-off launcher is not recorded")?;
+            process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
+            process.outcome = Some(
+                match settled.code {
+                    0 => "succeeded",
+                    130 => "interrupted",
+                    _ => "failed",
+                }
+                .into(),
+            );
+            process.exit_code = Some(i32::from(settled.code));
+            process.error = settled.lines.first().filter(|_| settled.code != 0).cloned();
+            store.record_process(&process)?;
+            Ok(())
+        })();
+        if let Err(error) = recorded {
+            tracing::warn!(%error, session = %exit.session, "cannot record the launcher's exit");
         }
-        .into(),
-    );
-    process.exit_code = Some(i32::from(settled.code));
-    process.error = settled.lines.first().filter(|_| settled.code != 0).cloned();
-    store.record_process(&process)?;
-    Ok(settled)
+    }
+    settled
+}
+
+fn open_store() -> Result<SqliteStore> {
+    Ok(SqliteStore::new(&crate::store::database_path_from_env()?)?)
 }
 
 /// Record the provider's exit under its attachment; whether an interrupt ended it.
@@ -186,6 +225,66 @@ mod tests {
     use super::{settle, NativeExit};
 
     #[test]
+    fn settlement_without_a_store_keeps_the_providers_own_exit() {
+        let ledger = TestLedgerGuard::new();
+        let home = ledger.home();
+        {
+            let capture = CaptureHandle::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .unwrap();
+            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+            let session = store
+                .session_for_artifact(&capture.artifact_key())
+                .unwrap()
+                .unwrap();
+            let launcher = store.test_lf_process();
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &launcher, true)
+                .unwrap();
+            let exit = NativeExit {
+                session: session.id.to_string(),
+                attachment,
+                provider: "codex".into(),
+                resuming: false,
+                cwd: home.into(),
+                capture: Some(capture.hand_off()),
+                capture_key: Some(capture.artifact_key()),
+                account: None,
+                isolate: None,
+                diagnostics: (home.join("absent.log"), 0),
+            };
+            // The store this build knows is gone by the time the provider quits.
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute_batch("ALTER TABLE agent_sessions RENAME TO agent_sessions_gone")
+                .unwrap();
+            let settled = settle(&exit, ExitStatus::from_raw(0));
+            assert_eq!(settled.code, 0);
+            assert!(settled.lines.is_empty(), "{:?}", settled.lines);
+            let terminal: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(capture.artifact_dir().join("terminal.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(terminal["outcome"], "completed");
+        }
+    }
+
+    #[test]
     fn settlement_preserves_takeover_capture_and_new_attachment() {
         let ledger = TestLedgerGuard::new();
         let home = ledger.home();
@@ -249,7 +348,7 @@ mod tests {
                 )
                 .unwrap();
             let before = store.process(&next.agent_process_id).unwrap().unwrap();
-            let settled = settle(&exit, ExitStatus::from_raw(7 << 8)).unwrap();
+            let settled = settle(&exit, ExitStatus::from_raw(7 << 8));
             assert_eq!(settled.code, 0);
             assert!(settled
                 .lines

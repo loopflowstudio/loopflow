@@ -279,7 +279,10 @@ pub(crate) fn watch(
         let pending = match pending {
             Ok(pending) => pending,
             Err(StoreError::InvalidAuthority(_)) => return Ok(()),
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                tracing::warn!(%error, "native Task updates unavailable; polling again");
+                None
+            }
         };
         if let Some(update) = pending {
             // Claude's next-priority inbox and Pi's follow-up queue own when

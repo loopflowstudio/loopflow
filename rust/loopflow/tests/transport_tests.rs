@@ -478,15 +478,12 @@ impl Viewer {
             other => panic!("unexpected frame tag {other:#x}"),
         })
     }
-    fn moves(&mut self) -> Vec<(Option<String>, Option<Vec<String>>)> {
+    fn moves(&mut self) -> Vec<Option<String>> {
         let mut moves = Vec::new();
         while let Some(item) = self.next() {
             if let Item::Event(event) = item {
                 if event["type"] == "control" && event["held"] == false {
-                    moves.push((
-                        serde_json::from_value(event["notice"].clone()).unwrap(),
-                        serde_json::from_value(event["successor"].clone()).unwrap(),
-                    ));
+                    moves.push(serde_json::from_value(event["notice"].clone()).unwrap());
                 }
             }
         }
@@ -1005,8 +1002,11 @@ fn accept_attachment(listener: &UnixListener) -> UnixStream {
     }
 }
 
+/// A viewer told it no longer holds input restores its terminal, prints the
+/// owner's notice and leaves with exit 0. Nothing runs after it: the owner
+/// judged itself, and the person decides what to open next.
 #[test]
-fn successor_handoff_restores_the_terminal_and_preserves_command_results() {
+fn control_handoff_restores_the_terminal_and_prints_the_notice() {
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", "sleep 60"]);
     let session = fixture.session(&owner);
@@ -1015,20 +1015,6 @@ fn successor_handoff_restores_the_terminal_and_preserves_command_results() {
     std::fs::rename(&endpoint, &retained).unwrap();
     let listener = UnixListener::bind(&endpoint).unwrap();
     listener.set_nonblocking(true).unwrap();
-
-    let entry = fixture.home.path().join("successor entry");
-    std::fs::write(
-        &entry,
-        r#"#!/bin/sh
-[ "$#" = 3 ] && [ "$1" = session ] && [ "$2" = resume ] && [ "$3" = "$EXPECTED_SESSION" ] || exit 91
-[ "$(stty -g)" = "$EXPECTED_TERMINAL" ] || exit 92
-printf 'successor saw restored terminal\n'
-if [ "$SUCCESSOR_RESULT" = signal ]; then kill -TERM $$; fi
-exit "$SUCCESSOR_RESULT"
-"#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let mut master = -1;
     let mut slave = -1;
@@ -1054,103 +1040,57 @@ exit "$SUCCESSOR_RESULT"
     );
     // SAFETY: the slave is a distinct, newly opened descriptor.
     let input = unsafe { std::fs::File::from_raw_fd(slave) };
-    let original = Command::new("stty")
-        .arg("-g")
-        .stdin(input.try_clone().unwrap())
-        .output()
-        .unwrap();
-    assert!(original.status.success());
-    let original = String::from_utf8(original.stdout).unwrap();
 
-    for (result, exit, error) in [
-        ("0", 0, None),
-        ("23", 23, None),
-        ("signal", 1, Some("ended by a signal")),
-        ("missing", 1, Some("run /")),
-        ("empty", 1, Some("empty successor command")),
-        ("none", 0, None),
-    ] {
-        let successor = match result {
-            "none" => Value::Null,
-            "empty" => json!([]),
-            "missing" => json!([
-                fixture.home.path().join("missing"),
-                "session",
-                "resume",
-                session
-            ]),
-            _ => json!([entry, "session", "resume", session]),
-        };
-        let mut viewer = fixture
-            .command(&["session", "resume", &session])
-            .env("EXPECTED_SESSION", &session)
-            .env("EXPECTED_TERMINAL", original.trim())
-            .env("SUCCESSOR_RESULT", result)
-            .stdin(input.try_clone().unwrap())
-            .stdout(input.try_clone().unwrap())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut socket = accept_attachment(&listener);
-        socket
-            .write_all(&frame(
-                REPLY,
-                json!({
-                    "answers":1,"seq":0,"kind":"attached","viewer":"v","reconnect":"r",
-                    "nonce":"00","token":"claim","terminal":true,"grace_ms":60000,"owner":"v"
-                })
-                .to_string()
-                .as_bytes(),
-            ))
-            .unwrap();
-        socket.write_all(&frame(SNAPSHOT, b"\x1b[?1049h")).unwrap();
-        let event = json!({"seq":1,"type":"control","held":false,
-            "notice":"owner retired","successor":successor});
-        socket
-            .write_all(&frame(OUT, format!("\x1b_lf1;00;{event}\x1b\\").as_bytes()))
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut screen = Vec::new();
-        loop {
-            let exited = viewer.try_wait().unwrap().is_some();
-            // Drain while the viewer runs: a PTY can hold less than its reset sequence.
-            match terminal.read_to_end(&mut screen) {
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(error) => panic!("read terminal: {error}"),
-            }
-            if exited {
-                break;
-            }
-            if Instant::now() >= deadline {
-                viewer.kill().unwrap();
-                viewer.wait().unwrap();
-                panic!(
-                    "{result}: viewer did not exit: {}",
-                    String::from_utf8_lossy(&screen)
-                );
-            }
-            std::thread::sleep(Duration::from_millis(20));
+    let mut viewer = fixture
+        .command(&["session", "resume", &session])
+        .stdin(input.try_clone().unwrap())
+        .stdout(input.try_clone().unwrap())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut socket = accept_attachment(&listener);
+    socket
+        .write_all(&frame(
+            REPLY,
+            json!({
+                "answers":1,"seq":0,"kind":"attached","viewer":"v","reconnect":"r",
+                "nonce":"00","token":"claim","terminal":true,"grace_ms":60000,"owner":"v"
+            })
+            .to_string()
+            .as_bytes(),
+        ))
+        .unwrap();
+    socket.write_all(&frame(SNAPSHOT, b"\x1b[?1049h")).unwrap();
+    let event = json!({"seq":1,"type":"control","held":false,"notice":"owner retired"});
+    socket
+        .write_all(&frame(OUT, format!("\x1b_lf1;00;{event}\x1b\\").as_bytes()))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut screen = Vec::new();
+    loop {
+        let exited = viewer.try_wait().unwrap().is_some();
+        // Drain while the viewer runs: a PTY can hold less than its reset sequence.
+        match terminal.read_to_end(&mut screen) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("read terminal: {error}"),
         }
-        let output = viewer.wait_with_output().unwrap();
-        let stdout = String::from_utf8_lossy(&screen);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(
-            output.status.code(),
-            Some(exit),
-            "{result}: {stdout} {stderr}"
-        );
-        assert!(stderr.contains("owner retired"), "{result}: {stderr}");
-        if let Some(error) = error {
-            assert!(stderr.contains(error), "{result}: {stderr}");
+        if exited {
+            break;
         }
-        assert!(stdout.contains("\x1b[?1049l"), "{result}: {stdout}");
-        if matches!(result, "0" | "23" | "signal") {
-            let restored = stdout.find("\x1b[?1049l").unwrap();
-            let followed = stdout.find("successor saw restored terminal").unwrap();
-            assert!(restored < followed, "{stdout}");
+        if Instant::now() >= deadline {
+            viewer.kill().unwrap();
+            viewer.wait().unwrap();
+            panic!("viewer did not exit: {}", String::from_utf8_lossy(&screen));
         }
+        std::thread::sleep(Duration::from_millis(20));
     }
+    let output = viewer.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&screen);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stdout} {stderr}");
+    assert!(stderr.contains("owner retired"), "{stderr}");
+    assert!(stdout.contains("\x1b[?1049l"), "{stdout}");
     drop(listener);
     std::fs::remove_file(&endpoint).unwrap();
     std::fs::rename(retained, endpoint).unwrap();
@@ -2918,16 +2858,14 @@ while True:
     }
 }
 
-/// A conversation whose lf executable is deleted, rebuilt or superseded ends
-/// once it holds no work or input, even while viewed, and a terminal showing it
-/// follows through its lf entry into the reopened conversation with its
-/// history: a deleted build through the entry that still dispatches, a rebuilt
-/// build through its own path, and one launched through the installed entry
-/// onto the build `lf install` selected. A turn in progress finishes first:
-/// `lf resume` on that owner watches it rather than cutting it, and follows
-/// when it ends.
+/// A conversation whose lf executable is deleted, rebuilt or superseded keeps
+/// serving on the build it started with: nothing but a person quitting, `lf
+/// resume`, rollover, the detached limit or an explicit end stops an owner, and
+/// its viewers are never told to move. `lf resume` through the installed entry
+/// is the person's own decision: it ends the superseded idle owner and reopens
+/// the conversation with its history on the installed lf.
 #[test]
-fn sessions_end_when_their_lf_executable_goes() {
+fn sessions_keep_serving_when_their_lf_executable_goes() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
     let bin = fixture.home.path().join("bin");
@@ -2938,7 +2876,6 @@ fn sessions_end_when_their_lf_executable_goes() {
     };
     let installed = bin.join("lf");
     std::os::unix::fs::symlink(build("lf-installed"), &installed).unwrap();
-    let talking = build("lf-talking");
     let entry = bin.join("lf-entry");
     std::os::unix::fs::symlink(bin.join("lf-installed"), &entry).unwrap();
     let removed = build("lf-idle");
@@ -2947,7 +2884,6 @@ fn sessions_end_when_their_lf_executable_goes() {
     let launched = [
         (removed.clone(), entry.clone()),
         (replaced.clone(), replaced.clone()),
-        (installed.clone(), installed.clone()),
         (installed.clone(), installed.clone()),
     ];
     let mut owners = Vec::new();
@@ -2971,43 +2907,15 @@ fn sessions_end_when_their_lf_executable_goes() {
         viewers.push(fixture.viewer(&owner, false));
         owners.push(owner);
     }
-    let mut talking_command = fixture.command_from(&talking, &["session", "serve", "--terminal"]);
-    talking_command
-        .args([
-            "--",
-            entry.to_str().unwrap(),
-            "--interactive",
-            "--agent",
-            "claude",
-            ":",
-            "talking",
-        ])
-        .env("LF_BIN", &entry)
-        .env("PATH", &path);
-    let talking_owner = fixture.owner(talking_command);
-    fixture.launches(owners.len() + 1);
+    fixture.launches(owners.len());
     let sessions: Vec<String> = owners
         .iter()
         .map(|owner| fixture.session_of_owner(owner))
         .collect();
-    let busy = sessions[3].clone();
-    fixture.mark_working(&busy);
-    let resume = |entry: &Path, session: &str| {
-        let mut command = fixture.command_from(entry, &["session", "resume", session]);
-        command.env("LF_BIN", entry).env("PATH", &path);
-        Terminal::spawn(command)
-    };
-    let mut terminals: Vec<Terminal> = (0..3)
-        .map(|index| resume(&launched[index].1, &sessions[index]))
-        .collect();
-    for owner in &owners[..3] {
-        fixture.wait_controlled(owner);
-    }
 
     // A worktree removed, a build rebuilt in place, `lf install` selecting
     // another build.
     std::fs::remove_file(&removed).unwrap();
-    std::fs::remove_file(&talking).unwrap();
     let rebuilt = bin.join("lf-rebuilt");
     other_build(&rebuilt);
     std::fs::rename(&rebuilt, &replaced).unwrap();
@@ -3017,110 +2925,41 @@ fn sessions_end_when_their_lf_executable_goes() {
     std::os::unix::fs::symlink(&next, &swapped).unwrap();
     std::fs::rename(&swapped, &installed).unwrap();
 
-    for owner in &owners[..3] {
-        fixture.ends(owner);
-    }
-    // Every viewer learns why and the command that reopens the conversation
-    // through its entry.
-    let moved = |index: usize, change: &str| {
-        (
-            Some(format!(
-                "This Session's lf was {change}; reopening it as `lf resume {}`",
-                sessions[index]
-            )),
-            Some(vec![
-                launched[index].1.to_str().unwrap().to_owned(),
-                "session".to_owned(),
-                "resume".to_owned(),
-                sessions[index].clone(),
-            ]),
-        )
-    };
-    for (index, change) in [(0, "removed"), (1, "replaced"), (2, "superseded")] {
-        assert_eq!(viewers[index].moves(), [moved(index, change)], "{change}");
-    }
-    // Each terminal ran that command: the conversation resumed with its
-    // history on the build its entry runs now.
-    let lines = fixture.launches(8);
-    let mut reopened_sessions: Vec<String> = lines[5..]
-        .iter()
-        .map(|line| {
-            assert!(
-                line.contains(" --resume "),
-                "reopened without history: {line}"
-            );
-            session_of(&fixture.sql(), line)
-        })
-        .collect();
-    reopened_sessions.sort();
-    let mut expected = sessions[..3].to_vec();
-    expected.sort();
-    assert_eq!(reopened_sessions, expected);
-    let mut reopened = Vec::new();
-    for (index, build) in [(0, "lf-installed"), (1, "lf-replaced"), (2, "lf-next")] {
-        let owner = fixture.owner_of(&sessions[index]);
-        assert_ne!(owner, owners[index]);
-        let executable: String = fixture
-            .sql()
-            .query_row(
-                "SELECT json_extract(command,'$[0]') FROM processes WHERE id=?1",
-                [&owner],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            std::fs::canonicalize(&executable).unwrap(),
-            std::fs::canonicalize(bin.join(build)).unwrap(),
-            "reopened on {executable}"
+    // Several policy polls later every owner is still serving.
+    std::thread::sleep(Duration::from_secs(8));
+    for (index, owner) in owners.iter().enumerate() {
+        assert!(
+            fixture.running(owner),
+            "owner {index} ended after its executable went"
         );
-        terminals[index].assert_viewing(&format!("terminal {index}"));
-        reopened.push(owner);
     }
-    // Opening the busy owner's conversation from the installed lf attaches to
-    // it rather than cutting its turn, and several judgments later it still runs.
-    let watching = resume(&installed, &busy);
-    fixture.wait_controlled(&owners[3]);
-    std::thread::sleep(Duration::from_secs(4));
-    assert!(fixture.running(&owners[3]), "busy owner ended mid-turn");
-    assert_eq!(
-        fixture.launches(8).len(),
-        8,
-        "the busy conversation relaunched"
-    );
+    // The person resumes the superseded conversation through the installed
+    // entry: that ends its owner and reopens it with history on the installed lf.
+    let mut command = fixture.command_from(&installed, &["session", "resume", &sessions[2]]);
+    command.env("LF_BIN", &installed).env("PATH", &path);
+    let mut terminal = Terminal::spawn(command);
+    let line = fixture.launches(owners.len() + 1).pop().unwrap();
     assert!(
-        fixture.running(&talking_owner),
-        "native turn ended while drawing"
-    );
-    // Once output stops, a viewer cannot keep a vanished build.
-    let _talking_viewer = fixture.viewer(&talking_owner, false);
-    std::fs::write(fixture.home.path().join("hush"), "").unwrap();
-    fixture.ends(&talking_owner);
-    // Its turn settling lets it end; the watching terminal then follows.
-    fixture
-        .sql()
-        .execute("DELETE FROM session_activity WHERE session_id=?1", [&busy])
-        .unwrap();
-    fixture.ends(&owners[3]);
-    assert_eq!(viewers[3].moves(), [moved(3, "superseded")]);
-    let line = fixture.launches(9).pop().unwrap();
-    assert!(
-        line.contains(" --resume ") && session_of(&fixture.sql(), &line) == busy,
+        line.contains(" --resume ") && session_of(&fixture.sql(), &line) == sessions[2],
         "reopened without history: {line}"
     );
-    let busy_reopened = fixture.owner_of(&busy);
-    assert_ne!(busy_reopened, owners[3]);
-    terminals.push(watching);
-    // Every terminal is still in its reopened conversation.
-    std::thread::sleep(Duration::from_secs(1));
-    for (index, terminal) in terminals.iter_mut().enumerate() {
-        terminal.assert_viewing(&format!("terminal {index}"));
+    let reopened = fixture.owner_of(&sessions[2]);
+    assert_ne!(reopened, owners[2]);
+    assert!(
+        !fixture.running(&owners[2]),
+        "resume left the superseded owner"
+    );
+    terminal.assert_viewing("terminal 2");
+    for owner in &owners[..2] {
+        assert!(fixture.running(owner), "resume of another Session ended it");
     }
-    drop(viewers);
-    for terminal in terminals {
-        terminal.stop();
-    }
-    for owner in reopened.iter().chain([&busy_reopened]) {
+    terminal.stop();
+    for owner in owners[..2].iter().chain([&reopened]) {
         fixture.stop(owner);
+    }
+    // No viewer of an untouched owner was ever told to move.
+    for (index, viewer) in viewers[..2].iter_mut().enumerate() {
+        assert_eq!(viewer.moves(), [], "viewer {index} was moved");
     }
 }
 

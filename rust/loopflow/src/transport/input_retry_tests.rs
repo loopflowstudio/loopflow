@@ -1,4 +1,5 @@
-//! Exercise a failed store through the real descriptor loop in an isolated process.
+//! Exercise a failed store through the real descriptor loop in an isolated process:
+//! input the store cannot retain still reaches the provider, once.
 
 use std::cell::Cell;
 use std::io::{Read, Write};
@@ -17,7 +18,7 @@ pub(super) fn poll() {
 }
 
 #[test]
-fn failed_input_store_waits_then_delivers_the_same_queued_bytes() {
+fn failed_input_store_delivers_the_queued_bytes_unrecorded() {
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -82,8 +83,14 @@ fn input_store_fixture() {
             socket
                 .write_all(&frame(Tag::Input, b"retained draft\n"))
                 .unwrap();
-            std::thread::sleep(Duration::from_secs(3));
-            assert!(!receipt.exists(), "unrecorded input reached the provider");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !receipt.exists() {
+                assert!(
+                    Instant::now() < deadline,
+                    "a failed store held the person's input"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
             let sql = rusqlite::Connection::open(db).unwrap();
             sql.execute_batch("DROP TRIGGER reject_input").unwrap();
             let mut output = Vec::new();

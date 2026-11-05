@@ -200,3 +200,54 @@ own tests before the next begins.
    arrangement only.
 4. **Remaining namespaces.** `wave.* session.* graph.* machine.* repository.*
    usage.* history.*` through the engine; fold the two config paths into one.
+
+## Nomenclature decisions — November 5, 2026
+
+Jack Heart resolved the ten places where the CLI and config disagreed or left
+the API noun open. These supersede the alignment table above where they differ.
+
+1. **Skills.** `skill.*` is a noun (`skill.run`, `skill.list`); CLI and config
+   already have it.
+2. **PRs.** `pr.*` is a noun because a PR exists without a Task:
+   `pr.publish open submit arm land abandon reconcile checks reviews
+   request_review`. `task.ship` and `task.hold` stay on Task (its Auto-Ship
+   approval and run control); a Task's current PR is a field of `task.get`.
+3. **Task is a proxy parent.** The engine's real operations live on the lower
+   primitive; `task.*` resolves a Task to its Session, PR, Graph, Process or
+   checkout and delegates. `task.steer` → `session.steer`; `task.run` →
+   `graph.run` on the Task's checkout; `task.ship` → the Task's run control and
+   `pr.*`. In the CLI the proxy is the `--task <issue>` selector.
+4. **Planning, not project.** `wave.planning` is a Wave's plan (Tasks, KRs,
+   targets); `wave.sync` refreshes it; `wave.planning.bind|connect|reteam` manage
+   its tracker binding; `repository.planning` is where a repository exchanges
+   planning; `planning.list` is every Wave's plan on the Machine. Config keys
+   stay `planning.*` inside the repository file.
+5. **Config keys are literal with shorthand.** Canonical paths sit on their
+   primitive (`repository.planning.provider`, `skill.explore.agent`,
+   `wave.graph`); a file may spell any key by a unique trailing path
+   (`planning.provider`), readers canonicalize, writers write canonical paths,
+   the catalogue shows both. The released `planning:`/`linear:` shape is a
+   unique shorthand, so no compatibility branch is needed.
+6. **Steer replaces comment.** `session.steer` is the operation, `task.steer` the
+   proxy, `lf task steer <issue> <message>` the CLI. Agents post progress with
+   `task.report`. The thread is read from `task.get`. `comment` disappears.
+7. **Desktop is one to one.** `desktop.*` mirrors the whole `lf desktop` tree:
+   arrangement and app automation, executed by the app. Work reads leave it.
+8. **Root verbs are shorthands.** `lf ship land sync commit open resume` are
+   the canonical spelling of their noun operations in `lf help`; `usage history
+   doctor portfolio` show the noun path with the root form as alias.
+9. **`ops` dissolves.** `checkout.*` is a noun (`checkout.commit sync create`;
+   `lf commit`, `lf sync`, `lf wt`); `repository.release`, `repository.ci`,
+   `repository.people`, `repository.tokens`; `account.*`; `pr.*` and `machine.*`
+   already at the root. Nothing is left under `ops`.
+10. **Accounts and auth are one noun**, `account.*`, `lf auth` its shorthand.
+    Account selection is user-scope config, never the repository file:
+    `wave.<name>.account`, and the same key shape for a repository or skill.
+    The catalogue carries each key's scope.
+11. **Chapter and Project are removed for now.** Project is just Wave. No
+    `chapter.*`, no `project.*`; `lf wave new-chapter` and the NewChapter write
+    are deleted (git keeps them for when KRs return).
+
+The API nouns are therefore: Wave, Task, Graph, Session, Process, Machine,
+Repository, Work, PR, Checkout, Skill, Account, Config, Desktop, Planning
+(cross-Wave only).

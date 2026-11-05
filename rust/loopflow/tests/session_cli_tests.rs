@@ -303,6 +303,11 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             r#"{"ses_resume-proof":[]}"#,
         )
         .unwrap();
+        std::fs::write(
+            home.path().join("native-locations.json"),
+            serde_json::json!({"ses_resume-proof": home.path()}).to_string(),
+        )
+        .unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let provider = bin.join("opencode");
@@ -753,7 +758,12 @@ fn available_lists_only_conversations_ready_for_input() {
             let _ = self.0.wait();
         }
     }
-    let provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
+    let provider = Child(
+        Command::new("/bin/cat")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let home = tempfile::tempdir().unwrap();
     let cwd = home.path().join("work");
@@ -2018,9 +2028,9 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
 }
 
 #[test]
-fn hooks_from_an_earlier_lf_never_block_their_provider() {
+fn retired_title_hooks_never_block_their_provider() {
     let home = tempfile::tempdir().unwrap();
-    let output = command(home.path(), &["__planning-check"])
+    let output = command(home.path(), &["__session-title", "claude"])
         .stdin(std::process::Stdio::null())
         .output()
         .unwrap();

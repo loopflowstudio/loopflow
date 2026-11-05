@@ -132,7 +132,8 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             nsView.onSurfaceFailed = onSurfaceFailed
             nsView.onFocus = onFocus
             let searchHeight = nsView.searchBar.isHidden ? 0 : TerminalSearchBar.height
-            nsView.sizeDidChange(CGSize(width: size.width, height: max(0, size.height - searchHeight)))
+            let connectionHeight: CGFloat = nsView.connectionBar.isHidden ? 0 : 36
+            nsView.sizeDidChange(CGSize(width: size.width, height: max(0, size.height - searchHeight - connectionHeight)))
 
             if case .ready = manager.state, nsView.surface == nil, !nsView.childExited,
                size.width > 0, size.height > 0 {
@@ -175,6 +176,7 @@ final class GhosttyTerminalMount: NSView {
         terminal.autoresizingMask = []
         addSubview(terminal)
         addSubview(terminal.searchBar)
+        addSubview(terminal.connectionBar)
         needsLayout = true
     }
 
@@ -182,7 +184,9 @@ final class GhosttyTerminalMount: NSView {
         super.layout()
         guard terminal.superview === self else { return }
         let searchHeight = terminal.searchBar.isHidden ? 0 : min(TerminalSearchBar.height, bounds.height)
-        terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight))
+        let connectionHeight: CGFloat = terminal.connectionBar.isHidden ? 0 : 36
+        terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight - connectionHeight))
+        terminal.connectionBar.frame = NSRect(x: 8, y: bounds.height - connectionHeight, width: max(0, bounds.width - 16), height: connectionHeight)
         terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
 }
@@ -260,6 +264,9 @@ final class GhosttySurfacePool {
         }
         guard !view.childExited, !ghostty_surface_process_exited(surface) else {
             throw RegistryQueryError("The terminal child exited; no input was sent or client reopened.")
+        }
+        guard view.connectionAcceptsInput else {
+            throw RegistryQueryError("Session input is paused or held by another viewer; no input was sent.")
         }
         guard !view.hasMarkedText() else {
             throw RegistryQueryError("The terminal has an active input-method composition; finish it before sending input.")
@@ -489,6 +496,43 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var lastCommandBlockRefresh: CFTimeInterval = 0
     private var focusRequested = false
     private var inputEnabled = true
+    private var serverConnection: ServerConnection?
+    private var connectionReadonly = false
+    var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
+    private let connectionLabel = NSTextField(labelWithString: "")
+    private lazy var retryConnection = NSButton(title: "Retry", target: self, action: #selector(retryServerConnection))
+    private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveServerConnection))
+    lazy var connectionBar: NSStackView = {
+        let bar = NSStackView(views: [connectionLabel, moveConnection, retryConnection])
+        bar.orientation = .horizontal
+        bar.spacing = 8
+        bar.isHidden = true
+        connectionLabel.lineBreakMode = .byTruncatingTail
+        connectionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return bar
+    }()
+
+    @objc private func retryServerConnection() {
+        serverConnection?.retry()
+    }
+
+    @objc private func moveServerConnection() {
+        serverConnection?.moveHere()
+    }
+
+    private func showConnection(_ reading: ServerConnectionReading) {
+        let readonly = !reading.acceptsInput
+        if surface != nil, connectionReadonly != readonly {
+            performBinding("toggle_readonly")
+            connectionReadonly = readonly
+        }
+        connectionLabel.stringValue = reading.title ?? ""
+        connectionLabel.toolTip = reading.title
+        connectionBar.isHidden = reading.title == nil
+        retryConnection.isHidden = reading.state != .unavailable
+        moveConnection.isHidden = !reading.canMoveHere
+        superview?.needsLayout = true
+    }
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
     /// parent render; unchanged size, scale and feedback must not reach Ghostty.
     private nonisolated(unsafe) var appliedScale: (surface: ghostty_surface_t, scale: CGFloat)?
@@ -542,7 +586,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         let surfaceCommand: String?
         if case .session = terminal, let command {
-            let script = "export LF_MACHINE_SERVICE=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
+            let connection = ServerConnection()
+            do {
+                try connection.start { [weak self] reading in self?.showConnection(reading) }
+            } catch {
+                onSurfaceFailed("Cannot open native connection status: \(error.localizedDescription)")
+                return
+            }
+            serverConnection = connection
+            let script = "export LF_SERVER_STATUS=\(shellEscape(connection.path)); export LF_SERVER=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
             surfaceCommand = ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
         } else {
             surfaceCommand = command
@@ -556,6 +608,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if surface != nil { pendingInput = nil }
 
         if surface != nil {
+            if let serverConnection { showConnection(serverConnection.reading) }
             updateContentScale()
             updateSurfaceSize()
             installCommandBlockOverlay()
@@ -565,6 +618,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             setupTrackingArea()
             onSurfaceCreated()
         } else {
+            serverConnection?.stop()
+            serverConnection = nil
             onSurfaceFailed("Could not create the native terminal surface.")
         }
     }
@@ -633,6 +688,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func destroySurface() {
+        serverConnection?.stop()
+        serverConnection = nil
         copyDismissal?.cancel()
         publishCopyConfirmation(nil)
         retainedSearchBar?.end()
@@ -963,12 +1020,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         if !mods.contains(.command) { clearBlockSelection() }
 
+        guard connectionAcceptsInput else { return false }
         // Let other command shortcuts through to the terminal
         let key = translateKey(event)
         return ghostty_surface_key(surface, key)
     }
 
     override func keyDown(with event: NSEvent) {
+        guard connectionAcceptsInput else { return }
         guard let surface else {
             super.keyDown(with: event)
             return
@@ -1003,6 +1062,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func keyUp(with event: NSEvent) {
+        guard connectionAcceptsInput else { return }
         guard let surface else {
             super.keyUp(with: event)
             return
@@ -1014,6 +1074,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func flagsChanged(with event: NSEvent) {
+        guard connectionAcceptsInput else { return }
         guard let surface else {
             super.flagsChanged(with: event)
             return
@@ -1048,6 +1109,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
+        guard connectionAcceptsInput else { return }
         guard let surface else { return }
 
         let text: String
@@ -1076,6 +1138,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        guard connectionAcceptsInput else { return }
         if let attrString = string as? NSAttributedString {
             _markedText = NSMutableAttributedString(attributedString: attrString)
         } else if let str = string as? String {
@@ -1306,6 +1369,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     @objc private func clearAction() {
+        guard connectionAcceptsInput else { return }
         guard let surface else { return }
         // Send clear screen sequence
         let clearCmd = "clear\n"
@@ -1371,6 +1435,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     private func pasteFromClipboard() -> Bool {
+        guard connectionAcceptsInput else { return false }
         if case .session = terminal,
            ghosttyPrefersImageShortcut(NSPasteboard.general) {
             return sendImagePasteShortcut()
@@ -1437,6 +1502,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     fileprivate func insertTerminalText(_ text: String) -> Bool {
+        guard connectionAcceptsInput else { return false }
         guard let surface else { return false }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         clearBlockSelection()
@@ -1447,6 +1513,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     fileprivate func sendTerminalKey(_ input: DesktopKey) {
+        guard connectionAcceptsInput else { return }
         guard let surface else { return }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         clearBlockSelection()

@@ -13,34 +13,6 @@ use crate::store::Store;
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     // Rentals own their runtimes, so they dispatch before this one opens.
     match cmd {
-        MachineCommand::Service { cmd } => {
-            crate::machine_service::installation::delegate_selected()?;
-            use crate::lf::MachineServiceCommand;
-            let status = match cmd {
-                MachineServiceCommand::Run => return crate::machine_service::run(),
-                MachineServiceCommand::Mobile { off, status } => {
-                    if *status {
-                        println!(
-                            "{}",
-                            serde_json::to_string(&crate::machine_service::mobile::status()?)?
-                        );
-                    } else if *off {
-                        crate::machine_service::mobile::disable()?;
-                        println!("Mobile access is off");
-                    } else {
-                        println!(
-                            "{}",
-                            serde_json::to_string(&crate::machine_service::mobile::enable()?)?
-                        );
-                    }
-                    return Ok(());
-                }
-                MachineServiceCommand::Ensure => crate::machine_service::installation::ensure()?,
-                MachineServiceCommand::Status => crate::machine_service::installation::status()?,
-            };
-            println!("{}", serde_json::to_string(&status)?);
-            return Ok(());
-        }
         MachineCommand::End { label, force } => return super::rental::end(label, *force),
         MachineCommand::Pool { cmd } => return super::rental::run_pool(cmd),
         MachineCommand::Ondemand { cmd } => return super::rental::run_ondemand(cmd, batch),
@@ -280,8 +252,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        MachineCommand::Service { .. }
-        | MachineCommand::Connect { .. }
+        MachineCommand::Connect { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Id { .. } => {
             unreachable!("credential and identity commands dispatch before opening the store")

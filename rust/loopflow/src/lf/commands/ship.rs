@@ -72,7 +72,6 @@ pub fn run(
             &issue,
             TaskProcessOptions {
                 wave: cli.wave.clone(),
-                agent: cli.agent.clone(),
                 from,
                 reason: None,
                 ..TaskProcessOptions::default()

@@ -7,10 +7,9 @@
 //! pool or on-demand that `lf task run` takes a machine from.
 //!
 //! Scope settings are your overrides of shared setup (`graph`, `agent`,
-//! `skill_agents.<skill>`) for a Wave, a repository or every repository.
-use std::collections::BTreeMap;
+//! `skills.<skill>.agent`) for a Wave, a repository or every repository.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::durable::{
     CapacityDefault, DefaultScope, MachineDefault, MachineId, MachineSetting, OwningMachineSource,
@@ -21,18 +20,15 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-fn scope_key(scope: &DefaultScope) -> (&'static str, &str) {
-    match scope {
-        DefaultScope::Wave(wave) => ("wave", wave.as_str()),
-        DefaultScope::Repository(repository) => ("repository", repository.as_str()),
+fn field(setting: MachineSetting) -> &'static str {
+    match setting {
+        MachineSetting::Tasks => "tasks",
+        MachineSetting::Session => "session",
     }
 }
 
-fn column(setting: MachineSetting) -> &'static str {
-    match setting {
-        MachineSetting::Tasks => "tasks_machine_id",
-        MachineSetting::Session => "session_machine_id",
-    }
+fn preference_error(error: anyhow::Error) -> StoreError {
+    StoreError::InvalidData(error.to_string())
 }
 
 fn parse_wave(id: &str) -> StoreResult<WaveId> {
@@ -70,70 +66,101 @@ fn machine_at_in(
     scope: &DefaultScope,
     setting: MachineSetting,
 ) -> StoreResult<Option<MachineId>> {
-    let (kind, id) = scope_key(scope);
-    Ok(conn
-        .query_row(
-            &format!(
-                "SELECT {} FROM scope_defaults WHERE scope_kind=?1 AND scope_id=?2",
-                column(setting)
-            ),
-            [kind, id],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten()
+    Ok(crate::config::placement::read(conn, Some(scope))
+        .map_err(preference_error)?
+        .get("machine")
+        .cloned()
+        .map(serde_yaml_ng::from_value::<crate::config::placement::Placement>)
+        .transpose()
+        .map_err(|error| preference_error(error.into()))?
+        .and_then(|placement| match setting {
+            MachineSetting::Tasks => placement.tasks,
+            MachineSetting::Session => placement.session,
+        })
         .map(MachineId::from_raw))
 }
 
 fn capacity_at_in(conn: &Connection, scope: &DefaultScope) -> StoreResult<Option<String>> {
-    let (kind, id) = scope_key(scope);
-    Ok(conn
-        .query_row(
-            "SELECT tasks_capacity FROM scope_defaults WHERE scope_kind=?1 AND scope_id=?2",
-            [kind, id],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten())
+    Ok(crate::config::placement::read(conn, Some(scope))
+        .map_err(preference_error)?
+        .get("machine")
+        .and_then(|value| value.get("capacity"))
+        .and_then(serde_yaml_ng::Value::as_str)
+        .map(str::to_owned))
 }
 
-/// Your Machine for one setting under a Wave and repository, else this Machine.
-/// A scope naming capacity keeps its Tasks here until `lf task run` places them.
+fn resolved_placement(
+    conn: &Connection,
+    wave: Option<String>,
+    repository: Option<String>,
+) -> StoreResult<crate::config::settings::ResolvedSettings> {
+    let chain = chain_in(conn, wave, repository)?;
+    let mut layers = Vec::new();
+    for scope in std::iter::once(None).chain(chain.iter().rev().map(|(scope, _)| Some(scope))) {
+        let (path, prefix) =
+            crate::config::placement::location(conn, scope).map_err(preference_error)?;
+        let document = crate::config::placement::read(conn, scope).map_err(preference_error)?;
+        let mut value = serde_yaml_ng::Value::Mapping(Default::default());
+        if let Some(machine) = document.get("machine") {
+            crate::config::settings::insert(&mut value, &["machine"], machine.clone());
+        }
+        layers.push(crate::config::ConfigDeclarations {
+            source: crate::config::ConfigSource::Personal,
+            scope: match scope {
+                Some(DefaultScope::Wave(_)) => crate::config::settings::SettingScope::Wave,
+                Some(DefaultScope::Repository(_)) => {
+                    crate::config::settings::SettingScope::Repository
+                }
+                None => crate::config::settings::SettingScope::Global,
+            },
+            path: if prefix.is_empty() {
+                path
+            } else {
+                format!("{}#{}", path.display(), prefix.join(".")).into()
+            },
+            value,
+        });
+    }
+    crate::config::settings::resolve_layers(&layers, None)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
+/// Placement is resolved once; existing Task claims remain independent of preferences.
 pub(super) fn owning_machine_in(
     conn: &Connection,
     wave: Option<String>,
     repository: Option<String>,
     setting: MachineSetting,
 ) -> StoreResult<(MachineId, OwningMachineSource)> {
-    for (scope, name) in chain_in(conn, wave, repository)? {
-        let source = || match &scope {
-            DefaultScope::Wave(_) => OwningMachineSource::Wave(name.clone()),
-            DefaultScope::Repository(_) => OwningMachineSource::Repository,
-        };
-        if let Some(machine) = machine_at_in(conn, &scope, setting)? {
-            return Ok((machine, source()));
-        }
-        if setting == MachineSetting::Tasks && capacity_at_in(conn, &scope)?.is_some() {
-            return Ok((super::task_ownership::local_machine_in(conn)?, source()));
-        }
-    }
-    Ok((
-        super::task_ownership::local_machine_in(conn)?,
-        OwningMachineSource::ThisMachine,
-    ))
-}
-
-/// Your overrides of shared setup that apply in one repository and Wave, by
-/// key, for each scope.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ScopeSettings {
-    pub global: BTreeMap<String, String>,
-    pub repository: BTreeMap<String, String>,
-    pub wave: BTreeMap<String, String>,
-}
-
-fn settings_key(scope: Option<&DefaultScope>) -> (&'static str, &str) {
-    scope.map_or(("global", ""), scope_key)
+    let resolved = resolved_placement(conn, wave.clone(), repository)?;
+    let key = format!("machine.{}", field(setting));
+    let Some(value) = resolved
+        .settings
+        .get(&key)
+        .filter(|setting| !setting.value.is_null())
+    else {
+        let source = resolved
+            .settings
+            .get("machine.capacity")
+            .filter(|setting| !setting.value.is_null())
+            .and_then(|setting| setting.selected())
+            .map(|selected| OwningMachineSource::Preference(Box::new(selected.clone())))
+            .unwrap_or(OwningMachineSource::ThisMachine);
+        return Ok((super::task_ownership::local_machine_in(conn)?, source));
+    };
+    let source = OwningMachineSource::Preference(Box::new(
+        value
+            .selected()
+            .expect("resolved placement has a selection")
+            .clone(),
+    ));
+    let id = value.value.as_str().expect("typed Machine reference");
+    let aliases = crate::config::placement::machine_declarations(conn).map_err(preference_error)?;
+    let machine = aliases
+        .get(id)
+        .map(|declaration| declaration.id.clone())
+        .unwrap_or_else(|| MachineId::from_raw(id));
+    Ok((machine, source))
 }
 
 impl SqliteStore {
@@ -175,149 +202,36 @@ impl SqliteStore {
         setting: MachineSetting,
         machine: &MachineId,
     ) -> StoreResult<()> {
-        let (kind, id) = scope_key(scope);
-        let column = column(setting);
-        let capacity = if setting == MachineSetting::Tasks {
-            ",tasks_capacity=NULL"
-        } else {
-            ""
-        };
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            &format!(
-                "INSERT INTO scope_defaults(scope_kind,scope_id,{column},set_at) VALUES(?1,?2,?3,?4)
-                 ON CONFLICT(scope_kind,scope_id) DO UPDATE SET {column}=excluded.{column},set_at=excluded.set_at{capacity}"
-            ),
-            params![kind, id, machine.as_str(), crate::store::rows::now_unix()],
-        )?;
+        edit_placement(&conn, scope, |placement| {
+            placement[field(setting)] = machine.to_string().into();
+            if setting == MachineSetting::Tasks {
+                crate::config::files::remove(placement, &["capacity"]);
+            }
+        })?;
         Ok(())
     }
 
-    /// Clear one Machine setting at a scope, with the Tasks capacity it may
-    /// name; false when it held none.
     pub fn clear_machine_default(
         &self,
         scope: &DefaultScope,
         setting: MachineSetting,
     ) -> StoreResult<bool> {
-        let (kind, id) = scope_key(scope);
-        let (set, held) = match setting {
-            MachineSetting::Tasks => (
-                "tasks_machine_id=NULL,tasks_capacity=NULL",
-                "(tasks_machine_id IS NOT NULL OR tasks_capacity IS NOT NULL)",
-            ),
-            MachineSetting::Session => {
-                ("session_machine_id=NULL", "session_machine_id IS NOT NULL")
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        edit_placement(&conn, scope, |placement| {
+            crate::config::files::remove(placement, &[field(setting)]);
+            if setting == MachineSetting::Tasks {
+                crate::config::files::remove(placement, &["capacity"]);
             }
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
-        let cleared = transaction.execute(
-            &format!(
-                "UPDATE scope_defaults SET {set} WHERE scope_kind=?1 AND scope_id=?2 AND {held}"
-            ),
-            [kind, id],
-        )? > 0;
-        transaction.execute(
-            "DELETE FROM scope_defaults WHERE scope_kind=?1 AND scope_id=?2
-             AND tasks_machine_id IS NULL AND session_machine_id IS NULL AND tasks_capacity IS NULL",
-            [kind, id],
-        )?;
-        transaction.commit()?;
-        Ok(cleared)
+        })
     }
 
-    /// Set your override of a shared setting; `None` is every repository.
-    pub fn set_scope_setting(
-        &self,
-        scope: Option<&DefaultScope>,
-        key: &str,
-        value: &str,
-    ) -> StoreResult<()> {
-        let (kind, id) = settings_key(scope);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO scope_settings(scope_kind,scope_id,key,value,set_at) VALUES(?1,?2,?3,?4,?5)
-             ON CONFLICT(scope_kind,scope_id,key) DO UPDATE SET value=excluded.value,set_at=excluded.set_at",
-            params![kind, id, key, value, crate::store::rows::now_unix()],
-        )?;
-        Ok(())
-    }
-
-    /// Clear your override of a shared setting; false when there was none.
-    pub fn clear_scope_setting(
-        &self,
-        scope: Option<&DefaultScope>,
-        key: &str,
-    ) -> StoreResult<bool> {
-        let (kind, id) = settings_key(scope);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "DELETE FROM scope_settings WHERE scope_kind=?1 AND scope_id=?2 AND key=?3",
-            [kind, id, key],
-        )? > 0)
-    }
-
-    /// Whether you have set any override, so readers skip finding the repository.
-    pub fn has_scope_settings(&self) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        // A store older than this build has no table, and so no values.
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scope_settings')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )? && conn.query_row("SELECT EXISTS(SELECT 1 FROM scope_settings)", [], |row| {
-            row.get(0)
-        })?)
-    }
-
-    /// Your overrides for work in `repo` (its canonical main checkout) and,
-    /// when named, the Wave at `wave_slug` there.
-    pub fn scope_settings(
-        &self,
-        repo: Option<&str>,
-        wave_slug: Option<&str>,
-    ) -> StoreResult<ScopeSettings> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT scope_kind,key,value FROM scope_settings
-             WHERE scope_kind='global'
-                OR (scope_kind='repository' AND scope_id IN
-                    (SELECT id FROM repository_plans WHERE repo=?1 AND selected=1))
-                OR (scope_kind='wave' AND scope_id IN
-                    (SELECT id FROM wave_addresses WHERE repo=?1 AND slug=?2 AND retired_at IS NULL))",
-        )?;
-        let rows = statement.query_map(params![repo, wave_slug], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
-        let mut settings = ScopeSettings::default();
-        for row in rows {
-            let (kind, key, value) = row?;
-            let scope = match kind.as_str() {
-                "global" => &mut settings.global,
-                "repository" => &mut settings.repository,
-                _ => &mut settings.wave,
-            };
-            scope.insert(key, value);
-        }
-        Ok(settings)
-    }
-
-    /// Send a scope's new Tasks to a pool or on-demand, replacing its Tasks
-    /// Machine. Its Session stays where it runs.
     pub fn set_tasks_capacity(&self, scope: &DefaultScope, capacity: &str) -> StoreResult<()> {
-        let (kind, id) = scope_key(scope);
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO scope_defaults(scope_kind,scope_id,tasks_capacity,set_at) VALUES(?1,?2,?3,?4)
-             ON CONFLICT(scope_kind,scope_id) DO UPDATE SET tasks_capacity=excluded.tasks_capacity,
-                 tasks_machine_id=NULL,set_at=excluded.set_at",
-            params![kind, id, capacity, crate::store::rows::now_unix()],
-        )?;
+        edit_placement(&conn, scope, |placement| {
+            placement["capacity"] = capacity.into();
+            crate::config::files::remove(placement, &["tasks"]);
+        })?;
         Ok(())
     }
 
@@ -331,95 +245,68 @@ impl SqliteStore {
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        for (scope, _) in chain_in(&snapshot, wave, repository)? {
-            if machine_at_in(&snapshot, &scope, MachineSetting::Tasks)?.is_some() {
-                return Ok(None);
-            }
-            if let Some(capacity) = capacity_at_in(&snapshot, &scope)? {
-                return Ok(Some(capacity));
-            }
-        }
-        Ok(None)
+        let resolved = resolved_placement(&snapshot, wave, repository)?;
+        Ok(resolved.config.machine.capacity)
     }
 
     /// Every scope whose new Tasks take a machine from a pool or on-demand.
     pub fn capacity_defaults(&self) -> StoreResult<Vec<CapacityDefault>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT d.scope_kind,d.scope_id,d.tasks_capacity,coalesce(w.name,r.repo,d.scope_id)
-             FROM scope_defaults d
-             LEFT JOIN waves w ON d.scope_kind='wave' AND w.id=d.scope_id
-             LEFT JOIN repository_plans r ON d.scope_kind='repository' AND r.id=d.scope_id AND r.selected=1
-             WHERE d.tasks_capacity IS NOT NULL
-             ORDER BY d.scope_kind DESC,4",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
         let mut defaults = Vec::new();
-        for row in rows {
-            let (kind, id, capacity, name) = row?;
-            let scope = if kind == "wave" {
-                DefaultScope::Wave(parse_wave(&id)?)
-            } else {
-                DefaultScope::Repository(RepositoryId::from_raw(id))
-            };
-            defaults.push(CapacityDefault {
-                scope,
-                name,
-                capacity,
-            });
+        for (scope, name) in crate::config::placement::scopes(&conn).map_err(preference_error)? {
+            if let Some(capacity) = capacity_at_in(&conn, &scope)? {
+                defaults.push(CapacityDefault {
+                    scope,
+                    name,
+                    capacity,
+                });
+            }
         }
         Ok(defaults)
     }
 
-    /// Every Machine default on this Machine, Waves first, Tasks before Session.
     pub fn machine_defaults(&self) -> StoreResult<Vec<MachineDefault>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT d.scope_kind,d.scope_id,d.tasks_machine_id,d.session_machine_id,
-                    coalesce(w.name,r.repo,d.scope_id)
-             FROM scope_defaults d
-             LEFT JOIN waves w ON d.scope_kind='wave' AND w.id=d.scope_id
-             LEFT JOIN repository_plans r ON d.scope_kind='repository' AND r.id=d.scope_id AND r.selected=1
-             ORDER BY d.scope_kind DESC,5",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })?;
         let mut defaults = Vec::new();
-        for row in rows {
-            let (kind, id, tasks, session, name) = row?;
-            let scope = if kind == "wave" {
-                DefaultScope::Wave(parse_wave(&id)?)
-            } else {
-                DefaultScope::Repository(RepositoryId::from_raw(id))
-            };
-            for (setting, machine) in [
-                (MachineSetting::Tasks, tasks),
-                (MachineSetting::Session, session),
-            ] {
-                if let Some(machine) = machine {
+        for (scope, name) in crate::config::placement::scopes(&conn).map_err(preference_error)? {
+            for setting in [MachineSetting::Tasks, MachineSetting::Session] {
+                if let Some(machine_id) = machine_at_in(&conn, &scope, setting)? {
                     defaults.push(MachineDefault {
                         scope: scope.clone(),
                         name: name.clone(),
                         setting,
-                        machine_id: MachineId::from_raw(machine),
+                        machine_id,
                     });
                 }
             }
         }
         Ok(defaults)
     }
+}
+
+fn edit_placement(
+    conn: &Connection,
+    scope: &DefaultScope,
+    edit: impl FnOnce(&mut serde_yaml_ng::Value),
+) -> StoreResult<bool> {
+    let (file, prefix) =
+        crate::config::placement::location(conn, Some(scope)).map_err(preference_error)?;
+    crate::config::files::update(&file, |document| {
+        let path: Vec<_> = prefix
+            .iter()
+            .map(String::as_str)
+            .chain(["machine"])
+            .collect();
+        let mut placement = path
+            .iter()
+            .try_fold(&*document, |value, key| value.get(*key))
+            .cloned()
+            .unwrap_or(serde_yaml_ng::Value::Mapping(Default::default()));
+        let previous = placement.clone();
+        crate::config::placement::expand_shorthand(&mut placement)?;
+        edit(&mut placement);
+        crate::config::settings::insert(document, &path, placement.clone());
+        Ok(previous != placement)
+    })
+    .map_err(preference_error)
 }

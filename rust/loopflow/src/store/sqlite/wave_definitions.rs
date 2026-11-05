@@ -100,6 +100,17 @@ impl SqliteStore {
                 }
             };
             seed_wave_files(&directory, &wave, &prefix)?;
+            if crate::work::wave::config::try_read_wave_config(checkout, &prefix)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                .and_then(|config| config.id)
+                .is_none()
+            {
+                crate::work::wave::config::update_wave_config(checkout, &prefix, |values| {
+                    values.insert("id".into(), wave.to_string().into());
+                    Ok(())
+                })
+                .map_err(StoreError::InvalidData)?;
+            }
             parent = Some(wave);
         }
         tx.commit()?;

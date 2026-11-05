@@ -39,6 +39,7 @@ skills-lock.json
 *.profraw
 *.actual.md
 .DS_Store
+*.swp
 target/
 /vendor/ghostty/
 

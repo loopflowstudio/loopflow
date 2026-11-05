@@ -40,12 +40,12 @@ const SESSION_OPERATE_PAIRS: &[(&str, &str)] = &[
 ];
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/machine_service/registration.m");
+    println!("cargo:rerun-if-changed=src/installation/registration.m");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         cc::Build::new()
-            .file("src/machine_service/registration.m")
+            .file("src/installation/registration.m")
             .flag("-fobjc-arc")
-            .compile("machine_service_registration");
+            .compile("server_registration");
         println!("cargo:rustc-link-lib=framework=ServiceManagement");
         println!("cargo:rustc-link-lib=framework=Foundation");
     }

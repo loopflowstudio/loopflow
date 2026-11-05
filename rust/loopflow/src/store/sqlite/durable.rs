@@ -71,7 +71,7 @@ impl SqliteStore {
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE machines SET public_name=?1 WHERE route='local'",
+            "UPDATE machines SET public_name=?1 WHERE is_local=1",
             [name.map(str::trim)],
         )?;
         Ok(())
@@ -90,54 +90,85 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if map_machine_by_id(&tx, machine_id)?.is_some_and(|machine| machine.route == "local") {
+        if map_local_machine(&tx)?.id == *machine_id {
             return Err(StoreError::InvalidData(
-                "cannot add the local machine as a remote".into(),
+                "cannot add the local machine as remote".into(),
             ));
         }
         let now = now_unix();
         tx.execute(
-            "INSERT INTO machines (id, route, label, created_at, observed_at)
-             VALUES (?1, ?2, ?3, ?4, ?4)
-             ON CONFLICT(id) DO UPDATE SET route=excluded.route, label=excluded.label,
-                observed_at=excluded.observed_at",
-            params![machine_id.as_str(), target, label, now],
-        ).map_err(|error| StoreError::InvalidData(format!("could not save machine: {error}; choose another label or remove the old connection")))?;
-        let machine = map_machine_by_id(&tx, machine_id)?.ok_or(StoreError::NotFound)?;
+            "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
+            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
+            params![machine_id.as_str(), now],
+        )?;
+        let declaration = crate::config::placement::MachineDeclaration {
+            id: machine_id.clone(),
+        };
+        let path = crate::config::placement::home(&tx)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .join("config.yaml");
+        crate::config::files::update(&path, |document| {
+            if let Some(existing) = document
+                .get("machines")
+                .and_then(|machines| machines.get(label))
+            {
+                let existing: crate::config::placement::MachineDeclaration =
+                    serde_yaml_ng::from_value(existing.clone())?;
+                anyhow::ensure!(existing.id == *machine_id, "machine name already exists");
+            }
+            crate::config::settings::insert(
+                document,
+                &["machines", label],
+                serde_yaml_ng::to_value(declaration)?,
+            );
+            crate::config::settings::insert(
+                document,
+                &["connections", machine_id.as_str()],
+                target.into(),
+            );
+            Ok(())
+        })
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         tx.commit()?;
-        Ok(machine)
+        map_machine_by_id(&conn, machine_id)?.ok_or(StoreError::NotFound)
     }
 
     pub fn machines(&self) -> StoreResult<Vec<Machine>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, route, created_at, observed_at, label
-             FROM machines WHERE label IS NOT NULL ORDER BY label",
-        )?;
-        let rows = stmt.query_map([], |row| Ok(map_machine_row(row)))?;
-        rows.map(|row| row?).collect()
+        let declarations = crate::config::placement::machine_declarations(&conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        declarations
+            .values()
+            .map(|declaration| {
+                map_machine_by_id(&conn, &declaration.id)?.ok_or(StoreError::NotFound)
+            })
+            .collect()
     }
 
     pub fn rename_machine(&self, label: &str, name: &str) -> StoreResult<()> {
-        if name.trim().is_empty() {
-            return Err(StoreError::InvalidData(
-                "machine label cannot be empty".into(),
-            ));
-        }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute(
-            "UPDATE machines SET label=?2 WHERE label=?1",
-            params![label, name],
-        )? == 0
-        {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
+        let path = crate::config::placement::home(&conn)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .join("config.yaml");
+        crate::config::files::update(&path, |document| {
+            anyhow::ensure!(!name.trim().is_empty(), "machine label cannot be empty");
+            let machines = document
+                .get_mut("machines")
+                .and_then(serde_yaml_ng::Value::as_mapping_mut)
+                .ok_or(StoreError::NotFound)?;
+            anyhow::ensure!(!machines.contains_key(name), "machine name already exists");
+            let declaration = machines.remove(label).ok_or(StoreError::NotFound)?;
+            machines.insert(name.into(), declaration);
+            Ok(())
+        })
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
     pub fn remove_machine(&self, label: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute("UPDATE machines SET label=NULL WHERE label=?1", [label])? == 0 {
+        if !crate::config::placement::write(&conn, None, &["machines", label], None)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+        {
             return Err(StoreError::NotFound);
         }
         Ok(())
@@ -395,7 +426,7 @@ impl SqliteStore {
 
 pub(super) fn local_public_name_in(conn: &Connection) -> StoreResult<Option<String>> {
     conn.query_row(
-        "SELECT public_name FROM machines WHERE route='local'",
+        "SELECT public_name FROM machines WHERE is_local=1",
         [],
         |row| row.get(0),
     )
@@ -403,34 +434,49 @@ pub(super) fn local_public_name_in(conn: &Connection) -> StoreResult<Option<Stri
 }
 
 pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
-    conn.query_row(
-        "SELECT id, route, created_at, observed_at, label FROM machines WHERE route='local'",
-        [],
-        |row| Ok(map_machine_row(row)),
-    )?
+    let id: String = conn.query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+        row.get(0)
+    })?;
+    map_machine_by_id(conn, &MachineId::from_raw(id))?.ok_or(StoreError::NotFound)
 }
 
 pub(super) fn map_machine_by_id(
     conn: &Connection,
     machine_id: &MachineId,
 ) -> StoreResult<Option<Machine>> {
-    conn.query_row(
-        "SELECT id, route, created_at, observed_at, label FROM machines WHERE id=?1",
-        [machine_id.as_str()],
-        |row| Ok(map_machine_row(row)),
-    )
-    .optional()?
-    .transpose()
-}
-
-fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
-    Ok(Machine {
-        id: MachineId::parse(&row.get::<_, String>(0)?).map_err(invalid_durable)?,
-        route: row.get(1)?,
-        created_at: OffsetDateTime::from_unix_timestamp(row.get(2)?).map_err(invalid_durable)?,
-        observed_at: OffsetDateTime::from_unix_timestamp(row.get(3)?).map_err(invalid_durable)?,
-        label: row.get(4)?,
-    })
+    let row: Option<(bool, i64, i64)> = conn
+        .query_row(
+            "SELECT is_local,created_at,observed_at FROM machines WHERE id=?1",
+            [machine_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let declarations = crate::config::placement::machine_declarations(conn)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    let declaration = declarations
+        .into_iter()
+        .find(|(_, declaration)| &declaration.id == machine_id);
+    if row.is_none() && declaration.is_none() {
+        return Ok(None);
+    }
+    // A declared destination need not have been contacted on this installation.
+    let (local, created, observed) = row.unwrap_or((false, 0, 0));
+    Ok(Some(Machine {
+        id: machine_id.clone(),
+        route: if local {
+            "local".into()
+        } else {
+            crate::config::placement::global_settings(conn)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                .connections
+                .get(machine_id)
+                .cloned()
+                .unwrap_or_default()
+        },
+        label: declaration.map(|(label, _)| label),
+        created_at: OffsetDateTime::from_unix_timestamp(created).map_err(invalid_durable)?,
+        observed_at: OffsetDateTime::from_unix_timestamp(observed).map_err(invalid_durable)?,
+    }))
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
@@ -728,13 +774,11 @@ mod durable_store_tests {
             branch: "probe".to_string(),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
@@ -1094,7 +1138,7 @@ mod durable_store_tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
+                "UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
                 rusqlite::params![
                     task.id.as_str(),
                     task.worktree.as_ref().unwrap().to_str().unwrap()
@@ -1409,6 +1453,76 @@ mod durable_store_tests {
                 .bind_session(&session.id, session.captured, &task_id)
                 .unwrap(),
             bound
+        );
+    }
+
+    #[test]
+    fn promotion_directory_survives_an_opening_prepared_before_binding() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.interactive = true;
+        conversation.cwd = dir.path().to_path_buf();
+        let session = store.create_session(conversation, None).unwrap();
+        store
+            .promote_task(
+                &task_id,
+                None,
+                None,
+                Some(&session),
+                task.worktree.as_deref(),
+            )
+            .unwrap();
+
+        let admitted = store
+            .admit_session_workspace(&session, &dir.path().join("old-scope"))
+            .unwrap();
+        assert_eq!(admitted.id, session.id);
+        assert_eq!(admitted.cwd, task.worktree.unwrap());
+        assert_eq!(admitted.task_id.as_ref(), Some(&task_id));
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), admitted);
+        assert_eq!(
+            store.task_primary(&task_id).unwrap().unwrap().id,
+            session.id
+        );
+    }
+
+    #[test]
+    fn promotion_binding_survives_completion_after_placement_preparation() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let pr = store.task_prs(&task_id).unwrap().remove(0);
+        let placement = (task.worktree.unwrap(), pr);
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.interactive = true;
+        let session = store.create_session(conversation, None).unwrap();
+        // The caller already prepared placement when completion arrived.
+        store.conn.lock().unwrap().execute(
+            "UPDATE tasks SET worktree=NULL,planning_completed=1,planning_state='completed' WHERE id=?1",
+            [task_id.as_str()],
+        ).unwrap();
+        for _ in 0..2 {
+            let bound = store
+                .promote_task(&task_id, None, Some(&placement), Some(&session), None)
+                .unwrap();
+            assert!(bound.worktree.is_none());
+            assert_eq!(
+                store.task_state(&task_id).unwrap(),
+                crate::durable::TaskState::Done
+            );
+            assert_eq!(
+                store.task_primary(&task_id).unwrap().unwrap().id,
+                session.id
+            );
+            let current = store.session(&session.id).unwrap().unwrap();
+            assert_eq!(current.task_id.as_ref(), Some(&task_id));
+            assert_eq!(current.cwd, session.cwd);
+        }
+        assert!(
+            store
+                .place_task(&task_id, &placement.0, &placement.1.slug, &placement.1)
+                .is_err(),
+            "ordinary checkout allocation still rejects done Tasks"
         );
     }
 

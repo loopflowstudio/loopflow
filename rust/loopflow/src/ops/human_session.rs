@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 use crate::durable::WorkRef;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
+use crate::store::sqlite::sessions::OwnerRetention;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
@@ -119,7 +120,7 @@ pub(super) fn unassociated_checkout(cwd: &Path) -> Result<anyhow::Error> {
 }
 
 /// The scope that owns this checkout, or `None` for an unassociated linked one.
-pub(super) async fn checkout_scope(
+pub(crate) async fn checkout_scope(
     store: &SharedStore,
     cwd: &Path,
     target: SessionTarget<'_>,
@@ -678,7 +679,7 @@ async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> R
     let mut args = vec![
         "-i".to_string(),
         "--agent".to_string(),
-        config.agent().to_owned(),
+        config.agent()?.to_owned(),
         "--cwd".to_string(),
         session.cwd.display().to_string(),
     ];
@@ -731,6 +732,9 @@ fn work_selector(session: &LfSession) -> Option<String> {
 }
 
 pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
+    if crate::journal::request::active() {
+        return Ok(None);
+    }
     let Some(value) = std::env::var_os(PREPARED_CAPTURE_ENV) else {
         return Ok(None);
     };
@@ -743,12 +747,13 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
     )?))
 }
 
-/// Get back to a Session. Whatever holds it gives it up: a terminal showing
-/// it hands over control, a provider client lf started stops. With `fork`,
-/// the holder keeps it and a new Session continues from its log. A Run is
-/// refused; it is never taken over or resumed.
+/// Get back to a Session. A terminal showing it hands over control; a provider
+/// client lf started stops only when no live turn, draft or request needs it.
+/// With `fork`, the holder keeps it and a new Session continues from its log. A
+/// Run is refused; it is never taken over or resumed.
 pub(crate) async fn open(
     store: &SharedStore,
+    directory: &Path,
     session_id: &str,
     fork: bool,
     resume: bool,
@@ -759,7 +764,7 @@ pub(crate) async fn open(
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
-        None => provider_conversation::admit(store, session_id)
+        None => provider_conversation::admit(store, session_id, directory)
             .await?
             .ok_or_else(|| session_not_found(session_id))?,
     };
@@ -791,7 +796,8 @@ pub(crate) async fn open(
     let admitted;
     let session = if resume {
         let id = session.id.clone();
-        let _launch = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
+        let _launch =
+            crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
         admitted = primary::admit_workspace(store, session.clone()).await?;
         &admitted
     } else {
@@ -900,10 +906,10 @@ pub(crate) async fn open(
                 &session.id,
                 departure_here(),
             )?;
-            eprintln!(
+            crate::journal::request::diagnostic(format_args!(
                 "Stopped the {} client that had this conversation; continuing here.",
                 session.provider.as_deref().unwrap_or("provider")
-            );
+            ));
         }
         crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
     }
@@ -954,10 +960,10 @@ async fn fork(
         &next,
         crate::session_record::SessionGraphMembership::Independent,
     )?;
-    eprintln!(
+    crate::journal::request::diagnostic(format_args!(
         "Forked {} into {}; the original keeps running.",
         source.id, next.id
-    );
+    ));
     let record = surface(store, &next).await?;
     if launch {
         open_prepared(store, &next.id, json).await?;
@@ -1018,7 +1024,8 @@ fn departure_here() -> crate::process::Departure {
 async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let launch_lock =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     crate::agent_input_timing::record("launch_lock_acquired", id);
     // Resolve the current input under the launch lock, including completion
     // or replacement that happened while this opener waited.
@@ -1086,7 +1093,8 @@ pub(crate) async fn new_thread(
     json: bool,
 ) -> Result<LfSession> {
     let lock_id = id.to_string();
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let launch_lock =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
         .session(id)
         .await?
@@ -1113,11 +1121,11 @@ pub(crate) async fn new_thread(
     next.skill = None;
     next.request = Some(request);
     let next = append_input(store, next).await?;
-    eprintln!(
+    crate::journal::request::diagnostic(format_args!(
         "Started a new {} thread for {}, seeded with what the {from} thread knew.",
         next.provider.as_deref().unwrap_or("provider"),
         next.title
-    );
+    ));
     if launch {
         drop(launch_lock);
         open_prepared(store, &next.id, json).await?;
@@ -1156,16 +1164,13 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
-/// Whether opening attaches to `owner`, `session`'s running execution owner.
-/// An owner from another build is never negotiated with: once its Sessions
-/// wait for a person it is ended as its own lifetime policy ends it, stopping
-/// its agent and recording its exit, and the conversation resumes on the lf
-/// the entry launches now. A turn in progress is watched instead when the
-/// owner can show it (this viewer attaches, the owner ends itself after the
-/// turn and the viewer follows); one the owner cannot show is cut and
-/// reported, never cut silently. The build is judged against the entry, not
-/// this viewer, so a development build opening a conversation in the main
-/// Home relaunches through the installed lf.
+/// Attach to protected work even when its owner cannot answer: saved history
+/// cannot reconstruct its editor or pending requests. An idle owner that is
+/// superseded or does not answer gives way to native continuation. So does an
+/// unanswering superseded owner with no open Session: no work is known there, while
+/// an answering one may hold a turn or draft nothing records, so a viewer attaches.
+/// Compare builds against the launch entry so a development viewer in the main Home
+/// still selects the installed lf.
 pub(crate) fn attaches(
     store: &SqliteStore,
     session: &LfSession,
@@ -1174,14 +1179,18 @@ pub(crate) fn attaches(
     if !owner_running(store, owner)? {
         return Ok(false);
     }
+    let unknown = match store.owner_retention(owner)? {
+        Some(OwnerRetention::NoOpenSession) => true,
+        Some(_) => return Ok(true),
+        None => false,
+    };
     let superseded = crate::journal::live_process_pid(store, owner)
         .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
         .filter(|(_, executable)| crate::installation::superseded(executable));
     let Some((pid, executable)) = superseded else {
         return Ok(answering(owner));
     };
-    let turn_cut_off = !store.owner_waits_for_person(owner)?;
-    if turn_cut_off && answering(owner) {
+    if unknown && answering(owner) {
         return Ok(true);
     }
     end_owner(store, owner, pid).with_context(|| {
@@ -1190,20 +1199,15 @@ pub(crate) fn attaches(
             executable.display()
         )
     })?;
-    eprintln!(
-        "Moved {} off {}; continuing on the installed lf.{}",
+    crate::journal::request::diagnostic(format_args!(
+        "Moved {} off {}; continuing on the installed lf.",
         if session.title.is_empty() {
             session.id.as_str()
         } else {
             session.title.as_str()
         },
         executable.display(),
-        if turn_cut_off {
-            " Its last turn was cut off; ask again."
-        } else {
-            ""
-        }
-    );
+    ));
     Ok(false)
 }
 
@@ -1229,14 +1233,13 @@ pub(crate) fn end_owner(
     Ok(())
 }
 
-/// Whether a running owner answers its socket. One that does not, as an owner
-/// from an earlier lf may not after an upgrade, can never hand its terminal to
-/// a viewer, so opening takes the conversation over on the same provider thread.
-pub(crate) fn answering(owner: &crate::id::LfProcessId) -> bool {
+/// Whether a running owner answers its socket. This observes reachability,
+/// not whether its provider can safely be replaced.
+fn answering(owner: &crate::id::LfProcessId) -> bool {
     match crate::transport::controlled(owner) {
         Ok(_) => true,
         Err(error) => {
-            tracing::warn!(%error, %owner, "Session owner does not answer; taking the conversation over");
+            tracing::warn!(%error, %owner, "Session owner does not answer");
             false
         }
     }
@@ -1388,20 +1391,18 @@ pub(crate) async fn rename(
     surface(store, &session).await
 }
 
-/// Assign a Task to future Session work by its durable ID, including closed Sessions.
+/// Bind and select the Task conversation without changing its live attachment.
 pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
     let (session, task) = binding_target(store, id, task).await?;
+    crate::ops::task::adoption::bind_session(store, &session, &task).await?;
     let session = store
-        .bind_session(&session.id, session.captured, &task.id)
-        .await
-        .map_err(|error| match error {
-            crate::store::StoreError::InvalidAuthority(reason) => anyhow!(reason),
-            error => anyhow!(error),
-        })?;
-    eprintln!(
+        .session(&session.id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    crate::journal::request::diagnostic(format_args!(
         "Binding {} to {} ({}). Permanent.",
         session.id, task.identifier, task.title
-    );
+    ));
     surface(store, &session).await
 }
 
@@ -1432,6 +1433,10 @@ async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(Lf
     let session = session_by_id(store, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
+    anyhow::ensure!(
+        session.interactive && session.completed_at.is_none(),
+        "Select an unfinished interactive Session to become the Task conversation"
+    );
     let task = match crate::durable::TaskId::parse(task) {
         Ok(id) => store.get_task(&id).await?,
         Err(_) => store.get_task_by_issue(task).await?,

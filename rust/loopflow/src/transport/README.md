@@ -22,17 +22,29 @@ waits for Move here, and an ended one waits for an explicit open.
 Preparing asks a running owner whether a viewer holds control, so an owner from an
 earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
-but never answers reads `detached` too; reattaching stops its provider and continues
-the same provider thread in a new owner, without replaying input.
+but never answers reads `detached` too.
 
-Desktop's Machine relay stays alive when its service connection drops. The
-terminal reports **Machine connection lost**: press Ctrl+R to reconnect to the
-same owner, or Ctrl+] to close. Terminal recovery refreshes the owner's screen;
-byte streams resume from their received position, or refresh when retained output
-expires. Disconnected typing and uncertain writes are never replayed. If another
-viewer took control, recovery observes it without replacing input or geometry;
-**Move here** remains an explicit action. An unavailable owner ends recovery
-without launching or resuming a provider. Ordinary explicit Open remains separate.
+Desktop's server relay stays alive when its service connection drops. Its native
+status row shows **Reconnecting…** and pauses input while local selection, copy,
+Find and scrolling remain available. Recovery refreshes the same owner's screen;
+byte streams resume from their received position or refresh when output expires.
+Disconnected typing and uncertain writes are never replayed. If another viewer
+took control, recovery observes it without replacing input or geometry. Choose
+**Move here** in the read-only pane's connection row to edit the same running
+Session. Input stays paused until its owner acknowledges; a lost reply never
+repeats that takeover. Eight attempts with capped backoff lead to **Session
+unavailable** and a native **Retry** action. Only an owner exit event means ended.
+Closing the surface cancels recovery. Ordinary explicit Open remains separate.
+
+The native surface creates a private temporary mailbox directory and passes
+`LF_SERVER_STATUS` to its relay only. Atomic JSON readings carry connection
+generation, state, input capability and optional explanation; `status.retry`
+requests another bounded cycle. `status.move` carries the current generation;
+the relay consumes it once before requesting an explicit replacing attachment,
+and advances the generation. Stale actions cannot cross a connection loss.
+Surface closure removes the directory and cancels pending actions. This is
+presentation state, not a durable viewer registry or execution authority. Plain
+CLI server relays retain their Ctrl+R/Ctrl+] interaction.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
@@ -52,6 +64,13 @@ retain typed input because they have no matching acknowledgement here. Clearing
 the screen or showing an idle prompt cannot discard that protection. Pending
 approvals and questions stay with their original provider until answered or canceled.
 
+Input waits in the owner until its retention record commits. A busy store pauses
+delivery while output, control queries and viewer return remain responsive.
+The owner retries every 100 ms without polling the writable PTY between attempts.
+Changed failures log once; delivery resumes automatically when the store recovers.
+Returning to the Session does not resubmit queued input. This cannot restore a
+deleted store or recover an editor from a dead provider.
+
 Removing, replacing or superseding the owner's lf executable ends it after two
 seconds of command silence, once no input, turn, pending request, running Graph
 or headless Run holds it. Viewers cannot extend this interval. The owner logs the
@@ -59,21 +78,32 @@ path to `logs/lf.log`; attached viewers receive the reason and run the resume
 command through the lf entry. The viewer restores its terminal before running
 that command and preserves its exit status or launch error. Failed store
 judgments retry at the next poll.
+An owner held past its detached limit or its replaced executable logs why: native
+input, a live turn, running Graph, headless Run, no open Session or, for the
+executable, command output. Repeated unchanged policy errors and retention reasons
+produce one warning until the condition changes. Activity cannot accelerate
+the two-second policy poll; it launches no helper process.
 Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
-`lf resume` also moves an idle owner from an earlier build onto the lf entry.
-If that owner is busy and answers its socket, resume shows the running turn;
-an owner with this lifetime policy moves when the turn ends. An older owner
-without the policy needs another resume after its turn. If a superseded owner
-does not answer, resume ends it and reports that its turn was cut off, then
-reopens the saved conversation without replaying input.
+`lf resume` replaces an idle owner that is superseded or unanswering, continuing
+its saved provider thread without replaying input. Drafts, pending requests, running
+turns, Graphs and Runs keep their owner even when its socket does not answer. Resume
+attempts attachment; a failed attachment leaves that work intact. Saved history cannot
+restore a native editor or pending request. No open Session is unknown, not work: the
+owner stays on its own and an answering one is attached, but `lf resume` ends a
+superseded one that does not answer. Once protected work settles, an owner with this
+lifetime policy moves; an older owner without the policy needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
-omit `--dry-run` to move them. The sweep ends owners directly; existing viewers
-may close and need `lf resume` again. Graph runners keep running and launch each
-next step through the entry. Owners and runners whose store has advanced beyond
-their reader floor cannot recover themselves through this policy.
+omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
+ends idle owners directly; existing viewers may close and need `lf resume` again.
+Rollover names the same retention reasons. Resume, rollover and lifetime policy
+share this judgment; work holds independent of reachability. Only resume asks
+whether the owner answers, and only for no open Session.
+Graph runners keep running and launch each next step through the entry.
+Owners and runners whose store has advanced beyond their reader floor cannot
+recover themselves through this policy.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the
@@ -201,11 +231,14 @@ provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
 
-Desktop Session panes set `LF_MACHINE_SERVICE=1` for their terminal relay. The
-relay obtains an `attach` bridge from the local Machine service before speaking
+Desktop Session panes set `LF_SERVER=1` for their terminal relay. The
+relay obtains an `attach` bridge from the local client API server before speaking
 this same owner protocol. No owner or provider is created on bridge failure.
 Ordinary CLI attachments keep their direct socket path. See
-[Machine service](../machine_service/README.md) for admission and framing.
+[current server protocol](../server/README.md) for admission and framing.
+The [server boundary](../../../../docs/dev/server.md) separates
+client access from Machine routing. `lf session serve` remains the execution-owner
+entry, distinct from the server serving entry.
 
 Native providers own their Program Status (OSC 7501) reports, which pass through
 unchanged. Claude's native title updates stay enabled because disabling them also

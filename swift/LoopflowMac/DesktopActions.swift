@@ -523,8 +523,21 @@ struct DesktopAction {
             workspace.toggleBrowser()
             return browserOutcome(workspace)
         },
-        DesktopAction("files", "Show Files", scope: .pane, available: taskTool) { context in
-            try show(.files, context)
+        DesktopAction("files", "Show Files", scope: .pane,
+            arguments: [.init(name: "path", kind: .string, required: false)], available: taskTool) { context in
+            if let path = context.args["path"] {
+                guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
+                    throw DesktopArgumentError("Files path must stay inside the checkout; nothing opened.")
+                }
+            }
+            let outcome = try show(.files, context)
+            if let path = context.args["path"] {
+                let workspace = try context.task
+                if let browser = workspace.multiplexer.browserPane {
+                    try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).presentFile(path)
+                }
+            }
+            return outcome
         },
         DesktopAction("graph-log", "Show Graph Processes", scope: .pane, available: taskTool) { context in
             try show(.graphLog, context)

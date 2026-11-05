@@ -22,40 +22,44 @@ dictation/IME choice UI and VoiceOver quality need demo/device review. Remote
 carrier/pairing, canonical observer geometry and hosting tier remain explicit
 integration decisions. Full historical research is in commit 9e4587bb53fc4102e8682a3bba61e9776a6de5c2.
 
-# LOO-593 decisions and gaps
+# LOO-593 decisions and open questions
 
-Jack Heart authorized the installed local slice through demo, without Auto-Ship.
-The simplest existing command is Session rename; no create/start or retry receipt
-is introduced. Request IDs are correlation only and uncertain commands are never
-automatically replayed. Owner observation/control semantics remain unchanged.
+Jack Heart selected direct server writes in [server-write-direction.md](server-write-direction.md).
+This supersedes the full-CLI subprocess design. Accepted delivery remains the
+existing feature Graph and PR #1813 through publication and interactive demo;
+no merge, Auto-Ship or Task completion. Direct execution is committed at
+`2d9c295d8a`; adoption/binding repairs are checkpointed at `b11d49d32f` and
+main through #1822 at `30b4394a57`. The working design tracks remaining proof.
 
-Full source research was checkpointed at `0bd889e4b860fd3d7c44389a86914317c0d22af6:scratch/` before curation.
-The archived notes include contrary evidence: lfd already shared executors but
-drifted in complete-operation/lifecycle ownership; setsid alone proves no
-supervisor isolation; SMAppService updates may kill the helper; remote proxies
-cannot borrow Unix peer trust. Exact remote transport, takeover UX, unattended
-Mac hosting, create/start recovery and remaining Work cutover remain later work.
+The [working design](mobile-backend.md) owns the deletion list, invariants and
+remaining proof. LOO-718 owns remote admission, pairing and iOS; do not edit its
+checkout. Installed-state migration keeps the old plist and stable socket/lock,
+not a second Work implementation.
 
-November 3 reconciliation: LOO-718's existing-Task → existing-Session path needs
-`view_plan`; exposing the existing shared read is a bounded contract correction.
-The additive contract was published at `12fbe9102c` on the Task branch. No remote
-transport or takeover decision is inferred. Full installed-executable replacement with active Work and unchanged
-provider-usage totals remain acceptance work; separate registrar/restart fixtures
-do not establish them.
+The [direct-write demo](direct-write-demo.md) records native Task creation,
+conversation, rename and save; [matched measurements](server-performance/results.md)
+record the direct-write comparison. Both predate the final repairs and main
+merge. Merged-build validation and automated composed installed-helper replacement
+passed as recorded in the working design. Interactive demo/review owns rendered
+acceptance and released-version upgrade proof. Earlier
+subprocess evidence cannot substitute. No matched embedded RSS sample supports
+a memory-savings claim.
 
-November 3 concept review: retain Desktop's deliberate retry policy for a lost
-Machine connection. This is the simpler recovery interaction and preserves the
-existing no-implicit-relaunch rule. The retry must reconnect the exact owner,
-without invoking provider resume or taking a newer viewer's claims. This is a
-derived implementation direction from Jack Heart's accepted continuity contract,
-not a new approval of automatic takeover. Details and counterexamples live in
-`scratch/mobile-backend.md`; no local product question needs an answer here.
+GUI-less distribution, before-login hosting, removal during active work and the
+phone takeover gesture remain separate product decisions. No new assumption
+about them is needed for the accepted local cutover. Session-to-Task adoption now
+shares creation dispatch; ordinary create-and-run retains its execution owners.
 
-November 3 implementation: keep the Machine relay alive and put deliberate
-Ctrl+R reconnect / Ctrl+] close in its terminal, so connection loss never reaches
-SessionsStore's ordinary preparation. Terminal recovery asks the exact owner for
-a fresh screen because a local disconnect prompt changes the displayed screen;
-nonterminal relays use retained Resume bytes and fall back to a fresh attachment
-when the spool expires. Both retain the owner, reconnect token and byte position
-in memory only, request free claims without replacement, and discard outage input.
-Native presentation remains for the interactive demo.
+## Continuation decision — November 4, 2026
+
+Jack Heart authorized continuation after three usage-limit failures and newer
+capacity evidence. The existing feature Graph continued through implementation
+and sync; the former absence of a live Graph is historical. No credential or
+account-routing change was selected. Original retry evidence and stopped Graph
+IDs remain at `0e597c17a1:scratch/questions.md`. No additional product decision
+is required for the local cutover; final acceptance is still outstanding.
+
+Settings-merge assumption (November 4): file settings retain access before Work
+is compatible. The additive status/configuration operations preserve existing
+bootstrap fields and route the incoming FFI consumers through the shared server.
+This is an implementation choice within Jack Heart's complete FFI deletion.

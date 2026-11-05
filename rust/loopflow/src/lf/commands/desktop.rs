@@ -562,7 +562,7 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
 
 /// One exit status for every `lf desktop` command: 2 bad arguments, 3 missing or
 /// ambiguous target, 4 Desktop unreachable, otherwise 1. Clap exits 2 and Ctrl-C 130.
-fn exit_status(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn exit_status(error: anyhow::Error) -> anyhow::Error {
     use crate::work::selection::SelectionError;
     let selection = error
         .chain()
@@ -822,6 +822,7 @@ fn view_plan(
             return super::open::run(
                 cli,
                 &super::open::OpenArgs {
+                    files: Vec::new(),
                     url: None,
                     host: super::open::OpenHost::Desktop,
                     available: false,
@@ -870,21 +871,21 @@ pub fn saved_layout(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
     work: &str,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::work::selection::DashboardId;
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
     Ok(match work.strip_prefix("query:") {
-        Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
+        Some(id) => serde_json::to_value(DesktopLayoutRecord::Dashboard(
             &reader
                 .sqlite
                 .read_dashboard(&repository, &DashboardId(id.into()))?
                 .ok_or(crate::store::StoreError::NotFound)?
                 .saved,
         ))?,
-        None => serde_json::to_string(&DesktopLayoutRecord::Work(
+        None => serde_json::to_value(DesktopLayoutRecord::Work(
             &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
         ))?,
     })
@@ -1036,6 +1037,53 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
     dispatch(cli, command).map_err(exit_status)
 }
 
+/// Reuse the Files surface without launching Desktop or changing conversation ownership.
+pub(super) fn present_files(
+    resolution: &crate::ops::context::ContextExplanation,
+    paths: &[&std::path::Path],
+) -> Result<bool> {
+    let mut desktop = match DesktopConnection::open() {
+        Ok(desktop) => desktop,
+        Err(error)
+            if error
+                .downcast_ref::<DesktopError>()
+                .is_some_and(|error| matches!(error, DesktopError::Unreachable(_))) =>
+        {
+            return Ok(false)
+        }
+        Err(error) => return Err(error),
+    };
+    let reading: DesktopInspection = desktop.call("inspect", serde_json::json!({}))?;
+    let scope = Scope {
+        inspection: &reading,
+        resolution,
+        explicit_work: true,
+        caller: std::env::var("LF_TERMINAL_ID")
+            .ok()
+            .filter(|id| !id.is_empty()),
+    };
+    let window = scope.window(None).map_err(DesktopError::target)?;
+    let pane = scope
+        .pane(window, None, PaneNeed::for_action("files"))
+        .map_err(DesktopError::target)?;
+    for path in paths {
+        let _: DesktopActionReceipt = desktop.call(
+            "perform",
+            DesktopActionRequest {
+                repository: window.repository.clone(),
+                window: window.window.clone(),
+                pane: Some(pane.target(window)),
+                action: "files".into(),
+                args: std::collections::BTreeMap::from([(
+                    "path".into(),
+                    path.to_string_lossy().into_owned(),
+                )]),
+            },
+        )?;
+    }
+    Ok(true)
+}
+
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     match command {
@@ -1044,20 +1092,6 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
         } => {
             let record = saved_layout(cli.repository.as_ref(), &std::env::current_dir()?, work)?;
             println!("{record}");
-            return Ok(());
-        }
-        DesktopCommand::Query { .. }
-        | DesktopCommand::Pin { .. }
-        | DesktopCommand::Unpin { .. }
-        | DesktopCommand::Rename { .. }
-        | DesktopCommand::Layout { .. } => {
-            let saved = save_arrangement(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                command,
-                &mut std::io::stdin().lock(),
-            )?;
-            println!("{saved}");
             return Ok(());
         }
         DesktopCommand::View {
@@ -1133,20 +1167,6 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     }
     // Arguments are checked before Desktop is contacted.
     let verb = Verb::parse(command)?;
-    if let VerbKind::Action { name, args } = &verb.kind {
-        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
-            let record = edit_saved_tile(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                board,
-                tile,
-                name,
-                args,
-            )?;
-            println!("{record}");
-            return Ok(());
-        }
-    }
     require_supported()?;
     let json = cli.json || verb.target.json;
     let mut desktop = DesktopConnection::open()?;
@@ -1982,7 +2002,7 @@ fn edit_tiles(
 fn stream_events(desktop: DesktopConnection, json: bool) -> Result<()> {
     use std::io::Write;
     let mut events = desktop.events()?;
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = std::io::stdout();
     while let Some(change) = events.next(None)? {
         if json {
             writeln!(stdout, "{}", serde_json::to_string(&change)?)?;
@@ -3309,6 +3329,37 @@ impl DesktopTextUnavailable {
             }
             Self::NotTerminal => "The addressed pane is not a terminal.",
         }
+    }
+}
+
+pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
+    use crate::lf::DesktopCommand;
+    if matches!(
+        command,
+        DesktopCommand::Query { .. }
+            | DesktopCommand::Pin { .. }
+            | DesktopCommand::Unpin { .. }
+            | DesktopCommand::Rename { .. }
+            | DesktopCommand::Layout { save: true, .. }
+    ) {
+        return true;
+    }
+    if !matches!(
+        command,
+        DesktopCommand::Hide { .. }
+            | DesktopCommand::Show { .. }
+            | DesktopCommand::Move { .. }
+            | DesktopCommand::Do { .. }
+    ) {
+        return false;
+    }
+    match Verb::parse(command) {
+        Ok(Verb {
+            kind: VerbKind::Action { name, .. },
+            target,
+            ..
+        }) => saved_tile(&name, target.pane.as_deref()).is_some(),
+        _ => false,
     }
 }
 

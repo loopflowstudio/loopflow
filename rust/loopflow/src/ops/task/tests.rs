@@ -269,8 +269,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             workspace_slug: "reserved-checkout".into(),
             stack_parent: None,
             github: None,
-            requested_agent: None,
-            directive: None,
         };
         let saved = runtime
             .block_on(fixture.store.get_task_by_issue("new-issue"))
@@ -281,6 +279,7 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
                 &fixture.store,
                 &saved.id,
                 prepared(checkout.clone()),
+                &Default::default(),
             ))
             .unwrap();
         {
@@ -587,13 +586,11 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         branch: "test/task-recovery-fixture".to_string(),
         base_commit: "deadbeef".to_string(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,
         assignee: None,
         due_date: None,
-        regressed_in: None,
         state: None,
         completed_at: None,
         observation: Observation::NotRequired,
@@ -1087,6 +1084,16 @@ async fn task_workspace_context_covers_committed_staged_unstaged_and_untracked_b
     assert!(context.contains("Patch omitted"));
     assert!(!context.contains("content_sha256"));
     assert!(crate::prompt::count_tokens(&context) < 5_000);
+
+    // A stale comparison must not prevent an agent from recovering saved work.
+    task.base_commit = "0000000000000000000000000000000000000001".into();
+    let recovery = super::task_workspace_context(&task).unwrap();
+    assert!(recovery.contains("comparison base"));
+    assert!(recovery.contains("unavailable"));
+    assert_eq!(
+        std::fs::read_to_string(repository.path().join("tracked.txt")).unwrap(),
+        "unstaged bytes\n"
+    );
 }
 
 #[tokio::test]

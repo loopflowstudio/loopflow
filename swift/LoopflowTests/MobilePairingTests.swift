@@ -9,7 +9,7 @@ struct MobilePairingTests {
     @Test func settingsDecodeTheMachinesConfiguration() throws {
         let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/machine")
+            .appendingPathComponent("tests/fixtures/dto/server")
         let config = try JSONDecoder().decode(MobileSetup.Configuration.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("mobile_configuration.json")))
         #expect(config.enabled && config.owner.node == "node-host")

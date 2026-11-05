@@ -173,20 +173,6 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     Ok(default_db_path())
 }
 
-static IN_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// This process is an app serving Loopflow through its library: it opens only
-/// the store `lf` prepared at this build's schema, and never creates or
-/// migrates one. `lf` owns that, run once when the app starts. Set once by the
-/// app's library; never cleared.
-pub fn serve_in_app() {
-    IN_APP.store(true, std::sync::atomic::Ordering::Relaxed);
-}
-
-pub(crate) fn serves_in_app() -> bool {
-    IN_APP.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// Whether an open is the authorized owner of the shared migration frontier.
 ///
 /// Advancing `~/.lf/loopflow.db` past the frontier the installed `lf` knows must
@@ -305,7 +291,7 @@ where
     F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
 {
     let store = store.clone();
-    tokio::task::spawn_blocking(move || func(store))
+    crate::journal::request::spawn_blocking(move || func(store))
         .await
         .map_err(|err| StoreError::InvalidData(err.to_string()))?
 }
@@ -987,7 +973,16 @@ pub struct ProviderToken {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    schemars::JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[serde(transparent)]
 pub struct ProviderAccountId(String);
@@ -1088,7 +1083,9 @@ impl CredentialState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingState {
     Automatic,
@@ -1292,6 +1289,36 @@ mod tests {
     }
 
     #[test]
+    fn reads_released_task_placement_without_migrating_the_machine() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("released.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/task_placement_released.sql"
+            ))
+            .unwrap();
+        drop(connection);
+        let before = std::fs::read(&path).unwrap();
+        let mut ownership: Vec<_> = super::sqlite::read_task_worktree_ownership(&path)
+            .unwrap()
+            .into_iter()
+            .map(|owner| (owner.task, owner.completed, owner.unfinished))
+            .collect();
+        ownership.sort();
+        assert_eq!(
+            ownership,
+            vec![
+                ("local-done".into(), true, false),
+                ("remote-done".into(), false, false),
+                ("running".into(), false, true),
+                ("unknown".into(), false, true),
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
     fn advancing_the_shared_frontier_is_exclusive_to_the_promotion_boundary() {
         use super::FrontierAdvance::{Authorized, Forbidden};
         let directory = tempfile::tempdir().unwrap();
@@ -1336,13 +1363,11 @@ mod tests {
             branch: format!("jack/task-{}", &id.as_str()[3..11]),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
@@ -1582,6 +1607,7 @@ mod tests {
                         skill: crate::graph::Skill::named("review"),
                         id: None,
                         interactive: true,
+                        interactive_name: None,
                         returns: None,
                         sources: Vec::new(),
                     },
@@ -3776,6 +3802,11 @@ mod tests {
 
         store.upsert_provider_account(&primary).await.unwrap();
         assert!(store.upsert_provider_account(&duplicate).await.is_err());
+        assert!(store
+            .get_provider_account("claude", &duplicate.account_id)
+            .await
+            .unwrap()
+            .is_none());
 
         duplicate.provider = "codex".to_string();
         store.upsert_provider_account(&duplicate).await.unwrap();

@@ -231,13 +231,17 @@ lf unset account.codex
 lf account route --json
 ```
 
-A launch uses the nearest of Wave, repository and global routes. Show lists
-eligible launch candidates in order without selecting one; its explicit
-`--repo` and `--default` work outside Git. A repository route requires a
-repository origin.
+Account order uses the personal global, repository or Wave scope. Repository and
+Wave declarations live in the clone's `lf.config.local.yaml`; linked Task worktrees
+share that file, while independent clones can choose different orders. Global
+orders live in `~/.lf/config.yaml`. `set`, `unset` and hand edits reach the same
+configuration; no DB override sits above the file.
 
-It is account-selection metadata, not an SSH or network route, and it contains
-no credential. Repository routes live in the local Loopflow database.
+The list contains account references, not credentials or network routes. Account
+registration, observed eligibility, usage and conversation attribution retain their
+runtime owners. No per-skill account policy exists. For remote work, the initiating
+profile supplies account preferences and the executor supplies its own credentials.
+See [Configuration](config.md#remote-work) for forwarding and retained preferences.
 
 A managed launch tries the repository route, then the default provider route.
 Without either route, every automatically eligible managed identity is a
@@ -251,7 +255,7 @@ attempt, including headless Task steps before a provider session ID is available
 Later attempts retain earlier account evidence; a null account means ambient
 execution. Once the provider reports its native identity, continuation must retain
 that identity and selected account/native Machine. Requested account and actual
-selection are different evidence; [cutover status](architecture/reference-cutover.md#cutover-status)
+selection are different evidence; [cutover status](dev/reference-cutover.md#cutover-status)
 records the remaining history/account conversion.
 
 Prefer an account while keeping the normal route as fallback:
@@ -356,7 +360,7 @@ lf session history 0199a213-81c0-7800-8aa1-bbab2a035a53
 Resuming a conversation plain Codex started brings it in as a Session with
 no Task. Normal batch completion and closing the current connected interface
 close its Codex process, leaving saved history available to plain `codex resume`.
-`lf resume` takes over a running conversation without restarting it;
+`lf resume` reconnects to a running conversation without restarting it;
 the old attachment's exit cannot close the new owner's Codex process. Codex allows one
 writer per conversation, so use `lf resume` while it is still running.
 

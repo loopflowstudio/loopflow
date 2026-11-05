@@ -164,7 +164,9 @@ struct SessionBindingDraft: Equatable {
     let id = UUID()
     let sessionId: String
     let title: String
+    var assignedTaskId: String?
     var selector = ""
+    var taskTitle = ""
     var preview: SessionBindingPreview?
     var submitting = false
     var error: String?

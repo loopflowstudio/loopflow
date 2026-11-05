@@ -3,6 +3,8 @@
 //! Release receipts live outside the data directory. Ordinary commands share
 //! the main Machine; explicit experiments never change installed artifact selection.
 
+pub mod server;
+
 use std::collections::HashSet;
 #[cfg(unix)]
 use std::ffi::{CStr, OsString};

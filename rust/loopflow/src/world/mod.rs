@@ -25,6 +25,7 @@ use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
+use crate::portfolio::{self, PortfolioCommand};
 use crate::process::{LfProcess, ProcessKind};
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
@@ -289,10 +290,13 @@ impl World {
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
         // Manual membership: folder mode would scan the person's own ~/src.
-        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)?;
-        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
-            paths: vec![repo.clone()],
-        })?;
+        portfolio::change(&PortfolioCommand::Manual, &repo)?;
+        portfolio::change(
+            &PortfolioCommand::Add {
+                paths: vec![repo.clone()],
+            },
+            &repo,
+        )?;
         crate::ops::planning_sync::defer_exchange(true);
         Ok(Self {
             dir,
@@ -373,12 +377,14 @@ impl World {
         for (name, value) in env.vars() {
             std::env::set_var(name, value);
         }
-        let registered = crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)
-            .and_then(|_| {
-                crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
+        let registered = portfolio::change(&PortfolioCommand::Manual, &repo).and_then(|_| {
+            portfolio::change(
+                &PortfolioCommand::Add {
                     paths: vec![repo.clone()],
-                })
-            });
+                },
+                &repo,
+            )
+        });
         for (name, value) in self.env.vars() {
             std::env::set_var(name, value);
         }
@@ -481,7 +487,7 @@ impl World {
             wave,
             Some(title.to_string()),
             Some(report.to_string()),
-            None,
+            crate::ops::task::TaskAdoptionOptions::default(),
         )?)
     }
 
@@ -768,7 +774,7 @@ impl World {
         let store = self.store()?;
         let session = self
             .runtime
-            .block_on(provider_conversation::admit(&store, &id))?
+            .block_on(provider_conversation::admit(&store, &id, &cwd))?
             .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
         let session_id = session.id.to_string();
         if let Some(task) = task {

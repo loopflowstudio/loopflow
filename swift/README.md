@@ -643,7 +643,7 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WaveDetailPane.swift` — streamed Project plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
-- `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
+- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; CLI execution launches
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
 `LoopflowMac` target contains AppKit, process management, menus, and other
@@ -673,7 +673,8 @@ launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
 
-Only `/Applications/Loopflow.app` updates itself (`AppUpdater`, Sparkle): it
+The installed app updates itself (`AppUpdater`, Sparkle), including a custom
+location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
 reads its stream from `~/.lf/config.yaml`, asks its bundled
 `lf install can-open` before installing, and runs `lf install adopt` on the first
 launch of a new version. Dev builds, and a Machine recording `dev` (which has no
@@ -755,21 +756,29 @@ lf desktop sessions --json --watch         # the repository's Sessions as Deskto
 lf planning status --json --watch          # stored sync receipts
 ```
 
-A window observes these reads through `RegistryQuery.watchWork()`, one
-subscription per part. The roadmap read/watch crosses the Machine socket; the
-service uses the shared Rust subscription. Other parts still run through the
-in-app Rust library (`rust/loopflow-ffi/include/loopflow.h`). Each part names its
-`ServedRead`, the `lf` command above that prints the same frames. Task files,
-diffs, Waves, Machine identity, Portfolio, saved panes, Task owners and Graphs
-still use that library. Service readiness may start the selected `lf` helper.
-Session rename crosses the Machine service and runs the complete CLI command.
-Completing, reopening, deferring, moving and editing a Task, saving a Task
-file, binding a Session, ensuring a Wave's Project, the planning
-refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
-library calls the function their `lf` command calls and records the same
-Process; arrangement records none, as its command does. Other writes, the
-commands that start work (`task create --run`, `task run`, `ship`, `resume`,
-`session connect`) and other Machines' reads still run the bundled `lf`. The parts: the plan, the repository's Dashboard plans
+A window observes these reads through `RegistryQuery.watchWork()`, one server
+subscription per part. All `ServedRead` and `ServedWrite` operations cross the
+same local protocol, including Task files, diffs, Waves, Machine identity,
+Portfolio, saved panes, Task ownership and Graphs. Desktop links no Loopflow Rust
+library; GhosttyKit remains its native renderer.
+
+The [server boundary](../docs/dev/server.md) puts registration and updates under
+installation. First connection obtains the selected helper; later connections
+only reconnect. CLI commands and served writes use the same Rust mutation
+dispatcher for routing, defaults, effects and formatting, with an explicit
+directory and input/output/error streams. Each served write runs in a
+request-scoped worker, starts no ordinary CLI child and creates no Process row.
+Its response trace correlates diagnostics and effects in `logs/lf.log`; it grants
+no execution ownership or permission to retry. Canceling releases the client's
+wait, but an admitted mutation may still complete. A lost response is an unknown
+outcome: refresh authoritative state before another deliberate edit. Desktop
+never automatically resubmits it. Session-to-Task adoption uses this shared write
+path without launching work. Create-and-run and other execution launches retain
+their ordinary CLI path and existing Session/Graph owners;
+remote Machine streams retain their CLI transports. Desktop's UI automation
+remains app-owned.
+
+The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
@@ -795,9 +804,11 @@ Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never
 automatically repeated.
 
-Each watch's pipes drain off the main actor. A watch speaks only on change, so
-silence is not a stall; cancellation closes stdin, then terminates and reaps only
-the owned process if necessary.
+Local subscriptions use server sockets off the main actor. Cancellation closes
+the connection; reconnect opens a fresh subscription without replaying revisions.
+Remote Task file watches retain their CLI pipes, drained off the main actor;
+cancellation closes stdin, then terminates and reaps only the owned reader if
+necessary. A watch that speaks only on change is not stalled merely by silence.
 
 ## Headless checks
 
@@ -909,7 +920,9 @@ exact window and pane, and `lf desktop` resolves those from one inspection (see 
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,
 same-uid peers, a stale file unlinked) and answers newline-delimited JSON:
 `inspect`, `perform`, `read_text` and `events`. It serves only `lf desktop` and
-hosts no Sessions. An unknown action or bad argument throws `DesktopArgumentError`
+hosts no Sessions. This app-owned automation endpoint closes with Desktop; the
+shared client API server has an independent lifetime and serves Work/terminal
+access. An unknown action or bad argument throws `DesktopArgumentError`
 (code `argument`, exit 2); a stale or missing target throws `DesktopTargetError`
 (`target`, exit 3); another API version answers `version`. The receipt carries the
 window's destination and the affected workspace in the same MainActor turn, so it
@@ -965,14 +978,18 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 ## Testing
 
-Task readings and Session rename use the installed Machine service; Session
-terminals bridge their existing owner through it. A lost Machine bridge leaves the
-relay and native surface alive: Ctrl+R reconnects that exact owner and refreshes its
-screen; Ctrl+] closes. Recovery never prepares or resumes a provider, and a newer
-viewer retains control until an explicit Move here. These operations surface service
-errors without a direct FFI fallback. Other Work operations retain FFI until their
-cutover. See the [local protocol](../rust/loopflow/src/machine_service/README.md).
-`scripts/test_desktop.sh --filter MachineProtocolTests` builds the consumer and
+Test shared Work through the [server protocol](../rust/loopflow/src/server/README.md).
+Rust's `served_reads` verifies CLI/server mutation parity, input/output/errors,
+concurrent request traces in `logs/lf.log`, and no request Process rows or global
+context changes. Native cancellation releases the client's wait; a lost reply
+remains unknown without replay.
+
+Terminal recovery must preserve the exact owner, draft and newer control claims.
+Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
+one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
+ended. Installed-helper replacement must preserve the Session and Graph owners
+and prove continued input and Graph progress; a socket restart alone is insufficient.
+`scripts/test_desktop.sh --filter ServerProtocolTests` builds the consumer and
 checks shared Rust/Swift fixtures. Installation needs the selected app bundle;
 source experiments select a separate `LF_HOME`.
 
@@ -996,7 +1013,6 @@ for optional hosted execution and cleanup.
 
 ```bash
 cargo build -p loopflow --bin lf # Real CLI transport proofs
-uv run python scripts/loopflow-dev.py ffi # The Rust library the app links; test_desktop.sh builds it too
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered

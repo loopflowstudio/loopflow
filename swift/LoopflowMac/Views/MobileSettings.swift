@@ -134,7 +134,7 @@ final class MobileSetup {
     }
 
     private static func command(_ arguments: [String]) async throws -> String {
-        try await LocalWaveAgentLauncher.queryLf(["machine", "service"] + arguments, cwd: "/")
+        try await LocalWaveAgentLauncher.queryLf(["server"] + arguments, cwd: "/")
     }
 
     private func perform(_ activity: String, _ body: @escaping @MainActor () async throws -> Void) {

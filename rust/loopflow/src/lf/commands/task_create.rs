@@ -18,6 +18,8 @@ use crate::ops::human_session::primary;
 use crate::store::{open_store, storage_config_from_env};
 use crate::work::task::Task;
 
+use super::mutation::CommandIo;
+
 /// What `lf task create --run --json` prints whenever the Task was filed: the
 /// Task, the graph it took up and its admitted conversation. A headless (`-b`)
 /// run admits no conversation; a run that failed leaves both absent and the
@@ -29,10 +31,67 @@ pub struct TaskCreateReceipt {
     pub session_id: Option<crate::id::LfSessionId>,
 }
 
-/// Refuse an unknown graph before any Task exists, so a typo leaves nothing behind.
-pub fn check_graph(repo: &Path, name: &str) -> Result<()> {
-    crate::ops::task::load_graph(name, "", repo)?;
-    Ok(())
+/// File or adopt a Task with the caller's streams; execution remains separate.
+pub fn create(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<Task> {
+    let TaskCommand::Create {
+        session,
+        worktree,
+        request,
+        no_wave,
+        wave,
+        title,
+        notes,
+        run,
+        graph,
+        json,
+        request_id: _,
+        terminal: _,
+    } = command
+    else {
+        bail!("expected task create");
+    };
+    if let Some(graph) = graph {
+        // Validate before creation so a typo leaves no Task behind.
+        crate::ops::task::load_graph(graph, "", repo)?;
+    }
+    let report = match request.as_ref().or(notes.as_ref()) {
+        Some(text) => Some(text.clone()),
+        None => read_report(io.input)?,
+    };
+    let task = crate::ops::task::task_create(
+        repo,
+        if *no_wave { None } else { wave.as_deref() },
+        title.clone(),
+        report,
+        crate::ops::task::TaskAdoptionOptions {
+            session: session.clone(),
+            worktree: worktree.clone(),
+        },
+    )?;
+    match (*json, *run) {
+        (false, _) => writeln!(io.output, "{} · {}", task.title, task.identifier)?,
+        (true, false) => writeln!(io.output, "{}", serde_json::to_string_pretty(&task)?)?,
+        // The launch prints one receipt once the run settles.
+        (true, true) => {}
+    }
+    if let Some(provider) = crate::config::load_config_or_default(Some(repo))
+        .planning_transport()
+        .remote_name()
+        .filter(|_| task.linear_id.is_none())
+    {
+        writeln!(
+            io.error,
+            "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
+            task.identifier
+        )?;
+    }
+    Ok(task)
+}
+
+pub fn read_report(input: &mut dyn std::io::Read) -> Result<Option<String>> {
+    let mut report = String::new();
+    input.read_to_string(&mut report)?;
+    Ok((!report.trim().is_empty()).then_some(report))
 }
 
 /// Start the created Task and open its conversation.
@@ -149,7 +208,6 @@ struct Intent<'a> {
     title: Option<&'a str>,
     report: Option<&'a str>,
     request: Option<&'a str>,
-    regressed_in: Option<&'a str>,
     graph: Option<&'a str>,
     agent: Option<&'a str>,
     step_args: Vec<String>,
@@ -171,7 +229,6 @@ pub fn recoverable(
                 request,
                 wave,
                 title,
-                regressed_in,
                 graph,
                 terminal,
                 ..
@@ -187,7 +244,6 @@ pub fn recoverable(
         title: title.as_deref(),
         report: report.as_deref(),
         request: request.as_deref(),
-        regressed_in: regressed_in.as_deref(),
         graph: graph.as_deref(),
         agent: cli.agent.as_deref(),
         step_args: cli.step_args(),
@@ -237,17 +293,15 @@ pub fn recoverable(
         });
     }
     if let Some(graph) = graph {
-        check_graph(&repo, graph)?;
+        // Validate before creation so a typo leaves no Task behind.
+        crate::ops::task::load_graph(graph, "", &repo)?;
     }
-    let regression = regressed_in.as_deref().map(|version| {
-        crate::work::task::release_version(version).unwrap_or_else(|| version.to_owned())
-    });
     let task = crate::ops::task::task_create_with_id(
         &repo,
         wave.as_deref(),
         title.clone(),
         report,
-        regression,
+        crate::ops::task::TaskAdoptionOptions::default(),
         reservation.task_id.clone(),
     )?;
     store.sqlite.begin_task_create_start(&id)?;

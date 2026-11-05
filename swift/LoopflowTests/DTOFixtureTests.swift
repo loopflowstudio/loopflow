@@ -629,6 +629,7 @@ struct DTOFixtureTests {
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
+        #expect(detail.tasks.items[0].runtime?.provider == nil)
         #expect(detail.tasks.items[0].task.sync.changes[0].field == "creation")
         #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
         #expect(detail.tasks.items[0].task.linearId == "issue-1")

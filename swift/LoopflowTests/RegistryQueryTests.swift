@@ -7,6 +7,46 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Session adoption returns the served Task and preserves uncertain failure")
+    func servedSessionAdoption() async throws {
+        actor Adoption {
+            var attempts = 0
+            func submit(title: String) throws -> String {
+                attempts += 1
+                if title == "Uncertain" { throw RegistryQueryError("Outcome unknown") }
+                return #"{"id":"task-retained","identifier":"FIX-1","title":"Keep the conversation"}"#
+            }
+        }
+        let adoption = Adoption()
+        let query = RegistryQuery(write: { change in
+            guard case .taskFromSession(_, _, let title) = change else {
+                throw RegistryQueryError("Unexpected write")
+            }
+            return try await adoption.submit(title: title)
+        }) { _, _ in throw RegistryQueryError("Unexpected execution launch") }
+        let task = try await query.createTaskFromSession(id: "session-retained", title: "Keep the conversation", cwd: "/repo")
+        #expect(task.id == "task-retained")
+        #expect(task.title == "Keep the conversation")
+        do {
+            _ = try await query.createTaskFromSession(id: "session-retained", title: "Uncertain", cwd: "/repo")
+            Issue.record("An uncertain adoption succeeded")
+        } catch {
+            #expect(error.localizedDescription == "Outcome unknown")
+        }
+        #expect(await adoption.attempts == 2)
+    }
+
+    @Test("Settings inspection retains skill and authored occurrence selectors")
+    func settingsInspection() throws {
+        let read = ServedRead.settings(directory: "/r", wave: nil, skill: nil, graph: "release", step: "write-code")
+        #expect(read.argv == ["config", "show", "--json", "--graph", "release", "--step", "write-code"])
+        let data = try JSONEncoder().encode(read)
+        let value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(value["read"] as? String == "settings")
+        #expect(value["graph"] as? String == "release")
+        #expect(value["step"] as? String == "write-code")
+    }
+
     @Test("Graph logs read captured execution from the content Machine, never a peer path locally")
     func contentRoutedGraphLog() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -327,7 +367,7 @@ struct RegistryQueryTests {
           "provider": "codex",
           "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
         },
-        "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move": {
           "owner": "task",
           "reason": "ready"

@@ -1,12 +1,11 @@
 use std::fs;
-use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::support;
+use loopflow::server::client::Connection;
 use loopflow_test_support::TestRepo;
 use sha2::{Digest, Sha256};
 
@@ -29,7 +28,7 @@ impl Service {
         let socket = PathBuf::from(format!("/tmp/lf-{uid}-{}", &hash[..16])).join("machine.sock");
         let child = fixture
             .command()
-            .args(["machine", "service", "run"])
+            .args(["server", "run"])
             .stdout(Stdio::null())
             .stderr(fs::File::create(fixture.home.path().join("service.stderr")).unwrap())
             .spawn()
@@ -37,29 +36,24 @@ impl Service {
         let mut service = Self { child, socket };
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if UnixStream::connect(&service.socket).is_ok() {
+            if Connection::open_at(&service.socket).is_ok() {
                 return service;
             }
             assert!(
                 service.child.try_wait().unwrap().is_none(),
-                "Machine service exited"
+                "Loopflow server exited"
             );
-            assert!(Instant::now() < deadline, "Machine service did not listen");
+            assert!(Instant::now() < deadline, "Loopflow server did not listen");
             std::thread::sleep(Duration::from_millis(20));
         }
     }
 
-    fn send(&self, request: &loopflow::machine_service::wire::Request) -> UnixStream {
-        let mut stream = UnixStream::connect(&self.socket).unwrap();
-        stream
+    fn connect(&self) -> Connection {
+        let connection = Connection::open_at(&self.socket).unwrap();
+        connection
             .set_read_timeout(Some(Duration::from_secs(20)))
             .unwrap();
-        let bytes = serde_json::to_vec(request).unwrap();
-        stream
-            .write_all(&(bytes.len() as u32).to_be_bytes())
-            .unwrap();
-        stream.write_all(&bytes).unwrap();
-        stream
+        connection
     }
 }
 
@@ -72,9 +66,9 @@ impl Drop for Service {
 }
 
 #[test]
-fn task_create_survives_a_dropped_carrier_and_machine_service_restart() {
+fn task_create_survives_a_dropped_carrier_and_server_restart() {
     use loopflow::lf::commands::write::Write as Change;
-    use loopflow::machine_service::wire::{Operation, Reply, Request, Response, VERSION};
+    use loopflow::server::wire::{Operation, Reply};
     let task = CreationFixture::new();
     task.repo.push();
     let id = loopflow::id::TaskCreateRequestId::new();
@@ -86,15 +80,12 @@ fn task_create_survives_a_dropped_carrier_and_machine_service_restart() {
         wave: None,
         graph: Some("feature".into()),
     };
-    let mut request = Request {
-        version: VERSION,
-        id: "lost-reply".into(),
-        operation: Operation::Command {
-            change: change.clone(),
-        },
+    let operation = || Operation::Command {
+        change: change.clone(),
     };
     let service = Service::start(&task);
-    let lost = service.send(&request);
+    let mut lost = service.connect();
+    lost.send(operation()).unwrap();
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
@@ -135,28 +126,18 @@ fn task_create_survives_a_dropped_carrier_and_machine_service_restart() {
     task.wait_for_graphs();
     drop(service);
     let service = Service::start(&task);
-    request.id = "recovered-reply".into();
-    let mut socket = service.send(&request);
-    let mut size = [0; 4];
-    socket.read_exact(&mut size).unwrap();
-    let mut bytes = vec![0; u32::from_be_bytes(size) as usize];
-    socket.read_exact(&mut bytes).unwrap();
-    let response: Response = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(response.id, request.id);
+    let reply = service.connect().request(operation()).unwrap();
     let Reply::Command {
-        output,
+        value,
         code,
         stderr,
         ..
-    } = response.result
+    } = reply
     else {
-        panic!("{response:?}");
+        panic!("{reply:?}");
     };
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&output).unwrap(),
-        saved
-    );
+    assert_eq!(value.expect("task create --json prints JSON"), saved);
     let args = change.argv();
     let output = task.run(&args.iter().map(String::as_str).collect::<Vec<_>>());
     assert!(

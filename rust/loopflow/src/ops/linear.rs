@@ -148,9 +148,14 @@ pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
 }
 
 pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
-    let transport = crate::config::load_planning_transport(repo).map_err(|error| {
-        OpsError::Message(format!("failed to read planning configuration: {error}"))
-    })?;
+    // The team is repository identity even when a personal preference selects
+    // another synchronization transport. Connecting must retain that binding.
+    let transport = crate::config::load_repo_config(repo)
+        .map_err(|error| {
+            OpsError::Message(format!("failed to read planning configuration: {error}"))
+        })?
+        .unwrap_or_default()
+        .planning_transport();
     Ok(match transport {
         crate::config::PlanningConfig::Linear { team } => {
             team.filter(|team| !team.trim().is_empty())
@@ -2329,7 +2334,7 @@ mod tests {
     }
 
     #[test]
-    fn connect_overrides_personal_git_without_rebinding_the_repository() {
+    fn connect_preserves_personal_transport_and_repository_binding() {
         with_pm_home(|home, runtime| {
             std::fs::write(
                 home.path().join("config.yaml"),
@@ -2374,8 +2379,9 @@ mod tests {
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
                         assert_eq!(
                             config.planning_transport(),
-                            crate::config::PlanningConfig::Linear {
-                                team: Some("team-1".into())
+                            crate::config::PlanningConfig::Git {
+                                remote: "personal".into(),
+                                plan: crate::config::GitPlan::Shared("private".into()),
                             }
                         );
                         assert_eq!(
@@ -2503,37 +2509,39 @@ mod tests {
 
     #[test]
     fn connection_selects_linear_and_preserves_unrelated_authored_content() {
-        let repo = tempfile::tempdir().unwrap();
-        write_repo_config(
-            repo.path(),
-            "agent: codex\nplanning:\n  provider: git\n  shared: colleagues\n",
-        );
-        write_goal(repo.path(), "product", "agent: claude\n");
-        let goal = repo.path().join(".lf/wave/product/GOAL.md");
+        with_pm_home(|_, _| {
+            let repo = tempfile::tempdir().unwrap();
+            write_repo_config(
+                repo.path(),
+                "agent: codex\nplanning:\n  provider: git\n  shared: colleagues\n",
+            );
+            write_goal(repo.path(), "product", "agent: claude\n");
+            let goal = repo.path().join(".lf/wave/product/GOAL.md");
 
-        write_repository_linear_config(repo.path(), "team-product").unwrap();
-        write_initiative_to_wave(repo.path(), "product", "initiative-product").unwrap();
-        let config = crate::config::load_repo_config(repo.path())
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            config.planning_transport(),
-            crate::config::PlanningConfig::Linear {
-                team: Some("team-product".into())
-            }
-        );
-        assert_eq!(config.agent.as_deref(), Some("codex"));
-        let updated = std::fs::read_to_string(goal).unwrap();
-        assert!(updated.ends_with("---\nDrive the work.\n"));
-        let wave = crate::config::load_wave_config(Some(repo.path()), Some("product"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(wave.agent.as_deref(), Some("claude"));
-        let wave = read_wave_config(repo.path(), "product").unwrap();
-        assert_eq!(
-            wave.linear.unwrap().initiative.as_deref(),
-            Some("initiative-product")
-        );
+            write_repository_linear_config(repo.path(), "team-product").unwrap();
+            write_initiative_to_wave(repo.path(), "product", "initiative-product").unwrap();
+            let config = crate::config::load_repo_config(repo.path())
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                config.planning_transport(),
+                crate::config::PlanningConfig::Linear {
+                    team: Some("team-product".into())
+                }
+            );
+            assert_eq!(config.agent.as_deref(), Some("codex"));
+            let updated = std::fs::read_to_string(goal).unwrap();
+            assert!(updated.ends_with("---\nDrive the work.\n"));
+            let wave = crate::config::load_wave_config(Some(repo.path()), Some("product"))
+                .unwrap()
+                .unwrap();
+            assert_eq!(wave.agent.as_deref(), Some("claude"));
+            let wave = read_wave_config(repo.path(), "product").unwrap();
+            assert_eq!(
+                wave.linear.unwrap().initiative.as_deref(),
+                Some("initiative-product")
+            );
+        });
     }
 
     #[test]

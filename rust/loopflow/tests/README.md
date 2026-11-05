@@ -39,6 +39,11 @@ Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
 when adding a table: give displayed rows revision triggers and classify operation-only
 receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
 its shared repository publishes authored files that lifecycle operations may already commit.
+When settings leave SQLite, search fixture SQL in `src/`, `tests/`, and
+`tests/e2e/` for removed columns and tables. Seed preferences through `lf set`;
+keep runtime observations in SQLite. Run account, Machine, Wave lifecycle, and
+context-budget regressions as well as migration tests: moving storage must
+preserve their existing behavior.
 
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
@@ -63,6 +68,44 @@ prompt/stop callbacks from the generated hook settings, preserves silent work
 past the detached grace and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
+
+`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
+holds a SQLite writer while typing and returning to the viewer. Control stays
+responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery
+without replay. `transport::input_retry_tests` bounds polling through a failed
+store and verifies recovery through the real descriptor loop.
+
+`transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
+owners while resuming their Sessions. Drafts, pending requests, turns, Graph
+ancestry/steps and Runs retain the same provider, attachment and capture; no new
+provider launches. A completed Session is unknown, not work: its unanswering owner
+ends and resume continues on one new provider, while an answering one is attached.
+The matching rollover unit test preserves the named retention reasons and permits
+movement after protected work settles.
+
+Upgrade recovery also needs `transport_tests`: retained hooks must settle through
+ContextBlock, exclude subagents and report real delivery errors. Public resume
+must retain drafts, requests, history and Session/Task/capture identity through
+build replacement and viewer return; only provider replacement changes its fence.
+An unanswering protected owner survives failed attachment and completes continued
+turns after transport returns.
+`session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
+natural helper exit permits continuation, persistent helpers refuse it without
+signals or settlement, and both retain Task/history/steers. These stand-ins use
+candidate wire/schema; released-version, permanently broken transport and
+installed-provider recovery still need separate proof.
+Use published 0.15.1 for the released boundary: its owner speaks newline JSON
+and predates native-input tracking. Prove attachment and retention of an unsent
+draft before allowing its provider to be replaced; an absent input record does
+not establish that an older provider's editor is empty.
+Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
+a shallow checkout orders all slugs as drafts and can reject the released store
+before reaching the interaction under test.
+
+Hook command spelling or Clap declaration changes also run
+`cargo test -p loopflow --test integration cli_discovery::`. Its alias contract
+keeps the exact callback retained by running providers while rejecting other
+command aliases; run it alongside the retained-hook upgrade test.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
@@ -117,7 +160,7 @@ public live steering. It uses a local model and disposable homes; configured-acc
 and rendered acceptance remain separate.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
-`explicit_launch_policy_survives_task_workflow_nested_graphs_and_provider_children` when
+`explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own_agent` when
 integrating Claude transport changes; bound the test so missing acknowledgements
 fail locally instead of exhausting the merge queue's deadline.
 Cross-provider replay fixtures must install stand-ins for both the recorded and
@@ -368,6 +411,25 @@ skills and Graph recipes into the checkout; default sync exports globally.
 cargo test -p loopflow --lib skills::tests
 ```
 
+Settings and recipe changes also run the provider-boundary matrix:
+
+```bash
+cargo test -p loopflow --test integration settings_launch_tests::
+```
+
+It executes exported commands and runtime Graphs, comparing inspected settings
+with provider arguments and delivered documents. Preserve defining Graph IDs
+through composition, live repository skill overrides in global recipes, personal/shared
+file precedence, explicit CLI/environment selection and empty/false/unset values.
+Session/resume fixtures create local Tasks through the CLI and wait for each
+worker before reading its selection. Stand-ins establish launch behavior, not
+configured-provider recovery. Claude's headless permission floor is independent
+of the resolved `yolo` preference; terminal bypass checks own its negation.
+Launch and preview fixtures select a harness explicitly or save a fixture-local
+`default_agent`; they must not depend on the developer's installed providers.
+Keep composed launch matrices split into bounded behavioral cases so each stays
+within the ordinary CI test deadline without dropping assertions.
+
 After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch
 reflects the intended prompt change, regenerate the snapshots, review their
@@ -416,6 +478,11 @@ historical fixtures for merged migration coverage. A Task's migration is edited
 in place, so test the merged frontier against the finished migration and write
 no test for a schema that existed only between two edits.
 
+Installer preview regressions assert validation and preserved files independently
+of promotion eligibility, which depends on the build's Git history. Exercise them
+with `LOOPFLOW_MIGRATION_ORDER=/dev/null` as well as the normal catalog to cover
+builds that classify slug migrations as unmerged.
+
 A source copy without Git metadata must set `LOOPFLOW_BUILD_PROVENANCE=development`
 when exercising source behavior, and `LOOPFLOW_MIGRATION_ORDER` when it carries
 slug migrations; it also cannot prove fixtures that require `git rev-parse HEAD`.
@@ -435,7 +502,7 @@ suite does not check those additions.
 `docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
 appends the command tree from `lf help --all --json`, so a command or help-text
 change needs no reference update.
-Keep README and docs/index openings identical and regenerate docs/architecture.html
+Keep README and docs/index openings identical and regenerate docs/dev/index.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.
 
@@ -812,24 +879,57 @@ Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
 
-## Machine service
+## Client API server
+
+The [server boundary](../../../docs/dev/server.md) assigns socket behavior
+to client access; OS registration/replacement belongs to installation. Their
+composed test must continue to prove both with existing execution owners live.
 
 ```bash
-cargo test -p loopflow --lib machine_service::
-cargo test -p loopflow --test transport_tests machine_service_refreshes_work_and_preserves_owner_and_graph_across_restart
-cargo test -p loopflow --test transport_tests machine_service_reconnect_
-cargo test -p loopflow --test transport_tests installed_machine_service_preserves_owner_and_graph_across_replacement -- --ignored
+cargo test -p loopflow --lib server::
+cargo test -p loopflow --test served_reads
+cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
+cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
+cargo test -p loopflow --test transport_tests server_subscriptions_refresh_work_and_resolve_primary_session
+cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
+cargo test -p loopflow --test transport_tests server_reconnect_
+cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
+cargo test -p loopflow --test transport_tests server_move_here_
+cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
 ```
 
-The ordinary socket proof covers Task subscription changes, CLI/command parity,
-authoritative primary-Session selection, concurrent trace isolation and editable
-owner/Graph continuity with the real relay connected during service restart.
+The development registration proof uses two isolated launchd labels: disabled
+legacy setup refuses; enabling it lets concurrent readiness requests retire the
+old job and obtain one server while preserving a live owner. The installed socket
+address/lock remain stable so old relays can reconnect while an obsolete server
+executable cannot open a competing listener.
+The bundled registrar harness separately proves SMAppService label migration.
+
+`served_reads` covers CLI/server effect parity and concurrent request traces
+without request Process rows. The transport subscription proof covers live Task
+changes and authoritative primary-Session selection.
+Separate lifecycle proofs keep the real relay connected through server restart,
+installed replacement and explicit takeover with an editable draft and live Graph.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer
 viewers retaining input/geometry, expired output and owner exit without relaunch.
-The opt-in macOS variant uses a unique launchd job and disposable Machine, then
-boots it out. Run it outside the runner's network sandbox. A separate signed
-bundle proof runs `uv run python scripts/test_machine_service_registration.py`;
-it exercises the production SMAppService registrar without starting Work. These
-separate proofs do not replace an installed executable while Work is active.
+Failed-start recovery consumes readiness once, preserves its diagnostic across
+Retry, and observes independent installation repair without replacing newer claims.
+`ServerClientTests` covers the same registration boundary for Work read refresh
+and reopened watches, including failed subprocess and unready status responses.
+Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
+acknowledgement before a newer claim, reject stale actions and cancel a queued
+action on pane closure. Native mailbox tests cover presentation until acknowledgement;
+rendered copy/Find/scroll and the visible action remain interactive demo evidence.
+The opt-in macOS variant creates an isolated signed app bundle, starts the owner
+and Graph from its installed helper, replaces that executable inode with identically
+signed bytes, verifies the bundle seal and invokes the production SMAppService
+replacement registrar while
+the draft remains held. A fresh relay acknowledgement must precede submission;
+the exact owner/provider survives and the Graph advances. Cleanup unregisters the
+unique job and LaunchServices registration. The updater runs as the signed app
+through LaunchServices; no UI or App Management permission changes are needed.
+Run outside the network sandbox. The underlying registrar harness is
+`scripts/test_server_registration.py`; its default mode separately checks
+idempotent registration without Work. Native rendered continuity remains demo.
 Linux supervisor replacement remains a Linux installation check; this service
 starts no providers or Graphs, and keeps systemd's control-group cleanup.

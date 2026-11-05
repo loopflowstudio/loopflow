@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "id": "mobile-status-1",
-  "operation": {
-    "kind": "mobile_status"
-  }
-}

@@ -26,6 +26,23 @@ workspace starts and you get the one workspace.
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
 
+## Present documentation in Desktop
+
+```bash
+lf open --host desktop --file docs/usage.md --file README.md
+```
+
+Present the original files in an attached Desktop Files view, without starting a
+host or conversation. Paths are relative to the selected checkout. Markdown and
+HTML render in read mode; active edits keep their selection and draft while
+another file becomes a tab. Desktop retains its existing remote Files transport.
+
+With no Desktop attached, the command reports paths and opens nothing. A missing
+file, invalid Work selection or unmatched view reports an error; correct the
+path or destination and retry presentation without rewriting the docs. The
+docs-first workflow reports paths and continues when presentation is unavailable.
+It never launches a terminal editor, browser or host as a fallback.
+
 ## Share a link
 
 ```bash
@@ -62,11 +79,22 @@ Queries take `wave:`, `task:`, `kind:task|wave` and
 `state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
 means AND, and `or` and parentheses compose.
 
+### Connection recovery
+
+Desktop uses the local Loopflow server to read Work and attach Session terminals.
+Installation prepares the connection. Check availability with `lf server status`.
+The native connection row shows recovery while keeping the screen and local
+reading actions available; input waits for acknowledgement. **Retry** reconnects;
+**Move here** explicitly requests control when another viewer has it. Recovery
+never replays uncertain input. See [Connect clients](server.md) for updates,
+background access and the distinction from Machine execution destinations.
+
 ## Drive Desktop from a script
 
 `lf desktop` is Desktop's own pane API, the same kind of thing as tmux's,
 cmux's, Herdr's or Rex's. Use theirs directly in those hosts; use this one in
-Desktop. Every key and menu item is a verb here by the same name.
+Desktop. Every key and menu item is a verb here by the same name. This automation
+endpoint lives with the app; the client server has an independent lifetime.
 
 ```bash
 lf desktop run 'cargo test -p loopflow'           # a new shell tab in the Task's checkout; focus stays put

@@ -126,7 +126,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     turn.agent = resolved.agent.clone();
     let message = if session.captured.is_some()
         && session.provider.as_deref()
-            != Some(crate::config::parse_agent(resolved.agent()).0.as_str())
+            != Some(crate::config::parse_agent(resolved.agent()?).0.as_str())
     {
         let request = crate::ops::human_session::conversation_log::continuation(&store, &session)?;
         format!("{request}\n\n{message}")
@@ -230,7 +230,6 @@ fn build_bound_prompt(
 ) -> Result<PromptBuild> {
     let mut launch = cli.process_options();
     launch.wave = binding.wave_name.clone();
-    launch.agent = binding.agent.clone().or(launch.agent);
     let arguments = message.unwrap_or_default();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
@@ -463,6 +462,7 @@ fn build_prompt_at(
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
     captured: bool,
 ) -> Result<PromptBuild> {
+    let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
     let is_interactive = is_interactive_run(cli, skill, message);
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
@@ -487,7 +487,7 @@ fn build_prompt_at(
         "loaded config"
     );
     trace!(
-        agent = config.agent(),
+        agent = ?config.agent(),
         ?config.yolo,
         "loaded config"
     );
@@ -544,22 +544,13 @@ fn build_prompt_at(
             skill: skill.map(|value| value.to_string()),
             resolved_skill: discovered_skill.clone(),
             surface,
-            docs: cli.docs.clone(),
+            docs: Vec::new(),
             wave,
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
             no_loopflow: standalone_native,
             work: cli.task.clone().map(crate::prompt::WorkContext::Task),
-            agent: task_input
-                .as_ref()
-                .and_then(|(_, seed)| seed.task.agent.clone())
-                .or_else(|| cli.agent.clone()),
-            yolo_mode: cli.yolo || crate::config::yolo_override() || config.yolo,
-            source_overrides: ContextSourceOverrides {
-                diff_files: cli.diff_files_setting(),
-                diff: cli.diff_setting(),
-                clipboard: if cli.clipboard { Some(true) } else { None },
-            },
+            source_overrides: ContextSourceOverrides::default(),
             summary: None,
             references: task_message
                 .as_ref()
@@ -596,13 +587,12 @@ fn build_prompt_at(
         ..Default::default()
     };
     let mut agent_config = prepared.config;
-    agent_config.chrome = cli.chrome_setting().unwrap_or(config.chrome);
     agent_config.output_schema = cli.output_schema.clone();
     if confine && !cli.context {
         agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
         agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(
             &repo_root,
-            agent_config.agent(),
+            agent_config.agent()?,
         )?);
         agent_config.skip_permissions = true;
     }
@@ -870,7 +860,7 @@ fn begin_capture(
             session,
             spec,
             &built.context,
-            AgentProcessRequest::from_prepared(prepared_config),
+            AgentProcessRequest::from_prepared(prepared_config)?,
         )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(
@@ -878,10 +868,10 @@ fn begin_capture(
             &id,
             spec,
             &built.context,
-            Some(AgentProcessRequest::from_prepared(prepared_config)),
+            Some(AgentProcessRequest::from_prepared(prepared_config)?),
         )
     } else {
-        let launch = Some(AgentProcessRequest::from_prepared(prepared_config));
+        let launch = Some(AgentProcessRequest::from_prepared(prepared_config)?);
         CaptureHandle::begin_with_context(spec, &built.context, launch)
     }
     .map_err(|error| {
@@ -1360,7 +1350,7 @@ mod tests {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
-            "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
+            "diff: false\ndiff_files: false\npaste: false\n",
         );
         let cli = Cli::parse_from(["lf", "--batch"]);
 

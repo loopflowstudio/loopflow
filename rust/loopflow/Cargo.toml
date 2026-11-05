@@ -108,6 +108,7 @@ schemars = "1.2"
 shlex = "2.0"
 serde_urlencoded = "0.7"
 serde_yaml_ng = "0.10"
+yaml-edit = "0.3.2"
 tracing = "0.1"
 thiserror = "2.0"
 tiktoken-rs = "0.12"
@@ -150,7 +151,7 @@ fs2 = "0.4"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
 tokio-tungstenite = "0.30"
 tokio-rustls = "0.26"
 tempfile = "3.27"

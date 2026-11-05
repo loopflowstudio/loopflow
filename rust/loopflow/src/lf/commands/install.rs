@@ -379,7 +379,9 @@ fn _validate_executable_steps(steps: &[crate::graph::ConcreteStep]) -> Result<()
 /// run on. A migration may repair a persisted graph name, so checking the
 /// pre-migration rows would reject the candidate the migration makes valid:
 /// a pending frontier is migrated in a private snapshot, never the live
-/// database. An exact frontier has nothing to apply, so it is read in place —
+/// database. Preference-file cutovers wait for real promotion; copied rows can
+/// still refer to live checkout paths. An exact frontier has nothing to apply,
+/// so it is read in place —
 /// copying a multi-gigabyte store on every preflight outlived callers'
 /// deadlines and stranded the partial copies in the temporary directory.
 fn _read_executable_compatibility(
@@ -426,7 +428,7 @@ fn _read_executable_compatibility(
             }
         }
     };
-    if let Err(error) = migrations::apply_sqlite(&connection) {
+    if let Err(error) = migrations::apply_sqlite_preview(&connection) {
         return ExecutableCompatibility::Unreadable {
             reason: format!("apply candidate migrations to validation store: {error}"),
         };
@@ -688,6 +690,72 @@ mod compatibility_tests {
     }
 
     #[test]
+    fn repeated_previews_leave_settings_for_the_real_promotion() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let store = home.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&store).unwrap();
+        crate::store::migrations::apply_before_migration(&conn, "settings_authority");
+        conn.execute_batch(include_str!(
+            "../../../tests/fixtures/migrations/settings_authority_released.sql"
+        ))
+        .unwrap();
+        conn.execute(
+            "UPDATE repository_plans SET repo=?1",
+            [repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO scope_settings(scope_kind,scope_id,key,value,set_at) VALUES
+             ('global','','agent','codex',3),
+             ('repository','repo_00000000000040008000000000000001','agent','claude',4);",
+        )
+        .unwrap();
+        let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
+        let global = home.path().join("config.yaml");
+        let private = crate::config::files::private_path(repo.path()).unwrap();
+        let original = "# personal\nchrome: false\n";
+        std::fs::write(&global, original).unwrap();
+
+        // The installer previews both the CLI and its bundled app helper.
+        for _ in 0..2 {
+            let preview = build_preview(&store);
+            // Promotion eligibility depends on the build's Git history; preview
+            // validation must preserve preferences even for unmerged migrations.
+            assert!(
+                matches!(preview.compatibility, Compatibility::AheadPending { .. }),
+                "{preview:?}"
+            );
+            assert_eq!(
+                preview.executable_compatibility,
+                executable(),
+                "{preview:?}"
+            );
+            assert_eq!(std::fs::read_to_string(&global).unwrap(), original);
+            assert!(!private.exists());
+            assert!(!private.with_extension("yaml.lock").exists());
+            assert!(!home.path().join("settings-cutover.json").exists());
+            assert_eq!(
+                crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
+                frontier
+            );
+        }
+
+        crate::store::migrations::apply_sqlite(&conn).unwrap();
+        let personal = crate::config::files::read(&global).unwrap();
+        assert_eq!(personal["agent"], "codex");
+        assert_eq!(personal["chrome"], false);
+        assert!(std::fs::read_to_string(&global)
+            .unwrap()
+            .contains("# personal"));
+        assert_eq!(
+            crate::config::files::read(&private).unwrap()["agent"],
+            "claude"
+        );
+        assert!(home.path().join("settings-cutover.json").exists());
+    }
+
+    #[test]
     fn existing_empty_store_fails_closed() {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("empty.db");
@@ -889,7 +957,6 @@ fn prepare_artifacts(
     candidate_binary: &Path,
     preview: &PromotionPreview,
     upgrade_id: &str,
-    app_verdict: Option<&Verdict>,
 ) -> Result<PreparedArtifacts> {
     let bin_dir = lf_bin_dir();
     let cli_binary = stage_binary(candidate_binary, &bin_dir)?;
@@ -904,11 +971,7 @@ fn prepare_artifacts(
     let app_source = match (artifacts.app_source, artifacts.app_target) {
         // A bundle already at its target (Sparkle updated it in place) is the candidate.
         (Some(source), Some(target)) if source == target => {
-            validate_staged_app_helper(
-                target,
-                &preview.candidate,
-                app_verdict.unwrap_or(&preview.verdict),
-            )?;
+            validate_staged_app_helper(target, &preview.candidate, &preview.verdict)?;
             None
         }
         (Some(source), Some(target)) => Some(stage_app_bundle(&AppPromotion {
@@ -916,7 +979,7 @@ fn prepare_artifacts(
             target,
             superseded: None,
             expected_candidate: &preview.candidate,
-            expected_verdict: app_verdict.unwrap_or(&preview.verdict),
+            expected_verdict: &preview.verdict,
         })?),
         (None, None) if artifacts.legacy_app_target.is_none() => None,
         _ => {
@@ -1267,6 +1330,21 @@ fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<Pa
     Ok((had_target || had_superseded).then_some(superseded))
 }
 
+fn remove_retired_app(path: &Path) -> Result<()> {
+    let paths = ["Loopflow", "lf"].map(|name| path.join("Contents/MacOS").join(name));
+    match running_app_processes(&paths) {
+        Ok(processes) if processes.is_empty() => remove_path(path),
+        Ok(processes) => {
+            tracing::info!(path = %path.display(), count = processes.len(), "retaining bundle used by running processes");
+            Ok(())
+        }
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "retaining bundle with unknown process ownership");
+            Ok(())
+        }
+    }
+}
+
 fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
     for path in [
         artifacts.app_source.as_deref(),
@@ -1276,7 +1354,7 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
     .into_iter()
     .flatten()
     {
-        remove_path(path)?;
+        remove_retired_app(path)?;
         if let Some(parent) = path.parent() {
             fs::File::open(parent)
                 .and_then(|directory| directory.sync_all())
@@ -1291,18 +1369,21 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Leave `target` the only release app Spotlight, Finder and `open -b` reach:
-/// remove the staging directory (with any copy an interrupted promotion left),
-/// copies earlier lf staged beside the target and release installs at earlier
-/// installer locations, then register `target` afresh. Callers remove the
-/// legacy target. Runs under the promotion lock with no switch in flight; the
-/// install is already committed, so failures are logged.
+/// unregister old copies, remove those no process uses, then register `target`
+/// afresh. Callers settle the legacy target. Runs under the promotion lock with
+/// no switch in flight; the install is already committed, so failures are logged.
 fn converge_release_app(target: &Path) {
     // Nothing in it ends in `.app`, so Launch Services holds none of it.
-    if let Err(error) = remove_path(&install_scratch(target)) {
-        tracing::warn!(%error, "superseded app copies were not removed");
+    // Inspect each bundle separately: a renamed helper may still own a Session.
+    let mut stale = sibling_promotion_copies(target);
+    match fs::read_dir(install_scratch(target)) {
+        Ok(entries) => {
+            stale.extend(entries.filter_map(|entry| entry.ok().map(|entry| entry.path())))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => tracing::warn!(%error, "superseded app copies could not be read"),
     }
     let registered = in_applications_folder(target);
-    let mut stale = sibling_promotion_copies(target);
     if registered {
         stale.extend(earlier_release_installs(target));
     }
@@ -1310,11 +1391,12 @@ fn converge_release_app(target: &Path) {
         if registered {
             lsregister(&["-u"], &app);
         }
-        match remove_path(&app) {
-            Ok(()) => tracing::info!(path = %app.display(), "removed superseded app"),
-            Err(error) => tracing::warn!(%error, "superseded app was not removed"),
+        if let Err(error) = remove_retired_app(&app) {
+            tracing::warn!(%error, "superseded app was not removed");
         }
     }
+    // Remove the container only once every retained image has exited.
+    let _ = fs::remove_dir(install_scratch(target));
     if registered && target.exists() {
         lsregister(&["-f"], target);
     }
@@ -1403,8 +1485,9 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
     serde_json::from_slice(&output.stdout).with_context(|| {
         let stderr = String::from_utf8_lossy(&output.stderr);
         format!(
-            "binary {} did not return a promotion preflight: {}",
+            "binary {} did not return a promotion preflight ({}): {}",
             binary.display(),
+            output.status,
             stderr.trim()
         )
     })
@@ -1504,7 +1587,7 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     retained_binary_path_as(candidate, bin_dir, "lf")
 }
 
-fn app_executable_paths(
+fn desktop_executable_paths(
     selection: &crate::installation::InstallSelection,
     app_target: Option<&Path>,
 ) -> Vec<PathBuf> {
@@ -1515,16 +1598,10 @@ fn app_executable_paths(
         .artifact_set
         .artifacts
         .iter()
-        .filter(|artifact| {
-            matches!(
-                artifact.role,
-                crate::installation::ArtifactRole::App
-                    | crate::installation::ArtifactRole::AppHelper(_)
-            )
-        })
+        .filter(|artifact| artifact.role == crate::installation::ArtifactRole::App)
         .map(|artifact| artifact.path.clone())
         .collect::<Vec<_>>();
-    paths.extend(["Loopflow", "lf"].map(|name| bundle.join("Contents/MacOS").join(name)));
+    paths.push(bundle.join("Contents/MacOS/Loopflow"));
     paths.sort();
     paths.dedup();
     paths
@@ -1611,13 +1688,49 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
 
 #[cfg(all(test, target_os = "macos"))]
 mod app_process_tests {
-    use super::running_app_processes;
+    use super::{
+        commit_app_bundle, converge_release_app, desktop_executable_paths, quiesce_app_processes,
+        remove_retired_app, running_app_processes, stage_app_copy, AppPromotion, CandidateIdentity,
+        Verdict,
+    };
+    use crate::installation::{ArtifactSet, InstallSelection, InstallSource};
     use std::fs;
     use std::io::{BufRead, BufReader};
+    use std::path::Path;
     use std::process::{Child, Command, Stdio};
     use std::time::Duration;
 
     struct TestProcess(Child);
+
+    impl TestProcess {
+        fn start(executable: &Path) -> Self {
+            let mut child = TestProcess(
+                Command::new(executable)
+                    .args([
+                        "--ignored",
+                        "--nocapture",
+                        "--exact",
+                        "lf::commands::install::app_process_tests::app_process_fixture",
+                    ])
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .unwrap(),
+            );
+            let mut output = BufReader::new(child.0.stdout.take().unwrap());
+            loop {
+                let mut line = String::new();
+                assert_ne!(
+                    output.read_line(&mut line).unwrap(),
+                    0,
+                    "fixture exited before startup"
+                );
+                if line.trim_end().ends_with("ready") {
+                    break;
+                }
+            }
+            child
+        }
+    }
 
     impl Drop for TestProcess {
         fn drop(&mut self) {
@@ -1634,6 +1747,66 @@ mod app_process_tests {
     }
 
     #[test]
+    fn bundle_replacement_stops_desktop_and_preserves_a_live_session_helper() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let app = root.join("Applications/Loopflow.app");
+        let helper = app.join("Contents/MacOS/lf");
+        let desktop = app.join("Contents/MacOS/Loopflow");
+        fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        fs::copy(std::env::current_exe().unwrap(), &helper).unwrap();
+        fs::copy(&helper, &desktop).unwrap();
+        let mut child = TestProcess::start(&helper);
+        let mut app_process = TestProcess::start(&desktop);
+        let selection = InstallSelection {
+            installation_id: "fixture".into(),
+            source: InstallSource::Published,
+            store: root.join("store"),
+            artifact_set: ArtifactSet {
+                id: "fixture".into(),
+                source: InstallSource::Published,
+                source_revision: "fixture".into(),
+                source_identity: "fixture".into(),
+                build_label: None,
+                content_sha256: "fixture".into(),
+                artifacts: vec![],
+            },
+        };
+        quiesce_app_processes(&desktop_executable_paths(&selection, Some(&app))).unwrap();
+        assert!(!app_process.0.wait().unwrap().success());
+        assert!(child.0.try_wait().unwrap().is_none());
+        let source = root.join("candidate/Loopflow.app");
+        fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
+        fs::write(source.join("Contents/MacOS/lf"), "replacement").unwrap();
+        let staged = stage_app_copy(&source, &app).unwrap();
+        let candidate = CandidateIdentity::current();
+        let retired = commit_app_bundle(
+            &staged,
+            &AppPromotion {
+                source: &source,
+                target: &app,
+                superseded: None,
+                expected_candidate: &candidate,
+                expected_verdict: &Verdict::Promote,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        remove_retired_app(&retired).unwrap();
+        converge_release_app(&app);
+        assert!(retired.join("Contents/MacOS/lf").exists());
+        assert!(child.0.try_wait().unwrap().is_none());
+        assert_eq!(
+            fs::read_to_string(app.join("Contents/MacOS/lf")).unwrap(),
+            "replacement"
+        );
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        converge_release_app(&app);
+        assert!(!retired.exists());
+    }
+
+    #[test]
     fn deleted_cli_does_not_block_app_upgrade() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
@@ -1641,32 +1814,7 @@ mod app_process_tests {
         // A copied Apple platform binary is killed under the network sandbox.
         // Use this test executable so the fixture also runs in isolated CI.
         fs::copy(std::env::current_exe().unwrap(), &cli).unwrap();
-        let mut child = TestProcess(
-            Command::new(&cli)
-                .args([
-                    "--ignored",
-                    "--nocapture",
-                    "--exact",
-                    "lf::commands::install::app_process_tests::app_process_fixture",
-                ])
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap(),
-        );
-        // Wait until the copied executable has entered the fixture before
-        // unlinking it; spawn alone does not establish completed startup.
-        let mut output = BufReader::new(child.0.stdout.take().unwrap());
-        loop {
-            let mut line = String::new();
-            assert_ne!(
-                output.read_line(&mut line).unwrap(),
-                0,
-                "fixture exited before startup"
-            );
-            if line.trim_end().ends_with("ready") {
-                break;
-            }
-        }
+        let mut child = TestProcess::start(&cli);
         let pid = child.0.id() as libc::pid_t;
         let app_helper = root.join("Loopflow.app/Contents/MacOS/lf");
 
@@ -1697,11 +1845,6 @@ fn quiesce_app_processes(paths: &[PathBuf]) -> Result<()> {
     if paths.is_empty() {
         return Ok(());
     }
-    let _ = Command::new("/usr/bin/osascript")
-        .args(["-e", "tell application id \"com.loopflow.mac\" to quit"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
     let deadline = Instant::now() + Duration::from_secs(10);
     let force_at = Instant::now() + Duration::from_secs(5);
     loop {
@@ -1721,7 +1864,7 @@ fn quiesce_app_processes(paths: &[PathBuf]) -> Result<()> {
             if result != 0 {
                 let error = std::io::Error::last_os_error();
                 if error.raw_os_error() != Some(libc::ESRCH) {
-                    return Err(anyhow!("stop app/helper process {pid}: {error}"));
+                    return Err(anyhow!("stop Desktop process {pid}: {error}"));
                 }
             }
         }
@@ -1732,7 +1875,7 @@ fn quiesce_app_processes(paths: &[PathBuf]) -> Result<()> {
                 .collect::<Vec<_>>()
                 .join(", ");
             return Err(anyhow!(
-                "old app/helper processes remained live after 10s: {paths}"
+                "old Desktop processes remained live after 10s: {paths}"
             ));
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -1748,7 +1891,7 @@ fn quiesce_switch_app(root: &Path, receipt: &mut crate::installation::SwitchRece
     let paths = receipt
         .prior
         .as_ref()
-        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
+        .map(|prior| desktop_executable_paths(prior, receipt.activation.app.as_deref()))
         .unwrap_or_default();
     receipt.app_was_running = !running_app_processes(&paths)?.is_empty();
     crate::installation::write_switch(root, receipt)?;
@@ -2009,7 +2152,6 @@ fn active_install_matches_candidate(
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
     candidate: &CandidateIdentity,
-    helper_verdict: &Verdict,
     store: &Path,
 ) -> Result<bool> {
     if active.selection.source != crate::installation::InstallSource::Published
@@ -2025,17 +2167,6 @@ fn active_install_matches_candidate(
         || set.source_identity != candidate.source_identity
     {
         return Ok(false);
-    }
-    match (artifacts.app_source, artifacts.app_target) {
-        (Some(app_source), Some(_)) => {
-            validate_staged_app_helper(app_source, candidate, helper_verdict)?;
-        }
-        (None, None) if artifacts.legacy_app_target.is_none() => {}
-        _ => {
-            return Err(anyhow!(
-                "--app-source and --app-target must be supplied together; --legacy-app-target requires both"
-            ))
-        }
     }
     let digest = artifact_set_digest(candidate_binary, artifacts.app_source)?;
     if set.content_sha256 != digest {
@@ -2150,7 +2281,7 @@ fn activate_switch_targets(
         verify_selected_app_bundle(app_target, &receipt.target.artifact_set)?;
     }
     if let Some(superseded) = superseded_app {
-        remove_path(&superseded)?;
+        remove_retired_app(&superseded)?;
         if let Some(parent) = superseded.parent() {
             fs::File::open(parent)?.sync_all()?;
         }
@@ -2171,7 +2302,7 @@ fn delegate_switch_recovery(receipt: &crate::installation::SwitchReceipt) -> Res
         std::env::current_exe().context("resolve running install recovery coordinator")?,
     )?;
     if current == recovery.path {
-        return recover_switch(&receipt.id);
+        return recover_switch(Some(&receipt.id));
     }
     // The pinned owner can predate the machine rename; resolve the operation
     // without coupling recovery to its command group.
@@ -2465,7 +2596,15 @@ fn running_executables() -> Result<Vec<PathBuf>> {
     Ok(running)
 }
 
-pub fn recover_switch(switch_id: &str) -> Result<()> {
+pub fn recover_switch(switch_id: Option<&str>) -> Result<()> {
+    let Some(switch_id) = switch_id else {
+        if let crate::installation::InstallationState::Switching(receipt) =
+            crate::installation::read_state(&crate::installation::root()?)?
+        {
+            delegate_switch_recovery(&receipt)?;
+        }
+        return Ok(());
+    };
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
     let root = crate::installation::root()?;
@@ -2552,9 +2691,9 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     let mut paths = receipt
         .prior
         .as_ref()
-        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
+        .map(|prior| desktop_executable_paths(prior, receipt.activation.app.as_deref()))
         .unwrap_or_default();
-    paths.extend(app_executable_paths(
+    paths.extend(desktop_executable_paths(
         &receipt.target,
         receipt.activation.app.as_deref(),
     ));
@@ -2572,7 +2711,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     settle_switch(&root, &mut receipt, &active)?;
     resume_switch_app(&receipt)?;
     if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
-        remove_path(legacy)?;
+        remove_retired_app(legacy)?;
     }
     if let Some(target) = receipt.activation.app.as_deref() {
         converge_release_app(target);
@@ -2586,9 +2725,11 @@ fn promote_from_installation(
     candidate_binary: &Path,
     sync_skills: bool,
     preview_only: bool,
-) -> Result<()> {
+) -> Result<Option<PathBuf>> {
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
+    let app = installed_app(artifacts.cli_target);
+    let artifacts = include_installed_app(artifacts, &app);
     let root = crate::installation::root()?;
     let mut prior = match crate::installation::read_state(&root)? {
         crate::installation::InstallationState::Settled(active) => Some(*active),
@@ -2631,9 +2772,27 @@ fn promote_from_installation(
             reasons.join("\n  - ")
         ));
     }
+    // Validate the pair once before either preview or the already-installed path.
+    // Preparation still validates the copied bytes before activation.
+    match (artifacts.app_source, artifacts.app_target) {
+        (Some(app), Some(_)) => {
+            validate_staged_app_helper(app, &preview.candidate, &preview.verdict).with_context(|| {
+                format!(
+                    "{} and the CLI must update together; run `lf install` to acquire the complete signed build",
+                    app.display()
+                )
+            })?;
+        }
+        (None, None) if artifacts.legacy_app_target.is_none() => {}
+        _ => {
+            return Err(anyhow!(
+                "--app-source and --app-target must be supplied together; --legacy-app-target requires both"
+            ));
+        }
+    }
     if preview_only {
         println!("  (preview only: no target changed)");
-        return Ok(());
+        return Ok(artifacts.app_target.map(Path::to_path_buf));
     }
     if prior.is_none() && store_path.exists() {
         prior = Some(bootstrap_published_install(&root, &artifacts)?);
@@ -2646,7 +2805,6 @@ fn promote_from_installation(
                 &artifacts,
                 candidate_binary,
                 &preview.candidate,
-                &preview.verdict,
                 &store_path,
             )?
         {
@@ -2655,11 +2813,11 @@ fn promote_from_installation(
                 preview.candidate.display_version(),
                 prior.selection.store.display()
             );
-            return Ok(());
+            return Ok(artifacts.app_target.map(Path::to_path_buf));
         }
     }
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
-    let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
+    let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id)?;
     let target_set = installation_artifact_set(
         &root,
         crate::installation::InstallSource::Published,
@@ -2764,7 +2922,34 @@ fn promote_from_installation(
         }
     }
     drop(lock);
-    Ok(())
+    Ok(artifacts.app_target.map(Path::to_path_buf))
+}
+
+/// Find the installed bundle even when the next update names another destination.
+fn installed_app(cli: &Path) -> PathBuf {
+    if let Ok(cli) = fs::canonicalize(cli) {
+        if let Some(app) = cli.ancestors().nth(3) {
+            if app.file_name().is_some_and(|name| name == "Loopflow.app") {
+                return app.to_path_buf();
+            }
+        }
+    }
+    std::env::var_os("LF_APPLICATIONS_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/Applications"))
+        .join("Loopflow.app")
+}
+
+fn include_installed_app<'a>(
+    mut artifacts: PromotionArtifacts<'a>,
+    app: &'a Path,
+) -> PromotionArtifacts<'a> {
+    if artifacts.app_source.is_none() && artifacts.app_target.is_none() && app.exists() {
+        artifacts.app_source = Some(app);
+        artifacts.app_target = Some(app);
+    }
+    artifacts
 }
 
 pub fn promote(
@@ -2772,19 +2957,14 @@ pub fn promote(
     sync_skills: bool,
     preview_only: bool,
 ) -> Result<()> {
-    if let crate::installation::InstallationState::Switching(receipt) =
-        crate::installation::read_state(&crate::installation::root()?)?
-    {
-        delegate_switch_recovery(&receipt)?;
-    } else {
-        let current = fs::canonicalize(std::env::current_exe()?)?;
-        promote_from_installation(artifacts, &current, sync_skills, preview_only)?;
-    }
+    recover_switch(None)?;
+    let current = fs::canonicalize(std::env::current_exe()?)?;
+    let app = promote_from_installation(artifacts, &current, sync_skills, preview_only)?;
     if !preview_only {
-        crate::machine_service::installation::refresh_after_promotion();
+        crate::installation::server::refresh_after_promotion();
     }
     if sync_skills && !preview_only {
-        install_link_receiver(artifacts.app_target);
+        install_link_receiver(app.as_deref());
     }
     Ok(())
 }
@@ -2859,10 +3039,10 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 #[cfg(test)]
 mod artifact_tests {
     use super::{
-        activate_cli_targets, app_executable_paths, commit_app_bundle, commit_cli_symlink,
-        converge_release_app, copy_tree, prune_superseded_artifacts, retained_published_sets,
-        stage_app_copy, stage_binary, tree_digest, verify_cli_target, AppPromotion,
-        CandidateIdentity, Verdict,
+        activate_cli_targets, commit_app_bundle, commit_cli_symlink, converge_release_app,
+        copy_tree, desktop_executable_paths, include_installed_app, prune_superseded_artifacts,
+        retained_published_sets, stage_app_copy, stage_binary, tree_digest, verify_cli_target,
+        AppPromotion, CandidateIdentity, PromotionArtifacts, Verdict,
     };
     use crate::installation::{
         entry_gate_path, ActivationTargets, ActiveInstall, ArtifactIdentity, ArtifactRole,
@@ -2893,7 +3073,29 @@ mod artifact_tests {
     }
 
     #[test]
-    fn cli_only_switch_leaves_prior_app_processes_out_of_quiescence() {
+    fn partial_promotion_keeps_the_installed_bundle() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = temp.path().join("Loopflow.app");
+        let cli = temp.path().join("lf");
+        let partial = PromotionArtifacts {
+            cli_target: &cli,
+            app_source: None,
+            app_target: None,
+            legacy_app_target: None,
+        };
+        assert!(include_installed_app(partial, &app).app_source.is_none());
+        let helper = app.join("Contents/MacOS/lf");
+        fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        fs::write(&helper, "installed helper").unwrap();
+        let paired = include_installed_app(partial, &app);
+        assert_eq!(paired.app_source, Some(app.as_path()));
+        assert_eq!(paired.app_target, Some(app.as_path()));
+        std::os::unix::fs::symlink(&helper, &cli).unwrap();
+        assert_eq!(super::installed_app(&cli), app.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn app_replacement_leaves_session_helpers_running() {
         let retained_app = Path::new("/retained/Loopflow.app/Contents/MacOS/Loopflow");
         let retained_helper = Path::new("/retained/Loopflow.app/Contents/MacOS/lf");
         let mut artifacts = published_set("prior", &[retained_app, retained_helper]);
@@ -2906,15 +3108,14 @@ mod artifact_tests {
             store: "/store/loopflow.db".into(),
         };
 
-        assert!(app_executable_paths(&selection, None).is_empty());
-        let paths = app_executable_paths(&selection, Some(Path::new("/Applications/Loopflow.app")));
+        assert!(desktop_executable_paths(&selection, None).is_empty());
+        let paths =
+            desktop_executable_paths(&selection, Some(Path::new("/Applications/Loopflow.app")));
         assert_eq!(
             paths,
             [
                 Path::new("/Applications/Loopflow.app/Contents/MacOS/Loopflow"),
-                Path::new("/Applications/Loopflow.app/Contents/MacOS/lf"),
                 retained_app,
-                retained_helper,
             ]
         );
     }
@@ -3072,6 +3273,102 @@ mod artifact_tests {
         activate_cli_targets(&root, &cli, &activation).unwrap();
         assert_eq!(fs::read_link(&public).unwrap(), cli);
         assert_eq!(fs::read(&public).unwrap(), b"selected");
+    }
+
+    #[test]
+    fn interrupted_activation_restores_the_receipts_complete_bundle_and_entries() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["LF_APPLICATIONS_DIR"]);
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("install");
+        let source = directory.path().join("source/Loopflow.app");
+        let app = directory.path().join("Custom Tools/Loopflow.app");
+        // Recovery honors the receipt even if the next request supplies a new target.
+        std::env::set_var("LF_APPLICATIONS_DIR", directory.path().join("Other Tools"));
+        let public = directory.path().join("bin/lf");
+        let candidate = CandidateIdentity::current();
+        let preview = serde_json::json!({"candidate": candidate, "verdict": {"kind": "promote"}});
+        fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
+        let helper = source.join("Contents/MacOS/lf");
+        let program = directory.path().join("candidate.c");
+        let json = serde_json::to_string(&preview.to_string()).unwrap();
+        fs::write(
+            &program,
+            format!("#include <stdio.h>\nint main(void) {{ puts({json}); return 0; }}\n"),
+        )
+        .unwrap();
+        let output = std::process::Command::new("cc")
+            .arg(&program)
+            .arg("-o")
+            .arg(&helper)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fs::write(source.join("Contents/MacOS/Loopflow"), "new Desktop").unwrap();
+        let cli = stage_binary(&helper, &directory.path().join("retained")).unwrap();
+        let set = super::installation_artifact_set(
+            &root,
+            InstallSource::Published,
+            &candidate,
+            &cli,
+            Some(&source),
+        )
+        .unwrap();
+        let target = InstallSelection {
+            installation_id: "published-fixture".into(),
+            source: InstallSource::Published,
+            artifact_set: set.clone(),
+            store: directory.path().join("loopflow.db"),
+        };
+        let mut receipt = crate::installation::SwitchReceipt {
+            schema_version: 1,
+            id: "switch-fixture".into(),
+            prior: None,
+            target,
+            published_fallback: None,
+            target_published_fallback: Some(set.clone()),
+            phase: crate::installation::SwitchPhase::Advancing,
+            recovery_owner: crate::installation::RecoveryOwner::Candidate,
+            target_store_advance_started: true,
+            target_store_advanced: true,
+            active_selection_committed: false,
+            coordinator: set.artifact(&ArtifactRole::Cli).unwrap().clone(),
+            candidate: set.artifact(&ArtifactRole::Cli).unwrap().clone(),
+            activation: ActivationTargets {
+                cli: public.clone(),
+                daemon: None,
+                app: Some(app.clone()),
+                legacy_app: None,
+            },
+            app_was_running: false,
+            disposable_store_owned: false,
+        };
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::write(app.join("Contents/MacOS/lf"), "old helper").unwrap();
+        fs::write(app.join("Contents/MacOS/Loopflow"), "old Desktop").unwrap();
+        commit_cli_symlink(&public, &cli).unwrap();
+        // The store advanced, but the bundle and public link still name old files.
+        // Recovery and its retry both use the complete receipt-pinned artifact set.
+        for _ in 0..2 {
+            super::activate_switch_targets(&root, &mut receipt, &candidate).unwrap();
+            assert_eq!(
+                fs::read_link(&public).unwrap(),
+                app.join("Contents/MacOS/lf")
+            );
+            assert_eq!(
+                fs::read_to_string(app.join("Contents/MacOS/Loopflow")).unwrap(),
+                "new Desktop"
+            );
+            assert_eq!(
+                fs::read(entry_gate_path(&root, &ArtifactRole::Cli).unwrap()).unwrap(),
+                fs::read(&cli).unwrap()
+            );
+            super::verify_selected_app_bundle(&app, &set).unwrap();
+        }
     }
 
     #[test]

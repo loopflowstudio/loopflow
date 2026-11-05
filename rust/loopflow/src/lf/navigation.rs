@@ -300,7 +300,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     }
     Some((|| {
         let cwd = std::env::current_dir()?;
-        let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+        let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or_else(|| cwd.clone());
         match command {
             Commands::Help { path, all, json } => {
                 if *json || cli.json {
@@ -333,8 +333,19 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 }
             }
             Commands::Graph {
-                cmd: GraphCommand::Customize { name },
-            } => println!("{}", crate::graph::customize(name, &repo)?.display()),
+                cmd: GraphCommand::Customize { .. },
+            } => {
+                crate::lf::commands::mutation::run(
+                    cli,
+                    &std::env::args().collect::<Vec<_>>(),
+                    &cwd,
+                    &mut crate::lf::commands::mutation::CommandIo {
+                        input: &mut std::io::stdin(),
+                        output: &mut std::io::stdout(),
+                        error: &mut std::io::stderr(),
+                    },
+                )?;
+            }
             Commands::Skill {
                 cmd: SkillCommand::Customize { name },
             } => println!("{}", crate::skills::customize(name, &repo)?.display()),
@@ -440,7 +451,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>, --cwd <path>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Graphs, skills and child commands\n");
+        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>, --cwd <path>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> selects this invocation and its Graph steps; unrelated child work keeps its own preferences\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf ops pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
         return Ok(output);
     }

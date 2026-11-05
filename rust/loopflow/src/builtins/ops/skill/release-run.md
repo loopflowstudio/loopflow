@@ -40,13 +40,24 @@ That command is responsible for:
 - waiting for the target's configured completion evidence
 - for a `github-release` target, moving GitHub's Latest marker (the `stable`
   pointer) forward to the newest release published at least 7 days ago that no
-  regression Task (`lf task create --regressed-in <version>`) covers, even
-  when there was nothing to release
+  GitHub issue labelled `regressed-in:v<version>` covers, even when there
+  was nothing to release; when those issues can't be read, `stable` stays put
 
 The repository owns `verify` and `prepare` commands, the selected candidate
 workflow, and the publisher under `release.targets` in `.lf/config.yaml`. Keep
 credential-free builds and smoke tests in the workflow. Keep signing,
 publication, deployment, and secret handling in the publisher.
+
+## Regressions and stable
+
+```bash
+lf release regress v0.15.3 "Sessions lose their name"  # file one against a release
+lf release issues v0.15.3                              # what it carries, and what each issue holds
+lf release promote --dry-run                           # what would move, or what holds it
+lf release promote                                     # move stable now, outside a run
+```
+
+A GitHub issue labelled `regressed-in:v<version>` is all a regression takes.
 
 ## Re-entry
 

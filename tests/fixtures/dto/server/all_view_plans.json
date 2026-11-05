@@ -1,0 +1,1 @@
+{"type":"request","id":"tasks-1","operation":{"kind":"subscribe","query":{"read":"all_view_plans","expression":"kind:task state:open"},"generation":1}}

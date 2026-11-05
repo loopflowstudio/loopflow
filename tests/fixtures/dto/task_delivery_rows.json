@@ -10,7 +10,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -283,7 +282,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "done": {
     "task": {
@@ -296,7 +295,6 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -569,7 +567,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "none": {
     "task": {
@@ -582,7 +580,6 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -855,7 +852,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "due": {
     "task": {
@@ -868,7 +865,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": "2026-10-08",
-      "regressed_in": "v0.15.3",
       "sync": {
         "connected": false,
         "changes": []
@@ -928,7 +924,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "unrelated": {
     "task": {
@@ -941,7 +937,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": "2026-10-08",
-      "regressed_in": "v0.15.3",
       "sync": {
         "connected": false,
         "changes": []
@@ -1001,7 +996,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "conversion": {
     "task": {
@@ -1014,7 +1009,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -1287,7 +1281,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "completed_running": {
     "task": {
@@ -1300,7 +1294,6 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -1573,6 +1566,6 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   }
 }

@@ -108,10 +108,9 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         task.worktree.as_deref().unwrap_or(&repo),
         wave.as_ref().map(|w| w.slug()),
         &personal,
-        task.agent.as_deref(),
         None,
     );
-    let (provider, _) = parse_agent(&agent);
+    let provider = agent.ok().map(|agent| parse_agent(&agent).0);
     let machine_id = store
         .task_checkout(&task.id)
         .await
@@ -155,7 +154,12 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .sqlite
         .task_ship_stop(&task.id)
         .map_err(task_error)?
-        .map(|stop| mark(stop.at, stop.by.as_ref()))
+        .map(|stop| {
+            Ok::<_, OpsError>(super::ShipMark {
+                at: stop.at,
+                by: super::ship::stopper(&store.sqlite, &repo, &stop).map_err(task_error)?,
+            })
+        })
         .transpose()?;
     Ok(TaskSnapshot {
         machine_id,
@@ -180,7 +184,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         workspace_slug: task.workspace_slug,
         branch: task.worktree.as_ref().map(|_| task.branch.clone()),
         base_commit: task.worktree.as_ref().map(|_| task.base_commit.clone()),
-        agent: task.agent,
         provider,
         pr,
         latest_event,
@@ -331,6 +334,13 @@ pub(super) fn diff_snapshot(
 pub(crate) fn task_workspace_context(task: &Task) -> OpsResult<String> {
     const MAX_PATCH_TOKENS: usize = 15_000;
 
+    if !crate::git::commit_exists(task.worktree()?, &task.base_commit)? {
+        return Ok(format!(
+            "The recorded Task comparison base {} is unavailable in {}. The saved checkout and its edits remain the working copy. Inspect Git history and the actual files, recover the comparison base through managed sync, and do not treat the missing diff as an empty change.",
+            task.base_commit,
+            task.worktree()?.display()
+        ));
+    }
     let workspace = TaskComparison::new(task)?;
     let changes = changes_snapshot(workspace)?;
     let diff = diff_snapshot(workspace, None)?;

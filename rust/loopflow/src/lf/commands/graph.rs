@@ -762,7 +762,7 @@ impl RunningGraph<'_> {
         let Some(stop) = self.store.sqlite.task_ship_stop(task)? else {
             return Ok(None);
         };
-        let by = crate::ops::task::ship::starter(&self.store.sqlite, self.cwd, stop.by.as_ref())?;
+        let by = crate::ops::task::ship::stopper(&self.store.sqlite, self.cwd, &stop)?;
         eprintln!(
             "Waiting at {step}: not approved to merge ({by} stopped shipping). `lf ship` lands it."
         );
@@ -998,8 +998,6 @@ impl SkillExecutor for &RunningGraph<'_> {
         step_cli.output_schema = output.as_ref().map(GraphOutput::schema);
         step_cli.account.clear();
         step_cli.only_account.clear();
-        step_cli.isolate = false;
-        step_cli.shared = false;
         // `-i` and `-b` choose for every step. Otherwise a step runs headless,
         // and an interactive step launches the way `lf skill` would: with the
         // person at a terminal, else headless.
@@ -1161,6 +1159,7 @@ mod tests {
                 skill: Skill::named("probe"),
                 id: None,
                 interactive: false,
+                interactive_name: None,
                 returns: None,
                 sources: Vec::new(),
             };
@@ -1251,6 +1250,7 @@ mod tests {
                 skill: Skill::named("probe"),
                 id: None,
                 interactive: false,
+                interactive_name: None,
                 returns: None,
                 sources: Vec::new(),
             });

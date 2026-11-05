@@ -2,10 +2,10 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::profile::{ProviderRoute, RouteScope};
+use crate::profile::RouteScope;
 use crate::provider_account::{account_login, match_account, nearest_provider_route, AccountMatch};
 use crate::provider_auth::Provider;
-use crate::repository::RepoId;
+use crate::repository::CanonicalRepo;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
 
 pub(super) async fn show_route(repo: Option<&str>, default: bool, json: bool) -> Result<()> {
@@ -50,7 +50,7 @@ struct RouteAccount {
 
 async fn show_routes(
     store: Option<&SharedStore>,
-    repo_id: Option<&RepoId>,
+    repo_id: Option<&CanonicalRepo>,
     json: bool,
 ) -> Result<()> {
     let mut reports = Vec::new();
@@ -172,43 +172,6 @@ async fn show_routes(
     Ok(())
 }
 
-/// Replace `provider`'s route at `scope` with the logins in order.
-pub(crate) async fn set_route(
-    store: &SharedStore,
-    scope: RouteScope,
-    label: &str,
-    provider: Provider,
-    raw_accounts: &[&str],
-) -> Result<()> {
-    let mut accounts = Vec::new();
-    for raw_account in raw_accounts {
-        accounts.push(find_provider_account(store, provider, raw_account).await?);
-    }
-    let account_ids = accounts
-        .iter()
-        .map(|account| account.account_id.clone())
-        .collect();
-    let now = now_unix();
-    store
-        .set_provider_route(&ProviderRoute {
-            scope,
-            provider,
-            accounts: account_ids,
-            created_at: now,
-            updated_at: now,
-        })
-        .await?;
-    println!(
-        "{label} {provider}: {}",
-        accounts
-            .iter()
-            .map(account_login)
-            .collect::<Vec<_>>()
-            .join(" -> ")
-    );
-    Ok(())
-}
-
 pub(crate) async fn find_provider_account(
     store: &SharedStore,
     provider: Provider,
@@ -238,40 +201,10 @@ pub(crate) async fn find_provider_account(
     }
 }
 
-pub(crate) fn parse_managed_provider(raw: &str) -> Result<Provider> {
-    let provider = raw.parse::<Provider>()?;
-    if matches!(provider, Provider::Claude | Provider::Codex) {
-        Ok(provider)
-    } else {
-        Err(anyhow!(
-            "managed OAuth accounts support Claude and Codex only"
-        ))
-    }
-}
-
-fn resolve_repo_id(raw_repo: Option<&str>) -> Result<Option<RepoId>> {
+fn resolve_repo_id(raw_repo: Option<&str>) -> Result<Option<CanonicalRepo>> {
     match raw_repo {
-        Some(repo) => Ok(Some(RepoId::parse(repo).map_err(|error| anyhow!(error))?)),
-        None => {
-            let Some(root) = crate::repo::discover_repo_root(&std::env::current_dir()?)? else {
-                return Ok(None);
-            };
-            // A local-only repository has no provider route identity yet.
-            let origin = std::process::Command::new("git")
-                .args(["config", "--get", "remote.origin.url"])
-                .current_dir(&root)
-                .output()?;
-            if origin.status.code() == Some(1) {
-                return Ok(None);
-            }
-            if !origin.status.success() {
-                return Err(anyhow!(
-                    "cannot read repository origin: {}",
-                    String::from_utf8_lossy(&origin.stderr).trim()
-                ));
-            }
-            Ok(Some(RepoId::discover(&root)?))
-        }
+        Some(repo) => Ok(Some(CanonicalRepo::discover(std::path::Path::new(repo))?)),
+        None => CanonicalRepo::current(),
     }
 }
 

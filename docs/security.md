@@ -129,6 +129,19 @@ SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent
 Doppler secret exports and automatic ambient-token forwarding are removed. Set up
 other services on the target explicitly. No Doppler master credential is sent.
 
+## Keep client access separate from Machine logins
+
+The local Loopflow server accepts the same OS user through a private Unix socket.
+It exposes existing Work operations and bridges Session owners; those owners
+still grant input control. A connection or reconnect does not give a viewer the
+right to replace another viewer's claim.
+
+Do not expose this socket through a network proxy: the proxy's local identity
+cannot authenticate a remote client. Authenticated phone access is separate
+work, with its own client credentials. Adding an SSH Machine grants an execution
+destination, independently of client access. Installation owns server registration
+and respects disabled background items. See [Connect clients](server.md).
+
 ## Account for stored and transmitted data
 
 Prompts, selected repository context, tool results, and conversation data go to

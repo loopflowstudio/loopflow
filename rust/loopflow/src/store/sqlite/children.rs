@@ -3,7 +3,7 @@
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Product writes read before they write (for example, validating parent Work),
 // so a deferred transaction has to upgrade its read lock to a write
@@ -99,13 +99,11 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         branch: String::new(),
         base_commit: String::new(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank,
         assignee: None,
         due_date: input.due_date.clone(),
-        regressed_in: None,
         state: Some("unstarted".into()),
         completed_at: None,
         observation: crate::work::task::Observation::NotRequired,
@@ -152,6 +150,62 @@ fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreR
     Ok(())
 }
 
+fn place_task_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    worktree: &Path,
+    workspace_slug: &str,
+    pr: &TaskPr,
+) -> StoreResult<()> {
+    let mut task = task_on(conn, task_id)?.ok_or(StoreError::NotFound)?;
+    if task.worktree.is_some() {
+        return Ok(());
+    }
+    if super::durable::task_state_in(conn, task_id)?.is_terminal() {
+        return Err(StoreError::InvalidAuthority(
+            "terminal Task cannot allocate a checkout".into(),
+        ));
+    }
+    if let Some(project) = &task.project_id {
+        super::durable::require_selected_project(conn, project)?;
+    }
+    require_task_planning(conn, &task)?;
+    // Allocating a checkout is the actual work reservation: it claims an
+    // unowned Task, and refuses one owned on another Machine.
+    super::task_ownership::claim_in(conn, task_id)?;
+    record_task_branch_in(conn, task_id, &pr.branch)?;
+    let local = super::durable::map_local_machine(conn)?.id;
+    task.worktree = Some(worktree.to_path_buf());
+    task.workspace_slug = workspace_slug.to_string();
+    task.branch = pr.branch.clone();
+    task.base_commit = pr.base_commit.clone();
+    task.parent_pr_id = pr.parent_pr_id.clone();
+    validate_initial_task_pr(&task, pr)?;
+    conn.execute(
+            "UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
+            params![
+                task_id.as_str(),
+                worktree.display().to_string(),
+                workspace_slug,
+                now_unix(), task.branch, task.base_commit, task.parent_pr_id.as_ref().map(TaskPrId::as_str), local.as_str()
+            ],
+        )?;
+    if pr.publication.is_some() {
+        insert_task_pr(conn, pr)?;
+    }
+    seed_task_linear_observation(conn, &task)?;
+    insert_task_event_in(
+        conn,
+        task_id,
+        &TaskEventKind::CheckoutInitializing {
+            branch: pr.branch.clone(),
+            path: worktree.display().to_string(),
+            base_commit: pr.base_commit.clone(),
+        },
+    )?;
+    Ok(())
+}
+
 impl SqliteStore {
     /// Apply the placement transaction's admission rule before preparing Git work.
     pub fn validate_task_planning(&self, task: &Task) -> StoreResult<()> {
@@ -174,52 +228,90 @@ impl SqliteStore {
         let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-        if task.worktree.is_some() {
-            return Ok(task);
+        place_task_in(&tx, task_id, worktree, workspace_slug, pr)?;
+        let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(task)
+    }
+
+    /// Commit promotion as one local effect. The caller holds checkout admission
+    /// across source resolution and this write; no provider or filesystem is changed.
+    pub(crate) fn promote_task(
+        &self,
+        task_id: &TaskId,
+        creation: Option<&NewTask>,
+        placement: Option<&(PathBuf, TaskPr)>,
+        session: Option<&crate::session::LfSession>,
+        destination: Option<&Path>,
+    ) -> StoreResult<Task> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(input) = creation {
+            if let Some(project) = &input.project_id {
+                super::durable::require_selected_project(&tx, project)?;
+            }
+            create_task_in(&tx, input)?;
         }
-        if super::durable::task_state_in(&tx, task_id)?.is_terminal() {
-            return Err(StoreError::InvalidAuthority(
-                "terminal Task cannot allocate a checkout".into(),
-            ));
+        if let Some((path, pr)) = placement {
+            let current = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+            if current
+                .worktree
+                .as_ref()
+                .is_some_and(|existing| existing != path)
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "Task acquired another checkout before promotion; existing work is unchanged"
+                        .into(),
+                ));
+            }
+            // Completion may have arrived after source preparation. Binding still
+            // selects the conversation, without allocating or reopening work.
+            if !super::durable::task_state_in(&tx, task_id)?.is_terminal() {
+                place_task_in(&tx, task_id, path, &pr.slug, pr)?;
+                insert_task_event_in(
+                    &tx,
+                    task_id,
+                    &TaskEventKind::CheckoutReady {
+                        branch: pr.branch.clone(),
+                        base_commit: pr.base_commit.clone(),
+                    },
+                )?;
+            }
         }
-        if let Some(project) = &task.project_id {
-            super::durable::require_selected_project(&tx, project)?;
+        if let Some(session) = session {
+            super::task_ownership::claim_in(&tx, task_id)?;
+            // Transfer only the selected conversation out of its shared primary
+            // scope. The checkout and historical captures retain their owners.
+            tx.execute(
+                "UPDATE agent_sessions SET primary_scope=NULL,
+                 wave_id=CASE WHEN task_id IS NULL THEN NULL ELSE wave_id END
+                 WHERE id=?1 AND primary_scope IS NOT NULL",
+                [session.id.as_str()],
+            )?;
+            // Re-read the capture under the transaction: promotion changes only
+            // prospective ownership, so a concurrent input need not be replayed.
+            let current =
+                super::sessions::session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
+            if current.cwd != session.cwd {
+                return Err(StoreError::InvalidAuthority(
+                    "Session workspace changed before binding".into(),
+                ));
+            }
+            super::sessions::bind_session_in(&tx, &current, task_id)?;
+            super::sessions::choose_task_primary_in(&tx, task_id, &session.id)?;
+            if let Some(cwd) = destination {
+                let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+                if task.worktree.as_deref() != Some(cwd) {
+                    return Err(StoreError::InvalidAuthority(
+                        "Task workspace changed before promotion; retry".into(),
+                    ));
+                }
+                tx.execute(
+                    "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+                    params![session.id, cwd.to_string_lossy()],
+                )?;
+            }
         }
-        require_task_planning(&tx, &task)?;
-        // Allocating a checkout is the actual work reservation: it claims an
-        // unowned Task, and refuses one owned on another Machine.
-        super::task_ownership::claim_in(&tx, task_id)?;
-        record_task_branch_in(&tx, task_id, &pr.branch)?;
-        let local = super::durable::map_local_machine(&tx)?.id;
-        task.worktree = Some(worktree.to_path_buf());
-        task.workspace_slug = workspace_slug.to_string();
-        task.branch = pr.branch.clone();
-        task.base_commit = pr.base_commit.clone();
-        task.parent_pr_id = pr.parent_pr_id.clone();
-        validate_initial_task_pr(&task, pr)?;
-        tx.execute(
-            "UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
-            params![
-                task_id.as_str(),
-                worktree.display().to_string(),
-                workspace_slug,
-                now_unix(), task.branch, task.base_commit, task.parent_pr_id.as_ref().map(TaskPrId::as_str), local.as_str()
-            ],
-        )?;
-        if pr.publication.is_some() {
-            insert_task_pr(&tx, pr)?;
-        }
-        seed_task_linear_observation(&tx, &task)?;
-        insert_task_event_in(
-            &tx,
-            task_id,
-            &TaskEventKind::CheckoutInitializing {
-                branch: pr.branch.clone(),
-                path: worktree.display().to_string(),
-                base_commit: pr.base_commit.clone(),
-            },
-        )?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)
@@ -253,18 +345,6 @@ impl SqliteStore {
             map_task_checkout(row, |id| Ok(identifiers.short(id)))
         })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
-    }
-
-    pub fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE tasks SET agent=?2, updated_at=?3 WHERE id=?1",
-            params![task_id.as_str(), agent, now_unix()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
     }
 
     pub(crate) fn request_task_completion(
@@ -489,22 +569,6 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         tasks_in(&conn, wave_id)
-    }
-
-    /// One repository's regression Tasks, open or done; abandoned ones covered nothing.
-    pub fn regression_tasks(&self, repo: &str) -> StoreResult<Vec<Task>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
-        let query = format!(
-            "{TASK_COLUMNS} WHERE t.repository_id=(SELECT id FROM repository_plans WHERE repo=?1)
-             AND t.regressed_in IS NOT NULL AND t.abandoned_at IS NULL AND {TASK_VISIBLE}"
-        );
-        let identifiers = TaskIdentifiers::read(&conn)?;
-        let mut statement = conn.prepare(&query)?;
-        let tasks = statement
-            .query_map([repo], |row| map_listed_task_row(&identifiers, row))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(tasks)
     }
 
     /// Tasks that are neither done nor abandoned: the live plan.
@@ -1425,9 +1489,9 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             ],
         ),
     )?;
-    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,created_at=?5,updated_at=?6,agent=?7,branch=?8,base_commit=?9,parent_pr_id=?10,checkout_machine_id=?11 WHERE id=?1",params![
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,created_at=?5,updated_at=?6,branch=?7,base_commit=?8,parent_pr_id=?9,checkout_machine_id=?10 WHERE id=?1",params![
         task.id.as_str(),task.pm_snapshot_synced_at,task.worktree.as_ref().map(|p|p.display().to_string()),task.workspace_slug,
-        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.agent,task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str),task.worktree.as_ref().map(|_|super::durable::map_local_machine(conn).map(|m|m.id.to_string())).transpose()?])?;
+        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str),task.worktree.as_ref().map(|_|super::durable::map_local_machine(conn).map(|m|m.id.to_string())).transpose()?])?;
     Ok(())
 }
 
@@ -1617,8 +1681,8 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
             AND t.external_issue_id IS NOT NULL
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
-    t.project_id, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id,t.regressed_in
+    t.project_id, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
+    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -2063,7 +2127,7 @@ fn map_task_columns(
     Ok(Task {
         id,
 
-        revision: row.get::<_, i64>(13)? as u64,
+        revision: row.get::<_, i64>(12)? as u64,
         linear_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearIssueId::from_raw),
@@ -2076,22 +2140,20 @@ fn map_task_columns(
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
-        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(22)?)
-            .map_err(|error| invalid_column(22, error))?,
+        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(21)?)
+            .map_err(|error| invalid_column(21, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
         workspace_slug: row.get(6)?,
-        branch: row.get(14)?,
-        base_commit: row.get(15)?,
-        parent_pr_id: row.get::<_, Option<String>>(16)?.map(TaskPrId::from_raw),
-        agent: row.get(12)?,
+        branch: row.get(13)?,
+        base_commit: row.get(14)?,
+        parent_pr_id: row.get::<_, Option<String>>(15)?.map(TaskPrId::from_raw),
         created_at: crate::store::rows::unix_to_datetime(row.get(7)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(8)?),
-        rank: row.get(17)?,
-        assignee: row.get(18)?,
-        due_date: row.get(19)?,
-        regressed_in: row.get(23)?,
-        state: row.get(20)?,
-        completed_at: row.get(21)?,
+        rank: row.get(16)?,
+        assignee: row.get(17)?,
+        due_date: row.get(18)?,
+        state: row.get(19)?,
+        completed_at: row.get(20)?,
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
         observation: crate::work::task::Observation::NotRequired,
@@ -2442,12 +2504,12 @@ impl SqliteStore {
             insert_task_row(&tx, task)?;
         } else {
             tx.execute(
-                "UPDATE tasks SET worktree=?2,workspace_slug=?3,agent=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
+                "UPDATE tasks SET worktree=?2,workspace_slug=?3,branch=?4,base_commit=?5,parent_pr_id=?6,checkout_machine_id=?7 WHERE id=?1",
                 params![
                     task.id.as_str(),
                     task.worktree.as_ref().map(|p| p.display().to_string()),
                     task.workspace_slug,
-                    task.agent, task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str()),
+                    task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str()),
                     task.worktree.as_ref().map(|_| super::durable::map_local_machine(&tx).map(|machine| machine.id.to_string())).transpose()?
                 ],
             )?;

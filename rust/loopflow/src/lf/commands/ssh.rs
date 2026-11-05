@@ -12,12 +12,40 @@ use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
+pub fn selects_current_machine(target: &str) -> anyhow::Result<bool> {
+    let Some(store) = crate::store::read_existing_registry()? else {
+        return Ok(false);
+    };
+    let selected = crate::ops::task_ownership::resolve_machine(&store.sqlite, target)?;
+    Ok(selected == store.sqlite.local_machine()?.id)
+}
+
 pub fn run(
     target: &str,
     forward_agent: bool,
     cli: &Cli,
     lf_args: &[String],
     task_route: Option<TaskExecutionRoute>,
+) -> anyhow::Result<()> {
+    run_with_io(
+        target,
+        forward_agent,
+        cli,
+        lf_args,
+        task_route,
+        &std::env::current_dir()?,
+        None,
+    )
+}
+
+pub(super) fn run_with_io(
+    target: &str,
+    forward_agent: bool,
+    cli: &Cli,
+    lf_args: &[String],
+    task_route: Option<TaskExecutionRoute>,
+    directory: &std::path::Path,
+    mut io: Option<&mut super::mutation::CommandIo<'_>>,
 ) -> anyhow::Result<()> {
     let preview = cli.context
         || cli.explain
@@ -35,6 +63,7 @@ pub fn run(
             cmd: crate::lf::SessionCommand::List(_)
                 | crate::lf::SessionCommand::Resume { .. }
                 | crate::lf::SessionCommand::New { .. }
+                | crate::lf::SessionCommand::Bind { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
@@ -45,6 +74,7 @@ pub fn run(
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
                 | crate::lf::TaskCommand::Save { .. }
+                | crate::lf::TaskCommand::Create { run: false, .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
         })
@@ -67,7 +97,7 @@ pub fn run(
     let source = if preview || resident_operation {
         None
     } else {
-        runtime.block_on(resolve_task_source(cli.task.as_deref()))?
+        runtime.block_on(resolve_task_source(cli.task.as_deref(), directory))?
     };
     let target = if preview || resident_operation {
         let store = crate::store::read_existing_registry()?
@@ -108,7 +138,7 @@ pub fn run(
     {
         Some(repository) => Some(repository),
         None if cli.repo.is_some() => None,
-        None => current_repository()?,
+        None => current_repository(directory)?,
     };
     // Preview forwards only authored selectors. Account lookup/connection and
     // isolation preparation belong to launch, on neither side of this read.
@@ -126,8 +156,12 @@ pub fn run(
         )
     };
     let source_json = source.as_ref().map(serde_json::to_string).transpose()?;
-    let user_name = crate::config::participant_name()?.unwrap_or_default();
+    let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
+    let origin = runtime.block_on(super::machine::local_machine())?;
+    let profile = crate::config::remote::outgoing(Some(directory), origin.id.as_str())?;
+    let profile = serde_json::to_string(&profile)?;
     let mut extra_env = vec![
+        (crate::config::remote::PROFILE_ENV, profile.as_str()),
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
         (crate::config::USER_NAME_ENV, user_name.as_str()),
     ];
@@ -138,9 +172,13 @@ pub fn run(
         ));
         extra_env.push(crate::provider_account::activation::isolation_env(true));
     }
-    let agent = crate::config::agent_override();
+    let agent = std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok();
     if let Some(agent) = agent.as_deref() {
         extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
+    }
+    let settings = std::env::var("LF_SETTINGS").ok();
+    if let Some(settings) = settings.as_deref() {
+        extra_env.push(("LF_SETTINGS", settings));
     }
     if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
@@ -163,7 +201,7 @@ pub fn run(
         })
     ) {
         let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
-        print!("{}", String::from_utf8(bytes)?);
+        output(&mut io, &String::from_utf8(bytes)?)?;
         return Ok(());
     }
     let preparation = match &cli.command {
@@ -195,17 +233,89 @@ pub fn run(
             record.open_argv = ssh_argv(&target.route, forward_agent, &script, true)?;
         }
         if connection.json {
-            println!("{}", serde_json::to_string(&record)?);
+            output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
         } else {
-            println!(
-                "{}",
-                shlex::try_join(record.open_argv.iter().map(String::as_str))?
-            );
+            output(
+                &mut io,
+                &format!(
+                    "{}\n",
+                    shlex::try_join(record.open_argv.iter().map(String::as_str))?
+                ),
+            )?;
         }
         return Ok(());
     }
     let preamble = build_preamble(&cmd, &extra_env);
-    run_ssh(&target.route, forward_agent, &preamble)
+    match io {
+        Some(io) => run_ssh_io(&target.route, forward_agent, &preamble, cli, io),
+        None => run_ssh(&target.route, forward_agent, &preamble),
+    }
+}
+
+fn output(io: &mut Option<&mut super::mutation::CommandIo<'_>>, text: &str) -> anyhow::Result<()> {
+    match io {
+        Some(io) => io.output.write_all(text.as_bytes())?,
+        None => {
+            use std::io::Write;
+            std::io::stdout().write_all(text.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+fn run_ssh_io(
+    dest: &str,
+    forward_agent: bool,
+    preamble: &str,
+    cli: &Cli,
+    io: &mut super::mutation::CommandIo<'_>,
+) -> anyhow::Result<()> {
+    use std::io::Write;
+    let args = ssh_argv(dest, forward_agent, preamble, false)?;
+    let mut input = Vec::new();
+    let reads_input = match &cli.command {
+        Some(crate::lf::Commands::Task {
+            cmd: crate::lf::TaskCommand::Save { .. },
+        })
+        | Some(crate::lf::Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
+        }) => true,
+        Some(crate::lf::Commands::Task {
+            cmd:
+                crate::lf::TaskCommand::Create {
+                    request: None,
+                    notes: None,
+                    ..
+                },
+        }) => true,
+        Some(crate::lf::Commands::Wave {
+            cmd: crate::lf::WaveCommand::NewChapter { plan, .. },
+        }) => plan == std::path::Path::new("/dev/stdin"),
+        _ => false,
+    };
+    if reads_input {
+        io.input.read_to_end(&mut input)?;
+    }
+    let mut child = Command::new(&args[0])
+        .args(&args[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().expect("piped SSH stdin");
+    // Drain output while sending large drafts: either pipe can fill first.
+    let output = std::thread::scope(|scope| {
+        let sending = scope.spawn(move || stdin.write_all(&input));
+        let output = child.wait_with_output()?;
+        let sent = sending.join().expect("SSH input writer panicked");
+        if output.status.success() {
+            sent?;
+        }
+        Ok::<_, std::io::Error>(output)
+    })?;
+    io.output.write_all(&output.stdout)?;
+    io.error.write_all(&output.stderr)?;
+    command_result(dest, output.status.code())
 }
 
 fn resident_args(
@@ -264,7 +374,10 @@ fn resident_args(
     result
 }
 
-async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<TaskSource>> {
+async fn resolve_task_source(
+    selector: Option<&str>,
+    directory: &std::path::Path,
+) -> anyhow::Result<Option<TaskSource>> {
     let Some(selector) = selector else {
         return Ok(None);
     };
@@ -275,9 +388,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     let source = TaskSource::resolve(&store, selector).await?;
     let repo = match store.get_task_by_issue(selector).await? {
         Some(task) => Some(crate::ops::task::repository_for_task(&store, &task)?),
-        None => crate::repo::discover_repo_root(&crate::repo::working_directory()?)
-            .ok()
-            .flatten(),
+        None => crate::repo::discover_repo_root(directory).ok().flatten(),
     };
     if let Some(repo) = repo {
         if crate::ops::planning_client::connected(&repo.to_string_lossy()) {
@@ -343,6 +454,9 @@ pub(super) async fn resolve_target(
         .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     let machine = super::machine::find_machine(&store, target).await?;
+    if machine.id == store.sqlite.local_machine()?.id {
+        return Ok(machine);
+    }
     let probe = super::machine::probe(&machine.route, forward_agent).await?;
     super::machine::report_version(&machine.route, &probe.version);
     let reached = probe.id?;
@@ -372,8 +486,10 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 
 /// The caller's repository by identity; `None` outside a repository or before
 /// `lf repository`, when the destination runs in its home directory.
-fn current_repository() -> anyhow::Result<Option<crate::durable::RepositoryId>> {
-    let Some(repo) = crate::repository::CanonicalRepo::current()? else {
+fn current_repository(
+    directory: &std::path::Path,
+) -> anyhow::Result<Option<crate::durable::RepositoryId>> {
+    let Some(repo) = crate::repository::CanonicalRepo::containing(directory)? else {
         return Ok(None);
     };
     let Some(store) = crate::store::read_existing_registry()? else {

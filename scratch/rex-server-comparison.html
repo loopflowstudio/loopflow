@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-593 · Loopflow and Rex</title><style>
+:root{color-scheme:light dark;--paper:#faf9f5;--ink:#242723;--muted:#62665f;--rule:#d7d9d1;--code:#f0f1eb;--link:#315e63}
+@media(prefers-color-scheme:dark){:root{--paper:#1c201d;--ink:#e5e8df;--muted:#adb6a9;--rule:#424a40;--code:#272e27;--link:#9bcbd0}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 system-ui,-apple-system,sans-serif}main{max-width:1060px;margin:auto;padding:64px 36px 100px}h1{font-size:clamp(2rem,5vw,3.3rem);line-height:1.08;letter-spacing:-.035em;max-width:850px;font-weight:650;margin:0 0 24px}h2{font-size:1.45rem;line-height:1.3;margin-top:52px;border-top:1px solid var(--rule);padding-top:28px}p{max-width:80ch}a{color:var(--link);text-underline-offset:.18em}code{font: .88em ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere;background:var(--code);padding:.1em .3em;border-radius:3px}pre{background:var(--code);padding:24px;overflow:auto;line-height:1.6}pre code{padding:0;background:none;white-space:pre;font-size:13px}table{width:100%;border-collapse:collapse;font-size:15px;line-height:1.5;margin:26px 0}th{text-align:left;font-weight:650}th,td{padding:16px 14px;border-bottom:1px solid var(--rule);vertical-align:top}th:first-child,td:first-child{width:15%;padding-left:0}td:nth-child(2),td:nth-child(3){width:42.5%}thead{color:var(--muted)}li{margin:14px 0}main>p:nth-child(2),main>p:nth-child(3){color:var(--muted);font-size:14px}main>p:nth-child(4){font-size:1.13rem;margin:32px 0}
+@media(max-width:650px){main{padding:32px 20px 60px}body{font-size:16px}thead{display:none}table,tbody,tr,td{display:block}tr{padding:12px 0;border-bottom:1px solid var(--rule)}td,td:first-child,td:nth-child(2),td:nth-child(3){width:100%;padding:8px 0;border:0}td:first-child{font-size:1.1rem;font-weight:650}td:nth-child(2)::before{content:'Loopflow · ';font-weight:650}td:nth-child(3)::before{content:'Rex · ';font-weight:650}pre{padding:16px}}
+</style></head><body><main><h1>Loopflow and Rex: server architecture and wire protocol</h1>
+<p>LOO-593 · interactive demo · November 4, 2026 (Pacific)</p>
+<p>Jack Heart requested this comparison. Loopflow source: <code>0c3759a910</code>. Rex evidence:
+the already-running Mac server, <code>0.0.1793377904-ge6592f</code>, API revision 8, its
+served <code>/llms.txt</code> specification and <code>api list --json</code>, plus current public docs.
+Read-only inspection; no Rex sessions, settings or installations changed.
+Built from <code>server/{wire,service,client}.rs</code>, <code>transport/{wire.rs,README.md}</code>,
+<code>ServerClient.swift</code>, <code>docs/dev/server.md</code> and <code>scratch/mobile-backend.md</code>.</p>
+<p><strong>Keep the independent execution owners. Rex provides a useful model for the
+client protocol around them: discoverable methods, structured results and explicit
+version negotiation.</strong> Those choices are independent of whether the server owns
+running programs. This comparison proposes no implementation change or shipping
+approval.</p>
+<h2>The system boundary</h2>
+<pre><code class="language-text">Loopflow today
+Desktop ── framed Unix connections ── lf server
+                                      ├─ shared Rust reads / writes / watches
+                                      └─ bridge ── existing execution owner
+                                                     └─ provider / PTY
+CLI ────── shared Rust operations + direct owner access
+Desktop automation ── app-owned windows / panes
+
+Rex, as documented by the installed server
+App / CLI / Lua ── control WebSocket ── Rex server
+                                       ├─ sessions / layouts / blocks
+App ───────────── data WebSocket ──────└─ terminal / program
+Native client actions ← request routed to the named app
+</code></pre>
+<p>The nouns differ. A Rex session groups windows and blocks. A Loopflow Session
+is a durable agent conversation; Work and native arrangement live elsewhere.
+Equating the two would import layout and process-lifetime responsibilities into
+the wrong Loopflow object. Rex can route native actions to a specific client;
+that is compatible with keeping our Desktop automation app-owned. Sources:
+<a href="https://www.superlogical.com/rex/docs/reference/api">Rex method reference</a>,
+<a href="../docs/dev/server.md">Loopflow boundary</a>.</p>
+<p>Restart behavior makes the lifetime distinction concrete. Rex's Linux personal
+and account servers retain their old executable while sessions remain; restarting
+a shared server ends its programs. Its login server is an ingress exception:
+restarting it preserves independent account servers. Our access server can be
+replaced while existing execution owners continue. The same-build composed
+replacement test passed; final rendered continuity, released-version upgrade and
+Linux replacement remain unproved. Sources:
+<a href="https://www.superlogical.com/rex/docs/linux/upgrading">Rex upgrades</a>,
+<a href="mobile-backend.md#remaining-proof-and-delivery">Loopflow proof limits</a>.</p>
+<h2>The wire, side by side</h2>
+<p><strong>Layer clarification — November 5:</strong> Jack Heart asked about within-computer
+requests. A Unix socket is a local transport; WebSocket supplies a handshake and
+message protocol above a stream. WebSocket can run over a Unix socket, as Rex's
+local endpoint does. Persistence is a third choice: our one-operation connections
+are an implementation decision, not a Unix-socket limitation. The table compares
+current stacks, not mutually exclusive technologies.</p>
+<p>Rex details below come from the installed server's own protocol specification,
+retrieved over its existing Unix socket. They describe that build, not a claim
+that every released Rex version behaves identically.</p>
+<table>
+<thead>
+<tr>
+<th>Boundary</th>
+<th>Loopflow in this branch</th>
+<th>Rex API revision 8</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Control carrier</td>
+<td>Same-user Unix socket; four-byte big-endian length followed by JSON. One operation per connection, with subscriptions remaining open.</td>
+<td>Persistent <code>/api/control</code> WebSocket, <code>rex.control.v1</code>; JSON text messages carry requests, responses and events.</td>
+</tr>
+<tr>
+<td>Request and result</td>
+<td><code>version</code>, <code>id</code>, tagged <code>operation</code>; response includes server <code>instance</code>. Reads return JSON/text inside an <code>output</code> string; commands return <code>trace_id</code>, <code>output</code>, <code>stderr</code>, <code>code</code>.</td>
+<td>Method name plus typed payload; structured result or error with machine-readable code and HTTP-style status. Requests may overlap; dependent calls await their predecessor.</td>
+</tr>
+<tr>
+<td>Discovery</td>
+<td>Bootstrap advertises broad capabilities and limits. Rust/Swift types and shared fixtures define the wire. CLI help separately describes command syntax.</td>
+<td>The connected server publishes input/output JSON Schemas, examples and validation notes; CLI/Lua discovery follows that server.</td>
+</tr>
+<tr>
+<td>Compatibility</td>
+<td>Exact protocol revision 1. Local readiness also checks the selected helper's executable hash. That installation check is separate from bridge admission.</td>
+<td>Hello/welcome negotiate an overlapping API revision range. This build advertises revisions 0–8 and documents translation to older shapes.</td>
+</tr>
+<tr>
+<td>Work updates</td>
+<td>Complete watch readings, generation and checkpoint acknowledgements; reconnect opens a fresh reading, without a replay cursor.</td>
+<td>Snapshot plus ordered connection events, with a response sequence boundary and domain revisions to avoid applying a change twice. Reconnect reads state again.</td>
+</tr>
+<tr>
+<td>Terminal channel</td>
+<td><code>attach(owner)</code> acknowledges, then switches that connection to the existing owner protocol: one-byte tag, four-byte big-endian length, payload. Input and output share it.</td>
+<td>An attached control client obtains an expiring, single-use, principal-bound ticket for <code>/api/data</code>. Output uses binary WebSocket messages; input uses control methods.</td>
+</tr>
+<tr>
+<td>Recovery</td>
+<td>Owner reconnect token and consumed byte position; refresh if retained bytes expired. Native recovery preserves newer input/geometry claims and never replays uncertain input.</td>
+<td>Control-client and data-stream reconnection are separate. Data resumes by token and consumed byte count; reconnect tokens rotate. Control events and pending replies are not replayed.</td>
+</tr>
+<tr>
+<td>Bounds</td>
+<td>32 MiB server frames, 64 concurrent connections, five-second writes. Owner stream: 64 KiB chunks, 4 MiB payload/queue bounds, 1 MiB replay spool.</td>
+<td>Control messages limited to 1 MiB in this build; 8 MiB event backlog causes disconnection. Data messages carry up to 64 KiB. Both control and data document 60-second reconnect retention.</td>
+</tr>
+</tbody>
+</table>
+<p>Loopflow sources: <a href="../rust/loopflow/src/server/wire.rs">server wire</a>,
+<a href="../rust/loopflow/src/server/service.rs">server implementation</a>,
+<a href="../rust/loopflow/src/server/client.rs">readiness</a>,
+<a href="../rust/loopflow/src/transport/README.md">terminal contract</a>.
+Rex's public <a href="https://www.superlogical.com/rex/docs/automate/server-api">API discovery guide</a>
+explains how to inspect the connected build. Reproduce the bounded read with
+<code>rex --autostart=false api list --json</code>; its <code>http</code> object names the served
+documentation and control/data endpoints. The inspection found 73 methods.</p>
+<p>Complete Work readings let Loopflow clients replace a projection without writing
+event reducers. Rex's sequence contract supports finer updates, with more client
+ordering rules. The comparison supplies no workload evidence that warrants
+replacing our watch model.</p>
+<h2>Similar machinery, different contracts</h2>
+<p>Both terminal streams combine an initial screen with subsequent output and
+nonce-tagged APC events. Both use byte positions for stream recovery. Rex's
+documented initial data uses Ghostty's snapshot format; Loopflow's live attachment
+uses Ghostty's VT formatter, while ended-screen files use Ghostty snapshots.
+Shared Ghostty foundations therefore do not make the wire formats interchangeable.</p>
+<p>Neither design promises exactly-once mutations after a lost response. An operation
+may have completed; inspect state before retrying. Request correlation IDs do not
+solve duplicate creation. This remains a shared-command admission question for
+mobile, rather than a reason to add a gateway response cache.</p>
+<p>Rex block ownership arbitrates presentation such as terminal size and grants no
+additional rights. Loopflow separates size/color ownership from exclusive input
+control. Our reconnect policy must retain that distinction; importing the name
+“owner” alone would obscure it. Sources: installed Rex <code>session.own_block</code> schema
+and validation notes; <a href="../rust/loopflow/src/transport/README.md#viewer-stream">Loopflow viewer stream</a>.</p>
+<h2>What the comparison suggests</h2>
+<p><strong>1. Keep execution independent of client access.</strong> That boundary protects live
+providers and Graphs during access-server updates. Rex's login/account split also
+demonstrates that an ingress process need not own the programs it reaches.</p>
+<p><strong>2. Make the mobile API discoverable and return domain values.</strong> A rename should
+return its identity/result directly, with diagnostics alongside it. Today our
+inputs are typed, but many results retain the CLI stdout/stderr shape and require
+a second decode. Derive schemas and results from the existing shared operations;
+avoid another method catalogue or mutation implementation. Preserve ordinary CLI
+formatting at its adapter. This is a proposed improvement, not accepted scope.</p>
+<p><strong>3. Decide compatibility before treating the phone protocol as stable.</strong> Desktop
+and its selected local helper can update together. A phone and its host may not.
+Rex's revision negotiation makes that difference explicit. A small supported
+version window may suffice for Loopflow; copying eight compatibility layers is
+not implied. Keep executable selection an installation concern.</p>
+<p><strong>4. Choose framing and connection lifetime without moving ownership.</strong> A
+persistent connection can carry requests and subscriptions with either framing
+choice. WebSocket over Unix locally and WSS remotely could share message handling
+while retaining local peer credentials and separate remote authentication. This
+adds HTTP/WebSocket machinery locally; library support for Unix streams must be
+checked in each client. Keeping custom local framing is smaller at that boundary,
+but leaves two framing implementations. Neither the comparison nor the saved
+latency measurements establishes a performance winner. Protocol reuse is a
+separate reason to consider the change. Sources:
+<a href="https://www.rfc-editor.org/rfc/rfc6455">WebSocket specification</a>,
+<a href="https://websockets.readthedocs.io/en/stable/reference/asyncio/client.html#websockets.asyncio.client.unix_connect">WebSocket over Unix example API</a>,
+<a href="https://man7.org/linux/man-pages/man7/unix.7.html">Unix socket semantics</a>.</p>
+<p>Rex currently derives remote admission from the connection's identity, commonly
+Tailscale, and documents broader authentication as planned. It specifically warns
+that forwarding the ordinary trusted Unix listener misidentifies remote callers.
+LOO-593 supplies local access; LOO-718 owns remote admission and iOS. Its pairing
+design and combined integration need their own review. Sources:
+<a href="https://www.superlogical.com/rex/docs/linux/remote-access">Rex remote access</a>,
+<a href="mobile-backend.md#loo-718-integration-handoff">LOO-718 handoff</a>.</p>
+<h2>Questions for the next design pass</h2>
+<p>These are comparison choices, not new acceptance gates for the published PR.</p>
+<ol>
+<li>Protocol scope: <strong>a)</strong> preserve custom local framing and improve the shared
+operation contract first; <strong>b)</strong> use WebSocket framing over Unix locally and
+the network remotely. Assess client-library fit and removed code before choosing;
+both preserve the local Unix transport. Jack has not selected either approach.</li>
+<li>Result contract: <strong>a)</strong> expose typed domain results and generated discovery;
+<strong>b)</strong> retain CLI-shaped replies and decode them in each client.
+<strong>a</strong> is the larger API simplification suggested by Rex.</li>
+</ol>
+<p>LOO-593 remains at interactive demo with PR #1813 published. Comparison artifacts
+only; no implementation relaunch, merge or Auto-Ship.</p>
+</main></body></html>

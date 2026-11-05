@@ -24,14 +24,16 @@ first, then the engineering words it borrows.
 | **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |
 | **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
 | **AgentProcess** | The provider's OS process Loopflow started for a Session; it keeps running when another lf process attaches. |
-| **Machine** | One OS user’s Loopflow authority in one data directory; two users on one host have separate identities. |
+| **Machine** | One OS user’s Loopflow authority in one data directory, used as an execution destination; two users on one host have separate identities. |
+| **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, independently of the app window. |
+| **Installation** | The selected Loopflow build and its registration, updated with `lf install`, including the client server. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, OpenCode, or Pi. |
 | **Scratch** | The `scratch/` folder, for working notes. `lf scratch clear` removes added files; existing files and edits remain. |
 
 Historical capture paths and immutable receipts retain their encoding; see
-[cutover status](architecture/reference-cutover.md#cutover-status). They are not a fourth
+[cutover status](dev/reference-cutover.md#cutover-status). They are not a fourth
 execution owner in the accepted model.
 
 ## Borrowed from software engineering

@@ -10,15 +10,16 @@ import XCTest
 final class MachinePairingTests: XCTestCase {
     func testLocalMobileSetupCodecMatchesTheBackendFixture() throws {
         let bundle = Bundle(for: Self.self)
-        let requestURL = try XCTUnwrap(bundle.url(forResource: "configure_remote", withExtension: "json", subdirectory: "machine"))
-        let configURL = try XCTUnwrap(bundle.url(forResource: "mobile_configuration", withExtension: "json", subdirectory: "machine"))
+        let requestURL = try XCTUnwrap(bundle.url(forResource: "configure_remote", withExtension: "json", subdirectory: "server"))
+        let configURL = try XCTUnwrap(bundle.url(forResource: "mobile_configuration", withExtension: "json", subdirectory: "server"))
         let config = try JSONDecoder().decode(MachineMobileConfiguration.self, from: Data(contentsOf: configURL))
-        let request = MachineRequest(version: 1, id: "mobile-1", operation: .configureRemote(configuration: config))
+        let request = ServerClientMessage.request(id: "mobile-1", operation: .configureRemote(configuration: config))
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: requestURL)))
-        let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "machine"))
-        let response = try JSONDecoder().decode(MachineResponse.self, from: Data(contentsOf: replyURL))
-        guard case .remote(let configuration) = response.result else { return XCTFail("Expected listener configuration") }
+        let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "server"))
+        guard case .response("mobile-1", .remote(let configuration)) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: replyURL)) else {
+            return XCTFail("Expected listener configuration")
+        }
         XCTAssertEqual(configuration?.endpoint, "https://host.tail.ts.net:8443")
     }
     func testAddressPreservesThePrivateEndpointAndRejectsOtherDestinations() throws {

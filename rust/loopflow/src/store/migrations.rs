@@ -123,7 +123,19 @@ const LEGACY_BASELINE_VERSION: &str = "001_initial";
 // -- Applying -----------------------------------------------------------------
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
-    apply_sqlite_transaction(conn, |_| Ok(()))
+    apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |_| Ok(()))
+}
+
+/// Advance a validation snapshot without changing preferences in the real
+/// checkouts its rows reference. Promotion owns the actual settings cutover.
+pub(crate) fn apply_sqlite_preview(conn: &rusqlite::Connection) -> StoreResult<()> {
+    apply_sqlite_transaction(conn, MigrationPurpose::Preview, |_| Ok(()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MigrationPurpose {
+    Upgrade,
+    Preview,
 }
 
 /// Stage a fresh connection one migration behind the binary's known head. The
@@ -209,11 +221,12 @@ pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 
 fn apply_sqlite_transaction(
     conn: &rusqlite::Connection,
+    purpose: MigrationPurpose,
     before_migration: impl FnOnce(&rusqlite::Connection) -> StoreResult<()>,
 ) -> StoreResult<()> {
     _migration_transaction(conn, |conn, guards| {
         before_migration(conn)?;
-        apply_set(conn, MIGRATIONS, guards)?;
+        apply_set_with_purpose(conn, MIGRATIONS, guards, purpose)?;
         validate_foreign_keys(conn)?;
         validate_persisted_json(conn)
     })
@@ -423,7 +436,7 @@ pub(crate) fn apply_sqlite_with_backup(
     let result = match requires_migration_sqlite(conn) {
         Ok(false) => Ok(()),
         Ok(true) => {
-            let migrated = apply_sqlite_transaction(conn, |conn| {
+            let migrated = apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |conn| {
                 backup_before_migration(conn, path).map(|_| ())
             });
             if migrated.is_ok() {
@@ -618,10 +631,20 @@ fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
 /// Apply every migration in `set` the database has not seen, in id order, exactly
 /// once. Taking the set as an argument is what lets the fixtures below drive
 /// synthetic release histories without a test-only seam in the store.
+#[cfg(test)]
 fn apply_set(
     conn: &rusqlite::Connection,
     set: &[Migration],
     guards: &mut Vec<File>,
+) -> StoreResult<()> {
+    apply_set_with_purpose(conn, set, guards, MigrationPurpose::Upgrade)
+}
+
+fn apply_set_with_purpose(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
     validate_set(set).map_err(StoreError::InvalidData)?;
 
@@ -645,7 +668,7 @@ fn apply_set(
     let applied = applied_versions(conn)?;
     for (offset, migration) in pending_migrations(conn, &applied, set)?.iter().enumerate() {
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
-        migration_preflight(conn, migration, guards)?;
+        migration_preflight(conn, migration, guards, purpose)?;
         conn.execute_batch(migration.sql)?;
         convert_released_data(conn, migration.sql)?;
         backfill_known_checksums(conn, set)?;
@@ -729,7 +752,12 @@ fn migration_preflight(
     conn: &rusqlite::Connection,
     migration: &Migration,
     guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
+    if purpose == MigrationPurpose::Upgrade && migration_contains(migration, "settings_authority") {
+        crate::config::migrate::preflight(conn, guards)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    }
     if migration_contains(migration, "canonical_structured_ids") {
         super::canonical_ids::preflight(conn, guards)?;
     }
@@ -1573,6 +1601,37 @@ mod tests {
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn task_session_promotion_releases_shared_scope_but_preserves_permanent_binds() {
+        let conn = open();
+        apply_before_migration(&conn, "task_session_promotion");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_session_promotion.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+
+        conn.execute(
+            "UPDATE agent_sessions SET primary_scope=NULL,wave_id=NULL WHERE id='primary'",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE agent_sessions SET task_id='task_promotion',bound_at=2,work_source='bound' WHERE id='primary'", []).unwrap();
+        let history: (String, String) = conn.query_row(
+            "SELECT s.cwd,e.wave_id FROM agent_sessions s JOIN session_events e ON e.session_id=s.id WHERE s.id='primary' AND e.kind='captured'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(history, ("/repo/wave".into(), "wave-promotion".into()));
+        for sql in [
+            "UPDATE agent_sessions SET task_id='task_other' WHERE id='primary'",
+            "UPDATE agent_sessions SET task_id=NULL WHERE id='primary'",
+            "UPDATE agent_sessions SET wave_id=NULL WHERE id='ordinary'",
+            "UPDATE agent_sessions SET wave_id='wave-promotion' WHERE id='primary'",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "{sql}");
+        }
     }
 
     #[test]
@@ -3078,6 +3137,22 @@ mod tests {
     }
 
     #[test]
+    fn server_request_stops_preserve_unknown_historical_attribution() {
+        let conn = open();
+        apply_before_migration(&conn, "server_request_stops");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/request_stops_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        let stop: (i64, Option<String>, Option<String>) = conn.query_row(
+            "SELECT ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person FROM tasks WHERE issue_identifier='STOP-1'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(stop, (25, None, None));
+    }
+
+    #[test]
     fn ownership_log_records_released_evidence_without_inventing_owners() {
         let conn = open();
         apply_before_migration(&conn, "task_ownership");
@@ -3459,31 +3534,27 @@ mod tests {
     }
 
     #[test]
-    fn task_agent_migration_preserves_existing_tasks() {
-        let conn = open();
-        apply_before_migration(&conn, "task_agent");
-        conn.execute_batch("INSERT INTO waves (id, name, repo, created_at)
-            VALUES ('wave_agent', 'agent', '/repo', 1);
-            INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
-            VALUES ('project_agent', 'wave_agent', 'linear-project', 1, 1);
-            INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, worktree, workspace_slug, created_at, updated_at)
-            VALUES ('task_agent', 'project_agent', 'linear-issue', 'TEST-1', '/repo.task', 'task-agent', 1, 1);").unwrap();
-        conn.execute_batch(&migration_section_sql("task_agent"))
-            .unwrap();
-        let retained = conn
-            .query_row(
-                "SELECT issue_identifier, worktree, agent FROM tasks WHERE id='task_agent'",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(retained, ("TEST-1".into(), "/repo.task".into(), None));
+    fn settings_authority_preserves_task_history_and_migrates_preferences() {
+        let home = tempfile::tempdir().unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        apply_before_migration(&conn, "settings_authority");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/settings_authority_released.sql"
+        ))
+        .unwrap();
+        let mut guards = Vec::new();
+        crate::config::migrate::preflight(&conn, &mut guards).unwrap();
+        drop(guards);
+        upgrade_from_migration(&conn, "settings_authority");
+        let retained: (String, String) = conn.query_row("SELECT t.worktree,s.provider FROM tasks t JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(retained, ("/repo.task".into(), "claude".into()));
+        let values: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &std::fs::read_to_string(home.path().join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(values["skills"]["design"]["agent"], "codex:o3");
+        assert_eq!(values["skills"]["implement"]["agent"], "codex");
+        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('scope_settings','scope_defaults','provider_routes')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
     }
 
     #[test]
@@ -6292,7 +6363,7 @@ mod tests {
                 .unwrap();
         });
 
-        apply_sqlite_transaction(&conn, |conn| {
+        apply_sqlite_transaction(&conn, super::MigrationPurpose::Upgrade, |conn| {
             backup_before_migration(conn, &path)?;
             start_writer.send(()).unwrap();
             assert!(

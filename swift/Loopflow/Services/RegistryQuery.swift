@@ -4,7 +4,7 @@
 // current by the same reads `--watch` streams, one served watch per part.
 //
 // On macOS the Work watches, `ServedRead` reads and `ServedWrite` writes run
-// inside the app through Loopflow's Rust library; other commands run the `lf`
+// through the local server; other commands run the `lf`
 // shipped inside the app.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
@@ -46,6 +46,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case waves
     case machineId
     case portfolio
+    case settings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
     case paneLayout(directory: String, work: String)
     case people(directory: String)
     case graphs(directory: String)
@@ -98,6 +99,10 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["machine", "id", "--json"]
         case .portfolio:
             return ["portfolio", "--json"]
+        case .settings(_, let wave, let skill, let graph, let step):
+            return ["config", "show", "--json"] + (wave.map { ["--wave", $0] } ?? [])
+                + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
+                + (step.map { ["--step", $0] } ?? [])
         case .paneLayout(_, let work):
             return ["desktop", "layout", work]
         case .people:
@@ -182,6 +187,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .waves: TaggedFields("waves")
         case .machineId: TaggedFields("machine_id")
         case .portfolio: TaggedFields("portfolio")
+        case .settings(let directory, let wave, let skill, let graph, let step):
+            TaggedFields("settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .paneLayout(let directory, let work):
             TaggedFields("pane_layout", ["directory": directory, "work": work])
         case .people(let directory): TaggedFields("people", ["directory": directory])
@@ -226,10 +233,11 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 }
 
 /// A write Loopflow makes inside the app, encoded as its Rust `Write`: what
-/// `argv` does in `cwd`, given `input` on stdin. A Work change records its
-/// Process as that `lf` command would.
+/// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
+/// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskCreate(directory: String, requestID: UUID, request: String, wave: String?, graph: String?, terminal: Bool)
+    case taskFromSession(directory: String, id: String, title: String)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
@@ -265,6 +273,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["task", "create", "--run", "--json", "--request-id", id.uuidString.lowercased()]
                 + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
                 + Self.option("--graph", graph) + (terminal ? ["--terminal"] : []) + ["--", request]
+        case .taskFromSession(_, let id, let title): ["task", "create", "--session", id, "--title", title, "--json"]
         case .taskComplete(_, let issue): ["task", "complete", issue]
         case .taskReopen(_, let issue): ["task", "reopen", issue]
         case .taskAbandon(_, let issue): ["task", "abandon", issue]
@@ -335,6 +344,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskCreate(let directory, let id, let request, let wave, let graph, let terminal):
             TaggedFields("task_create", ["directory": directory, "request_id": id.uuidString.lowercased(),
                                         "request": request, "wave": wave, "graph": graph, "terminal": terminal])
+        case .taskFromSession(let directory, let id, let title):
+            TaggedFields("task_from_session", ["directory": directory, "id": id, "title": title])
         case .taskComplete(let directory, let issue):
             TaggedFields("task_complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
@@ -652,7 +663,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.
-    /// Registration writes the store, so `lf` runs it, not the app's library.
+    /// Registration runs the complete CLI command.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
         try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
     }
@@ -984,6 +995,12 @@ public struct RegistryQuery: Sendable {
             .sessionNew(directory: cwd ?? "/", id: session.id, agent: agent)))
     }
 
+    /// Create a Task around the selected conversation without launching work.
+    public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
+        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await write(
+            .taskFromSession(directory: cwd ?? "/", id: id, title: title)))
+    }
+
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {
         try Self.decode(SessionBindingPreview.self, from: await serve(.bindPreview(session: id, task: task)))
     }
@@ -1099,7 +1116,7 @@ public struct TaskCreateRunFailed: LocalizedError, Sendable {
 public struct WaveGraph: Decodable, Sendable, Hashable {
     public struct Default: Decodable, Sendable, Hashable {
         public let name: String
-        /// `personal`, `wave`, `repo`, `global` or `default`
+        /// `builtin`, `repository`, `personal`, `environment` or `command_line`
         public let source: String
     }
     public let waveId: String?

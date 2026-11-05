@@ -1,0 +1,1 @@
+{"type":"response","id":"rename-1","result":{"kind":"command","trace_id":"85c31c1e-850c-4821-878d-55527b6dba46","code":0,"value":{"id":"session_5e55105e000040008000000000000001","title":"Served name"},"output":"{\"id\":\"session_5e55105e000040008000000000000001\",\"title\":\"Served name\"}\n","stderr":""}}

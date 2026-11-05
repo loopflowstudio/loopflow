@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "mobile-1",
+  "operation": {
+    "kind": "configure_remote",
+    "configuration": {
+      "enabled": true,
+      "endpoint": "https://host.tail.ts.net:8443",
+      "owner": {
+        "node": "node-host",
+        "user": 1
+      }
+    }
+  }
+}

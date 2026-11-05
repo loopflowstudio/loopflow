@@ -45,8 +45,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 None,
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
             )?;
-            let opened = super::open(&store, &session.id, false, true, false).await;
-            let forked = super::open(&store, &session.id, true, true, false).await;
+            let opened = super::open(&store, home, &session.id, false, true, false).await;
+            let forked = super::open(&store, home, &session.id, true, true, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -564,6 +564,7 @@ fn membership_wire_ids_are_derived_from_their_captures() {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             interactive: human,
+            interactive_name: None,
             id: None,
             returns: None,
             sources: Vec::new(),

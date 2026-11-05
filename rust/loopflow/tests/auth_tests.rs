@@ -650,8 +650,12 @@ esac
         .args(["set", "account.codex", "active@"])
         .output()
         .unwrap();
-    assert!(!unscoped.status.success());
-    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("--global"));
+    assert!(unscoped.status.success(), "{unscoped:?}");
+    let private: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+        &std::fs::read_to_string(home.path().join("lf.config.local.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(private["account"]["codex"], "active@");
 }
 
 #[test]
@@ -678,19 +682,19 @@ fn cached_auth_leaves_no_process_or_account_state() {
         .iter()
         .all(|r| r["scope"] == "local" && r["cached_credential_state"] == "uninspected"));
     let database = rusqlite::Connection::open(lf_home.join("loopflow.db")).unwrap();
-    let counts: (i64, i64, i64, i64) = database
+    let counts: (i64, i64, i64) = database
         .query_row(
             "SELECT (SELECT count(*) FROM processes),
                     (SELECT count(*) FROM provider_accounts),
-                    (SELECT count(*) FROM provider_routes),
                     (SELECT count(*) FROM agent_sessions)",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
     // Nothing references the finished read, so its exit forgets it.
-    assert_eq!(counts, (0, 0, 0, 0));
+    assert_eq!(counts, (0, 0, 0));
     assert!(!lf_home.join("accounts").exists());
+    assert!(!lf_home.join("config.yaml").exists());
 }
 
 fn write_identity(home: &std::path::Path, email: &str, subject: &str) {
@@ -1329,15 +1333,15 @@ fn codex_same_login_recovery_status_launch_and_reset() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let stored_routes = || {
-        db.prepare(
-            "SELECT json_array(scope,scope_id,provider,position,account_id,created_at,updated_at)
-                    FROM provider_routes ORDER BY scope,scope_id,provider,position",
-        )
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
+        [
+            home.path().join("config.yaml"),
+            repo.path().join("lf.config.local.yaml"),
+        ]
+        .map(|path| {
+            let config: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            config["account"].clone()
+        })
     };
     let prior_stored_routes = stored_routes();
     run(&["-b", ":", "Reply with RECOVERED."]);

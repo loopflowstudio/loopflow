@@ -53,9 +53,13 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Override agents named in Tasks, Graphs and skills, including child commands (claude, codex, opencode, pi; harness[:model])
+    /// Select this conversation or all agent steps of this Graph (harness[:model])
     #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
+
+    /// Override a typed preference for this invocation (KEY=YAML); repeatable
+    #[arg(long = "setting", global = true)]
+    pub settings: Vec<String>,
 
     /// Read the skill and its arguments from this captured invocation file, as a Graph step does
     #[arg(long, value_name = "PATH")]
@@ -159,6 +163,61 @@ pub struct Cli {
 }
 
 impl Cli {
+    pub fn setting_values(&self) -> anyhow::Result<serde_yaml_ng::Value> {
+        let mut value = serde_yaml_ng::Value::Mapping(Default::default());
+        for setting in &self.settings {
+            let (key, text) = setting
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
+            let parsed = crate::config::settings::parse_value(key, text)?;
+            crate::config::settings::insert(
+                &mut value,
+                &key.split('.').collect::<Vec<_>>(),
+                parsed,
+            );
+        }
+        for (key, enabled) in [
+            ("yolo", self.yolo.then_some(true)),
+            ("context.paste", self.clipboard.then_some(true)),
+            (
+                "isolate",
+                self.shared
+                    .then_some(false)
+                    .or(self.isolate.then_some(true)),
+            ),
+            ("chrome", self.chrome.map(|mode| mode == BrowserMode::On)),
+            (
+                "context.diff",
+                self.diff
+                    .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both)),
+            ),
+            (
+                "context.diff_files",
+                self.diff
+                    .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both)),
+            ),
+        ] {
+            if let Some(enabled) = enabled {
+                crate::config::settings::insert(
+                    &mut value,
+                    &key.split('.').collect::<Vec<_>>(),
+                    enabled.into(),
+                );
+            }
+        }
+        if let Some(agent) = &self.agent {
+            crate::config::settings::insert(&mut value, &["agent"], agent.clone().into());
+        }
+        if !self.docs.is_empty() {
+            crate::config::settings::insert(
+                &mut value,
+                &["context", "docs"],
+                serde_yaml_ng::to_value(&self.docs)?,
+            );
+        }
+        Ok(value)
+    }
+
     /// The global `--repo` or `--repository` selector names a repository.
     pub fn selects_repository(&self) -> bool {
         self.repo.is_some() || self.repository.is_some()
@@ -331,6 +390,7 @@ impl Cli {
             }
         }
         for (flag, values) in [
+            ("--setting", &self.settings),
             ("--docs", &self.docs),
             ("--account", &self.account),
             ("--only-account", &self.only_account),
@@ -353,6 +413,9 @@ impl Cli {
                 args.extend([flag.to_string(), value.get_name().to_string()]);
             }
         }
+        if let Some(agent) = &self.agent {
+            args.extend(["--agent".to_owned(), agent.clone()]);
+        }
         if let Some(input) = &self.skill_input {
             args.extend([
                 "--skill-input".to_string(),
@@ -374,6 +437,7 @@ impl Cli {
             docs: self.docs.clone(),
             clipboard: self.clipboard,
             agent: self.agent.clone(),
+            settings: self.settings.clone(),
             skill_input: self.skill_input.clone(),
             output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
@@ -397,24 +461,6 @@ impl Cli {
             cwd: self.cwd.clone(),
             resume: self.resume.clone(),
         }
-    }
-
-    pub fn chrome_setting(&self) -> Option<bool> {
-        self.chrome.map(|mode| mode == BrowserMode::On).or_else(|| {
-            std::env::var(crate::config::CHROME_OVERRIDE_ENV)
-                .ok()
-                .map(|value| value == "on")
-        })
-    }
-
-    pub fn diff_files_setting(&self) -> Option<bool> {
-        self.diff
-            .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both))
-    }
-
-    pub fn diff_setting(&self) -> Option<bool> {
-        self.diff
-            .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both))
     }
 
     /// The most specific Work selected for direct execution.
@@ -527,9 +573,9 @@ pub enum Commands {
         /// Every repository
         #[arg(long)]
         global: bool,
-        /// Apply on this Machine only; set by the copy to your other Machines
-        #[arg(long, hide = true)]
-        here: bool,
+        /// Edit the committed repository or Wave configuration explicitly
+        #[arg(long, id = "set_shared", conflicts_with = "global")]
+        shared: bool,
     },
     /// Clear your own value of a setting, so the committed config chooses
     #[command(after_help = SETTING_KEYS)]
@@ -538,9 +584,9 @@ pub enum Commands {
         /// Every repository
         #[arg(long)]
         global: bool,
-        /// Apply on this Machine only; set by the copy to your other Machines
-        #[arg(long, hide = true)]
-        here: bool,
+        /// Edit the committed repository or Wave configuration explicitly
+        #[arg(long, id = "unset_shared", conflicts_with = "global")]
+        shared: bool,
     },
     /// Read Loopflow configuration
     Config {
@@ -599,11 +645,12 @@ pub enum Commands {
     /// Internal provider turn-boundary hook: context at startup and compaction,
     /// steers at tool and prompt boundaries, Linear acquisition at turn end,
     /// Pi's native lifecycle events and its bash tool groups.
-    #[command(name = "__context-block", hide = true)]
+    // Running providers retain this older Stop spelling across lf upgrades.
+    #[command(name = "__context-block", alias = "__planning-check", hide = true)]
     ContextBlock {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, default_value = "stop")]
         moment: crate::context_block::ContextMoment,
         /// The FIFO Pi holds open while a `tool-group` command runs
         #[arg(
@@ -628,7 +675,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: Option<PrCommand>,
     },
-    /// Release operations (run, check, notes, bump, tag, status)
+    /// Release operations (run, check, notes, bump, tag, status, issues, regress, promote)
     Release {
         #[command(subcommand)]
         cmd: ReleaseCommand,
@@ -667,6 +714,11 @@ pub enum OpsCommand {
     Wt {
         #[command(subcommand)]
         cmd: WtCommand,
+    },
+    /// Serve Desktop and other clients on this host
+    Server {
+        #[command(subcommand)]
+        cmd: ServerCommand,
     },
     /// Name, connect, pool and rent Machines
     Machine {
@@ -1254,7 +1306,9 @@ impl OpsCommand {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
+            Self::Server { .. } | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => {
+                false
+            }
             Self::Commit { .. } | Self::Sync(_) => true,
         }
     }
@@ -1297,12 +1351,14 @@ fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
 impl ReleaseCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Check { .. } | Self::Status { .. } => false,
+            Self::Check { .. } | Self::Status { .. } | Self::Issues { .. } => false,
+            Self::Promote { dry_run, .. } => !dry_run,
             Self::Run { .. }
             | Self::Notes { .. }
             | Self::Bump { .. }
             | Self::Tag { .. }
-            | Self::Publish { .. } => true,
+            | Self::Publish { .. }
+            | Self::Regress { .. } => true,
         }
     }
 }
@@ -1318,11 +1374,9 @@ impl WtCommand {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum MachineServiceCommand {
+pub enum ServerCommand {
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
-    /// Register the selected installation's service and wait for local readiness.
-    Ensure,
     /// Report local readiness without registering or starting anything.
     Status,
     /// Configure private mobile access using this host's signed-in Tailscale installation.
@@ -1339,9 +1393,7 @@ pub enum MachineServiceCommand {
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Id { .. } | Self::List { .. } | Self::Status { .. } | Self::Service { .. } => {
-                false
-            }
+            Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
                 MachineCredentialCommand::Receive => true,
@@ -1373,7 +1425,10 @@ impl MachineCommand {
 impl ConfigCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::User { .. } => false,
+            Self::User { .. } | Self::Show { .. } | Self::Catalog { .. } => false,
+            Self::Import { .. } => true,
+            Self::Migrate { accept } => *accept,
+            Self::Retained { replace, keep } => *replace || *keep,
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
             Self::Planning { cmd } => match cmd {
                 PlanningCommand::Key { new, recover } => *new || recover.is_some(),
@@ -1389,7 +1444,8 @@ impl SelfCommand {
             Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
                 Some(
-                    InstallCommand::Preflight { .. }
+                    InstallCommand::Server
+                    | InstallCommand::Preflight { .. }
                     | InstallCommand::ReaderCatalog
                     | InstallCommand::CanOpen { .. },
                 ) => false,
@@ -1464,19 +1520,12 @@ impl WavePlanTarget {
     }
 }
 
-const SETTING_KEYS: &str = "Keys:
-  graph                 the graph new Tasks take up
-  agent                 the agent work launches on, such as claude:opus
-  skill_agents.<skill>  the agent one skill launches on
-  machine               where new Tasks and the Session run; copied to your other
-                        Machines. A pool or on-demand sends new Tasks there.
-  machine.tasks         where new Tasks run
-  machine.session       where the Session runs; it moves there
-  account.<provider>    the logins that pay, in order: work@,personal@
-
-Scope: this repository; `lf --wave <wave> set` a Wave; --global every repository.
-Yours wins over the committed .lf/config.yaml and .lf/wave/<name>/config.yaml,
-for you only; `lf wave status` shows each value and its source.";
+const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
+Values use YAML; false disables and [] clears an additive list.
+The default destination is root lf.config.local.yaml, shared across Task worktrees.
+--global edits ~/.lf/config.yaml; --shared explicitly edits committed configuration.
+`lf --wave <name> set` selects a Wave; unset removes only that declaration.
+`lf config show --skill <name> --json` explains effective values and sources.";
 
 #[derive(Subcommand, Debug)]
 pub enum WaveGraphCommand {
@@ -1682,7 +1731,7 @@ pub enum SessionCommand {
     List(SessionListArgs),
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Whatever holds the conversation, it continues here: a terminal showing it hands it over and says where it went; a provider client lf started stops; a dead one resumes from its history. With nothing to resume, it starts one.\n\nWith --start-only, reuse or start its retained terminal and return without attaching. Existing viewers keep input and geometry; harness and account options apply only when starting an owner. A lost reply requires inspection before another explicit open.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nWith --start-only, reuse or start its retained terminal and return without attaching. Existing viewers keep input and geometry; harness and account options apply only when starting an owner. A lost reply requires inspection before another explicit open.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID
@@ -1721,7 +1770,10 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Assign a Task to a Session that has none; the Task never changes after
+    /// Bind a Session as the Task's primary conversation without starting work
+    #[command(
+        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Runs cannot become primary. Remote calls use the target Machine's Sessions and paths."
+    )]
     Bind {
         /// Session ID or provider conversation ID
         id: String,
@@ -1931,7 +1983,7 @@ pub struct SyncArgs {
     /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to sync onto
+    /// Branch to sync onto; naming the default branch detaches a stacked Task
     pub onto: Option<String>,
 }
 
@@ -2048,11 +2100,17 @@ until `lf ship`."
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Create a planning Task; with --run, start it and open its conversation
+    /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "With --request-id, repeat identical arguments to recover the original Task. JSON state is in_progress, started, failed, or unknown; admitted results exit zero. Unknown means launch was interrupted: inspect the Task before explicitly starting it again. Retries never advance its Graph. A changed request must use a new ID."
+        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine.\n\nWith --request-id, repeat identical arguments to recover the original Task. JSON state is in_progress, started, failed, or unknown; admitted results exit zero. Unknown means launch was interrupted: inspect the Task before explicitly starting it again. Retries never advance its Graph. A changed request must use a new ID."
     )]
     Create {
+        /// Existing conversation to promote without replaying its input
+        #[arg(long, id = "create_session")]
+        session: Option<String>,
+        /// Existing linked checkout to adopt
+        #[arg(long)]
+        worktree: Option<PathBuf>,
         /// What you want, in your words: the Task's notes, its first line the title.
         /// With --run, also the first turn of its conversation
         #[arg(conflicts_with = "notes")]
@@ -2069,9 +2127,6 @@ until `lf ship`."
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
-        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
-        #[arg(long, value_name = "VERSION")]
-        regressed_in: Option<String>,
         /// Start it as `lf task run` does, then open its conversation here
         #[arg(long)]
         run: bool,
@@ -2212,9 +2267,6 @@ until `lf ship`."
         /// Assignee identity; provider user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
-        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
-        #[arg(long, value_name = "VERSION")]
-        regressed_in: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -2338,6 +2390,9 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
+    /// Reconcile the selected installation's local server for a client.
+    #[command(hide = true)]
+    Server,
     /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
@@ -2355,9 +2410,9 @@ pub enum InstallCommand {
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
-        /// The fixed installation switch receipt to continue.
+        /// The fixed receipt to continue; omitted, recover the active switch with its pinned owner.
         #[arg(long)]
-        switch: String,
+        switch: Option<String>,
     },
     /// Preview whether this build may replace the global lf (read-only).
     /// Reads the shared store's migration frontier and validates executable
@@ -2593,6 +2648,46 @@ A stream whose build cannot open this Machine's store keeps the installed lf unt
 /// Read Loopflow configuration.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
+    /// Adopt a recovery mapping into this clone, or personal global configuration
+    Import {
+        path: PathBuf,
+        /// JSON pointer to the authored mapping, for example /repo/owner~1project
+        #[arg(long, default_value = "")]
+        pointer: String,
+        #[arg(long)]
+        global: bool,
+        /// Replace conflicting declarations explicitly
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Inspect origin profile retention and explicitly keep or replace divergent files
+    Retained {
+        #[arg(long, conflicts_with = "keep")]
+        replace: bool,
+        #[arg(long)]
+        keep: bool,
+    },
+    /// Inspect the preference cutover; explicitly accept changed file precedence
+    Migrate {
+        #[arg(long)]
+        accept: bool,
+    },
+    /// Discover typed settings, destinations, combination rules and portability
+    Catalog {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show effective preferences without launching
+    Show {
+        #[arg(long)]
+        skill: Option<String>,
+        #[arg(long)]
+        graph: Option<String>,
+        #[arg(long, requires = "graph")]
+        step: Option<String>,
+        #[command(flatten)]
+        output: commands::config::ShowOptions,
+    },
     /// Print the configured participant display name.
     User {
         #[arg(long)]
@@ -2622,11 +2717,6 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
-    /// Run or obtain this Machine's standalone local service.
-    Service {
-        #[command(subcommand)]
-        cmd: MachineServiceCommand,
-    },
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
@@ -2947,6 +3037,30 @@ pub enum ReleaseCommand {
         #[arg(short = 't', long = "target")]
         target: Option<String>,
     },
+    /// List the regressions reported against a release, and what they hold
+    Issues {
+        /// Release (e.g. v0.15.3); every open regression without one
+        version: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// File a regression against a release
+    Regress {
+        /// Release it regressed in (e.g. v0.15.3)
+        version: String,
+        /// Issue title
+        title: String,
+    },
+    /// Move stable to the newest soaked release no regression covers
+    Promote {
+        /// Say what would move or what holds it, changing nothing
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -3196,6 +3310,40 @@ mod tests {
             error.to_string(),
             format!("lf {}\n", crate::build_info::VERSION_LINE)
         );
+    }
+
+    #[test]
+    fn server_access_is_separate_from_machine_routing_and_installation() {
+        let args = crate::lf::navigation::normalize_args(
+            ["lf", "server", "status"].map(str::to_owned).to_vec(),
+        )
+        .unwrap();
+        assert_eq!(args, ["lf", "ops", "server", "status"]);
+        let command = Cli::try_parse_from(args).unwrap().command.unwrap();
+        assert!(!command.changes_work());
+        assert!(matches!(
+            command,
+            Commands::Ops {
+                cmd: OpsCommand::Server {
+                    cmd: ServerCommand::Status
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["lf", "ops", "machine", "service", "run"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "server", "ensure"]).is_err());
+        let tree = crate::lf::navigation::command_tree();
+        let install = tree
+            .find_subcommand("self")
+            .unwrap()
+            .find_subcommand("install")
+            .unwrap();
+        assert!(install.find_subcommand("server").unwrap().is_hide_set());
+        let remote = crate::lf::navigation::machine_invocation(
+            &["lf", "--machine", "worker", "server", "status"].map(str::to_owned),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(remote.1, ["ops", "server", "status"]);
     }
 
     #[test]

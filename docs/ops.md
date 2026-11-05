@@ -151,6 +151,17 @@ succeed. Interrupted, it resumes the same release from where it stopped; a
 failed build is fixed with another commit under the same version, never by
 bumping. `lf skill release-run minor` hands the same command to an agent.
 
+```bash
+lf release regress v0.15.3 "Sessions lose their name"  # file a regression; stable stays below it
+lf release issues                                      # every open regression
+lf release promote --dry-run                           # what would move, or what holds it
+lf release promote                                     # move stable now, outside a run
+```
+
+A target with `completion: github-release` has a `stable` stream, GitHub's Latest
+marker. A GitHub issue labelled `regressed-in:v0.15.3` holds it below that release
+until the issue closes as completed.
+
 Your repository owns the build and publish steps. Declare them per target:
 
 ```yaml
@@ -198,6 +209,29 @@ lf task run LOO-13 --stack-on LOO-12
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 
+For a stacked Task, `lf sync` follows its parent. To deliver the child's work
+independently, run `lf sync main` (or the repository's default branch). It uses
+the recorded parent tip to remove inherited changes, keeps the Task, branch and
+PR identities, and retargets the PR after integration succeeds. Resolve conflicts
+with `lf sync --manual main`, then `lf sync --continue`; `lf sync --abort` keeps
+the original placement. Parent work remains in its own branch and in Git history.
+If the recorded fork is unavailable, sync recovers it from the common ancestor
+of this checkout and the parent's remote branch. `lf sync main --plan` shows
+that fork without changing placement.
+
+## Client access and installation
+
+```bash
+lf server status   # observe the local client server
+lf install         # update Loopflow and reconcile its server registration
+```
+
+Desktop connects through the server; installation prepares it automatically.
+Use server status for connection problems and Machine commands to select where
+work runs. They have separate lifetimes: a server reconnect does not restart an
+agent or move a Task. See [Connect clients](server.md) for recovery and background
+access, and [Surfaces](surfaces.md) for app-owned Desktop automation.
+
 ## Other machines
 
 ```bash
@@ -221,7 +255,7 @@ lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-us
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code           # a free lab machine, else rent one
-lf --wave infrastructure set machine code            # the Wave's new Tasks rent from code
+lf --wave infrastructure set machine.capacity code            # the Wave's new Tasks rent from code
 lf machine end code-1                                # give a rented machine back now
 ```
 
@@ -236,7 +270,7 @@ us-east-1's, so AWS names the region it rents in and the region it priced. When
 the repository plans in Linear, a rented machine gets an access token this
 laptop just refreshed; the refresh grant stays here, so Linear works there for
 the token's lifetime (about a day). Its provider deletes a rented machine at
-its deadline. `lf --wave infrastructure set machine code`
+its deadline. `lf --wave infrastructure set machine.capacity code`
 (or no `--wave`, for the repository) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".
@@ -277,6 +311,8 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |
 | `lf machine add\|list\|status\|use\|connect\|end` | Where work runs |
 | `lf pool …`, `lf ondemand …` | Machines you own, machines you rent |
+| `lf server status` | Observe local client access and connection errors |
+| `lf install` | Update Loopflow and its server registration |
 | `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
 
 Every flag is in the [`lf` reference](lf-reference.md#lf-ops).

@@ -14,7 +14,6 @@
     "rank": 1,
     "assignee": null,
     "due_date": null,
-    "regressed_in": null,
     "state": "unstarted",
     "completed_at": null,
     "linear_id": "issue-gmail",
@@ -29,7 +28,6 @@
     "branch": "",
     "base_commit": "",
     "parent_pr_id": null,
-    "agent": null,
     "created_at": "2026-09-29T12:00:00Z",
     "updated_at": "2026-09-29T12:00:00Z",
     "repository_id": "repo_00000000000040008000000000000001"

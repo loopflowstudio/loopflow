@@ -17,36 +17,36 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         return Ok(());
     }
     let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
-        eprintln!(
+        crate::journal::request::diagnostic(format_args!(
             "Task {} is complete; retained its PR-less checkout and artifacts.",
             task.identifier
-        );
+        ));
         return Ok(());
     };
     if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
-        eprintln!(
+        crate::journal::request::diagnostic(format_args!(
             "Task {} is complete; retained checkout for unresolved delivery.",
             task.identifier
-        );
+        ));
         return Ok(());
     }
     // Removal waits for running work; writing alongside it never does.
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
-        eprintln!(
+        crate::journal::request::diagnostic(format_args!(
             "Task {} is complete; retained checkout: {}",
             task.identifier,
             blockers.join("; ")
-        );
+        ));
         return Ok(());
     }
     let result = async {
         let repo = main_repo_root(&repository_for_task(store, task)?)?;
         if task.worktree.as_ref().is_some_and(|path| path == &repo) {
-            eprintln!(
+            crate::journal::request::diagnostic(format_args!(
                 "Task {} is complete; retained the primary checkout and branch.",
                 task.identifier
-            );
+            ));
             return Ok(());
         }
         let _mutation = task
@@ -192,10 +192,10 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     }
     .await;
     if let Err(error) = cleanup {
-        eprintln!(
+        crate::journal::request::diagnostic(format_args!(
             "{} is canceled; retained checkout/PR: {error}",
             task.identifier
-        );
+        ));
     }
     Ok(task.identifier)
 }

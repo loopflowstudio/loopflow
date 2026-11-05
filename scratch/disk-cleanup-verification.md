@@ -1,19 +1,20 @@
 # LOO-722 discovery repair
 
-## Remaining work
+## Accepted outcome — 2026-11-04
 
-Continue the authored Graph: gate the affected suites, publish this Task's next
-PR, reinstall final bytes through the existing opt-in installer, and verify a
-complete ordinary hourly :17 invocation with matching digests and protected-content
-checks. The installed runner predates the compress changes below. The successful
-manual launchd invocation does not establish calendar acceptance of final bytes.
-Sustained disk containment remains unverified independently of the discovery fix.
+Jack Heart accepted keeping laptop disk usage low across coding repositories and
+tooling, including recurrence prevention and successive usage measurements. A
+cleaner PR or one successful invocation does not satisfy that outcome. Repeatable
+cleanup belongs to the same opt-in hourly runner, excluded from product packages
+and automatic installation. Personal inventories remain private. Accounting keeps
+retention preference separate from content type; neither classification grants
+deletion authority, and physical reconciliation gaps remain unknown.
 
-Jack Heart's accepted coding cleanup policies and reservations remain unchanged:
+Jack Heart's accepted policies and reservations remain unchanged:
 4h/1h/15m idle-output windows; verified owner teardown only after 24h; in-use
 dependencies preserved; successful evidence 24h, failed/unknown evidence seven
-days, saved evidence preserved. Keep source, unpublished work, durable history,
-databases and project-owned stores. Native cache caps apply even with plentiful
+days, saved evidence preserved. Source, unpublished work, durable history,
+databases and project-owned stores remain protected. Native cache caps apply even with plentiful
 free space. Non-coding content remains observation-only except the separately
 approved stale Chrome signing copies; never stop Chrome. Reclaimed allocation,
 free-space change and measured growth remain distinct observations.
@@ -26,18 +27,69 @@ design, policy and demo details survive at `7e969d4f6e:scratch/loo-722.md`,
 `7e969d4f6e:scratch/disk-cleanup-demo.md`. Earlier claims that no PR exists are stale.
 Existing Manabot/Kata prevention and separately owned runtime work are not duplicated.
 
-## Repair and deletion scope
+## Concept review — 2026-11-04
 
-**Delete — do not maintain:** repeated ancestor searches in `_builds`, repeated
-nested-checkout probes during traversal, Git descent into known generated roots
-and `.lf` state, and Docker's three-field template that fails on missing `Created`.
-These paths have been replaced; no remaining deletion target or exclusive fixture.
+Outcome: no design change and no open product choice. Jack Heart's accepted
+experience remains one explicitly installed hourly cleaner with private receipts
+and bounded growth history. The standalone usage guide already describes that
+experience and the repaired unknown-age behavior; no new commands, configuration,
+skill instructions or persistent lifecycle are needed.
+
+The interaction is install → scheduled inspection → eligible reclamation → read
+the receipt and successive measurements. `Candidate` carries a path, category and
+owning checkout; discovery does not grant deletion authority. `_reason` applies
+retention, reservations, activity and actual Git rules; `_stop_owners` and `_clean`
+own verified teardown and removal. `_prune_docker` leaves native image ownership
+with Docker. `_record_usage` and the run receipt retain observations separately
+from cleanup decisions. Carrying checkout ownership through discovery removes
+repeated lookup without adding a user-visible concept or persistent state.
+
+Normal path: an idle, ignored generated root can be reclaimed while a nested
+repository uses its own rules. Failure: incomplete discovery remains an explicit
+failed run; a missing image timestamp means retain that image, not infer age or
+abort unrelated eligible maintenance. Recovery: the next hourly run rediscovers
+current state under the same lock and protections. Source, durable evidence,
+reservations and unknown-age images survive; the latest receipt and bounded
+history may change. A stale receipt cannot establish recovery.
+
+Counterexamples remain acceptance constraints: an independent repository named
+`target` must not become disposable through its name; discovery exclusions must
+not authorize deleting unignored source; an image without `Created` must not
+prevent later eligible images from being considered. The current repair and its
+focused tests address these cases. No additional implementation direction follows
+from this review. The remaining mismatch is between a successful invocation and
+the accepted sustained laptop outcome, already retained below as unverified.
+Next proof remains final-byte calendar acceptance and successive measurements;
+this review neither repeats execution nor treats delivery as containment.
+
+## Remaining work
+
+The discovery and missing-Docker-timestamp repairs exist in this checkout at
+`d5e0b1151b`; affected-suite gate, publication and final installation remain.
+Calendar acceptance requires a complete ordinary hourly :17 invocation of those
+final bytes, a fresh successful receipt, matching installed digests and unchanged
+protected content. The successful manual invocation below used the pre-compress
+repair. A read-only comparison during reconciliation confirmed that the scheduled
+runner still differs from this checkout; its other four installed files match.
+
+Sustained containment remains unverified independently of discovery performance.
+Successive ordinary-run observations must still establish coverage, growth and
+target shortfall across coding repositories and tooling, with unknown measurements
+visible. Any remaining recurring growth needs attribution and repository-owned
+prevention where applicable. Reclaimed allocation and free-space change alone do
+not establish this. No new cleanup-policy decision is needed for the current repair.
+
+## Implemented repair
+
+The repair removes repeated ancestor searches in `_builds`, repeated nested-checkout
+probes, Git descent into known generated roots and `.lf` state, and Docker's
+three-field template that fails on missing `Created`.
 
 Discovery carries checkout ownership in the queue, resolving nested ownership once
 when enqueueing each directory. Registered worktrees retain independent coverage.
 Git enumeration skips known generated contents, while `_reason` still requires
-actual ignore rules and no tracked files before deletion. Keep the original bounds,
-symlink protection and incomplete-coverage failures. Completed discovery logs
+actual ignore rules and no tracked files before deletion. Original bounds,
+symlink protection and incomplete-coverage failures remain. Completed discovery logs
 candidate, checkout and directory counts plus elapsed time.
 
 Docker reads JSON metadata, retains unknown-age images and continues maintenance.
@@ -46,7 +98,7 @@ source roots inside a checkout, independent nested repositories (including a rep
 named `target`), real ignore-rule enforcement, and eligible Docker reclamation after
 an unknown-age image. Review found no change to deletion authority.
 
-Checks: `uv run pytest python/tests/test_disk_cleanup.py -k 'discovery or ignored_data or docker or xcode or swiftpm or embedded_checkout'` with inherited `LF_*` unset and closed stdin — 17 passed; Ruff format/check and `git diff --check` passed. Broader acceptance belongs to gate; installation and final-byte calendar verification belong to the later verification step.
+Checks: `uv run pytest python/tests/test_disk_cleanup.py -k 'discovery or ignored_data or docker or xcode or swiftpm or embedded_checkout'` with inherited `LF_*` unset and closed stdin — prior 17-pass result reused for unchanged code; Ruff format/check previously passed; `git diff --check` passed; affected-suite gate and final-byte scheduled verification remain with their Graph steps.
 
 ## Evidence and limits — 2026-11-04
 

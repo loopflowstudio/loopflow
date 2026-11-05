@@ -2675,10 +2675,10 @@ while True:
             "Uncertain"
         );
         let paused = fixture.pause(&owner);
-        let failed = resume();
-        let output = wait_for_viewer(failed.child, Duration::from_secs(20));
+        let mut failed = resume();
+        let status = failed.wait_exit();
         drop(paused);
-        assert!(!output.status.success(), "{output:?}");
+        assert!(!status.success(), "{status:?}");
         assert_eq!(
             attachment(),
             before,
@@ -2727,8 +2727,8 @@ while True:
     };
     assert_eq!(continuity(), original);
     terminal.input(b"\x1d");
-    let output = wait_for_viewer(terminal.child, Duration::from_secs(10));
-    assert!(output.status.success(), "{output:?}");
+    let status = terminal.wait_exit();
+    assert!(status.success(), "{status:?}");
 
     let mut returned = resume();
     fixture.wait_controlled(&replacement);
@@ -2751,8 +2751,8 @@ while True:
         ])
     );
     returned.input(b"\x04");
-    let output = wait_for_viewer(returned.child, Duration::from_secs(10));
-    assert!(output.status.success(), "{output:?}");
+    let status = returned.wait_exit();
+    assert!(status.success(), "{status:?}");
     fixture.ends(&replacement);
 }
 

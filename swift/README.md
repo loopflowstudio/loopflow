@@ -1122,17 +1122,11 @@ its ordinary jobs; Undo restores its identity and history. Use Reconnect for
 transport loss and New Shell for fresh execution. No remote failure opens a
 local prompt.
 
-Quit Desktop to leave shells running. For a completed Task, acknowledged quit
-preserves its fifteen-minute absence deadline; eligible idle agents end under
-the two-minute policy. Cleanup can finish while Desktop stays quit. Desktop waits
-up to five seconds for release reports. A failed request leaves its result unknown;
-cleanup stays pending until the destination receives release or confirms that
-exact Desktop instance has exited. Confirmed exit starts ordinary absence grace;
-it does not skip fifteen minutes. Requested work finishes first. Remote contact
-loss alone is unknown. Verifying a remote retaining process uses the destination's
-existing Machine route back to its host; an unavailable route keeps cleanup pending.
-Explicitly closing the last Task workspace skips absence grace, after
-requested work settles. Return before cleanup to retain the workspace again.
-Conversation history remains after cleanup; a deleted checkout is not recreated.
-Completed workspace cleanup and native-host retention use the
+Keep a Task Session viewer open to retain its worktree; the selected Task's
+panes are viewers. Switching Work, closing the window or quitting ends Desktop's
+viewers but leaves shells and agents running. Once a completed Task has no open
+viewer, its checkout and Desktop shells stay fifteen minutes, after requested
+work finishes; eligible idle agents end under the two-minute policy. Cleanup
+finishes without relaunching Desktop. Return before then to retain it again.
+Conversation history remains; a deleted checkout is not recreated. See the
 [shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).

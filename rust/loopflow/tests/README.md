@@ -76,12 +76,11 @@ Twenty cycles exercise the public Machine route, abrupt transport loss,
 reattachment to the same shell, Close and process/PTY/socket settlement;
 a separate case covers failed authentication, stale checkout and shell exit.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
-Desktop demonstration. `ops::task::retirement::tests` covers native-host
-acknowledgement, cancellation, unconfirmed job cleanup and retry after partial
-Git deletion with disposable worktrees and a bare remote.
-`ssh_shells::retirement_observes_remote_host_exit_after_disconnect_without_a_new_presence_report`
-keeps the existing retirement executor alive through loss of its retaining host's
-Machine connection, then confirms exit after reconnect without another presence report.
+Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
+holds, unknown viewers, cancellation, unconfirmed job cleanup and retry after
+partial Git deletion with disposable worktrees and a bare remote.
+`session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unknown`
+records a real owner's hold through leave, reconnect grace and SSH loss.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

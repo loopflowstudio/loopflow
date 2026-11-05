@@ -27,7 +27,7 @@ use anyhow::Result;
 use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
-use crate::store::sqlite::SqliteStore;
+use crate::store::sqlite::{SqliteStore, ViewerHold};
 
 /// How often an owner looks at the clock and its executable.
 const POLL: Duration = Duration::from_secs(2);
@@ -39,6 +39,9 @@ pub(super) struct Activity {
     pub viewed: bool,
     pub viewers: u64,
     pub output: u64,
+    /// Whether this owner's viewers retain its Task checkout. Separate from
+    /// `viewed`: a lost SSH viewer is unknown and never keeps the agent alive.
+    pub hold: Option<ViewerHold>,
 }
 
 impl Activity {
@@ -49,6 +52,17 @@ impl Activity {
         self.viewed = viewed;
         self.viewers += 1;
         true
+    }
+
+    pub fn hold(&mut self, hold: Option<ViewerHold>) -> bool {
+        let changed = self.hold != hold;
+        self.hold = hold;
+        changed
+    }
+
+    /// Activity the idle grace measures; checkout holds do not restart it.
+    fn idle_evidence(&self) -> (bool, u64, u64) {
+        (self.viewed, self.viewers, self.output)
     }
 }
 
@@ -88,27 +102,13 @@ impl Ending {
                 successor: None,
             }));
         }
-        if store.owner_host_hold(owner)? {
+        if !self.may_end(activity, input_queued) || !store.owner_waits_for_person(owner)? {
             return Ok(None);
         }
-        let closed = store.owner_host_closed(owner)?;
-        if input_queued
-            || (!closed && !self.may_end(activity, false))
-            || !store.owner_waits_for_person(owner)?
-        {
-            return Ok(None);
-        }
-        let notice = if closed {
-            Some("Workspace closed")
-        } else if store.owner_retiring(owner)? {
-            Some("Completed Task workspace retired")
-        } else {
-            None
-        };
-        if let Some(notice) = notice {
+        if store.owner_retiring(owner)? {
             return Ok(Some(Event::Control {
                 held: false,
-                notice: Some(notice.into()),
+                notice: Some("Completed Task workspace retired".into()),
                 successor: None,
             }));
         }
@@ -188,10 +188,10 @@ struct Grace {
 
 impl Grace {
     fn note(&mut self, activity: Activity, now: SystemTime) {
-        if activity != self.activity {
+        if activity.idle_evidence() != self.activity.idle_evidence() {
             self.quiet_since = now;
-            self.activity = activity;
         }
+        self.activity = activity;
     }
 
     fn expired(&self, now: SystemTime) -> bool {
@@ -204,6 +204,19 @@ impl Grace {
     }
 }
 
+/// Record this owner's checkout hold; a release wakes waiting Task cleanup.
+pub(super) fn record_hold(
+    store: &SqliteStore,
+    owner: &LfProcessId,
+    hold: Option<ViewerHold>,
+) -> Result<()> {
+    store.record_owner_viewer_hold(owner, hold)?;
+    if hold.is_none() {
+        crate::ops::task::retirement::wake_released(store, owner)?;
+    }
+    Ok(())
+}
+
 fn watch(
     owner: &LfProcessId,
     executable: Option<&Executable>,
@@ -214,6 +227,8 @@ fn watch(
 ) {
     let mut store = Store::default();
     let mut recorded_viewed = None;
+    // A fresh owner Process records no hold.
+    let mut recorded_hold = None;
     let mut last_output = SystemTime::now();
     let mut grace = Grace {
         limit: None,
@@ -239,6 +254,17 @@ fn watch(
                     Ok(()) => recorded_viewed = Some(viewed),
                     Err(error) => {
                         tracing::warn!(%error, %owner, viewed, "cannot record Session viewers; retrying");
+                    }
+                }
+            }
+        }
+        let hold = grace.activity.hold;
+        if recorded_hold != hold {
+            if let Some(store) = store.open(owner) {
+                match record_hold(store, owner, hold) {
+                    Ok(()) => recorded_hold = hold,
+                    Err(error) => {
+                        tracing::warn!(%error, %owner, ?hold, "cannot record Session viewer hold; retrying");
                     }
                 }
             }
@@ -284,14 +310,8 @@ fn watch(
         });
         // Native turns may leave only terminal output. Viewers never prolong a
         // vanished build, so their activity cannot reset this quiet interval.
-        if store.owner_host_hold(owner).unwrap_or(true) {
-            grace.quiet_since = now;
-            continue;
-        }
-        let host_closed = store.owner_host_closed(owner).unwrap_or(false);
         let retiring = store.owner_retiring(owner).unwrap_or(false);
-        let quiet = host_closed
-            || retiring
+        let quiet = retiring
             || match change {
                 Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
                 None => grace.expired(now),
@@ -470,7 +490,6 @@ mod tests {
 
     #[test]
     fn workspace_retirement_waits_for_final_work_drafts_and_pending_requests() {
-        use crate::store::sqlite::HostUse;
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
         let owner = store.test_lf_process();
@@ -481,15 +500,15 @@ mod tests {
         store.test_session("session", &crate::session_record::new_artifact_key());
         conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2,agent_process_id=?2 WHERE id='session'", rusqlite::params![task.as_str(),owner]).unwrap();
         conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('session',?1,1,1,0,0)", [&owner]).unwrap();
-        store
-            .observe_task_host(&task, "desktop", HostUse::Away, 0, 1, true, None)
+        let intent = store
+            .reconcile_task_retirement(&task, 0, None)
+            .unwrap()
             .unwrap();
-        let intent = store.reconcile_task_retirement(&task, 0).unwrap().unwrap();
         assert_eq!(intent.due_at, Some(900));
         // Silent work remains protected long after both deadlines, including
         // a queued ending whose activity never saw another output byte.
         let candidate = ending(true, Activity::default());
-        store.reconcile_task_retirement(&task, 3600).unwrap();
+        store.reconcile_task_retirement(&task, 3600, None).unwrap();
         store.retirement_progress(&intent, "closing", None).unwrap();
         for (tools, pending, yielded) in [(1, 0, 0), (0, 1, 1), (0, 0, 0)] {
             conn.execute(
@@ -592,6 +611,7 @@ mod tests {
                 viewed: false,
                 viewers: 2,
                 output: 0,
+                hold: None,
             })
             .unwrap();
         std::thread::sleep(super::POLL * 2);

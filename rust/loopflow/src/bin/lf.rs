@@ -1049,8 +1049,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Presence { .. }
-        | TaskCommand::Retire { .. }
+        TaskCommand::Retire { .. }
         | TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => {
@@ -1837,33 +1836,6 @@ fn run() -> anyhow::Result<()> {
         }) => {
             journal::admit_process(&std::env::current_dir()?, &args);
             return loopflow::ops::task::retirement::run(issue).map_err(Into::into);
-        }
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::Presence {
-                    issue,
-                    occurrence,
-                    state,
-                    revision,
-                    native_settled,
-                    owner,
-                },
-        }) => {
-            if state.is_some() {
-                journal::admit_process(&std::env::current_dir()?, &args);
-            }
-            println!(
-                "{}",
-                serde_json::to_string(&loopflow::ops::task::retirement::observe(
-                    issue,
-                    occurrence.as_deref(),
-                    *state,
-                    *revision,
-                    *native_settled,
-                    owner.as_ref()
-                )?)?
-            );
-            return Ok(());
         }
         Some(Commands::Task {
             cmd:

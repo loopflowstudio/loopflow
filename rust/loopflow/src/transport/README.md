@@ -127,7 +127,7 @@ A viewer's stream is the bytes of its snapshot, out and err frames in order. The
 viewer counts them; the owner spools the last 1 MiB per viewer.
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null}
+{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null,"ssh":false}
 {"answers":1,"seq":0,"kind":"attached","viewer":"…","reconnect":"…","nonce":"…","token":"…","terminal":true,"grace_ms":60000,"owner":"…"}
 ```
 
@@ -227,68 +227,38 @@ New Shell deliberately starts different execution. An unavailable destination
 never opens a local successor prompt. Prefix these commands with `--machine` to
 use the same operations on the Task's recorded Machine.
 
-Native hosts retain Task Sessions through one destination-owned contract:
+Keep a Task Session viewer open to retain its worktree. Hidden or unfocused
+viewers count, passive ones too; input control is separate. Closing the last
+viewer lets a completed Task follow its normal cleanup grace once requested work
+finishes. An ordinary shell in that directory does not retain the worktree.
+Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in Rex.
+Task and conversation history remain after cleanup.
 
-```sh
-lf task presence TASK --occurrence desktop:window:task --state retained --revision 1 --native-settled false
-lf task presence TASK --occurrence desktop:window:task --state away --revision 2 --native-settled true
-lf task presence TASK
-```
+The serving owner records its own viewers on its Process (`viewer_hold`): an
+attached viewer that has not sent `leave` holds, including a dropped connection
+inside its 60 s reconnect grace. A local connection that outlives that grace has
+exited. A viewer attached under SSH (`"ssh": true`, set from `SSH_CONNECTION`)
+that drops without `leave` may still be running on its own Machine: it stays
+unknown, through the owner's own exit, until any fresh attach to that owner.
+Leave remote viewers with Ctrl+] so they release promptly; Desktop detaches
+its panes that way when you switch Work or close the window. Quitting Desktop
+or closing a native tab hangs up instead, so a remote viewer left that way stays
+unknown until the Session is viewed again. An owner that died without recording
+its viewers also reads as unknown; a resumed Session's new owner replaces that
+record. Unknown holds the checkout but never
+keeps an idle agent alive, and an agent's exit is not a viewer's exit.
+Viewed Desktop shells hold like Session viewers. Loopflow stores no host,
+window or occurrence identity.
 
-Each host chooses its own occurrence identity and release policy. Use distinct
-identities for independent occurrences; keep increasing revisions for each
-occurrence's lifetime so reordered reports cannot undo a return or Close. A host
-that restores the same occurrence must persist its revision too; Desktop uses
-fresh occurrences per app process. Retry an identical report safely. Renew
-`retained` within 30 seconds. `away` releases retention; `closed` is an explicit
-Close request that skips absence grace. Every write also supplies
-`--native-settled true|false`: true means this occurrence has no host-owned
-resources requiring action before checkout deletion. It says nothing about
-Session or destination-owned shell settlement. Retained/unknown observations
-clear that fact; a delayed settlement cannot overwrite a newer return.
-A failed request leaves its result unknown to the caller. If no release reached
-the destination, an expired retained lease prevents checkout deletion. A lost
-reply does not undo a release already recorded there; retry its identical revision.
-Rex owns its native shell/window cleanup and reports this contract without
-relaying its shells through lf.
-
-Supply `--owner` with a JSON object containing `machine_id`, `pid`, `started_at`
-(kernel start time, Unix seconds), and `settles_on_exit` to enable confirmed-exit
-recovery. Identify the retaining process, not its SSH attachment or a Rex client.
-Use a distinct occurrence for each independently retaining instance. The existing
-retirement executor observes that process on its Machine; remote observation
-uses a registered route from the execution Machine back to the retaining Machine.
-Missing routes, failed reads and lease expiry remain unknown. An old exit read
-cannot release a newer revision or instance. Confirmed exit releases as away,
-never explicit Close. Set `settles_on_exit` only when all native resources die
-with that process, as Desktop's surfaces do. Rex-native jobs still require their
-adapter's independent settlement report. Destination shell jobs always settle
-through their own owners. Hosts without verifiable owner evidence omit `--owner`;
-their unavailable observations remain pending until a fresh report.
-
-Desktop reports retained for the selected Task, away on departure, and closed
-when its repository window explicitly closes. Detached Desktop surfaces can
-acknowledge native settlement while destination-owned shells still run. Quit
-releases as away and waits up to five seconds for acknowledgements; it preserves
-an existing absence deadline and does not become explicit Close. Acknowledged
-cleanup can finish without relaunching Desktop. Confirmed exit of that exact
-Desktop instance also releases retention and starts ordinary absence grace.
-Lease expiry or a failed remote read alone leaves cleanup pending. Away Sessions
-follow the usual two-minute
-eligible idle policy. A completed, released Task keeps its checkout and shells
-for fifteen minutes total. Return cancels that deadline; later departure starts
-a new one. Closing every occurrence skips that grace. Requested active work,
-drafts, pending requests and running Graphs still prevent ending execution.
-Finishing that work does not restart an already-due workspace deadline.
-
-The JSON reading names the pinned completion, checkout, branch, deadline, phase
-and pending reason. At `closing`, a released native host closes its Task resources
-and reports native settlement with a newer revision, preserving its release policy.
-An away Rex occurrence with native shells remains unsettled until its adapter
-closes those resources. Saved layouts alone establish neither retention nor
-settlement. Destination owners separately confirm job settlement before deletion. Completion
-and PR landing use this same operation; reopen or changed placement revokes it.
-Eligible cleanup discards uncommitted files but preserves primary/persistent
-checkouts and changed committed refs. Failures retain a pending reason and retry
-on the next host report. Task and conversation history survive; reopening a
-retired Task never silently recreates a checkout.
+A completed, released Task keeps its checkout and Desktop shells for fifteen
+minutes total; eligible unviewed agents still end at two minutes. A returning
+viewer cancels that deadline and its queued shell closes; leaving again starts
+a new one. Requested active work, drafts, pending requests and running Graphs
+still prevent ending execution; finishing that work does not restart an
+already-due deadline. Completion and PR landing schedule one retirement pinned
+to the completion, checkout and branch; reopen or changed placement revokes it.
+An owner whose viewers release wakes waiting cleanup for its Tasks. Destination
+owners confirm shell job settlement before deletion. Eligible cleanup discards
+uncommitted files but preserves primary/persistent checkouts and changed
+committed refs. Failures record a pending reason and retry. Reopening a retired
+Task never silently recreates a checkout.

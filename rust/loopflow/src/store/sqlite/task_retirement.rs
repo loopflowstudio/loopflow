@@ -1,54 +1,40 @@
-//! Host observations and one cleanup intent pinned to a Task's completion.
+//! Session-viewer holds and one cleanup intent pinned to a Task's completion.
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
 
 use super::SqliteStore;
-use crate::durable::{MachineId, TaskId};
+use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::store::{StoreError, StoreResult};
 
 pub(crate) const WORKSPACE_GRACE: i64 = 15 * 60;
-pub(crate) const HOST_LEASE: i64 = 30;
 
-/// The retaining process on its own Machine, not an attachment or client proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskHostOwner {
-    pub machine_id: MachineId,
-    pub pid: u32,
-    pub started_at: i64,
-    /// True only when all native resources die with this process (Desktop surfaces).
-    /// Native shell hosts must independently acknowledge their job settlement.
-    pub settles_on_exit: bool,
-}
-
-#[derive(Debug)]
-pub(crate) struct RetainingHost {
-    pub occurrence: String,
-    pub revision: i64,
-    pub owner: TaskHostOwner,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
-#[serde(rename_all = "snake_case")]
-pub enum HostUse {
-    Retained,
-    Away,
-    Closed,
+/// What a serving owner knows about its own viewers, recorded on its Process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewerHold {
+    /// An attached viewer has not left: open, or inside its reconnect grace.
+    Viewed,
+    /// An SSH viewer dropped without leaving; its LF process may still be alive.
     Unknown,
 }
 
-impl HostUse {
+impl ViewerHold {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Retained => "retained",
-            Self::Away => "away",
-            Self::Closed => "closed",
+            Self::Viewed => "viewed",
             Self::Unknown => "unknown",
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One owner's recorded hold on a Task. `ended` owners hold only when unknown.
+#[derive(Debug)]
+pub(crate) struct OwnerHold {
+    pub owner: LfProcessId,
+    pub hold: ViewerHold,
+    pub ended: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct TaskRetirement {
     pub task_id: TaskId,
     pub completion: String,
@@ -60,116 +46,82 @@ pub struct TaskRetirement {
 }
 
 impl SqliteStore {
-    #[allow(clippy::too_many_arguments)] // One revisioned host observation, including optional process evidence.
-    pub(crate) fn observe_task_host(
+    pub(crate) fn record_owner_viewer_hold(
         &self,
-        task: &TaskId,
-        occurrence: &str,
-        state: HostUse,
-        now: i64,
-        revision: i64,
-        native_settled: bool,
-        owner: Option<&TaskHostOwner>,
+        owner: &LfProcessId,
+        hold: Option<ViewerHold>,
     ) -> StoreResult<()> {
-        if occurrence.is_empty() {
-            return Err(StoreError::InvalidData(
-                "Host occurrence identity is empty".into(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        // Retention and unknown evidence invalidate any earlier native settlement.
-        let native_settled = native_settled && matches!(state, HostUse::Away | HostUse::Closed);
-        let owner = owner
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-        let changed = tx.execute("INSERT INTO task_host_occurrences(task_id,occurrence,state,lease_until,revision,native_settled,owner) VALUES(?1,?2,?3,?4,?5,?6,?7)
-            ON CONFLICT(task_id,occurrence) DO UPDATE SET state=excluded.state,lease_until=excluded.lease_until,revision=excluded.revision,native_settled=excluded.native_settled,owner=excluded.owner,
-                owner_exited=CASE WHEN excluded.owner IS task_host_occurrences.owner THEN task_host_occurrences.owner_exited ELSE 0 END
-            WHERE excluded.revision>task_host_occurrences.revision
-              AND NOT (task_host_occurrences.owner_exited=1 AND excluded.owner IS task_host_occurrences.owner AND excluded.state IN ('retained','unknown'))", params![task.as_str(),occurrence,state.as_str(),now+HOST_LEASE,revision,native_settled,owner])?;
-        if changed == 0 {
-            let same_observation = tx.query_row(
-                "SELECT state=?3 AND revision=?4 AND native_settled=?5 AND owner IS ?6 AND (owner_exited=0 OR state IN ('away','closed'))
-                 FROM task_host_occurrences WHERE task_id=?1 AND occurrence=?2",
-                params![
-                    task.as_str(),
-                    occurrence,
-                    state.as_str(),
-                    revision,
-                    native_settled,
-                    owner
-                ],
-                |r| r.get::<_, bool>(0),
-            )?;
-            if same_observation {
-                return Ok(());
-            }
-            return Err(StoreError::InvalidData(
-                "Host observation was superseded".into(),
-            ));
-        }
-        if matches!(state, HostUse::Retained | HostUse::Unknown) {
-            hold_retirement(&tx, task, None)?;
-        }
-        tx.commit()?;
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE processes SET viewer_hold=?2 WHERE id=?1",
+            params![owner.as_str(), hold.map(ViewerHold::as_str)],
+        )?;
         Ok(())
     }
 
-    pub(crate) fn retaining_hosts(&self, task: &TaskId) -> StoreResult<Vec<RetainingHost>> {
+    /// Holds from each Task Session's current transport owner and Desktop shell
+    /// owners. A replaced owner no longer speaks for its Session.
+    pub(crate) fn task_viewer_holds(&self, task: &TaskId) -> StoreResult<Vec<OwnerHold>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT occurrence,revision,owner FROM task_host_occurrences
-            WHERE task_id=?1 AND owner IS NOT NULL AND owner_exited=0",
-        )?;
+        let mut query = conn.prepare(&format!(
+            "SELECT p.id,p.viewer_hold,p.completed_at IS NOT NULL FROM processes p
+             WHERE p.viewer_hold IS NOT NULL
+               AND (p.id IN (SELECT s.transport_lf_process_id FROM agent_sessions s WHERE s.id IN ({}))
+                    OR p.id IN (SELECT owner FROM task_shells WHERE task_id=?1))
+               AND (p.completed_at IS NULL OR p.viewer_hold='unknown')
+             ORDER BY p.id",
+            super::task_work::session_ids("?1")
+        ))?;
         let rows = query.query_map([task.as_str()], |r| {
             Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
+                r.get::<_, LfProcessId>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, bool>(2)?,
             ))
         })?;
         rows.map(|row| {
-            let (occurrence, revision, owner) = row?;
-            Ok(RetainingHost {
-                occurrence,
-                revision,
-                owner: serde_json::from_str(&owner)
-                    .map_err(|e| StoreError::InvalidData(e.to_string()))?,
-            })
+            let (owner, hold, ended) = row?;
+            let hold = match hold.as_str() {
+                "viewed" => ViewerHold::Viewed,
+                "unknown" => ViewerHold::Unknown,
+                other => {
+                    return Err(StoreError::InvalidData(format!(
+                        "Unknown viewer hold {other}"
+                    )))
+                }
+            };
+            Ok(OwnerHold { owner, hold, ended })
         })
         .collect()
     }
 
-    /// A delayed exit read may release only the observation it actually inspected.
-    pub(crate) fn release_exited_host(
+    /// Done Tasks whose waiting cleanup this owner's release may unblock.
+    pub(crate) fn owner_waiting_retirements(
         &self,
-        task: &TaskId,
-        host: &RetainingHost,
-    ) -> StoreResult<()> {
-        let owner = serde_json::to_string(&host.owner)
-            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE task_host_occurrences SET
-                state=CASE WHEN state IN ('retained','unknown') THEN 'away' ELSE state END,
-                native_settled=CASE WHEN ?5 THEN 1 ELSE native_settled END,owner_exited=1
-             WHERE task_id=?1 AND occurrence=?2 AND revision=?3 AND owner=?4 AND owner_exited=0",
-            params![
-                task.as_str(),
-                host.occurrence,
-                host.revision,
-                owner,
-                host.owner.settles_on_exit
-            ],
-        )?;
-        Ok(())
+        owner: &LfProcessId,
+    ) -> StoreResult<Vec<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT r.task_id FROM task_retirements r WHERE r.phase!='retired' AND (
+                EXISTS(SELECT 1 FROM agent_sessions s WHERE s.transport_lf_process_id=?1 AND s.id IN ({}))
+                OR EXISTS(SELECT 1 FROM task_shells t WHERE t.owner=?1 AND t.task_id=r.task_id))",
+            super::task_work::session_ids("r.task_id")
+        ))?;
+        let rows = query
+            .query_map([owner.as_str()], |r| {
+                Ok(TaskId::from_raw(r.get::<_, String>(0)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(rows)
     }
 
+    /// `hold` names why a viewer still retains the checkout. Holds clear any
+    /// deadline; release starts one fifteen-minute interval that later work
+    /// completion does not restart.
     pub(crate) fn reconcile_task_retirement(
         &self,
         task: &TaskId,
         now: i64,
+        hold: Option<&str>,
     ) -> StoreResult<Option<TaskRetirement>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
@@ -177,29 +129,15 @@ impl SqliteStore {
             SELECT id,planning_completed_at,worktree,branch,NULL,'waiting' FROM tasks
             WHERE id=?1 AND planning_completed=1 AND planning_completed_at IS NOT NULL AND worktree IS NOT NULL
             ON CONFLICT(task_id) DO NOTHING", [task.as_str()])?;
-        let (retained, unknown, all_closed): (bool, bool, bool) = tx.query_row(
-            "WITH hosts AS (SELECT * FROM task_host_occurrences WHERE task_id=?1)
-             SELECT EXISTS(SELECT 1 FROM hosts WHERE state='retained' AND lease_until>=?2),
-                    EXISTS(SELECT 1 FROM hosts WHERE state='unknown' OR (state='retained' AND lease_until<?2)),
-                    EXISTS(SELECT 1 FROM hosts WHERE owner_exited=0)
-                        AND NOT EXISTS(SELECT 1 FROM hosts WHERE owner_exited=0 AND state!='closed')",
-            params![task.as_str(), now],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )?;
-        if retained || unknown {
-            let reason = if retained {
-                "Retained by a host"
-            } else {
-                "Host observation unavailable; cleanup pending"
-            };
-            hold_retirement(&tx, task, Some(reason))?;
-        } else {
-            tx.execute(
-                "UPDATE task_retirements
-                 SET due_at=CASE WHEN ?2 THEN ?3 ELSE COALESCE(due_at,?3+?4) END,reason=NULL
-                 WHERE task_id=?1 AND phase='waiting'",
-                params![task.as_str(), all_closed, now, WORKSPACE_GRACE],
-            )?;
+        match hold {
+            Some(reason) => hold_retirement(&tx, task, reason)?,
+            None => {
+                tx.execute(
+                    "UPDATE task_retirements SET due_at=COALESCE(due_at,?2+?3),reason=NULL
+                     WHERE task_id=?1 AND phase='waiting'",
+                    params![task.as_str(), now, WORKSPACE_GRACE],
+                )?;
+            }
         }
         tx.commit()?;
         drop(conn);
@@ -239,53 +177,17 @@ impl SqliteStore {
             params![intent.task_id.as_str(),intent.completion,intent.checkout,intent.branch,phase,reason])? == 1)
     }
 
-    pub(crate) fn owner_host_hold(&self, owner: &LfProcessId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            &format!(
-                "SELECT EXISTS(SELECT 1 FROM task_host_occurrences h
-            JOIN agent_sessions s ON s.id IN ({})
-            WHERE s.transport_lf_process_id=?1 AND h.state='retained' AND h.lease_until>=unixepoch())",
-                super::task_work::session_ids("h.task_id")
-            ),
-            [owner],
-            |r| r.get(0),
-        )?)
-    }
-
-    pub(crate) fn owner_host_closed(&self, owner: &LfProcessId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            &format!(
-                "WITH hosts AS (
-                    SELECT h.state FROM task_host_occurrences h
-                    JOIN agent_sessions s ON s.id IN ({})
-                    WHERE s.transport_lf_process_id=?1 AND h.owner_exited=0)
-                 SELECT EXISTS(SELECT 1 FROM hosts)
-                    AND NOT EXISTS(SELECT 1 FROM hosts WHERE state!='closed')",
-                super::task_work::session_ids("h.task_id")
-            ),
-            [owner],
-            |r| r.get(0),
-        )?)
-    }
-
     pub(crate) fn owner_retiring(&self, owner: &LfProcessId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(&format!("SELECT
             EXISTS(SELECT 1 FROM task_retirements h JOIN agent_sessions s ON s.id IN ({}) WHERE s.transport_lf_process_id=?1 AND h.phase='closing')
             OR EXISTS(SELECT 1 FROM task_retirements h JOIN task_shells s ON s.task_id=h.task_id WHERE s.owner=?1 AND h.phase='closing')", super::task_work::session_ids("h.task_id")), [owner], |r| r.get(0))?)
     }
-
-    pub(crate) fn retirement_hosts_settled(&self, task: &TaskId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("SELECT NOT EXISTS(SELECT 1 FROM task_host_occurrences WHERE task_id=?1 AND (state NOT IN ('away','closed') OR native_settled=0))", [task.as_str()], |r| r.get(0))?)
-    }
 }
 
-// A return cancels only retirement's queued shell closes, never explicit Close.
-// Keep both writes in the caller's host-observation/retirement transaction.
-fn hold_retirement(conn: &Connection, task: &TaskId, reason: Option<&str>) -> StoreResult<()> {
+// A returning viewer cancels only retirement's queued shell closes, never
+// explicit Close. Keep both writes in the caller's retirement transaction.
+fn hold_retirement(conn: &Connection, task: &TaskId, reason: &str) -> StoreResult<()> {
     conn.execute(
         "UPDATE task_shells SET close_requested=0 WHERE task_id=?1 AND close_requested=2",
         [task.as_str()],
@@ -300,7 +202,7 @@ fn hold_retirement(conn: &Connection, task: &TaskId, reason: Option<&str>) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::{HostUse, SqliteStore, TaskHostOwner, TaskId, WORKSPACE_GRACE};
+    use super::{SqliteStore, TaskId, ViewerHold, WORKSPACE_GRACE};
     use rusqlite::params;
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, TaskId) {
@@ -312,310 +214,127 @@ mod tests {
         (home, store, task)
     }
 
-    #[test]
-    fn workspace_retirement_exit_is_revision_fenced_and_does_not_imply_job_settlement() {
-        let (_home, store, task) = fixture();
-        let owner = TaskHostOwner {
-            machine_id: store.local_machine().unwrap().id,
-            pid: 42,
-            started_at: 100,
-            settles_on_exit: false,
-        };
-        store
-            .observe_task_host(&task, "rex", HostUse::Retained, 100, 1, false, Some(&owner))
-            .unwrap();
-        let old = store.retaining_hosts(&task).unwrap().pop().unwrap();
-        let newer = TaskHostOwner {
-            started_at: 200,
-            ..owner.clone()
-        };
-        store
-            .observe_task_host(&task, "rex", HostUse::Retained, 200, 2, false, Some(&newer))
-            .unwrap();
-        store.release_exited_host(&task, &old).unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 200)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            None
-        );
-        assert_eq!(store.retaining_hosts(&task).unwrap()[0].owner, newer);
+    fn session_owner(store: &SqliteStore, task: &TaskId, session: &str) -> crate::id::LfProcessId {
+        let owner = store.test_lf_process();
+        store.test_session(session, &crate::session_record::new_artifact_key());
+        store.conn.lock().unwrap().execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id=?3", params![task.as_str(),owner,session]).unwrap();
+        owner
+    }
 
-        let current = store.retaining_hosts(&task).unwrap().pop().unwrap();
-        store.release_exited_host(&task, &current).unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 300)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            Some(1200)
-        );
-        assert!(!store.retirement_hosts_settled(&task).unwrap());
-        // Delayed messages from the exited instance cannot revive its hold.
-        assert!(store
-            .observe_task_host(&task, "rex", HostUse::Retained, 301, 3, false, Some(&newer))
-            .is_err());
-        store.release_exited_host(&task, &current).unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 400)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            Some(1200)
-        );
-        // A surviving adapter separately confirms native jobs have settled.
+    fn held(store: &SqliteStore, task: &TaskId) -> Vec<(ViewerHold, bool)> {
         store
-            .observe_task_host(&task, "rex", HostUse::Away, 400, 4, true, Some(&newer))
-            .unwrap();
-        assert!(store.retirement_hosts_settled(&task).unwrap());
+            .task_viewer_holds(task)
+            .unwrap()
+            .into_iter()
+            .map(|h| (h.hold, h.ended))
+            .collect()
     }
 
     #[test]
-    fn workspace_retirement_other_instances_retain_and_last_close_ignores_exited_views() {
+    fn viewer_holds_read_current_session_owners_and_survive_only_as_unknown() {
         let (_home, store, task) = fixture();
-        let owner = TaskHostOwner {
-            machine_id: store.local_machine().unwrap().id,
-            pid: 42,
-            started_at: 100,
-            settles_on_exit: true,
-        };
+        let first = session_owner(&store, &task, "first");
+        let second = session_owner(&store, &task, "second");
+        let unrelated = store.test_lf_process();
         store
-            .observe_task_host(
-                &task,
-                "desktop:old",
-                HostUse::Retained,
-                100,
-                1,
-                false,
-                Some(&owner),
+            .record_owner_viewer_hold(&unrelated, Some(ViewerHold::Viewed))
+            .unwrap();
+        assert!(held(&store, &task).is_empty());
+        store
+            .record_owner_viewer_hold(&first, Some(ViewerHold::Viewed))
+            .unwrap();
+        store
+            .record_owner_viewer_hold(&second, Some(ViewerHold::Viewed))
+            .unwrap();
+        assert_eq!(held(&store, &task).len(), 2);
+        // One viewer's exit leaves the other Session's viewer holding.
+        store.record_owner_viewer_hold(&first, None).unwrap();
+        assert_eq!(held(&store, &task), vec![(ViewerHold::Viewed, false)]);
+        // A cleanly ended owner told its viewers; only a lost SSH viewer survives it.
+        let conn = store.conn.lock().unwrap();
+        conn.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&second])
+            .unwrap();
+        drop(conn);
+        assert!(held(&store, &task).is_empty());
+        store
+            .record_owner_viewer_hold(&second, Some(ViewerHold::Unknown))
+            .unwrap();
+        assert_eq!(held(&store, &task), vec![(ViewerHold::Unknown, true)]);
+        // A replacement owner speaks for the Session; the old one no longer does.
+        let replacement = store.test_lf_process();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id='second'",
+                [&replacement],
             )
             .unwrap();
-        store
-            .observe_task_host(&task, "desktop:new", HostUse::Retained, 200, 1, false, None)
-            .unwrap();
-        let old = store.retaining_hosts(&task).unwrap().pop().unwrap();
-        store.release_exited_host(&task, &old).unwrap();
+        assert!(held(&store, &task).is_empty());
         assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 200)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            None
+            store.owner_waiting_retirements(&replacement).unwrap(),
+            vec![]
         );
-        // Lease expiry on the surviving host is still unknown, not absence.
+        store.reconcile_task_retirement(&task, 100, None).unwrap();
         assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 300)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            None
+            store.owner_waiting_retirements(&replacement).unwrap(),
+            vec![task.clone()]
         );
-        store
-            .observe_task_host(&task, "desktop:new", HostUse::Closed, 400, 2, true, None)
-            .unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 400)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            Some(400)
-        );
-        assert!(store.retirement_hosts_settled(&task).unwrap());
+        assert!(store
+            .owner_waiting_retirements(&unrelated)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
-    fn workspace_retirement_returns_cancel_deadlines_and_close_skips_grace() {
+    fn workspace_retirement_holds_cancel_deadlines_and_work_does_not_restart_them() {
         let (_home, store, task) = fixture();
-        store
-            .observe_task_host(&task, "desktop", HostUse::Retained, 100, 1, false, None)
+        let held = store
+            .reconcile_task_retirement(&task, 100, Some("Retained by an open Task Session viewer"))
+            .unwrap()
             .unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 100)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            None
-        );
-        store
-            .observe_task_host(&task, "desktop", HostUse::Away, 110, 2, false, None)
-            .unwrap();
+        assert_eq!(held.due_at, None);
         let left = store
-            .reconcile_task_retirement(&task, 110)
+            .reconcile_task_retirement(&task, 110, None)
             .unwrap()
             .unwrap();
         assert_eq!(left.due_at, Some(110 + WORKSPACE_GRACE));
         // The two-minute agent policy does not add two minutes to this deadline.
         assert_eq!(
             store
-                .reconcile_task_retirement(&task, 230)
+                .reconcile_task_retirement(&task, 230, None)
                 .unwrap()
                 .unwrap()
                 .due_at,
             left.due_at
         );
         store
-            .observe_task_host(&task, "desktop", HostUse::Retained, 900, 3, false, None)
+            .create_task_shell("shell", &task, "/repo.task")
             .unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 900)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            None
-        );
-        store
-            .observe_task_host(&task, "desktop", HostUse::Away, 920, 4, false, None)
-            .unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 920)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            Some(1820)
-        );
-        store
-            .observe_task_host(&task, "desktop", HostUse::Closed, 930, 5, true, None)
-            .unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 930)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            Some(930)
-        );
-        assert!(store
-            .observe_task_host(&task, "desktop", HostUse::Away, 940, 4, false, None)
-            .is_err());
-    }
-
-    #[test]
-    fn workspace_retirement_multiple_hosts_and_lost_observation_preserve_resources() {
-        let (_home, store, task) = fixture();
-        store
-            .observe_task_host(&task, "rex:block-a", HostUse::Retained, 100, 1, false, None)
-            .unwrap();
-        store
-            .observe_task_host(&task, "desktop", HostUse::Closed, 100, 1, true, None)
-            .unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 100)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            None
-        );
-        let unknown = store
-            .reconcile_task_retirement(&task, 200)
+        store.close_task_shells(&task).unwrap();
+        let returned = store
+            .reconcile_task_retirement(&task, 900, Some("Viewer liveness unknown; cleanup pending"))
             .unwrap()
             .unwrap();
-        assert_eq!(unknown.due_at, None);
-        assert!(unknown.reason.unwrap().contains("unavailable"));
-        store
-            .observe_task_host(&task, "rex:block-a", HostUse::Away, 210, 2, false, None)
-            .unwrap();
+        assert_eq!(returned.due_at, None);
+        assert!(returned.reason.unwrap().contains("unknown"));
+        assert!(!store.task_shell("shell").unwrap().unwrap().close_requested);
         assert_eq!(
             store
-                .reconcile_task_retirement(&task, 210)
+                .reconcile_task_retirement(&task, 920, None)
                 .unwrap()
                 .unwrap()
                 .due_at,
-            Some(1110)
+            Some(920 + WORKSPACE_GRACE)
         );
-        assert!(!store.retirement_hosts_settled(&task).unwrap());
-        store
-            .observe_task_host(&task, "rex:block-a", HostUse::Closed, 220, 3, true, None)
-            .unwrap();
-        assert!(store.retirement_hosts_settled(&task).unwrap());
-    }
-
-    #[test]
-    fn workspace_retirement_native_settlement_preserves_grace_and_is_revision_fenced() {
-        let (_home, store, task) = fixture();
-        store
-            .observe_task_host(&task, "desktop", HostUse::Away, 100, 1, false, None)
-            .unwrap();
-        let deadline = store
-            .reconcile_task_retirement(&task, 100)
-            .unwrap()
-            .unwrap()
-            .due_at;
-        assert_eq!(deadline, Some(100 + WORKSPACE_GRACE));
-        assert!(!store.retirement_hosts_settled(&task).unwrap());
-
-        // Acknowledged quit settles native presentation without explicit Close.
-        store
-            .observe_task_host(&task, "desktop", HostUse::Away, 200, 2, true, None)
-            .unwrap();
-        assert!(store.retirement_hosts_settled(&task).unwrap());
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 200)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            deadline
-        );
-        // Identical retries are safe; changing settlement requires a new revision.
-        store
-            .observe_task_host(&task, "desktop", HostUse::Away, 201, 2, true, None)
-            .unwrap();
-        assert!(store
-            .observe_task_host(&task, "desktop", HostUse::Away, 201, 2, false, None)
-            .is_err());
-
-        for (state, revision) in [(HostUse::Retained, 3), (HostUse::Unknown, 4)] {
-            store
-                .observe_task_host(&task, "desktop", state, 300, revision, false, None)
-                .unwrap();
-            assert!(!store.retirement_hosts_settled(&task).unwrap());
-            assert!(store
-                .observe_task_host(&task, "desktop", HostUse::Away, 301, 2, true, None)
-                .is_err());
-            assert_eq!(
-                store
-                    .reconcile_task_retirement(&task, 300)
-                    .unwrap()
-                    .unwrap()
-                    .due_at,
-                None
-            );
-        }
-        // Explicit Close skips grace but still requires native settlement.
-        store
-            .observe_task_host(&task, "desktop", HostUse::Closed, 400, 5, false, None)
-            .unwrap();
-        assert_eq!(
-            store
-                .reconcile_task_retirement(&task, 400)
-                .unwrap()
-                .unwrap()
-                .due_at,
-            Some(400)
-        );
-        assert!(!store.retirement_hosts_settled(&task).unwrap());
-        store
-            .observe_task_host(&task, "desktop", HostUse::Closed, 401, 6, true, None)
-            .unwrap();
-        assert!(store.retirement_hosts_settled(&task).unwrap());
     }
 
     #[test]
     fn workspace_retirement_reopen_and_checkout_replacement_revoke_queued_work() {
         let (_home, store, task) = fixture();
         let old = store
-            .reconcile_task_retirement(&task, 100)
+            .reconcile_task_retirement(&task, 100, None)
             .unwrap()
             .unwrap();
         store
@@ -629,12 +348,12 @@ mod tests {
             .unwrap();
         assert!(!store.retirement_progress(&old, "closing", None).unwrap());
         assert!(store
-            .reconcile_task_retirement(&task, 200)
+            .reconcile_task_retirement(&task, 200, None)
             .unwrap()
             .is_none());
         store.conn.lock().unwrap().execute("UPDATE tasks SET planning_completed=1,planning_completed_at='completion-2' WHERE id=?1", [task.as_str()]).unwrap();
         let next = store
-            .reconcile_task_retirement(&task, 300)
+            .reconcile_task_retirement(&task, 300, None)
             .unwrap()
             .unwrap();
         assert_eq!(next.due_at, Some(1200));
@@ -652,37 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn workspace_retirement_host_retention_applies_to_the_same_session_in_any_host() {
-        let (_home, store, task) = fixture();
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let owner = store.test_lf_process();
-        store.test_session("session", &crate::session_record::new_artifact_key());
-        store.conn.lock().unwrap().execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='session'", params![task.as_str(),owner]).unwrap();
-        assert!(!store.owner_host_hold(&owner).unwrap());
-        for host in ["rex", "desktop"] {
-            store
-                .observe_task_host(&task, host, HostUse::Retained, now, 1, false, None)
-                .unwrap();
-            assert!(store.owner_host_hold(&owner).unwrap());
-            store
-                .observe_task_host(&task, host, HostUse::Away, now, 2, true, None)
-                .unwrap();
-            assert!(!store.owner_host_hold(&owner).unwrap());
-            assert!(!store.owner_host_closed(&owner).unwrap());
-            store
-                .observe_task_host(&task, host, HostUse::Closed, now, 3, true, None)
-                .unwrap();
-            assert!(store.owner_host_closed(&owner).unwrap());
-        }
-        let intent = store
-            .reconcile_task_retirement(&task, now)
-            .unwrap()
-            .unwrap();
-        assert!(store.retirement_progress(&intent, "closing", None).unwrap());
-        assert!(store.owner_host_closed(&owner).unwrap());
-    }
-
-    #[test]
     fn workspace_shell_creation_is_once_even_after_lost_acknowledgement_or_exit() {
         let (_home, store, task) = fixture();
         assert!(store
@@ -696,6 +384,12 @@ mod tests {
         store.bind_task_shell("shell", &owner).unwrap();
         assert!(store.bind_task_shell("shell", &owner).is_err());
         assert_eq!(store.shell_owner(&owner).unwrap(), Some(0));
+        // A viewed Desktop shell is an LF-owned hold; an ordinary shell never is.
+        store
+            .record_owner_viewer_hold(&owner, Some(ViewerHold::Viewed))
+            .unwrap();
+        assert_eq!(held(&store, &task), vec![(ViewerHold::Viewed, false)]);
+        store.record_owner_viewer_hold(&owner, None).unwrap();
         store.close_task_shell("shell").unwrap();
         assert_eq!(store.shell_owner(&owner).unwrap(), Some(1));
         assert!(!store

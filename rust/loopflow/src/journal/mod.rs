@@ -237,8 +237,7 @@ impl ProcessReceipt {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProcessIdentityEvidence {
     Live,
     Dead,

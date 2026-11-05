@@ -1299,28 +1299,3 @@ fn wave_graph_reports_its_default_with_or_without_a_wave() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
-
-#[test]
-fn task_retirement_keeps_completion_deadline_and_pending_reason() {
-    let json = include_str!("../../../tests/fixtures/dto/task_retirement.json");
-    let value: loopflow::store::sqlite::TaskRetirement = serde_json::from_str(json).unwrap();
-    assert_eq!(value.due_at, Some(1793747700));
-    assert_eq!(value.phase, "waiting");
-    assert_eq!(
-        serde_json::to_value(value).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-}
-
-#[test]
-fn task_host_owner_identifies_the_retaining_process_and_native_settlement_contract() {
-    let json = include_str!("../../../tests/fixtures/dto/task_host_owner.json");
-    let value: loopflow::store::sqlite::TaskHostOwner = serde_json::from_str(json).unwrap();
-    assert_eq!(value.pid, 1234);
-    assert_eq!(value.started_at, 1793746800);
-    assert!(value.settles_on_exit);
-    assert_eq!(
-        serde_json::to_value(value).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-}

@@ -1,6 +1,6 @@
 # LOO-717 — Shell lifetime and Task Session viewers
 
-Status: **Design revised November 5; implementation must be reconciled.**
+Status: **Design revised November 5; implemented on the branch (pursue), awaiting gate and review.**
 Jack Heart clarified that an open LF viewer of a Task Session retains the Task's
 worktree, while a random shell in that directory does not. Jack then requested:
 "ok. update the design then laucnh a new pursue". Build and review publication are
@@ -128,6 +128,56 @@ November 5 read: 672's status was shipping and its latest native demo recorded
 repository/Wave/Task background startup; that is not authority to operate it.
 498's handoff reports PR #1814, code b1864599e76b2eca74a3a03fd8ffc41d287a1682,
 notes f129371904. Neither establishes this revised cleanup integration.
+
+## Implementation — November 5 (pursue)
+
+Viewer evidence is the session owner's own connection table. Each owner records
+`processes.viewer_hold` (`viewed` | `unknown` | NULL) beside the existing `viewed`
+flag; nothing else is persisted and no host identity is named.
+
+- `viewed`: an attached viewer that has not sent `leave` and is open or inside
+  the existing 60 s reconnect grace. Hidden/unfocused native tabs keep the relay
+  open, so they hold. Passive (non-controlling) viewers count.
+- Clean `leave`, and a local connection outliving its reconnect grace, are
+  confirmed exits. A local relay never resumes, so a lost local socket is exit.
+- A viewer attached under SSH (`ssh: true` on attach, from `SSH_CONNECTION`) that
+  drops without `leave` is `unknown` after its grace, and at owner exit. Any fresh
+  attach to that owner supersedes the unknown (recovery confirms a viewer).
+- Task holds read only the Session's current transport owner and Desktop shell
+  owners. A completed owner holds only with `unknown`; an owner that ended
+  without writing (crash, kill) keeps its last value and reads as unknown.
+- Idle agent ending stays on live `viewed`; `unknown` never keeps an agent alive.
+- The retirement executor exits while any hold exists. An owner whose hold
+  clears wakes the executor for its Tasks' waiting intents; completion and
+  landing schedule as before. Deletion rechecks holds immediately before effects.
+- Desktop departure and window close detach its terminals with Ctrl+] (a
+  deliberate `leave`); quit hangs them up. No presence reports, quit budget or
+  app delegate.
+
+Check (Nov 5): focused lib `task_retirement::`, `ops::task::retirement`,
+`transport::lifetime`; integration `session_viewers_retain…`,
+`waited_land_retains_intent…`; Swift Workspace/WorkDestination/DTO/Ghostty input
+suites; fmt, clippy, architecture, inventory — pass. Gate owns affected suites.
+Compress (Nov 5): `transport::lifetime` lib, `transport_tests session_viewers_retain…`, clippy — pass.
+
+### Delete — do not maintain
+
+- `task_host_occurrences` table/triggers in `task_workspace_lifetimes.sql`.
+- `lf task presence`, `HostUse`, `TaskHostOwner`, `parse_task_host_owner`,
+  `observe_task_host`, `retaining_hosts`, `release_exited_host`,
+  `owner_host_hold`, `owner_host_closed`, `retirement_hosts_settled`,
+  `retirement::{observe, reconcile_hosts, owner_evidence}`.
+- Hidden `lf machine process`, its SSH resident routing and the
+  `ProcessIdentityEvidence` serde derive.
+- DTO fixtures `task_host_owner.json`, `task_retirement.json` and their Rust/Swift tests.
+- Swift `TaskHostOwner`, `TaskRetirement`, `RegistryQuery.taskPresence`,
+  `SessionsWorkspace` presence/revision/quit reporting, `DesktopAppDelegate`
+  quit release, the retirement banner, and `WorkspaceRetentionTests` presence cases.
+- `ssh_shells` remote-host-exit retirement test; host cases in `retirement_tests`.
+- transport README presence/native-settlement recipe.
+
+Preserve: Desktop shell create/attach/Close/jobs settlement, completion-pinned
+retirement intent, requested-work/draft/pending protections, Git safeguards.
 
 ## Draft usage copy for the next implementation
 

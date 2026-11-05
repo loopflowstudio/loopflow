@@ -7,22 +7,6 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
-    @Test func taskHostOwnerIdentifiesTheRetainingProcessAndNativeSettlementContract() throws {
-        let data = try loadFixtureData("task_host_owner.json")
-        let value = try JSONDecoder().decode(TaskHostOwner.self, from: data)
-        #expect(value.pid == 1234)
-        #expect(value.startedAt == 1793746800)
-        #expect(value.settlesOnExit)
-        #expect(try JSONDecoder().decode(TaskHostOwner.self, from: JSONEncoder().encode(value)) == value)
-    }
-    @Test func taskRetirementKeepsCompletionDeadlineAndPendingReason() throws {
-        let data = try loadFixtureData("task_retirement.json")
-        let value = try JSONDecoder().decode(TaskRetirement.self, from: data)
-        #expect(value.dueAt == 1793747700)
-        #expect(value.phase == "waiting")
-        #expect(try JSONDecoder().decode(TaskRetirement.self, from: JSONEncoder().encode(value)) == value)
-    }
-
     @Test func waveRemovalPreviewDecodesEveryField() throws {
         let removal = try RegistryQuery.decode(
             WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))

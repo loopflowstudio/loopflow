@@ -29,9 +29,9 @@ and the simulated review do not override the accepted scope below.
 - Close a shell ends it and its ordinary jobs. Hide/Task switching/app exit retain
   ordinary shell execution, subject to completed-Task cleanup. Undo cannot revive
   an ended process. A server running inside an ordinary shell is not an agent turn.
-- Host retention keeps a Session alive. Each host chooses release policy; lf does
-  not interpret tab selection. Desktop releases completed-Session retention on
-  departure rather than prioritizing keeping old completed Sessions resident.
+- An open LF Session viewer keeps a Session retained (Nov 5 reading of the
+  original host-retention item); lf does not interpret tab selection. Desktop
+  releases completed-Session retention on departure.
 - Ordinary eligible idle agent ending uses LOO-709's two-minute rule. For completed
   and released Tasks, checkout and shells remain until fifteen minutes total
   (two plus thirteen). No Task-membership exemption for idle agents.
@@ -47,87 +47,23 @@ and the simulated review do not override the accepted scope below.
 
 ## Implementation decisions delegated to the build
 
-Use one real host retention/release contract, existing attachment/process evidence
-and one cleanup authority. Prove behavior on clean release, client crash, remote
-loss and multiple retained occurrences; a saved layout is not live retention.
-A failed host read is not confirmed closure. Reuse existing owners and eliminate
-replaced code rather than adding another lifecycle stack.
-
 For the workspace deadline, use fifteen minutes from eligible completed-and-away
-entry; host reuse cancels it and later release starts a fresh interval. Active
-work prevents execution of cleanup; it does not require another fifteen minutes
-once an already-due cleanup becomes safe. This is an implementation interpretation
-of Jack's wait-for-final-work direction, not an additional timing choice from Jack.
-Keep the existing agent idle clock/protections distinct. Record/test exact races.
+entry; a returning viewer cancels it and later release starts a fresh interval.
+Active work prevents execution of cleanup; it does not require another fifteen
+minutes once an already-due cleanup becomes safe. This is an implementation
+interpretation of Jack's wait-for-final-work direction, not an additional timing
+choice from Jack. Keep the existing agent idle clock/protections distinct.
 
-LOO-498 owns the Rex-specific adapter and workspace features and remains independently owned. The shared contract and Desktop path are implemented here; concrete API needs
-were shared in the coordination note. Rex end-to-end proof remains outstanding.
+LOO-498 owns the Rex adapter and native layouts; Rex end-to-end proof remains
+for demo. Main through `ac8e088f5f` (LOO-709, LOO-711, native status restoration)
+is integrated; LOO-714 routing remains an overlap constraint. One migration.
 
-Main through `ac8e088f5f`, including LOO-709, LOO-711 and native status restoration
-across reconnects, is integrated. LOO-714 routing remains an overlap constraint.
-The Task uses one migration. Remaining
-implementation and proof are tracked in `loo-717-shell-lifetimes.md`.
+## Superseded host-occurrence notes
 
-## Build assumptions — November 3
-
-A lost retained-host lease is unknown. Cleanup needs fresh release or positive
-evidence that the exact retaining owner exited, per the accepted November 4 choice. Desktop releases on departure, including unfinished Tasks; ordinary
-shell execution stays alive and an eligible idle agent uses its existing grace.
-Host observations carry increasing revisions so an old release cannot overwrite
-a newer return. Reusing an occurrence across restarts requires persisted revisions;
-Desktop uses a fresh occurrence per app process and an in-memory counter per retained
-workspace. Native Rex integration remains owned by LOO-498.
-
-## Earlier headless concept-review interpretation — November 3
-
-Clean Desktop quit is departure, not explicit Close: it preserves ordinary
-shells and the completed Task's fifteen-minute grace. This follows Jack Heart's
-accepted quit/Close distinction; it is an engineering interpretation, not new
-approval. The implementation separates release policy from native-resource
-settlement in the existing host observation, so acknowledged quit can finish
-cleanup without reopening Desktop. Failed reporting remains unknown. Exact
-direction and counterexamples are preserved at
-`e7fd5db44f:scratch/loo-717-shell-lifetimes.md`, **Concept review — November 3**.
-No unresolved product choice was found.
-
-Build choice: quit has one five-second reporting budget across all destinations.
-Desktop fences window Close and heartbeats before detaching surfaces; failed or
-canceled writes provide no acknowledgement. A prior explicit Close keeps its
-policy. This bounds departure only, not requested work or the cleanup deadline.
-
-## Interactive concept review — accepted November 4
-
-Jack Heart requested another concept review at demo. Before the November 4 repair,
-an expired retained-host lease held completed-Task shells and checkout indefinitely;
-even a dead Desktop instance needed a fresh host report. Eligible idle agent ending
-was already independent of that workspace hold.
-
-Jack Heart selected **1a** ("1a i guess") on November 4: positive evidence that the exact retaining host
-instance exited releases its hold and starts ordinary absence cleanup without
-reopening the app. Requested work and independent native/destination settlement
-still precede deletion. Network loss or lease expiry alone remains unknown;
-Rex client disappearance does not establish its retaining server's death.
-
-The choice is resolved; the confirmed-exit path is implemented with focused local,
-real SSH and headless Swift evidence recorded in the working design.
-The working design preserves the contract and evidence limits; the earlier review
-and counterexamples remain at `e7fd5db44f:scratch/loo-717-shell-lifetimes.md`.
-The review granted no shipping approval.
-
-## Implementation continuation — November 4
-
-Jack Heart requested "build it" after accepting 1a. Implement and prove confirmed
-retaining-host exit recovery, then republish PR #1811 for interactive demo. Keep
-the existing feature Graph and Task checkout. No Auto-Ship, merge or installation.
-Reuse the accepted design's protections and independent native/destination
-settlement. Share concrete adapter changes with LOO-498 without launching its work.
-
-Implementation choice — November 4: use the existing retirement executor and OS
-process reader. A host owner names Machine, PID, kernel start time and whether
-native resources die with that process. Remote verification uses an already
-registered route back to that Machine; absent routes/network failure stay unknown.
-No new watcher daemon or reverse connection setup. Desktop process instances get
-independent occurrences; old-instance exit cannot release a newer instance.
+The November 3–4 lease, revision, quit-budget and confirmed-host-exit build notes,
+including Jack Heart's November 4 choice of **1a**, are at
+`b81df60579:scratch/questions.md`. 1a's outcome (a dead Desktop releases without
+relaunch) now follows from its viewers' connections ending.
 
 ## Current Rex boundary — November 4 direction, reconciled November 5
 
@@ -140,9 +76,25 @@ releases that hold, subject to ordinary conditions and other holds. Unavailable
 inventory remains unknown. Rex owns layout mutations and restoration; LF layouts
 are one-way input. LOO-498 owns its native adapter.
 
-The published confirmed-Desktop-exit implementation passed its recorded focused
-checks, but transport/README.md and earlier design paragraphs still describe the
-superseded Rex handshake. Reconcile that documentation and demonstrate the newer
-terminal-existence retention boundary with LOO-498 before claiming cross-host
-acceptance. Publication of PR #1811 is not that evidence. No Graph is launched
-or review advanced by this recorded completion update.
+## Build decisions — November 5 pursue (reversible, engineering)
+
+- Viewer hold lives on the serving owner's Process (`processes.viewer_hold`),
+  added in the Task's one migration; `task_host_occurrences` is gone.
+- SSH-ness comes from the relay's `SSH_CONNECTION`. A hangup under SSH (Rex tab
+  closed on a remote viewer, Desktop quit, sleep/network loss) stays unknown
+  until any fresh attach to that owner or a resumed owner replaces it. Desktop
+  departure and window close send Ctrl+] so they release. Cost: a remote viewer
+  closed by hangup keeps a completed checkout until the Session is viewed again.
+- A dead owner that never recorded its viewers reads as unknown (no reaping).
+- Viewed Desktop shells count as LF holds; ordinary shells never do.
+- Desktop window Close no longer skips the fifteen-minute grace (no host
+  channel reports explicit Close); shell Close keeps its explicit behavior.
+- The Desktop retirement banner went with `lf task presence`; the pending
+  reason stays in `task_retirements.reason` and `logs/workspace-retirement.log`.
+  A Task status surface for it would be a separate change.
+- Proposed Wave memory update (not edited; read-only here): `.lf/wave/product/MEMORY.md`
+  lines ~291–296 still describe Machine/PID owner evidence, revision fences and
+  native settlement for LOO-717; replace with the Session-viewer hold above.
+
+Headless proof does not cover the real Ghostty detach timing (500 ms before
+freeing the surface) or Rex end to end; both belong to demo.

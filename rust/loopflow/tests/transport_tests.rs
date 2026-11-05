@@ -607,6 +607,77 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     );
 }
 
+/// The owner's recorded checkout hold, as Task cleanup reads it.
+fn viewer_hold(fixture: &Fixture, owner: &str) -> Option<String> {
+    fixture
+        .sql()
+        .query_row(
+            "SELECT viewer_hold FROM processes WHERE id=?1",
+            [owner],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+
+#[track_caller]
+fn wait_hold(fixture: &Fixture, owner: &str, expected: Option<&str>) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while viewer_hold(fixture, owner).as_deref() != expected {
+        assert!(
+            Instant::now() < deadline,
+            "viewer hold stayed {:?}, expected {expected:?}",
+            viewer_hold(fixture, owner)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unknown() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+    ]);
+    assert_eq!(viewer_hold(&fixture, &owner), None);
+    // A controlling and a passive (hidden, unfocused) viewer both hold.
+    let mut controller = fixture.viewer(&owner, true);
+    let passive = fixture.viewer(&owner, false);
+    wait_hold(&fixture, &owner, Some("viewed"));
+    controller.request(json!({"kind":"leave"}));
+    drop(controller);
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(viewer_hold(&fixture, &owner).as_deref(), Some("viewed"));
+    // A dropped connection keeps holding through its reconnect grace, and its
+    // resume continues the same hold; the clean leave of that stream releases.
+    passive.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(viewer_hold(&fixture, &owner).as_deref(), Some("viewed"));
+    let mut resumed = fixture.connect(&owner);
+    resumed.request(json!({"kind":"resume","reconnect":passive.reconnect,
+        "received":passive.received,"control":false,"own":null,"rows":24,"cols":80}));
+    assert_eq!(resumed.until_reply()["kind"], "attached");
+    drop(passive);
+    resumed.request(json!({"kind":"leave"}));
+    drop(resumed);
+    wait_hold(&fixture, &owner, None);
+    // An SSH viewer whose connection is lost may still be running elsewhere.
+    let remote = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":false,"replace":true,"rows":24,"cols":80,"ssh":true}),
+    );
+    wait_hold(&fixture, &owner, Some("viewed"));
+    remote.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    drop(remote);
+    let mut finisher = fixture.viewer(&owner, true);
+    finisher.input("done\n");
+    finisher.finish();
+    assert_eq!(fixture.wait_file("answer"), "done");
+    // Ending tells open viewers why; the lost one survives the owner as unknown.
+    wait_hold(&fixture, &owner, Some("unknown"));
+}
+
 #[test]
 fn automatic_attachment_preserves_an_existing_viewers_control() {
     let fixture = Fixture::new();

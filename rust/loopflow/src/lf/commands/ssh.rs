@@ -31,11 +31,7 @@ pub fn run(
     // Inspection and file editing must never prepare or transfer a provider login.
     let resident_operation = matches!(
         &cli.command,
-        Some(crate::lf::Commands::Ops {
-            cmd: crate::lf::OpsCommand::Machine {
-                cmd: crate::lf::MachineCommand::Process { .. }
-            }
-        }) | Some(crate::lf::Commands::Session {
+        Some(crate::lf::Commands::Session {
             cmd: crate::lf::SessionCommand::List(_)
                 | crate::lf::SessionCommand::Resume { .. }
                 | crate::lf::SessionCommand::New { .. }
@@ -43,7 +39,6 @@ pub fn run(
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
-                | crate::lf::TaskCommand::Presence { .. }
                 | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }

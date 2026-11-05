@@ -30,6 +30,7 @@ use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::NativeExit;
 use crate::id::LfProcessId;
+use crate::store::sqlite::ViewerHold;
 use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner, Tag};
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
@@ -396,6 +397,8 @@ struct Viewer {
     theme: Option<serde_json::Value>,
     name: Option<String>,
     leaving: bool,
+    /// Attached under SSH; a lost connection leaves its viewer's fate unknown.
+    ssh: bool,
     /// A resume this connection sent, moved onto the dropped viewer's stream.
     resuming: Option<(u64, Resume)>,
     /// The `native_ended` request awaiting its acknowledgement.
@@ -422,6 +425,7 @@ impl Viewer {
             theme: None,
             name: None,
             leaving: false,
+            ssh: false,
             resuming: None,
             ending: None,
             input_hint: None,
@@ -796,6 +800,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
+    // An SSH viewer outlived its reconnect grace without leaving. A fresh
+    // attach supersedes it: recovery confirms a viewer either way.
+    let mut lost_remote = false;
     // The lifetime policy and a blocking child wait wake the descriptor loop.
     // Keep SIGCHLD available to runtimes used by the owner's background work.
     let (wake, waker) = UnixStream::pair()?;
@@ -926,6 +933,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             cols,
                             name,
                             moved,
+                            ssh,
                         } => {
                             if wants_control
                                 && !replace
@@ -938,6 +946,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             attached = true;
                             viewer.size = dimensions(rows, cols);
                             viewer.name = name;
+                            viewer.ssh = ssh == Some(true);
+                            lost_remote = false;
                             if wants_control {
                                 hint_due = true;
                                 if viewer.token != control {
@@ -1002,6 +1012,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         });
         // Release dropped connections' claims before a same-pass resume asks
         // for them again; reconnecting restores the stream, not its old claims.
+        lost_remote |= viewers.iter().any(|viewer| {
+            viewer.connection.expired() && viewer.attached && viewer.ssh && !viewer.leaving
+        });
         viewers.retain(|viewer| !viewer.connection.expired());
         owner_change |= ownership.settle(&viewers);
         if !viewers
@@ -1355,6 +1368,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
+                release_viewer_hold(&id, &viewers, lost_remote);
                 snapshot::leave(&id, &output);
                 return if code == 0 {
                     Ok(())
@@ -1365,7 +1379,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         // Ready output and viewer changes precede the final ending judgment.
         // A throttled/unconsumed activity report also invalidates the candidate.
-        if observed.view(viewers.iter().any(|v| v.live())) {
+        let viewed = observed.view(viewers.iter().any(|v| v.live()));
+        if observed.hold(viewer_hold(&viewers, lost_remote)) | viewed {
             let _ = activity.send(observed);
         }
         #[cfg(test)]
@@ -1384,6 +1399,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
                 }
                 end_viewers(&mut viewers, event);
+                release_viewer_hold(&id, &viewers, lost_remote);
                 snapshot::leave(&id, &output);
                 crate::platform::kill_process(std::process::id());
             }
@@ -1490,6 +1506,39 @@ fn wait_for_activity(
     // SAFETY: poll reads a live array of exactly fds.len() descriptors.
     unsafe {
         libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout);
+    }
+}
+
+/// Viewers retain the owner's Task checkout until they leave. A dropped
+/// connection keeps holding through its reconnect grace; a lost SSH viewer's
+/// LF process may outlive its connection, so after that grace it is unknown.
+fn viewer_hold(viewers: &[Viewer], lost_remote: bool) -> Option<ViewerHold> {
+    if viewers
+        .iter()
+        .any(|viewer| viewer.attached && !viewer.leaving)
+    {
+        Some(ViewerHold::Viewed)
+    } else if lost_remote {
+        Some(ViewerHold::Unknown)
+    } else {
+        None
+    }
+}
+
+/// An ending owner tells its open viewers why; only SSH viewers it had already
+/// lost survive it, as unknown.
+fn release_viewer_hold(owner: &LfProcessId, viewers: &[Viewer], lost_remote: bool) {
+    let lost = lost_remote
+        || viewers.iter().any(|viewer| {
+            viewer.attached && viewer.ssh && !viewer.leaving && !viewer.connection.is_open()
+        });
+    let recorded = crate::journal::process_ledger()
+        .map_err(anyhow::Error::from)
+        .and_then(|store| {
+            lifetime::record_hold(&store, owner, lost.then_some(ViewerHold::Unknown))
+        });
+    if let Err(error) = recorded {
+        tracing::warn!(%error, %owner, "cannot record Session viewer release; cleanup stays pending");
     }
 }
 
@@ -1848,6 +1897,7 @@ fn attach_with_terminal(
             cols,
             name: tty_name(libc::STDIN_FILENO),
             moved,
+            ssh: Some(std::env::var_os("SSH_CONNECTION").is_some()),
         },
     )?;
     let mut decoder = Decoder::default();
@@ -1981,7 +2031,11 @@ fn attach_with_terminal(
                                 Err(crate::process::CommandExit(code).into())
                             }
                         }
-                        Event::Detached => return Ok(()),
+                        Event::Detached => {
+                            // Detached on purpose: an SSH viewer must not read as lost.
+                            let _ = send(&mut socket, Request::Leave);
+                            return Ok(());
+                        }
                         Event::Return { detach } => returning = Some(detach),
                         Event::Hint { text } => {
                             if let Some(terminal) = &mut terminal {

@@ -323,8 +323,19 @@ final class GhosttySurfacePool {
         views.removeValue(forKey: view.terminal)
     }
 
+    /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
+    /// so the Session owner records a deliberate leave. Through SSH a hangup
+    /// alone cannot show that the viewer exited and keeps the Task checkout.
     func release(_ id: TerminalIdentity) {
-        views.removeValue(forKey: id)?.destroySurface()
+        guard let view = views.removeValue(forKey: id) else { return }
+        guard view.detachRelay() else {
+            view.destroySurface()
+            return
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            view.destroySurface()
+        }
     }
 
     func clearFocus() {
@@ -631,6 +642,17 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         return .available(text: text, truncated: truncated)
     }
 
+    /// Released by Desktop: the child's exit is our detach, not a closed pane.
+    private var detaching = false
+
+    /// Type the relay's detach key into a running child; false when none runs.
+    func detachRelay() -> Bool {
+        guard let surface, !childExited, !ghostty_surface_process_exited(surface) else { return false }
+        detaching = true
+        ghostty_surface_text(surface, "\u{1d}", 1)
+        return true
+    }
+
     func destroySurface() {
         copyDismissal?.cancel()
         publishCopyConfirmation(nil)
@@ -663,6 +685,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     /// UI can reclassify immediately instead of waiting for the next poll.
     func handleSurfaceClose() {
         guard surface != nil else { return }
+        if detaching {
+            destroySurface()
+            return
+        }
         var output: String?
         if case .available(let text, let truncated) = try? readText(region: .screen, maxBytes: 16384) {
             let excerpt = text.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -2540,21 +2540,23 @@ esac
         String::from_utf8_lossy(&completed.stderr)
     );
     let read_retirement = || {
-        let output = command()
-            .current_dir(repo.path())
-            .args(["task", "presence", "INF-123"])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        serde_json::from_slice::<loopflow::store::sqlite::TaskRetirement>(&output.stdout).unwrap()
+        database
+            .query_row(
+                "SELECT phase,due_at,reason FROM task_retirements",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap()
     };
-    let retirement = read_retirement();
-    assert_eq!(retirement.phase, "waiting");
-    assert!(retirement.due_at.unwrap() > time::OffsetDateTime::now_utc().unix_timestamp());
+    let (phase, due_at, _) = read_retirement();
+    assert_eq!(phase, "waiting");
+    assert!(due_at.unwrap() > time::OffsetDateTime::now_utc().unix_timestamp());
     assert!(worktree.join("scratch/retained.md").exists());
     assert_eq!(
         runtime
@@ -2581,31 +2583,23 @@ esac
         .unwrap();
     assert_eq!(pr.phase(), loopflow::work::task::PrPhase::Merged);
     assert_eq!(
-        read_retirement().due_at,
-        retirement.due_at,
+        read_retirement().1,
+        due_at,
         "repeated landing must preserve the completion's deadline"
     );
-    let closed = command()
+    // No viewer holds the checkout: once its grace elapses the executor retires it.
+    database
+        .execute("UPDATE task_retirements SET due_at=unixepoch()-1", [])
+        .unwrap();
+    let retired = command()
         .current_dir(repo.path())
-        .args([
-            "task",
-            "presence",
-            "INF-123",
-            "--occurrence",
-            "desktop-fixture",
-            "--state",
-            "closed",
-            "--revision",
-            "1",
-            "--native-settled",
-            "true",
-        ])
+        .args(["task", "retire", "INF-123"])
         .output()
         .unwrap();
     assert!(
-        closed.status.success(),
+        retired.status.success(),
         "{}",
-        String::from_utf8_lossy(&closed.stderr)
+        String::from_utf8_lossy(&retired.stderr)
     );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while worktree.exists() && std::time::Instant::now() < deadline {

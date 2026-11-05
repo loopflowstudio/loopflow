@@ -769,15 +769,6 @@ public struct RegistryQuery: Sendable {
         try await run(["history", "show", id], nil)
     }
 
-    public func taskPresence(task: String, occurrence: String, state: String, revision: Int64, nativeSettled: Bool, owner: TaskHostOwner?) async throws -> TaskRetirement? {
-        var args = ["task", "presence", task, "--occurrence", occurrence,
-                                    "--state", state, "--revision", String(revision),
-                                    "--native-settled", String(nativeSettled)]
-        if let owner { args += ["--owner", String(decoding: try JSONEncoder().encode(owner), as: UTF8.self)] }
-        let output = try await run(args, nil)
-        return try Self.decode(TaskRetirement?.self, from: output)
-    }
-
     /// One store-driven reading keeps position, readiness and run history together.
     public func watchTask(task: String) async throws -> LineWatch {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }

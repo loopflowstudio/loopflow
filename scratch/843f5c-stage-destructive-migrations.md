@@ -61,6 +61,11 @@ separate Task; nothing here touches floor code.
 - `prune_migration_backups(store, 0)` at settlement without checking processes.
 - `check_migrations.py`'s second first-parent walk (`_first_parent_added`) and the
   re-parsing of drop strings into kind/table/column (done).
+- `install.rs`'s `Promotion` wrapper (the app target is read before the call) and
+  `check_migrations.py`'s loose `_ordered`/`_migration_file`/`_schema_before`/
+  `_empty_store`, now `Catalog` methods; a binary with no process cannot come out
+  of `rollover::inventory()`, so settlement asks only whether a superseded binary
+  exists (done).
 
 ## Checks
 
@@ -73,6 +78,9 @@ python/tests/test_check_migrations.py` 19 passed (views, 2026-11-05); `check_mig
 tree: no unmerged migration, and a probe contract against real history reported
 `ship_stop` merged 6 days ago, clears 2026-11-29. Realign (2026-11-05): doc-only
 corrections, no code change; `lf context` shows memory and scratch under budget.
+Second compress (2026-11-05, `Catalog` + `Promotion` removal): the same lib filter
+48 passed, pytest 19 passed, clippy and fmt clean, `lf context` memory at
+16000/16000 tokens and scratch under budget.
 
 ## Concept review (2026-11-05, headless)
 

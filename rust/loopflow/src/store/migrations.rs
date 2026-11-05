@@ -525,7 +525,7 @@ fn backup_before_migration(
 
 /// The clones this writer made beside `path`, oldest first:
 /// `loopflow.db.backup-<version>-<16 hex>`. Names it did not produce are not listed.
-pub fn migration_backups(path: &Path) -> Vec<PathBuf> {
+pub(crate) fn migration_backups(path: &Path) -> Vec<PathBuf> {
     let (Some(parent), Some(file_name)) = (
         path.parent(),
         path.file_name().and_then(|name| name.to_str()),

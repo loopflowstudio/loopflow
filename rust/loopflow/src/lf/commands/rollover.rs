@@ -603,15 +603,15 @@ fn render_report(report: &RolloverReport) -> String {
 pub fn report_before_promote() {
     match inventory() {
         Ok(inventory) => {
+            if inventory.binaries.is_empty() {
+                println!("no live lf process runs on this Machine");
+                return;
+            }
             let total = inventory
                 .binaries
                 .iter()
                 .map(|binary| binary.processes.len())
                 .sum::<usize>();
-            if total == 0 {
-                println!("no live lf process runs on this Machine");
-                return;
-            }
             let parts = inventory
                 .binaries
                 .iter()

@@ -152,39 +152,6 @@ def _released_key(name: str) -> tuple[int, ...]:
     return tuple(int(number) for number in numbers)
 
 
-def _first_parent_additions() -> dict[str, dt.datetime]:
-    """Migration file names in the order origin/main's first-parent history added
-    them, each with the commit time that first added it."""
-    directory = MIGRATIONS_DIR.relative_to(REPO_ROOT)
-    listed = subprocess.run(
-        [
-            "git", "log", "origin/main", "--first-parent", "--diff-merges=first-parent",
-            "--no-renames", "--diff-filter=A", "--reverse", "--format=%ct", "--name-only", "--",
-            f"{directory}/",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    added: dict[str, dt.datetime] = {}
-    when = dt.datetime.fromtimestamp(0, dt.timezone.utc)
-    for line in listed.stdout.splitlines():
-        if line.isdigit():
-            when = dt.datetime.fromtimestamp(int(line), dt.timezone.utc)
-        elif Path(line).parent == directory:  # `drafts/` once held same-named files
-            added.setdefault(Path(line).name, when)
-    return added
-
-
-def _ordered(main: dict[str, bytes], added: dict[str, dt.datetime]) -> list[str]:
-    """origin/main's catalog in the order `build.rs` applies it."""
-    released = sorted((name for name in main if RELEASED.match(name)), key=_released_key)
-    merged = [name for name in added if SLUG.match(name) and name in main]
-    stragglers = sorted(name for name in main if SLUG.match(name) and name not in added)
-    return released + merged + stragglers
-
-
 @dataclass(frozen=True)
 class Column:
     declared_type: str
@@ -214,12 +181,70 @@ class Schema:
         return members
 
 
-def _empty_store() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute(
-        "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
-    )
-    return conn
+@dataclass(frozen=True)
+class Catalog:
+    """origin/main's migrations: their bytes, and the time the first-parent commit
+    that added each file landed, which is the order `build.rs` applies slugs in."""
+
+    files: dict[str, bytes]
+    added: dict[str, dt.datetime]
+
+    @classmethod
+    def of_origin_main(cls, files: dict[str, bytes]) -> Catalog:
+        directory = MIGRATIONS_DIR.relative_to(REPO_ROOT)
+        listed = subprocess.run(
+            [
+                "git", "log", "origin/main", "--first-parent", "--diff-merges=first-parent",
+                "--no-renames", "--diff-filter=A", "--reverse", "--format=%ct", "--name-only", "--",
+                f"{directory}/",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        added: dict[str, dt.datetime] = {}
+        when = dt.datetime.fromtimestamp(0, dt.timezone.utc)
+        for line in listed.stdout.splitlines():
+            if line.isdigit():
+                when = dt.datetime.fromtimestamp(int(line), dt.timezone.utc)
+            elif Path(line).parent == directory:  # `drafts/` once held same-named files
+                added.setdefault(Path(line).name, when)
+        return cls(files, added)
+
+    def ordered(self) -> list[str]:
+        """Every file in the order `build.rs` applies it."""
+        released = sorted((name for name in self.files if RELEASED.match(name)), key=_released_key)
+        merged = [name for name in self.added if SLUG.match(name) and name in self.files]
+        stragglers = sorted(
+            name for name in self.files if SLUG.match(name) and name not in self.added
+        )
+        return released + merged + stragglers
+
+    def file_of(self, migration: str) -> str | None:
+        """The file holding `migration`: its slug, or the released batch holding its draft."""
+        if f"{migration}.sql" in self.files:
+            return f"{migration}.sql"
+        for name, content in self.files.items():
+            if RELEASED.match(name) and (
+                name.split("_", 1)[1].removesuffix(".sql") == migration
+                or migration in DRAFT_MARKER.findall(content.decode())
+            ):
+                return name
+        return None
+
+    def replay(self, before: str | None = None) -> sqlite3.Connection:
+        """A store with every migration applied, or only those before `before`."""
+        ordered = self.ordered()
+        if before is not None:
+            ordered = ordered[: ordered.index(before)]
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+        )
+        for name in ordered:
+            _apply(conn, name, self.files[name].decode())
+        return conn
 
 
 def _apply(conn: sqlite3.Connection, name: str, sql: str) -> None:
@@ -297,7 +322,7 @@ def _compare(before: Schema, after: Schema) -> tuple[list[str], list[str]]:
         if new_columns is None:
             drops.append(f"view {view}")
             continue
-        drops.extend(f"column {view}.{column}" for column in old_columns - new_columns.keys())
+        drops.extend(f"column {view}.{column}" for column in old_columns.keys() - new_columns.keys())
     for index, table in after.unique_indexes.items():
         if index not in before.unique_indexes and table in before.tables:
             breaks.append(f"unique index {index} on {table}; an older writer may violate it")
@@ -306,11 +331,8 @@ def _compare(before: Schema, after: Schema) -> tuple[list[str], list[str]]:
 
 def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: list[str]) -> None:
     """A new slug is additive, or a dated contract that exports what it drops."""
-    added = _first_parent_additions()
-    ordered = _ordered(main, added)
-    conn = _empty_store()
-    for name in ordered:
-        _apply(conn, name, main[name].decode())
+    catalog = Catalog.of_origin_main(main)
+    conn = catalog.replay()
     for name in unmerged:
         sql = local[name].decode()
         before = _schema(conn)
@@ -322,17 +344,10 @@ def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: li
                 f" and drop the old one in a contract {STAGING_DAYS} days after that merges"
             )
         if drops:
-            _check_contract(name, sql, drops, main, ordered, added)
+            _check_contract(name, sql, drops, catalog)
 
 
-def _check_contract(
-    name: str,
-    sql: str,
-    drops: list[str],
-    main: dict[str, bytes],
-    ordered: list[str],
-    added: dict[str, dt.datetime],
-) -> None:
+def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> None:
     """A contract names an aged expand step, exports, and drops only what that step superseded."""
     dropped = ", ".join(drops)
     expand = EXPAND_MARKER.search(sql)
@@ -349,19 +364,19 @@ def _check_contract(
             " writes that data before the SQL runs (settings-cutover.json is the template)"
         )
     step = expand.group(1)
-    expand_file = _migration_file(main, step)
+    expand_file = catalog.file_of(step)
     if expand_file is None:
         _fail(f"{name} names expand step {step!r}, which is not on origin/main")
-    if expand_file not in added:
+    if expand_file not in catalog.added:
         _fail(f"{expand_file} has no first-parent commit on origin/main")
-    age = dt.datetime.now(dt.timezone.utc) - added[expand_file]
+    merged_at = catalog.added[expand_file]
+    age = dt.datetime.now(dt.timezone.utc) - merged_at
     if age < dt.timedelta(days=STAGING_DAYS):
-        clears = added[expand_file] + dt.timedelta(days=STAGING_DAYS)
         _fail(
-            f"{name} contracts {step}, which merged {age.days} days ago;"
-            f" its contract clears on {clears:%Y-%m-%d} ({STAGING_DAYS} days)"
+            f"{name} contracts {step}, which merged {age.days} days ago; its contract clears on"
+            f" {merged_at + dt.timedelta(days=STAGING_DAYS):%Y-%m-%d} ({STAGING_DAYS} days)"
         )
-    left_behind = _schema_before(main, ordered, expand_file).members()
+    left_behind = _schema(catalog.replay(before=expand_file)).members()
     for item in drops:
         if item not in left_behind:
             _fail(
@@ -369,26 +384,6 @@ def _check_contract(
                 " a contract drops only what its expand step superseded"
             )
     print(f"{name}: contract of {step} ({age.days} days), exports {exports.group(1)}")
-
-
-def _migration_file(main: dict[str, bytes], name: str) -> str | None:
-    """The origin/main file for `name`: its slug, or the released batch holding its draft."""
-    if f"{name}.sql" in main:
-        return f"{name}.sql"
-    for file_name, content in main.items():
-        if RELEASED.match(file_name) and (
-            file_name.split("_", 1)[1].removesuffix(".sql") == name
-            or name in DRAFT_MARKER.findall(content.decode())
-        ):
-            return file_name
-    return None
-
-
-def _schema_before(main: dict[str, bytes], ordered: list[str], name: str) -> Schema:
-    conn = _empty_store()
-    for earlier in ordered[: ordered.index(name)]:
-        _apply(conn, earlier, main[earlier].decode())
-    return _schema(conn)
 
 
 def main() -> None:

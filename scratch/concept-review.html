@@ -25,56 +25,61 @@
   ol li { margin:.6rem 0; }
 </style>
 </head>
-<body>
-<main>
+<body><main>
 <h1>Codex Sessions talk to app-server directly</h1>
-<p class="meta">Task 430c74 · concept-review step (headless) · 2026-11-05<br>
-Built from <code>scratch/jack-heart-430c74-codex-sessions-talk.md</code>, <code>scratch/questions.md</code>,
-<code>rust/loopflow/src/harness/codex_connection.rs</code>, <code>rust/loopflow/src/lf/commands/context.rs</code>,
-and a two-client probe against codex-cli 0.166.0.</p>
+<p class="meta">Task 430c74 · concept-review step, second pass (headless) · 2026-11-05<br>
+Built from scratch/jack-heart-430c74-codex-sessions-talk.md, scratch/questions.md,
+rust/loopflow/src/harness/codex.rs (~L595–1080), rust/loopflow/src/harness/codex_connection.rs,
+rust/loopflow/src/lf/commands/util.rs (<code>open_codex_native</code>), docs/architecture/execution.md,
+and a <code>config/read</code> probe against codex-cli 0.166.0.</p>
 
-<p class="lead">No new product choice is needed. The accepted model already says a Session follows its
-conversation when the person starts a new one. The direct path made <code>/new</code> and
-<code>/fork</code> work in Codex but doesn't follow them yet. Next step: implement the following.</p>
+<p class="lead">No decision needed from you. The plan blamed Codex for a gap that comes from lf:
+lf configures each thread instead of the Session's private app-server. Next implement moves
+lf's configuration onto the server. Then a thread the person starts with <code>/new</code>
+or <code>/fork</code> gets lf's instructions and hooks too.</p>
 
 <h2>Actions → concepts → APIs</h2>
 <table>
-<tr><th>The person does</th><th>Concept</th><th>What changes state</th></tr>
-<tr><td>Starts or resumes a Codex Session</td><td>LfSession → selected AgentSession (thread)</td><td><code>open_thread</code>: <code>thread/start</code> + <code>thread/name/set</code>, then the TUI joins with <code>--remote</code></td></tr>
-<tr><td>Types, runs tools, approves</td><td>Turns on that thread</td><td>TUI ↔ app-server directly; the observer records from the side</td></tr>
-<tr><td>Gets a Task update</td><td>Interjection</td><td>Observer <code>turn/start</code> with <code>toolOutput</code> while idle</td></tr>
-<tr><td>Moves the Session elsewhere</td><td>Attachment</td><td>Observer ends the old TUI</td></tr>
-<tr class="gap"><td>Types <code>/new</code> or <code>/fork</code></td><td>Should be: the Session selects the new AgentSession</td><td>Today: nothing. The observer keeps watching the old thread, and <code>lf resume</code> reopens it</td></tr>
-<tr class="proposed"><td>Types <code>/new</code> or <code>/fork</code> (proposed)</td><td>Same LfSession, new selection; the earlier one stays in history</td><td>Observer sees a top-level <code>thread/started</code> → selects it as Claude's <code>/clear</code> does (<code>NativeBoundary::Select</code>) → <code>thread/resume</code> → records</td></tr>
+<tr><th>The person does</th><th>Concept</th><th>What carries lf's context</th></tr>
+<tr><td>Starts or resumes a Codex Session</td><td>LfSession → its private app-server → selected thread</td>
+<td class="gap">Today: <code>thread/start</code> params from <code>open_thread</code></td></tr>
+<tr><td>Types <code>/new</code> or <code>/fork</code></td><td>Same LfSession, new selected AgentSession (implemented)</td>
+<td class="gap">Today: nothing. The TUI's <code>thread/start</code> has no lf config, and <code>--remote</code> ignores <code>-c</code></td></tr>
+<tr class="proposed"><td>Either (proposed)</td><td>The configuration belongs to the Session's app-server</td>
+<td><code>codex -c … app-server --listen …</code>: every thread inherits it from the <code>sessionFlags</code> layer. The observer binds hooks on selection</td></tr>
 </table>
 
 <h2>The mismatch</h2>
-<p>Claude's <code>/clear</code> fires <code>SessionStart</code>, and lf selects the new conversation.
-In Codex, <code>/new</code> now gets past lf (the relay used to refuse it), but lf goes on
-recording the first thread. When the person comes back, <code>lf resume</code> opens the
-conversation they left. A transparent session manager shouldn't do that.</p>
+<p>The comment in <code>harness/codex.rs</code> keeps configuration per thread because "the app-server
+can host another conversation" and it must not lend that configuration to "a newly admitted sibling."
+That reason dates from the relay. Today each Session's app-server is private to it
+(execution.md, "Connect and transfer attachment"), so every thread on it is that Session's thread.</p>
 
-<h2>Evidence: Codex already reports the switch</h2>
-<pre>client b: thread/resume t1, nothing else
-client a: thread/start          → b gets thread/started {id: t2, parentThreadId: null}
-client a: thread/fork t1        → b gets thread/started {id: t3, forkedFromId: t1, parentThreadId: null}</pre>
-<p>On a Session's private app-server, lf opens its own threads before the observer subscribes.
-So every top-level start the observer sees after that point comes from the person's client.</p>
+<h2>Evidence</h2>
+<pre>CODEX_HOME=&lt;private&gt; codex -c 'developer_instructions="LFMARK"' app-server --listen unix://…/a.sock
+client: config/read {includeLayers: true}
+  → config.developer_instructions = "LFMARK"
+  → set in layer {type: sessionFlags}   (lf already reads the wrapper's hooks from this layer)</pre>
+<p>Still to check during implementation: that a thread the TUI starts actually sends the
+<code>sessionFlags</code> instructions to the model. Use the <code>--new-thread</code> fixture with a marker. If it doesn't,
+the Codex limit stands and the plan says so.</p>
 
-<h2>Still open (a fact to check, not a product choice)</h2>
-<p>A thread the TUI starts uses the TUI's own config, not lf's prepared instructions and hooks.
-If <code>codex --remote</code> accepts <code>-c</code> overrides for its <code>thread/start</code>,
-lf context reaches the new thread. If not, that limit is Codex's, and the design says so.</p>
+<h2>What changes, what survives</h2>
+<ul>
+<li>Changes: <code>open_thread</code> sends no <code>config</code>. The native launch puts it on the server, before the
+subcommand. The "sibling" comment goes.</li>
+<li>Survives: lf still opens the first thread so it has the thread id and the first input before the TUI starts.
+Following <code>/new</code> and <code>/fork</code> stays as is. Codex's <code>codex_tui</code> dynamic tools stay out.</li>
+<li>Becomes unnecessary: option (b), the observer interjection. lf never starts a turn the person didn't send.</li>
+</ul>
 
 <h2>Questions</h2>
+<p>None for this pass. The accepted decisions (the Session follows the thread, lf adds context)
+cover the change. If the implement step finds Codex ignores <code>sessionFlags</code> for client-started
+threads, the earlier question comes back:</p>
 <ol>
-<li>Should <code>/fork</code> follow the same way as <code>/new</code>?
-  <br>a. Yes, both change the selection (implied by the model; this is what goes forward)
-  <br>b. Only <code>/new</code>; a fork stays in Codex's history and lf doesn't record it</li>
-<li>If Codex can't carry lf's context onto a thread the TUI starts:
-  <br>a. Follow anyway, with no lf context on the new thread (proposed)
-  <br>b. Follow it and also inject context as an observer interjection on its first idle moment</li>
+<li>A thread the person starts can't carry lf's context:
+<br>a. Follow it with no lf context
+<br>b. Follow it and inject context as an observer interjection</li>
 </ol>
-</main>
-</body>
-</html>
+</main></body></html>

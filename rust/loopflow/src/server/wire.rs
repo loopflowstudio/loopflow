@@ -28,11 +28,12 @@ pub enum ClientMessage {
     Status,
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
     Request { id: String, operation: Operation },
-    /// One request line for the live subscription `id`, as the watch's stdin takes it.
-    Checkpoint {
-        id: String,
-        frame: serde_json::Value,
-    },
+    /// A read with a watch; answers `subscribed`, then `reading` messages
+    /// until cancelled. The id follows the same rules as a request's.
+    Subscribe { id: String, operation: Read },
+    /// Ask the live subscription `id` for a reading now; the next reading's
+    /// `answers` carries `checkpoint`, changed or not.
+    Checkpoint { id: String, checkpoint: u64 },
     /// Forget a request's answer, or end a subscription.
     Cancel { id: String },
     /// A ticketed connection's first and only protocol message. The server
@@ -49,7 +50,7 @@ pub struct Hello {
 }
 
 /// Who connected, for diagnostics; it grants nothing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientIdentity {
     pub kind: String,
@@ -58,42 +59,47 @@ pub struct ClientIdentity {
     pub version: String,
 }
 
+/// What a request asks for, named by its `kind`: a dotted resource and verb
+/// (`task.complete`, `plan.get`). `desktop.*` kinds are Desktop's own
+/// arrangement state, not part of what other clients are offered.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(untagged)]
 pub enum Operation {
-    /// Same-user local socket only.
-    MobileStatus,
-    /// Same-user local socket only.
-    ConfigureRemote {
-        configuration: Option<super::mobile::Configuration>,
-    },
-    SessionOwner {
-        session: crate::id::LfSessionId,
-    },
-    Read {
-        query: Read,
-    },
-    /// Answers `subscribed`, then `reading` messages until cancelled.
-    Subscribe {
-        query: Read,
-        generation: u64,
-    },
+    Server(ServerOperation),
+    Read(Read),
+    Write(Write),
+}
+
+/// Operations the server owns rather than a shared read or write.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+pub enum ServerOperation {
+    /// The owner Process of a Session's terminal, if one is recorded.
+    #[serde(rename = "session.owner")]
+    SessionOwner { session: crate::id::LfSessionId },
+    /// Settings files: catalogue, declaration, explanation and theme.
+    #[serde(rename = "config.file")]
     Configuration {
         request: crate::config::api::Request,
     },
-    Command {
-        change: Write,
+    /// Mobile access readiness; same-user local socket only.
+    #[serde(rename = "mobile.status")]
+    MobileStatus,
+    /// Turn mobile access on with `configuration`, or off with null; same-user
+    /// local socket only. Answers `{configuration}`.
+    #[serde(rename = "mobile.configure")]
+    ConfigureRemote {
+        configuration: Option<super::mobile::Configuration>,
     },
-    /// A ticket for a terminal connection to this owner's existing protocol.
-    Attach {
-        owner: LfProcessId,
-    },
+    /// A ticket for a terminal connection to this owner's existing protocol;
+    /// answers `{ticket}`.
+    #[serde(rename = "terminal.attach")]
+    Attach { owner: LfProcessId },
     /// A ticket for a connection that carries one request of `bytes` bytes,
-    /// larger than `limits.max_message`; its answer arrives here under the
-    /// uploaded request's own id.
-    Bulk {
-        bytes: usize,
-    },
+    /// larger than `limits.max_message`; answers `{ticket}`. The uploaded
+    /// request is answered here under its own id.
+    #[serde(rename = "request.upload")]
+    Upload { bytes: usize },
 }
 
 /// One message from the server.
@@ -102,13 +108,16 @@ pub enum Operation {
 pub enum ServerMessage {
     Welcome(Welcome),
     Status(Status),
+    /// What the request returned: a read's or write's value, `{owner}` for
+    /// `session.owner`, null once a subscription or attachment is confirmed.
+    /// `trace_id` correlates the server's diagnostics for it.
     Response {
         id: String,
-        result: Reply,
+        trace_id: crate::id::TraceId,
+        result: serde_json::Value,
     },
     Reading {
         id: String,
-        generation: u64,
         frame: serde_json::Value,
     },
     /// The answer for `id` is `bytes` long, more than `limits.max_message`:
@@ -125,12 +134,16 @@ pub enum ServerMessage {
         id: Option<String>,
         code: ErrorCode,
         message: String,
+        /// Structured detail a client can act on, such as the missing resource.
+        data: Option<serde_json::Value>,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Welcome {
+    /// The server's name for this connection, as `lf server status` lists it.
+    pub client_id: String,
     /// The revision both sides speak for this connection.
     pub revision: u32,
     pub server_revision: u32,
@@ -152,6 +165,20 @@ pub struct Status {
     pub min_revision: u32,
     pub instance: String,
     pub executable_sha256: String,
+    /// Every welcomed connection still open.
+    pub clients: Vec<ConnectedClient>,
+}
+
+/// One welcomed connection, from `welcome` until it closes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectedClient {
+    pub id: String,
+    pub client: ClientIdentity,
+    /// RFC 3339.
+    pub connected_at: String,
+    /// Requests the connection has sent, subscriptions included.
+    pub requests: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,45 +188,59 @@ pub struct Limits {
     pub max_connections: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Reply {
-    MobileStatus {
-        status: super::mobile::Status,
-    },
-    Remote {
-        configuration: Option<super::mobile::Configuration>,
-    },
-    Read {
-        value: serde_json::Value,
-    },
-    Subscribed,
-    Command {
-        trace_id: crate::id::TraceId,
-        code: i32,
-        /// Stdout parsed as JSON when the command's spelling prints JSON.
-        value: Option<serde_json::Value>,
-        output: String,
-        stderr: String,
-    },
-    SessionOwner {
-        owner: Option<LfProcessId>,
-    },
-    /// Single use, bound to this connection's admission, expiring in
-    /// [`TICKET_TTL`](super::ticket::TICKET_TTL).
-    Ticket {
-        ticket: String,
-    },
-}
-
+/// What a client can branch on. Nothing ran for any code but `outcome_unknown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
+    /// No protocol revision in common; `data` names the side to update.
     Incompatible,
+    /// The message or request is malformed or its arguments are refused.
     Invalid,
+    /// The named Task, Session, owner or subscription does not exist; `data` names it.
+    NotFound,
+    /// The request contradicts current state: a reused id or a stale revision.
+    Conflict,
+    /// A dependency is missing or failed: the Machine registry, a watch, a provider.
     Unavailable,
+    /// The operation may have taken effect; inspect state before retrying.
     OutcomeUnknown,
+    /// The server is at capacity or the client fell behind; retry shortly.
     Busy,
+}
+
+/// A refused request, as an `error` message carries it. Shared operations
+/// return it inside `anyhow::Error` to name their code; the server sends it as
+/// is, and the CLI prints its message.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct ServerError {
+    pub code: ErrorCode,
+    pub message: String,
+    pub data: Option<serde_json::Value>,
+}
+
+impl ServerError {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
+    }
+
+    pub fn with(mut self, data: serde_json::Value) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn into_message(self, id: Option<String>) -> ServerMessage {
+        ServerMessage::Error {
+            id,
+            code: self.code,
+            message: self.message,
+            data: self.data,
+        }
+    }
 }
 
 /// The wire name, so a message reads `outcome_unknown: …` on every client.
@@ -227,13 +268,13 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
-            include_str!("../../../../tests/fixtures/dto/server/task_create.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_start.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_start.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_page.json"),
-            include_str!("../../../../tests/fixtures/dto/server/all_view_plans.json"),
+            include_str!("../../../../tests/fixtures/dto/server/view_select.json"),
             include_str!("../../../../tests/fixtures/dto/server/configure_remote.json"),
             include_str!("../../../../tests/fixtures/dto/server/mobile_status_request.json"),
-            include_str!("../../../../tests/fixtures/dto/server/bulk_request.json"),
+            include_str!("../../../../tests/fixtures/dto/server/upload.json"),
             include_str!("../../../../tests/fixtures/dto/server/ticket.json"),
         ] {
             let message: ClientMessage = serde_json::from_str(raw).unwrap();
@@ -245,10 +286,11 @@ mod tests {
         for raw in [
             include_str!("../../../../tests/fixtures/dto/server/welcome.json"),
             include_str!("../../../../tests/fixtures/dto/server/status.json"),
-            include_str!("../../../../tests/fixtures/dto/server/command.json"),
+            include_str!("../../../../tests/fixtures/dto/server/response.json"),
             include_str!("../../../../tests/fixtures/dto/server/owner.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
+            include_str!("../../../../tests/fixtures/dto/server/not_found.json"),
             include_str!("../../../../tests/fixtures/dto/server/remote.json"),
             include_str!("../../../../tests/fixtures/dto/server/mobile_status.json"),
             include_str!("../../../../tests/fixtures/dto/server/ticket_reply.json"),
@@ -266,12 +308,11 @@ mod tests {
             r#"{"type":"hello","revision":2,"min_revision":2}"#
         )
         .is_err());
-        assert!(serde_json::from_str::<ServerMessage>(
-            r#"{"type":"reading","id":"tasks-1","generation":1}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<ServerMessage>(r#"{"type":"reading","id":"tasks-1"}"#).is_err()
+        );
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"request","id":"b","operation":{"kind":"bootstrap"}}"#
+            r#"{"type":"request","id":"b","operation":{"kind":"task.complete","issue":"A"}}"#
         )
         .is_err());
     }

@@ -508,6 +508,9 @@ pub enum Commands {
         /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
         #[arg(long)]
         stop: bool,
+        /// With --stop, print the Task and whether it was shipping
+        #[arg(long, requires = "stop")]
+        json: bool,
     },
     /// Inspect and continue Sessions
     Session {
@@ -1561,7 +1564,12 @@ pub enum GraphCommand {
     },
     /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
-    Customize { name: String },
+    Customize {
+        name: String,
+        /// Print `{"path": …}`
+        #[arg(long)]
+        json: bool,
+    },
     /// Carry a Task's Graph from where its `lf task run` set out; that run starts it
     #[command(hide = true)]
     Run,
@@ -2093,12 +2101,18 @@ until `lf ship`."
         /// Why, kept in the Task's completion request
         #[arg(long)]
         reason: Option<String>,
+        /// Print the completed Task
+        #[arg(long)]
+        json: bool,
     },
     /// Reopen local planning without moving its Graph or replacing the PR
     Reopen {
         issue: String,
         #[arg(long)]
         reason: Option<String>,
+        /// Print the reopened Task
+        #[arg(long)]
+        json: bool,
     },
     /// Create a Task; with --run, also start its Graph
     #[command(
@@ -2269,6 +2283,9 @@ until `lf ship`."
         assignee: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Print the edited Task's ID and planning sync
+        #[arg(long)]
+        json: bool,
     },
     /// Change Task membership, or move the Task to another Machine, preserving its recorded work
     #[command(
@@ -2393,7 +2410,7 @@ pub enum InstallCommand {
     /// Reconcile the selected installation's local server for a client.
     #[command(hide = true)]
     Server,
-    /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
+    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux)
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
         /// Defaults to the installed schedule's, else daily.
@@ -2458,8 +2475,9 @@ pub enum InstallCommand {
         #[arg(long)]
         preview: bool,
     },
-    /// Repoint the global CLI at retained prior bytes only after that binary's
-    /// own preflight proves it recognizes the current store frontier.
+    /// Repoint a legacy global CLI at retained prior bytes only after that
+    /// binary's own preflight proves it recognizes the current store frontier.
+    /// Refuses receipt-managed installs.
     #[command(hide = true)]
     Rollback {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
@@ -3879,7 +3897,7 @@ mod tests {
             Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
                 .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason } })
+            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason, .. } })
                 if issue == "LOO-42" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",

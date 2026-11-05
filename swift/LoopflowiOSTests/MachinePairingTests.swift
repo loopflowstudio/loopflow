@@ -17,9 +17,10 @@ final class MachinePairingTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: requestURL)))
         let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "server"))
-        guard case .response("mobile-1", .remote(let configuration)) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: replyURL)) else {
+        guard case .response("mobile-1", _, let result) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: replyURL)) else {
             return XCTFail("Expected listener configuration")
         }
+        let configuration = try JSONDecoder().decode(MachineMobileConfiguration?.self, from: JSONEncoder().encode(result["configuration"]))
         XCTAssertEqual(configuration?.endpoint, "https://host.tail.ts.net:8443")
     }
     func testAddressPreservesThePrivateEndpointAndRejectsOtherDestinations() throws {

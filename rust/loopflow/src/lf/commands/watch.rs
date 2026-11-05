@@ -20,7 +20,8 @@
 //! embedding API does: a data-free wakeup from any thread says a result may
 //! have changed, and the app pulls on its own thread, where the reading runs
 //! and coalesces a burst into one frame. The app reads exactly what the `lf`
-//! command would print.
+//! command would print. A subscription's arguments are fixed; it takes only
+//! checkpoints.
 
 mod checkouts;
 
@@ -227,8 +228,8 @@ where
     }
 }
 
-/// A watch served inside this process. Requests are the lines
-/// `lf <read> --json --watch` takes on stdin; [`Subscription::pull`] reads on
+/// A watch served inside this process. It takes checkpoints, never argument
+/// changes: a client with new arguments subscribes again. [`Subscription::pull`] reads on
 /// the caller's thread and returns the frame that command would print next.
 /// Dropping it ends the watch.
 pub struct Subscription {
@@ -244,9 +245,10 @@ impl std::fmt::Debug for Subscription {
 }
 
 impl Subscription {
-    /// One request line, as on the stdin of the equivalent `lf` watch.
-    pub fn request(&self, line: &[u8]) {
-        self.inbox.deliver(line);
+    /// `{"id": checkpoint}` on the stdin of the equivalent `lf` watch: the
+    /// next frame answers it, changed or not.
+    pub fn checkpoint(&self, checkpoint: u64) {
+        self.inbox.checkpoint(checkpoint);
     }
 
     /// The newest changed frame, or `None` when nothing changed since the last
@@ -275,16 +277,16 @@ impl Drop for Subscription {
 
 /// A mailbox whose argument type is known only to its watch.
 trait Inbox: Send + Sync {
-    fn deliver(&self, line: &[u8]);
+    fn checkpoint(&self, id: u64);
     fn close(&self);
     /// Ask the watch to look at the store again; false once it has closed.
     fn look(&self) -> bool;
 }
 
 impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
-    fn deliver(&self, line: &[u8]) {
+    fn checkpoint(&self, id: u64) {
         let mut mailbox = self.0.lock().expect("watch mailbox poisoned");
-        accept(&mut mailbox, line);
+        mailbox.requests.push(Request { id, args: None });
         self.1.notify_all();
     }
 

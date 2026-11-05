@@ -9,7 +9,7 @@ use std::task::{ready, Poll};
 use std::time::{Duration, SystemTime};
 
 use super::mobile::{Configuration, Host, Status};
-use super::service::{self, Carrier, Greeting};
+use super::service::{self, Carrier, Clients, Greeting};
 use super::ticket::{Admission, Tickets};
 use super::wire::MAX_BULK;
 use anyhow::{Context, Result};
@@ -47,6 +47,7 @@ pub(super) async fn manage(
     instance: Arc<str>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
+    clients: Clients,
     tickets: Arc<Tickets>,
 ) -> Result<()> {
     let mut status = match initial {
@@ -97,7 +98,7 @@ pub(super) async fn manage(
                         .context("Could not save mobile access; no listener was enabled")?;
                     status.configuration = Some(bound.config.clone());
                     status.ready = true;
-                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), tickets.clone()));
+                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone()));
                     Ok(status.configuration.clone())
                 }.await;
                 status.error = result.as_ref().err().map(|error| format!("{error:#}"));
@@ -122,7 +123,7 @@ pub(super) async fn manage(
                             status.ready = true;
                             status.error = None;
                             reported_failure = false;
-                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), tickets.clone()));
+                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone()));
                         }
                         Err(error) => {
                             if !reported_failure {
@@ -245,6 +246,7 @@ async fn run(
     instance: Arc<str>,
     executable: Arc<String>,
     slots: Arc<Semaphore>,
+    clients: Clients,
     tickets: Arc<Tickets>,
 ) -> Result<()> {
     tracing::info!(endpoint = %bound.config.endpoint, "Mobile HTTPS ready on host Tailscale");
@@ -266,12 +268,13 @@ async fn run(
         let Ok(permit) = slots.clone().try_acquire_owned() else {
             continue;
         };
-        let (host, owner, tls, instance, executable, tickets) = (
+        let (host, owner, tls, instance, executable, clients, tickets) = (
             bound.host.clone(),
             bound.config.owner.clone(),
             tls.clone(),
             instance.clone(),
             executable.clone(),
+            clients.clone(),
             tickets.clone(),
         );
         connections.spawn(async move {
@@ -281,7 +284,7 @@ async fn run(
                     tokio::task::spawn_blocking(move || host.permits(peer, &owner)).await??;
                 let socket =
                     tokio::time::timeout(Duration::from_secs(5), tls.accept(socket)).await??;
-                connection(socket, admission, &instance, &executable, tickets).await
+                connection(socket, admission, &instance, &executable, &clients, tickets).await
             }
             .await;
             if let Err(error) = result {
@@ -309,6 +312,7 @@ async fn connection<S>(
     admission: Option<Admission>,
     instance: &str,
     executable: &str,
+    clients: &Clients,
     tickets: Arc<Tickets>,
 ) -> Result<()>
 where
@@ -352,7 +356,8 @@ where
         .await
         .context("no message within five seconds")?
         .context("closed before its first message")??;
-    let ended = match service::welcome(&mut messages, &first, instance, executable).await? {
+    let ended = match service::welcome(&mut messages, &first, instance, executable, clients).await?
+    {
         Greeting::Ended => Ok(()),
         Greeting::Ticket(ticket) if ticket_path => {
             match service::ticketed(&mut messages, &ticket, &admission, &tickets).await {
@@ -362,10 +367,18 @@ where
         }
         // A ticket belongs on `/v1/ticket` and a session on `/v1/machine`.
         Greeting::Ticket(_) => Ok(()),
-        Greeting::Session if ticket_path => Ok(()),
+        Greeting::Session(_) if ticket_path => Ok(()),
         // Remote connections never configure mobile access.
-        Greeting::Session => {
-            service::session(&mut messages, instance.into(), None, admission, tickets).await
+        Greeting::Session(admitted) => {
+            service::session(
+                &mut messages,
+                instance.into(),
+                &admitted,
+                None,
+                admission,
+                tickets,
+            )
+            .await
         }
     };
     // The control connection ends with a close frame, not a reset.
@@ -477,10 +490,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::{bridge, connection};
+    use crate::server::service::Clients;
     use crate::server::ticket::{Admission, Purpose, Tickets};
     use crate::server::wire::{
-        ClientIdentity, ClientMessage, Hello, Operation, Reply, ServerMessage, MAX_MESSAGE,
-        MIN_REVISION, REVISION,
+        ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation,
+        MAX_MESSAGE, MIN_REVISION, REVISION,
     };
     use futures_util::{SinkExt, StreamExt};
     use std::sync::Arc;
@@ -556,6 +570,7 @@ mod tests {
                 admission,
                 "test-instance",
                 "test-executable",
+                &Clients::default(),
                 tickets,
             )
             .await;
@@ -629,14 +644,15 @@ mod tests {
         // Mobile setup stays on the Machine's private socket; the remote
         // carrier answers it as an ordinary error and keeps the connection.
         for (id, operation) in [
-            ("status", Operation::MobileStatus),
+            ("status", ServerOperation::MobileStatus),
             (
                 "configure",
-                Operation::ConfigureRemote {
+                ServerOperation::ConfigureRemote {
                     configuration: None,
                 },
             ),
         ] {
+            let operation = Operation::Server(operation);
             client
                 .send(text(&ClientMessage::Request {
                     id: id.into(),
@@ -654,18 +670,15 @@ mod tests {
         client
             .send(text(&ClientMessage::Request {
                 id: "terminal".into(),
-                operation: Operation::Attach {
+                operation: Operation::Server(ServerOperation::Attach {
                     owner: crate::id::LfProcessId::new(),
-                },
+                }),
             }))
             .await
             .unwrap();
         assert!(matches!(
             receive(&mut client).await.unwrap(),
-            ServerMessage::Response {
-                result: Reply::Ticket { .. },
-                ..
-            }
+            ServerMessage::Response { result, .. } if result["ticket"].is_string()
         ));
         // Binary frames belong to a bridged terminal, never to the control connection.
         client
@@ -684,9 +697,8 @@ mod tests {
         };
         let big = serde_json::to_string(&ServerMessage::Response {
             id: "file".into(),
-            result: Reply::Read {
-                value: serde_json::Value::String("x".repeat(2 * MAX_MESSAGE)),
-            },
+            trace_id: crate::id::TraceId::default(),
+            result: serde_json::Value::String("x".repeat(2 * MAX_MESSAGE)),
         })
         .unwrap();
         let ticket = tickets.issue(phone.clone(), Purpose::Download(big.clone()));

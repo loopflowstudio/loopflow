@@ -2297,7 +2297,7 @@ pub(crate) async fn reconcile_task_completion(
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct TaskEdit {
     pub id: String,
     pub sync: crate::store::planning_sync::PlanningSyncStatus,

@@ -20,7 +20,7 @@ struct WorkObservationTransportTests {
         let server = LocalServerFixture(lf)
         let printed = try await ServerClient.write(.graphCustomize(directory: repo.path, name: "code"), location: server.location())
         await server.stop()
-        let path = printed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = try #require(try JSONSerialization.jsonObject(with: Data(printed.utf8)) as? [String: String])["path"]!
         let graph = try String(contentsOfFile: path, encoding: .utf8)
         #expect(graph.contains("implement"))
     }

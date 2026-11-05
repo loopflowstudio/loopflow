@@ -4544,28 +4544,21 @@ impl<'a> ServerProof<'a> {
         connection
     }
 
-    fn request(&self, operation: Value) -> loopflow::server::wire::Reply {
+    fn request(&self, operation: Value) -> Value {
         self.connect()
             .request(serde_json::from_value(operation).unwrap())
             .unwrap()
+            .result
     }
 
     fn mobile_status(&self) -> Value {
-        let loopflow::server::wire::Reply::MobileStatus { status } =
-            self.request(json!({"kind":"mobile_status"}))
-        else {
-            panic!("expected mobile status")
-        };
-        serde_json::to_value(status).unwrap()
+        self.request(json!({"kind":"mobile.status"}))
     }
 
     fn configure_remote(&self, configuration: Value) -> Value {
-        let loopflow::server::wire::Reply::Remote { configuration } =
-            self.request(json!({"kind":"configure_remote","configuration":configuration}))
-        else {
-            panic!("expected the remote configuration")
-        };
-        serde_json::to_value(configuration).unwrap()
+        self.request(json!({"kind":"mobile.configure","configuration":configuration}))
+            ["configuration"]
+            .clone()
     }
 
     fn viewer(&self, owner: &str) -> Viewer {
@@ -4590,10 +4583,10 @@ fn server_task_watch_replaces_readings_across_repositories() {
         &fixture.repo.head_sha(),
     );
     let service = ServerProof::start(&fixture, false);
-    let query = json!({"read":"all_view_plans","expression":"kind:task state:open"});
+    let query = json!({"kind":"view.select","expression":"kind:task state:open"});
     let mut watch = service.connect();
     let tasks = watch
-        .subscribe(serde_json::from_value(query.clone()).unwrap(), 1)
+        .subscribe(serde_json::from_value(query.clone()).unwrap())
         .unwrap();
     let first = watch.reading(&tasks).unwrap();
     let contents = |frame: &Value| -> Vec<Value> {
@@ -4627,7 +4620,7 @@ fn server_task_watch_replaces_readings_across_repositories() {
             break;
         }
     }
-    watch.checkpoint(&tasks, json!({"id":12})).unwrap();
+    watch.checkpoint(&tasks, 12).unwrap();
     loop {
         let reading = watch.reading(&tasks).unwrap();
         if reading["answers"] == 12 {
@@ -4637,11 +4630,7 @@ fn server_task_watch_replaces_readings_across_repositories() {
     }
     drop(watch);
     // The one-shot read shares the subscription's query and projection.
-    let loopflow::server::wire::Reply::Read { value: plans } =
-        service.request(json!({"kind":"read","query":query}))
-    else {
-        panic!("expected a read")
-    };
+    let plans = service.request(query);
     assert_eq!(plans.as_array().unwrap().len(), 2);
 }
 
@@ -4756,18 +4745,8 @@ fn start_only_opens_one_session_without_taking_existing_viewer_claims() {
     );
     until_out(&mut desktop, "ready for");
     let service = ServerProof::start(&fixture, false);
-    let loopflow::server::wire::Reply::Command {
-        code,
-        value,
-        stderr,
-        ..
-    } = service
-        .request(json!({"kind":"command", "change":{"write":"session_start", "id":session}}))
-    else {
-        panic!("expected a command result")
-    };
-    assert_eq!(code, 0, "{stderr}");
-    assert_eq!(value.expect("session_start prints JSON")["id"], session);
+    let started = service.request(json!({"kind":"session.start", "id":session}));
+    assert_eq!(started["id"], session, "{started}");
     let mut observer = fixture.connect(&owner);
     observer
         .request(json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}));
@@ -4812,23 +4791,15 @@ fn start_only_lost_reply_preserves_the_started_session_for_passive_inspection() 
     service.ready();
     let mut abandoned = service.connect();
     abandoned
-        .send(
-            serde_json::from_value(
-                json!({"kind":"command", "change":{"write":"session_start", "id":session}}),
-            )
-            .unwrap(),
-        )
+        .send(serde_json::from_value(json!({"kind":"session.start", "id":session})).unwrap())
         .unwrap();
     // Confirm admission before losing the response, not before the request arrives.
     let launches = fixture.launches(1);
     drop(abandoned);
-    let loopflow::server::wire::Reply::SessionOwner { owner } =
-        service.request(json!({"kind":"session_owner", "session":session}))
-    else {
-        panic!("expected the Session owner")
-    };
-    let owner = owner.expect("the lost reply's Session kept its owner");
-    let owner = owner.as_str();
+    let resolved = service.request(json!({"kind":"session.owner", "session":session}));
+    let owner = resolved["owner"]
+        .as_str()
+        .expect("the lost reply's Session kept its owner");
     let _cleanup = StopOwner(&fixture, owner.into());
     let observer = fixture.viewer(owner, false);
     assert!(observer.token.is_none());
@@ -5478,45 +5449,6 @@ fn server_status_does_not_install_or_create_work() {
     assert!(!fixture.home.path().join("loopflow.db").exists());
 }
 
-#[test]
-fn server_invalid_checkpoints_use_shared_watch_errors() {
-    use loopflow::server::client::ServerError;
-    use loopflow::server::wire::ErrorCode;
-
-    let fixture = Fixture::new();
-    let service = ServerProof::start(&fixture, false);
-    let query = || {
-        serde_json::from_value(
-            json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true}),
-        )
-        .unwrap()
-    };
-    for checkpoint in [json!({"unknown": 1}), json!({"id": 1, "args": false})] {
-        let mut connection = service.connect();
-        let id = connection.subscribe(query(), 7).unwrap();
-        let initial = connection.reading(&id).unwrap();
-        assert!(initial["unavailable"].is_null(), "{initial}");
-        connection.checkpoint(&id, checkpoint).unwrap();
-        loop {
-            let frame = connection.reading(&id).unwrap();
-            if let Some(error) = frame["unavailable"].as_str() {
-                assert!(error.contains("invalid watch request"), "{error}");
-                assert!(frame["body"].is_null());
-                break;
-            }
-        }
-        // The watch's failure ends its subscription; the connection stays open.
-        let ended = connection.reading(&id).unwrap_err();
-        let ended = ended
-            .downcast::<ServerError>()
-            .unwrap_or_else(|other| panic!("not a server error: {other:?}"));
-        assert_eq!(ended.code, ErrorCode::Unavailable);
-        assert!(ended.message.contains("invalid watch request"), "{ended}");
-        let again = connection.subscribe(query(), 8).unwrap();
-        assert!(connection.reading(&again).unwrap()["unavailable"].is_null());
-    }
-}
-
 // The host CLI is the network-identity boundary. Fixtures supply its responses;
 // TLS, HTTP/WebSocket, service dispatch and owner lifetimes remain real.
 fn mobile_host(fixture: &Fixture, status: &Value, pem: &str) {
@@ -5580,10 +5512,10 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     );
     let mut service = ServerProof::start(&fixture, false);
     let instance = service.ready();
-    let roadmap = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
+    let roadmap = json!({"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let watched = watch
-        .subscribe(serde_json::from_value(roadmap.clone()).unwrap(), 1)
+        .subscribe(serde_json::from_value(roadmap.clone()).unwrap())
         .unwrap();
     let initial = watch.reading(&watched).unwrap();
     assert!(initial["unavailable"].is_null(), "{initial}");
@@ -5596,7 +5528,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let mut abandoned = service.connect();
     abandoned
         .send(
-            serde_json::from_value(json!({"kind":"configure_remote","configuration":proposed}))
+            serde_json::from_value(json!({"kind":"mobile.configure","configuration":proposed}))
                 .unwrap(),
         )
         .unwrap();
@@ -5664,13 +5596,12 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         assert_eq!(text(reader)["type"], "welcome");
         reader
             .send(Message::Text(
-                json!({"type":"request","id":"remote-watch","operation":{
-                    "kind":"subscribe","query":roadmap,"generation":1}})
-                .to_string()
-                .into(),
+                json!({"type":"subscribe","id":"remote-watch","operation":roadmap})
+                    .to_string()
+                    .into(),
             ))
             .unwrap();
-        assert_eq!(text(reader)["result"]["kind"], "subscribed");
+        assert_eq!(text(reader)["result"], Value::Null);
         assert_eq!(text(reader)["type"], "reading");
     };
     let closed = |reader: &mut tokio_tungstenite::tungstenite::WebSocket<_>| loop {
@@ -5687,7 +5618,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let off = service.mobile_status();
     assert_eq!(off["ready"], false);
     assert_eq!(off["configuration"]["enabled"], false);
-    watch.checkpoint(&watched, json!({"id":9})).unwrap();
+    watch.checkpoint(&watched, 9).unwrap();
     assert_eq!(watch.reading(&watched).unwrap()["answers"], 9);
     assert_eq!(
         service.ready(),
@@ -5701,7 +5632,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     std::fs::write(&status_path, r#"{"BackendState":"NeedsLogin"}"#).unwrap();
     // Logout must close existing remote connections.
     closed(&mut reader);
-    watch.checkpoint(&watched, json!({"id":10})).unwrap();
+    watch.checkpoint(&watched, 10).unwrap();
     assert_eq!(watch.reading(&watched).unwrap()["answers"], 10);
     assert_eq!(service.ready(), instance);
     let unavailable = service.mobile_status();
@@ -5915,21 +5846,19 @@ fn server_mobile_setup_repairs_obsolete_settings_and_occupied_ports() {
 
 #[test]
 fn server_subscriptions_refresh_work_and_resolve_primary_session() {
-    use loopflow::server::wire::Reply;
-
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
-    let query = json!({"read":"roadmap","directory":"/","wave":null,"task":null,"all":true});
+    let query = json!({"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let tasks = watch
-        .subscribe(serde_json::from_value(query).unwrap(), 7)
+        .subscribe(serde_json::from_value(query).unwrap())
         .unwrap();
     let initial = watch.reading(&tasks).unwrap();
     assert!(initial["unavailable"].is_null(), "{initial}");
-    watch.checkpoint(&tasks, json!({"id":17})).unwrap();
+    watch.checkpoint(&tasks, 17).unwrap();
     let confirmed = watch.reading(&tasks).unwrap();
     assert_eq!(confirmed["answers"], 17);
 
@@ -5950,15 +5879,13 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     )
     .unwrap();
     // The read shares the watch's connection.
-    let Reply::Read { value: socket_plan } = watch
+    let socket_plan = watch
         .request(
-            serde_json::from_value(json!({"kind":"read","query":{"read":"view_plan","directory":fixture.repo.path(),"expression":"task:INF-123"}}))
+            serde_json::from_value(json!({"kind":"view.get","directory":fixture.repo.path(),"expression":"task:INF-123"}))
                 .unwrap(),
         )
         .unwrap()
-    else {
-        panic!("expected a read")
-    };
+        .result;
     let cli = service
         .command(&["desktop", "view", "task:INF-123", "--plan", "--json"])
         .output()
@@ -5971,7 +5898,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let cli_plan: Value = serde_json::from_slice(&cli.stdout).unwrap();
     assert_eq!(socket_plan, cli_plan);
     assert_eq!(socket_plan["contents"][0]["primary_session"], session);
-    watch.checkpoint(&tasks, json!({"id":18})).unwrap();
+    watch.checkpoint(&tasks, 18).unwrap();
     loop {
         let changed = watch.reading(&tasks).unwrap();
         if changed["answers"] == 18 {
@@ -6483,12 +6410,8 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let owner_pid = pid_of_process(&fixture, &owner);
     let session = fixture.session_of_owner(&owner);
     let first_instance = service.ready();
-    let loopflow::server::wire::Reply::SessionOwner { owner: resolved } =
-        service.request(json!({"kind":"session_owner","session":session}))
-    else {
-        panic!("expected the Session owner")
-    };
-    assert_eq!(serde_json::to_value(resolved).unwrap(), owner);
+    let resolved = service.request(json!({"kind":"session.owner","session":session}));
+    assert_eq!(resolved["owner"], owner);
     let mut viewer = service.viewer(&owner);
     viewer.input("draft");
     drop(viewer); // Desktop quit: the owner keeps its native editor.

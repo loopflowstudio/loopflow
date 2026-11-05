@@ -2579,7 +2579,7 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
 fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     use loopflow::lf::commands::write::Write as Mutation;
     use loopflow::server::client::Connection;
-    use loopflow::server::wire::{Operation, Reply};
+    use loopflow::server::wire::{Operation, ServerError};
     use std::io::Read;
     use std::time::{Duration, Instant};
 
@@ -2614,28 +2614,20 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
         connection
             .set_read_timeout(Some(Duration::from_secs(20)))
             .unwrap();
-        connection
-            .request(Operation::Command {
-                change: Mutation::TaskOwnership {
-                    directory: plan.local_path.clone(),
-                    issue: task.to_string(),
-                    claimed,
-                },
-            })
-            .unwrap()
+        connection.request(Operation::Write(if claimed {
+            Mutation::TaskClaim {
+                directory: plan.local_path.clone(),
+                issue: task.to_string(),
+            }
+        } else {
+            Mutation::TaskUnassign {
+                directory: plan.local_path.clone(),
+                issue: task.to_string(),
+            }
+        }))
     };
     let local = plan.local.task_ownership(&task).unwrap();
-    let Reply::Command {
-        code,
-        output,
-        stderr,
-        ..
-    } = send(true)
-    else {
-        panic!("expected command")
-    };
-    assert_eq!(code, 0, "{stderr}");
-    let ownership: Value = serde_json::from_str(&output).unwrap();
+    let ownership = send(true).unwrap().result;
     assert_eq!(
         ownership["owner"]["machine"]["id"],
         plan.remote.local_machine().unwrap().id.as_str()
@@ -2677,13 +2669,10 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
         &fixture.root.path().join("bin/ssh"),
         "#!/bin/sh\necho 'peer unavailable' >&2\nexit 255\n",
     );
-    let Reply::Command { code, stderr, .. } = send(false) else {
-        panic!("expected command failure")
-    };
-    assert_ne!(code, 0);
+    let refused = send(false).unwrap_err().downcast::<ServerError>().unwrap();
     assert!(
-        stderr.contains("peer unavailable") || stderr.contains("unavailable"),
-        "{stderr}"
+        refused.message.contains("peer unavailable") || refused.message.contains("unavailable"),
+        "{refused:?}"
     );
     assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
     assert!(plan.remote.task_ownership(&task).unwrap().owner.is_some());

@@ -55,22 +55,20 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     func attach(sessionID: String) async throws -> any MobileAttachment {
         let connection = try await connection()
-        guard case .sessionOwner(let owner) = try await connection.request(.sessionOwner(session: sessionID)) else {
-            throw RegistryQueryError("The Machine did not resolve the Session owner")
+        let owner: String
+        switch try await connection.request(.sessionOwner(session: sessionID))["owner"] {
+        case .string(let running): owner = running
+        case .null: throw SessionNotRunning()
+        default: throw RegistryQueryError("The Machine did not resolve the Session owner")
         }
-        guard let owner else { throw SessionNotRunning() }
         let terminal = try await connection.attach(owner: owner)
         do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal) }
         catch { terminal.close(); throw error }
     }
 
     func startSession(sessionID: String) async throws {
-        guard case .command(_, let code, _, let output, let stderr) = try await request(.command(.sessionStart(id: sessionID)), required: ["session_start"]) else {
-            throw RegistryQueryError("The Machine did not confirm Session opening")
-        }
-        guard code == 0 else { throw RegistryQueryError(stderr.isEmpty ? "The Session did not open" : stderr) }
         // The complete CLI operation returns its existing SessionRecord.
-        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(output.utf8))
+        let record = try decode(SessionRecord.self, await request(.command(.sessionStart(id: sessionID)), required: ["session_start"]))
         guard record.id == sessionID else {
             throw RegistryQueryError("The Machine returned a different Session")
         }
@@ -85,13 +83,9 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
         try verifySubmission(submission)
-        let reply = try await request(.command(.taskCreate(directory: submission.directory,
+        let outcome = try await request(.command(.taskCreate(directory: submission.directory,
             requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)), required: Self.creation)
-        guard case .command(_, let code, _, let output, let stderr) = reply else {
-            throw RegistryQueryError("The Machine did not return the creation result")
-        }
-        guard code == 0 else { throw RegistryQueryError(stderr.isEmpty ? "Task creation did not finish" : stderr) }
-        return try JSONDecoder().decode(TaskCreateOutcome.self, from: Data(output.utf8))
+        return try decode(TaskCreateOutcome.self, outcome)
     }
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
@@ -143,15 +137,12 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         return connection
     }
 
-    private func request(_ operation: ServerOperation, required: [String] = []) async throws -> ServerReply {
+    private func request(_ operation: ServerOperation, required: [String] = []) async throws -> JSONValue {
         try await connection(required: required).request(operation)
     }
 
     private func read(_ query: ServedRead, required: [String] = []) async throws -> JSONValue {
-        guard case .read(let value) = try await request(.read(query), required: required) else {
-            throw RegistryQueryError("The Machine did not return a reading")
-        }
-        return value
+        try await request(.read(query), required: required)
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ value: JSONValue) throws -> T {

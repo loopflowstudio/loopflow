@@ -1,19 +1,17 @@
 {
   "type": "response",
   "id": "mobile-status-1",
+  "trace_id": "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
   "result": {
-    "kind": "mobile_status",
-    "status": {
-      "configuration": {
-        "enabled": true,
-        "endpoint": "https://host.tail.ts.net:8443",
-        "owner": {
-          "node": "node-host",
-          "user": 1
-        }
-      },
-      "ready": false,
-      "error": "Sign in to Tailscale on this Machine"
-    }
+    "configuration": {
+      "enabled": true,
+      "endpoint": "https://host.tail.ts.net:8443",
+      "owner": {
+        "node": "node-host",
+        "user": 1
+      }
+    },
+    "ready": false,
+    "error": "Sign in to Tailscale on this Machine"
   }
 }

@@ -8,30 +8,21 @@ import Loopflow
 enum ServerClient {
     /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
     static func read(_ query: ServedRead, location: ServerLocation = .shared) async throws -> String {
-        guard case .read(let value) = try await request(.read(query), location: location) else {
-            throw RegistryQueryError("Unexpected Server reading")
-        }
+        let value = try await request(.read(query), location: location)
         if case .string(let text) = value { return text }
         return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
     }
 
+    /// What the write returned, as JSON: what `lf <write> --json` prints.
     static func write(_ change: ServedWrite, location: ServerLocation = .shared) async throws -> String {
-        try commandOutput(await request(.command(change), location: location))
+        String(decoding: try JSONEncoder().encode(await request(.command(change), location: location)), as: UTF8.self)
     }
 
     static func configuration(_ value: JSONValue, location: ServerLocation = .shared) async throws -> Data {
-        Data(try commandOutput(await request(.configuration(value), location: location)).utf8)
+        try JSONEncoder().encode(await request(.configuration(value), location: location))
     }
 
-    private static func commandOutput(_ reply: ServerReply) throws -> String {
-        guard case .command(_, let code, _, let output, let stderr) = reply else {
-            throw RegistryQueryError("Server command outcome unknown; inspect the affected work before retrying")
-        }
-        guard code == 0 else { throw RegistryQueryError(stderr, stdout: output) }
-        return output
-    }
-
-    private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> ServerReply {
+    private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> JSONValue {
         try Task.checkCancellation()
         let link = try await links.link(for: location)
         return try await link.request(operation)
@@ -148,7 +139,7 @@ final class ServerLink: @unchecked Sendable {
     private let fd: Int32
     private let state = NSLock()
     private let writes = NSLock()
-    private var pending: [String: CheckedContinuation<ServerReply, any Error>] = [:]
+    private var pending: [String: CheckedContinuation<JSONValue, any Error>] = [:]
     private var subscriptions: [String: ServerSubscription] = [:]
     private var failure: (any Error)?
     private var reader: LineReader
@@ -165,6 +156,8 @@ final class ServerLink: @unchecked Sendable {
     /// How long the server has to welcome the connection; the session's reads
     /// are then unbounded, so a stalled open releases `ServerLinks` to back off.
     static let handshakeSeconds = 10
+    /// A lost connection: requests in flight have unknown outcomes, not failures.
+    static let disconnected = "Server disconnected; refresh state before retrying a command"
 
     private init(path: String) throws {
         self.path = path
@@ -180,7 +173,7 @@ final class ServerLink: @unchecked Sendable {
             }
             switch try JSONDecoder().decode(ServerMessage.self, from: first) {
             case .welcome(let welcome): self.welcome = welcome
-            case .error(_, let code, let message): throw RegistryQueryError("\(code): \(message)")
+            case .error(_, let code, let message, _): throw RegistryQueryError("\(code): \(message)")
             default: throw RegistryQueryError("Server did not welcome the connection")
             }
             Self.setReceiveTimeout(fd, seconds: 0)
@@ -196,14 +189,14 @@ final class ServerLink: @unchecked Sendable {
 
     /// One request and its answer. Cancelling the task sends `cancel` and
     /// releases the wait; a command already dispatched may still complete.
-    func request(_ operation: ServerOperation) async throws -> ServerReply {
+    func request(_ operation: ServerOperation) async throws -> JSONValue {
         let id = UUID().uuidString
         let line = try Self.line(.request(id: id, operation: operation))
         if line.count <= ServerProtocol.maxMessage { return try await answer(id) { try write(line) } }
-        // A bulk ticket admits a second connection carrying this one request;
+        // An upload ticket admits a second connection carrying this one request;
         // its answer arrives here under the request's own id.
-        guard case .ticket(let ticket) = try await request(.bulk(bytes: line.count)) else {
-            throw RegistryQueryError("Server issued no bulk ticket")
+        guard case .string(let ticket) = try await request(.upload(bytes: line.count))["ticket"] else {
+            throw RegistryQueryError("Server issued no upload ticket")
         }
         return try await answer(id) {
             Thread.detachNewThread { [self] in
@@ -212,7 +205,7 @@ final class ServerLink: @unchecked Sendable {
         }
     }
 
-    private func answer(_ id: String, deliver: () throws -> Void) async throws -> ServerReply {
+    private func answer(_ id: String, deliver: () throws -> Void) async throws -> JSONValue {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let refused: (any Error)? = state.withLock {
@@ -245,7 +238,7 @@ final class ServerLink: @unchecked Sendable {
             return nil
         }
         if let refused { throw refused }
-        do { try send(.request(id: subscription.id, operation: .subscribe(query, generation: 1))) } catch {
+        do { try send(.subscribe(id: subscription.id, operation: query)) } catch {
             _ = state.withLock { subscriptions.removeValue(forKey: subscription.id) }
             throw error
         }
@@ -274,18 +267,18 @@ final class ServerLink: @unchecked Sendable {
         let ended: any Error
         do {
             while let line = try reader.next() { try dispatch(line) }
-            ended = RegistryQueryError("Server disconnected; refresh state before retrying a command")
+            ended = RegistryQueryError(Self.disconnected)
         } catch { ended = error }
         fail(ended)
     }
 
     private func dispatch(_ line: Data) throws {
         switch try JSONDecoder().decode(ServerMessage.self, from: line) {
-        case .response(let id, let result):
+        case .response(let id, _, let result):
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(returning: result) }
             // `subscribed` confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
-        case .reading(let id, _, let frame):
+        case .reading(let id, let frame):
             state.withLock { subscriptions[id] }?.receive(frame)
         case .bulk(let id, let ticket, _):
             // Fetched off the reader thread, so other readings never wait behind it.
@@ -298,9 +291,9 @@ final class ServerLink: @unchecked Sendable {
                     })
                 } catch { settle(id, throwing: error) }
             }
-        case .error(let id?, let code, let message):
+        case .error(let id?, let code, let message, _):
             settle(id, throwing: RegistryQueryError("\(code): \(message)"))
-        case .error(nil, let code, let message):
+        case .error(nil, let code, let message, _):
             throw RegistryQueryError("\(code): \(message)")
         case .welcome, .status, .admitted:
             throw RegistryQueryError("Server repeated its greeting; update the client")
@@ -318,7 +311,7 @@ final class ServerLink: @unchecked Sendable {
         guard let first = try reader.next() else { throw RegistryQueryError("Server closed the ticketed connection without admitting it") }
         switch try JSONDecoder().decode(ServerMessage.self, from: first) {
         case .admitted: break
-        case .error(_, let code, let message): throw RegistryQueryError("\(code): \(message)")
+        case .error(_, let code, let message, _): throw RegistryQueryError("\(code): \(message)")
         default: throw RegistryQueryError("Server did not admit the ticket; update the client")
         }
         return try body(fd)
@@ -330,9 +323,7 @@ final class ServerLink: @unchecked Sendable {
             defer { pending = [:]; subscriptions = [:] }
             return (Array(pending.values), Array(subscriptions.values))
         }
-        // Outcomes of requests in flight are unknown, not failed.
-        let unknown = RegistryQueryError("Server disconnected; refresh state before retrying a command")
-        for continuation in waiting { continuation.resume(throwing: unknown) }
+        for continuation in waiting { continuation.resume(throwing: RegistryQueryError(Self.disconnected)) }
         for subscription in watching { subscription.finish(throwing: error) }
         writes.withLock { Darwin.close(fd) }
     }
@@ -427,7 +418,7 @@ private struct LineReader {
                 if errno == EAGAIN || errno == EWOULDBLOCK {
                     throw RegistryQueryError("Loopflow server did not answer within \(ServerLink.handshakeSeconds)s; check `lf server status`")
                 }
-                throw RegistryQueryError("Server disconnected; refresh state before retrying a command")
+                throw RegistryQueryError(ServerLink.disconnected)
             }
             if received == 0 { ended = true; continue }
             buffer.append(contentsOf: chunk[..<received])
@@ -441,7 +432,7 @@ private final class ServerSubscription: @unchecked Sendable {
     private let continuation: AsyncThrowingStream<Data, any Error>.Continuation
     private let lock = NSLock()
     private var link: ServerLink?
-    private var queued: [Data] = []
+    private var queued: [UInt64] = []
     private var stopped = false
 
     init(_ continuation: AsyncThrowingStream<Data, any Error>.Continuation) {
@@ -452,18 +443,22 @@ private final class ServerSubscription: @unchecked Sendable {
     func start(on link: ServerLink, query: ServedRead) throws {
         guard !lock.withLock({ stopped }) else { return }
         try link.subscribe(self, query: query)
-        let queued: [Data] = lock.withLock {
+        let queued: [UInt64] = lock.withLock {
             guard !stopped else { return [] }
             self.link = link
             defer { self.queued = [] }
             return self.queued
         }
-        for line in queued { send(line) }
+        for checkpoint in queued {
+            do { try link.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error); return }
+        }
     }
 
+    /// A watch's stdin line, `{"id": n}`: a checkpoint. A subscription's
+    /// arguments are fixed; new arguments are a new subscription.
     func send(_ line: Data) {
-        let frame: JSONValue
-        do { frame = try JSONDecoder().decode(JSONValue.self, from: line) } catch {
+        let checkpoint: UInt64
+        do { checkpoint = try JSONDecoder().decode(Checkpoint.self, from: line).id } catch {
             finish(throwing: RegistryQueryError("Invalid watch request: \(error.localizedDescription)"))
             return
         }
@@ -471,7 +466,7 @@ private final class ServerSubscription: @unchecked Sendable {
             guard !stopped else { return (nil, false) }
             if let link { return (link, false) }
             guard queued.count < 64 else { return (nil, true) }
-            queued.append(line)
+            queued.append(checkpoint)
             return (nil, false)
         }
         if overflow {
@@ -479,7 +474,19 @@ private final class ServerSubscription: @unchecked Sendable {
             return
         }
         guard let target else { return }
-        do { try target.send(.checkpoint(id: id, frame: frame)) } catch { finish(throwing: error) }
+        do { try target.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error) }
+    }
+
+    private struct Checkpoint: Decodable {
+        let id: UInt64
+        init(from decoder: Decoder) throws {
+            let box = try decoder.container(keyedBy: Keys.self)
+            guard box.allKeys == [.id] else {
+                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "a subscription takes only checkpoints"))
+            }
+            id = try box.decode(UInt64.self, forKey: .id)
+        }
+        private enum Keys: String, CodingKey { case id, args }
     }
 
     /// From the reader thread: one complete reading.

@@ -2502,9 +2502,29 @@ fn settle_switch(
     crate::installation::write_switch(root, receipt)?;
     crate::installation::settle_switch(root, receipt, active)?;
     prune_superseded_artifacts(root, &lf_bin_dir(), active);
-    // The settled release opens the store, so nothing restores its pre-migration clone.
-    crate::store::migrations::prune_migration_backups(&active.selection.store, 0);
+    settle_migration_backups(
+        &active.selection.store,
+        crate::lf::commands::rollover::inventory(),
+    );
     Ok(())
+}
+
+/// The pre-migration clone outlives settlement while any process still runs an
+/// older build: those processes read the live store, and the clone is the restore
+/// point for the generation they were written against, the only copy once a
+/// migration dropped something. With none left, the settled lf opens the store
+/// and nothing restores the clone, so it goes.
+fn settle_migration_backups(
+    store: &Path,
+    inventory: Result<crate::lf::commands::rollover::BinaryInventory>,
+) {
+    match inventory {
+        Ok(inventory) if inventory.superseded().next().is_some() => {}
+        Ok(_) => crate::store::migrations::prune_migration_backups(store, 0),
+        Err(error) => {
+            tracing::warn!(%error, "pre-migration clone kept: live lf processes are unknown")
+        }
+    }
 }
 
 fn is_content_addressed(name: &str, labels: &[&str]) -> bool {
@@ -2720,12 +2740,20 @@ pub fn recover_switch(switch_id: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// What a promotion left behind, for the lines `promote` prints after everything
+/// else so a `tail` of the install output still shows them.
+#[derive(Debug)]
+struct PromotedBuild {
+    summary: String,
+    replaced_app: bool,
+    store: PathBuf,
+}
+
 fn promote_from_installation(
     artifacts: PromotionArtifacts<'_>,
     candidate_binary: &Path,
-    sync_skills: bool,
     preview_only: bool,
-) -> Result<Option<PathBuf>> {
+) -> Result<Option<PromotedBuild>> {
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     let app = installed_app(artifacts.cli_target);
@@ -2792,7 +2820,7 @@ fn promote_from_installation(
     }
     if preview_only {
         println!("  (preview only: no target changed)");
-        return Ok(artifacts.app_target.map(Path::to_path_buf));
+        return Ok(None);
     }
     if prior.is_none() && store_path.exists() {
         prior = Some(bootstrap_published_install(&root, &artifacts)?);
@@ -2813,9 +2841,19 @@ fn promote_from_installation(
                 preview.candidate.display_version(),
                 prior.selection.store.display()
             );
-            return Ok(artifacts.app_target.map(Path::to_path_buf));
+            return Ok(None);
         }
     }
+    // Visibility before anything changes; the install proceeds either way.
+    if let Compatibility::AheadPending {
+        applied_frontier,
+        latest_known,
+        ..
+    } = &preview.compatibility
+    {
+        println!("this install advances the store from {applied_frontier} to {latest_known}");
+    }
+    crate::lf::commands::rollover::report_before_promote();
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
     let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id)?;
     let target_set = installation_artifact_set(
@@ -2906,23 +2944,18 @@ fn promote_from_installation(
         converge_release_app(target);
     }
     resume_switch_app(&switch)?;
-    println!(
-        "promoted {}: {} -> {} (store {})",
-        preview.candidate.display_version(),
-        prepared.cli_target.display(),
-        public_cli_target(&switch.candidate.path, &switch.activation).display(),
-        store_path.display()
-    );
-    crate::lf::commands::rollover::report_after_promote(switch.activation.app.is_some());
-    if sync_skills {
-        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
-            eprintln!(
-                "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
-            );
-        }
-    }
     drop(lock);
-    Ok(artifacts.app_target.map(Path::to_path_buf))
+    Ok(Some(PromotedBuild {
+        summary: format!(
+            "promoted {}: {} -> {} (store {})",
+            preview.candidate.display_version(),
+            prepared.cli_target.display(),
+            public_cli_target(&switch.candidate.path, &switch.activation).display(),
+            store_path.display()
+        ),
+        replaced_app: switch.activation.app.is_some(),
+        store: store_path,
+    }))
 }
 
 /// Find the installed bundle even when the next update names another destination.
@@ -2959,12 +2992,26 @@ pub fn promote(
 ) -> Result<()> {
     recover_switch(None)?;
     let current = fs::canonicalize(std::env::current_exe()?)?;
-    let app = promote_from_installation(artifacts, &current, sync_skills, preview_only)?;
+    let app_target = artifacts.app_target;
+    let promoted = promote_from_installation(artifacts, &current, preview_only)?;
     if !preview_only {
         crate::installation::server::refresh_after_promotion();
     }
     if sync_skills && !preview_only {
-        install_link_receiver(app.as_deref());
+        if promoted.is_some() {
+            if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
+                eprintln!(
+                    "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
+                );
+            }
+        }
+        install_link_receiver(app_target);
+    }
+    // The result goes last: skill sync prints dozens of lines, and the person or
+    // agent installing reads the tail.
+    if let Some(promoted) = promoted {
+        println!("{}", promoted.summary);
+        crate::lf::commands::rollover::report_after_promote(promoted.replaced_app, &promoted.store);
     }
     Ok(())
 }
@@ -3034,6 +3081,63 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
     validate_rollback_verdict(&preflight.verdict)?;
     activate_rollback(cli_target, &candidate, &preflight.verdict)?;
     Ok(candidate)
+}
+
+#[cfg(test)]
+mod settle_tests {
+    use super::settle_migration_backups;
+    use crate::id::LfProcessId;
+    use crate::lf::commands::rollover::{BinaryInventory, RunningBinary, RunningLfProcess};
+    use std::path::PathBuf;
+
+    fn inventory(binaries: Vec<RunningBinary>) -> BinaryInventory {
+        BinaryInventory {
+            selected: None,
+            store_floor: None,
+            binaries,
+        }
+    }
+
+    fn older_build() -> RunningBinary {
+        RunningBinary {
+            path: Some(PathBuf::from("/home/.lf/bin/lf-d49c57c")),
+            version: Some("0.15.1".into()),
+            selected: false,
+            cannot_open_store: false,
+            processes: vec![RunningLfProcess {
+                id: LfProcessId::new(),
+                pid: 1,
+                label: "lf session serve".into(),
+                started_at: 1,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_settled_install_keeps_its_clone_while_an_older_build_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("loopflow.db");
+        let clone = directory
+            .path()
+            .join("loopflow.db.backup-settings_authority-0123456789abcdef");
+        std::fs::write(&store, b"store").unwrap();
+        std::fs::write(&clone, b"generation").unwrap();
+
+        settle_migration_backups(&store, Ok(inventory(vec![older_build()])));
+        assert!(
+            clone.exists(),
+            "a running older build still reads this generation"
+        );
+
+        settle_migration_backups(&store, Err(anyhow::anyhow!("ps failed")));
+        assert!(clone.exists(), "unknown processes keep the clone");
+
+        settle_migration_backups(&store, Ok(inventory(Vec::new())));
+        assert!(
+            !clone.exists(),
+            "nothing restores a clone no older build needs"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -901,7 +901,7 @@ pub fn save_arrangement(
     directory: &std::path::Path,
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::lf::DesktopCommand;
     if let DesktopCommand::Query { .. }
     | DesktopCommand::Pin { .. }
@@ -920,12 +920,31 @@ pub fn save_arrangement(
     bail!("not a saved arrangement: name a tile as -p <board>/<tile>")
 }
 
+/// `lf desktop <verb> -p <board>/<tile>` on a saved board, without Desktop:
+/// `hide`, `show` or `move` (with `destination`). Returns the record it wrote.
+pub(crate) fn save_tile(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    board: &str,
+    tile: &str,
+    verb: &str,
+    args: &std::collections::BTreeMap<String, String>,
+) -> Result<serde_json::Value> {
+    let path = format!("{board}/{tile}");
+    let (board, tile) = saved_tile(verb, Some(&path)).ok_or_else(|| {
+        DesktopError::Argument(format!(
+            "`{verb}` names no saved board in {path}; nothing changed."
+        ))
+    })?;
+    edit_saved_tile(selected, directory, board, tile, verb, args)
+}
+
 fn saved_intent(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::lf::DesktopCommand;
     use crate::work::selection::{DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
@@ -1030,7 +1049,7 @@ fn saved_intent(
         }
         _ => unreachable!("saved intent command"),
     };
-    Ok(serde_json::to_string(&result)?)
+    Ok(result)
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
@@ -1817,7 +1836,7 @@ fn edit_saved_tile(
     tile: &str,
     name: &str,
     args: &std::collections::BTreeMap<String, String>,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     let repository = {
         let reader = crate::store::read_existing_registry()?
             .ok_or(crate::store::StoreError::NotFound)
@@ -1831,7 +1850,7 @@ fn edit_saved_tile(
         edit: TileEdit::parse(name, args, key)?,
     };
     let record = edit_tiles(&repository, &request)?;
-    Ok(serde_json::to_string(&DesktopTileOutput::Record(&record))?)
+    Ok(serde_json::to_value(DesktopTileOutput::Record(&record))?)
 }
 
 fn edit_shown_tile(

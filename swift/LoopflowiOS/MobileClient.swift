@@ -5,17 +5,16 @@ import Observation
 /// The fixture and live client consume the same backend-owned Work projection.
 func decodeMobileTasks(_ data: Data, requestID: String) throws -> [WorkViewPlan.Content] {
     switch try JSONDecoder().decode(ServerMessage.self, from: data) {
-    case .response(let id, let result):
+    case .response(let id, _, let result):
         guard id == requestID else { throw RegistryQueryError("Received a different Task request") }
         return try mobileTasks(result)
-    case .error(_, _, let message): throw RegistryQueryError(message)
+    case .error(_, _, let message, _): throw RegistryQueryError(message)
     default: throw RegistryQueryError("The Machine did not return a Task reading")
     }
 }
 
-func mobileTasks(_ reply: ServerReply) throws -> [WorkViewPlan.Content] {
-    guard case .read(let value) = reply else { throw RegistryQueryError("The Machine did not return a Task reading") }
-    return try mobileTasks(JSONDecoder().decode(WorkViewPlan.self, from: JSONEncoder().encode(value)))
+func mobileTasks(_ value: JSONValue) throws -> [WorkViewPlan.Content] {
+    try mobileTasks(JSONDecoder().decode(WorkViewPlan.self, from: JSONEncoder().encode(value)))
 }
 
 func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {

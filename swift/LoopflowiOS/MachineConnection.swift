@@ -152,7 +152,7 @@ final class MachineConnection {
     private var reader: Task<Void, Never>?
 
     private struct PendingRequest {
-        let continuation: CheckedContinuation<ServerReply, any Error>
+        let continuation: CheckedContinuation<JSONValue, any Error>
         let timeout: Task<Void, Never>
     }
 
@@ -171,7 +171,7 @@ final class MachineConnection {
             try await socket.send(try line(.hello(hello)))
             switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
             case .welcome(let welcome): return MachineConnection(endpoint: endpoint, socket: socket, welcome: welcome)
-            case .error(_, _, let message): throw RegistryQueryError(message)
+            case .error(_, _, let message, _): throw RegistryQueryError(message)
             default: throw RegistryQueryError("The Machine did not welcome the connection")
             }
         } catch { socket.close(); throw error }
@@ -195,7 +195,7 @@ final class MachineConnection {
 
     /// One request and its answer within `seconds`. A timeout or cancellation
     /// sends `cancel` and releases the wait; a dispatched command still completes.
-    func request(_ operation: ServerOperation, seconds: Int = 15) async throws -> ServerReply {
+    func request(_ operation: ServerOperation, seconds: Int = 15) async throws -> JSONValue {
         let id = UUID().uuidString
         let line = try Self.line(.request(id: id, operation: operation))
         return try await withTaskCancellationHandler {
@@ -219,12 +219,11 @@ final class MachineConnection {
     }
 
     /// A live subscription; its readings arrive until `cancel` or the server ends it.
-    func subscribe(_ query: ServedRead, generation: UInt64) async throws -> MachineSubscription {
+    func subscribe(_ query: ServedRead) async throws -> MachineSubscription {
         let subscription = MachineSubscription(connection: self)
         subscriptions[subscription.id] = subscription
         do {
-            let line = try Self.line(.request(id: subscription.id, operation: .subscribe(query, generation: generation)))
-            try await socket.send(line)
+            try await socket.send(try Self.line(.subscribe(id: subscription.id, operation: query)))
         } catch {
             subscriptions.removeValue(forKey: subscription.id)
             throw error
@@ -232,9 +231,9 @@ final class MachineConnection {
         return subscription
     }
 
-    fileprivate func checkpoint(_ id: String, frame: JSONValue) async throws {
+    fileprivate func checkpoint(_ id: String, _ checkpoint: UInt64) async throws {
         if let failure { throw failure }
-        try await socket.send(try Self.line(.checkpoint(id: id, frame: frame)))
+        try await socket.send(try Self.line(.checkpoint(id: id, checkpoint: checkpoint)))
     }
 
     fileprivate func unsubscribe(_ id: String) {
@@ -244,7 +243,7 @@ final class MachineConnection {
 
     /// A terminal connection bridged to `owner`, carrying its unchanged protocol.
     func attach(owner: String) async throws -> MachineSocket {
-        guard case .ticket(let ticket) = try await request(.attach(owner: owner)) else {
+        guard case .string(let ticket) = try await request(.attach(owner: owner))["ticket"] else {
             throw RegistryQueryError("The Machine did not attach the Session")
         }
         return try await Self.redeem(endpoint: endpoint, ticket: ticket)
@@ -259,7 +258,7 @@ final class MachineConnection {
             try await socket.send(try line(.ticket(ticket)))
             switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
             case .admitted: return socket
-            case .error(_, _, let message): throw RegistryQueryError(message)
+            case .error(_, _, let message, _): throw RegistryQueryError(message)
             default: throw RegistryQueryError("The Machine did not admit the ticket")
             }
         } catch { socket.close(); throw error }
@@ -268,8 +267,8 @@ final class MachineConnection {
     /// One request too large for the control connection; its answer still
     /// arrives here under the request's id.
     private func upload(_ line: String) async throws {
-        guard case .ticket(let ticket) = try await request(.bulk(bytes: line.utf8.count)) else {
-            throw RegistryQueryError("The Machine issued no bulk ticket")
+        guard case .string(let ticket) = try await request(.upload(bytes: line.utf8.count))["ticket"] else {
+            throw RegistryQueryError("The Machine issued no upload ticket")
         }
         let bulk = try await Self.redeem(endpoint: endpoint, ticket: ticket)
         defer { bulk.close() }
@@ -295,19 +294,19 @@ final class MachineConnection {
 
     private func dispatch(_ line: Data) throws {
         switch try JSONDecoder().decode(ServerMessage.self, from: line) {
-        case .response(let id, let result):
+        case .response(let id, _, let result):
             if let waiting = pending.removeValue(forKey: id) {
                 waiting.timeout.cancel()
                 waiting.continuation.resume(returning: result)
             }
-            // `subscribed` confirms a registered subscription; anything else is a late answer.
-        case .reading(let id, let generation, let frame):
-            subscriptions[id]?.receive(generation: generation, frame: frame)
+            // A null result confirms a registered subscription; anything else is a late answer.
+        case .reading(let id, let frame):
+            subscriptions[id]?.receive(frame)
         case .bulk(let id, let ticket, _):
             fetch(id, ticket: ticket)
-        case .error(let id?, _, let message):
+        case .error(let id?, _, let message, _):
             forget(id, throwing: RegistryQueryError(message))
-        case .error(nil, _, let message):
+        case .error(nil, _, let message, _):
             throw RegistryQueryError(message)
         case .welcome, .status, .admitted:
             throw RegistryQueryError("The Machine repeated its greeting; update the app")
@@ -349,13 +348,13 @@ final class MachineConnection {
     }
 }
 
-/// One subscription's readings in order; `checkpoint` carries the watch's
-/// request lines, `cancel` ends it.
+/// One subscription's readings in order; `checkpoint` asks for a reading whose
+/// `answers` carries the checkpoint, `cancel` ends it.
 @MainActor
 final class MachineSubscription {
     let id = UUID().uuidString
-    let readings: AsyncThrowingStream<(generation: UInt64, frame: JSONValue), any Error>
-    private let continuation: AsyncThrowingStream<(generation: UInt64, frame: JSONValue), any Error>.Continuation
+    let readings: AsyncThrowingStream<JSONValue, any Error>
+    private let continuation: AsyncThrowingStream<JSONValue, any Error>.Continuation
     private weak var connection: MachineConnection?
     private var ended = false
 
@@ -364,9 +363,9 @@ final class MachineSubscription {
         (readings, continuation) = AsyncThrowingStream.makeStream()
     }
 
-    func checkpoint(_ frame: JSONValue) async throws {
+    func checkpoint(_ checkpoint: UInt64) async throws {
         guard let connection, !ended else { throw RegistryQueryError("Task updates disconnected; reconnect for current Tasks") }
-        try await connection.checkpoint(id, frame: frame)
+        try await connection.checkpoint(id, checkpoint)
     }
 
     func cancel() {
@@ -376,8 +375,8 @@ final class MachineSubscription {
         continuation.finish()
     }
 
-    fileprivate func receive(generation: UInt64, frame: JSONValue) {
-        continuation.yield((generation, frame))
+    fileprivate func receive(_ frame: JSONValue) {
+        continuation.yield(frame)
     }
 
     fileprivate func finish(throwing error: any Error) {

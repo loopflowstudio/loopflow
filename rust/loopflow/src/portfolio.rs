@@ -38,7 +38,10 @@ pub struct Selection {
     paths: BTreeSet<PathBuf>,
 }
 
-#[derive(Debug, clap::Subcommand)]
+/// A change to which repositories the app shows; also the served
+/// `desktop.portfolio.set` write's `change`, tagged by `action`.
+#[derive(Debug, Clone, PartialEq, Eq, clap::Subcommand, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PortfolioCommand {
     /// Discover immediate main checkouts in a folder (defaults to the saved folder)
     Folder { path: Option<PathBuf> },

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::client::Connection;
-use super::wire::{Operation, Reply};
+use super::wire::{Operation, ServerOperation};
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
@@ -38,10 +38,11 @@ pub struct Status {
 }
 
 pub fn status() -> Result<Status> {
-    match Connection::open().and_then(|mut connection| connection.request(Operation::MobileStatus))
-    {
-        Ok(Reply::MobileStatus { status }) => Ok(status),
-        Ok(_) => anyhow::bail!("Update the Loopflow server to read mobile readiness"),
+    match Connection::open().and_then(|mut connection| {
+        connection.request(Operation::Server(ServerOperation::MobileStatus))
+    }) {
+        Ok(answer) => serde_json::from_value(answer.result)
+            .context("Update the Loopflow server to read mobile readiness"),
         Err(error) if service_is_stopped(&error) => {
             let configuration = configured()?;
             let error = configuration
@@ -125,10 +126,11 @@ fn configure(configuration: Option<Configuration>) -> Result<Option<Configuratio
     let mut connection = Connection::open()?;
     // Initial Tailscale certificate issuance can outlast an ordinary read.
     connection.set_read_timeout(Some(Duration::from_secs(60)))?;
-    match connection.request(Operation::ConfigureRemote { configuration })? {
-        Reply::Remote { configuration } => Ok(configuration),
-        _ => anyhow::bail!("Update the Loopflow server before enabling mobile access"),
-    }
+    let answer = connection.request(Operation::Server(ServerOperation::ConfigureRemote {
+        configuration,
+    }))?;
+    serde_json::from_value(answer.result["configuration"].clone())
+        .context("Update the Loopflow server before enabling mobile access")
 }
 
 pub fn enable() -> Result<Configuration> {

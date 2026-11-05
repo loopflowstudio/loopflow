@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -19,10 +19,10 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use super::remote::Control;
 use super::ticket::{Admission, Purpose, Tickets};
-
 use super::wire::{
-    ClientMessage, ErrorCode, Hello, Limits, Operation, Reply, ServerMessage, Status, Welcome,
-    MAX_BULK, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation,
+    ServerError, ServerMessage, ServerOperation, Status, Welcome, MAX_BULK, MAX_CONNECTIONS,
+    MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::lf::commands::{read::Read, watch::Subscription, write::Write};
 
@@ -73,6 +73,60 @@ impl Carrier for Lines {
     type Failure = LinesCodecError;
 }
 
+/// Welcomed connections by client ID, as `lf server status` lists them.
+pub(super) type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
+
+/// A welcomed connection's row, removed when the connection ends.
+pub(super) struct Admitted {
+    clients: Clients,
+    id: String,
+}
+
+impl Admitted {
+    fn new(clients: &Clients, client: ClientIdentity) -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
+        let connected_at = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("the current time formats as RFC 3339");
+        lock(clients).insert(
+            id.clone(),
+            ConnectedClient {
+                id: id.clone(),
+                client,
+                connected_at,
+                requests: 0,
+            },
+        );
+        Self {
+            clients: clients.clone(),
+            id,
+        }
+    }
+
+    fn requested(&self) {
+        if let Some(row) = lock(&self.clients).get_mut(&self.id) {
+            row.requests += 1;
+        }
+    }
+}
+
+impl Drop for Admitted {
+    fn drop(&mut self) {
+        lock(&self.clients).remove(&self.id);
+    }
+}
+
+fn lock(clients: &Clients) -> std::sync::MutexGuard<'_, HashMap<String, ConnectedClient>> {
+    clients.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Oldest connection first.
+fn connected(clients: &Clients) -> Vec<ConnectedClient> {
+    let mut rows: Vec<_> = lock(clients).values().cloned().collect();
+    rows.sort_by(|a, b| (&a.connected_at, &a.id).cmp(&(&b.connected_at, &b.id)));
+    rows
+}
+
 pub(super) async fn run() -> Result<()> {
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
@@ -98,6 +152,7 @@ pub(super) async fn run() -> Result<()> {
     );
     let instance: Arc<str> = uuid::Uuid::new_v4().to_string().into();
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let clients = Clients::default();
     // One ticket store: a terminal or bulk connection on either carrier
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
@@ -108,12 +163,13 @@ pub(super) async fn run() -> Result<()> {
         instance.clone(),
         executable_sha256.clone(),
         slots.clone(),
+        clients.clone(),
         tickets.clone(),
     );
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
-        result = local(listener, instance, executable_sha256, slots, remote_control, tickets) => result,
+        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets) => result,
     }
 }
 
@@ -122,6 +178,7 @@ async fn local(
     instance: Arc<str>,
     executable_sha256: Arc<String>,
     slots: Arc<Semaphore>,
+    clients: Clients,
     remote_control: mpsc::Sender<Control>,
     tickets: Arc<Tickets>,
 ) -> Result<()> {
@@ -152,6 +209,7 @@ async fn local(
         );
         let instance = instance.clone();
         let executable_sha256 = executable_sha256.clone();
+        let clients = clients.clone();
         let remote_control = remote_control.clone();
         let tickets = tickets.clone();
         tokio::spawn(async move {
@@ -160,6 +218,7 @@ async fn local(
                 socket,
                 &instance,
                 &executable_sha256,
+                &clients,
                 Some(remote_control),
                 tickets,
             )
@@ -173,11 +232,14 @@ async fn local(
 
 /// Capacity answers before closing, so the client knows nothing ran.
 async fn refuse_busy(mut socket: UnixStream) {
-    let line = line(&error(
-        None,
-        ErrorCode::Busy,
-        format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
-    ));
+    let line = line(
+        &ServerError::new(
+            ErrorCode::Busy,
+            format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
+        )
+        .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS }))
+        .into_message(None),
+    );
     let _ = tokio::time::timeout(SEND, socket.write_all(line.as_bytes())).await;
 }
 
@@ -187,6 +249,7 @@ pub(super) async fn connection(
     mut socket: UnixStream,
     instance: &str,
     executable_sha256: &str,
+    clients: &Clients,
     remote_control: Option<mpsc::Sender<Control>>,
     tickets: Arc<Tickets>,
 ) -> Result<()> {
@@ -206,12 +269,13 @@ pub(super) async fn connection(
         .await
         .context("no message within five seconds")?
         .context("closed before its first message")??;
-    match welcome(&mut lines, &line, instance, executable_sha256).await? {
+    match welcome(&mut lines, &line, instance, executable_sha256, clients).await? {
         Greeting::Ended => Ok(()),
-        Greeting::Session => {
+        Greeting::Session(admitted) => {
             session(
                 &mut lines,
                 instance.into(),
+                &admitted,
                 remote_control,
                 Admission::Local,
                 tickets,
@@ -228,23 +292,23 @@ pub(super) async fn connection(
 }
 
 /// What a connection's first message made it.
-#[derive(Debug)]
 pub(super) enum Greeting {
-    /// `welcome` was sent; the session follows.
-    Session,
+    /// `welcome` was sent; the session follows for this listed client.
+    Session(Admitted),
     /// A ticket to redeem; `admitted` or an error follows.
     Ticket(String),
     /// The connection's last message was sent.
     Ended,
 }
 
-/// Answer a connection's first message. `Session` once `welcome` was sent and the
-/// session may begin; `false` after a `status` probe or a refusal, which close.
+/// Answer a connection's first message: `welcome` and the session's client row,
+/// a ticket to redeem, or the last message after a `status` probe or a refusal.
 pub(super) async fn welcome<C: Carrier>(
     carrier: &mut C,
     line: &str,
     instance: &str,
     executable_sha256: &str,
+    clients: &Clients,
 ) -> Result<Greeting> {
     let hello = match serde_json::from_str::<ClientMessage>(line) {
         Ok(ClientMessage::Hello(hello)) => hello,
@@ -257,6 +321,7 @@ pub(super) async fn welcome<C: Carrier>(
                     min_revision: MIN_REVISION,
                     instance: instance.into(),
                     executable_sha256: executable_sha256.into(),
+                    clients: connected(clients),
                 }),
             )
             .await?;
@@ -283,19 +348,24 @@ pub(super) async fn welcome<C: Carrier>(
         };
         send(
             carrier,
-            &error(
-                None,
+            &ServerError::new(
                 ErrorCode::Incompatible,
                 format!(
                     "Server speaks protocol revisions {MIN_REVISION}–{REVISION}; the client speaks {}–{}; update the {side}",
                     hello.min_revision, hello.revision
                 ),
-            ),
+            )
+            .with(serde_json::json!({
+                "server": { "revision": REVISION, "min_revision": MIN_REVISION },
+                "update": if hello.min_revision > REVISION { "server" } else { "client" },
+            }))
+            .into_message(None),
         )
         .await?;
         return Ok(Greeting::Ended);
     };
-    tracing::debug!(%instance, client = ?hello.client, revision, "Server connection welcomed");
+    let admitted = Admitted::new(clients, hello.client);
+    tracing::debug!(%instance, client = %admitted.id, revision, "Server connection welcomed");
     // A Machine registry that is unavailable or uninitialized leaves `machine`
     // null; file settings stay reachable through the same connection.
     let machine =
@@ -305,6 +375,7 @@ pub(super) async fn welcome<C: Carrier>(
     send(
         carrier,
         &ServerMessage::Welcome(Welcome {
+            client_id: admitted.id.clone(),
             revision,
             server_revision: REVISION,
             min_revision: MIN_REVISION,
@@ -320,7 +391,7 @@ pub(super) async fn welcome<C: Carrier>(
         }),
     )
     .await?;
-    Ok(Greeting::Session)
+    Ok(Greeting::Session(admitted))
 }
 
 /// The newest revision both sides speak.
@@ -353,15 +424,22 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
 /// A request's task and, for a subscription, where its checkpoints go.
 struct Inflight {
     task: AbortHandle,
-    checkpoints: Option<mpsc::Sender<serde_json::Value>>,
+    checkpoints: Option<mpsc::Sender<u64>>,
+}
+
+/// What a request or subscription asks the session to start.
+enum Start {
+    Request(Operation),
+    Subscribe(Read),
 }
 
 /// Requests until the client closes. Terminal bytes and messages over the
-/// control limit never travel here: `attach` and `bulk` answer with tickets
-/// for connections of their own.
+/// control limit never travel here: `terminal.attach` and `request.upload`
+/// answer with tickets for connections of their own.
 pub(super) async fn session<C: Carrier>(
     lines: &mut C,
     instance: Arc<str>,
+    admitted: &Admitted,
     remote_control: Option<mpsc::Sender<Control>>,
     admission: Admission,
     tickets: Arc<Tickets>,
@@ -380,9 +458,9 @@ pub(super) async fn session<C: Carrier>(
                 let line = line.map_err(Into::into)?;
                 if line.len() > MAX_MESSAGE {
                     // A null-id error is the connection's last message.
-                    send(lines, &error(None, ErrorCode::Invalid, format!(
-                        "message exceeds {MAX_MESSAGE} bytes; request a bulk ticket for it"
-                    ))).await?;
+                    send(lines, &ServerError::new(ErrorCode::Invalid, format!(
+                        "message exceeds {MAX_MESSAGE} bytes; request an upload ticket for it"
+                    )).with(serde_json::json!({ "max_message": MAX_MESSAGE })).into_message(None)).await?;
                     return Ok(());
                 }
                 match serde_json::from_str::<ClientMessage>(&line) {
@@ -412,107 +490,16 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
         };
-        match message {
-            ClientMessage::Request { id, operation } => {
-                if id.is_empty() || id.len() > 128 {
-                    send(
-                        lines,
-                        &error(
-                            Some(id),
-                            ErrorCode::Invalid,
-                            "request ID must contain 1–128 bytes",
-                        ),
-                    )
-                    .await?;
-                    continue;
-                }
-                if inflight.contains_key(&id) {
-                    send(
-                        lines,
-                        &error(
-                            Some(id),
-                            ErrorCode::Invalid,
-                            "request ID is still unanswered",
-                        ),
-                    )
-                    .await?;
-                    continue;
-                }
-                let entry = match operation {
-                    Operation::Attach { owner } => {
-                        let ticket = tickets.issue(admission.clone(), Purpose::Terminal(owner));
-                        send(
-                            lines,
-                            &ServerMessage::Response {
-                                id,
-                                result: Reply::Ticket { ticket },
-                            },
-                        )
-                        .await?;
-                        continue;
-                    }
-                    Operation::Bulk { bytes } => {
-                        if bytes > MAX_BULK {
-                            send(
-                                lines,
-                                &error(
-                                    Some(id),
-                                    ErrorCode::Invalid,
-                                    format!("a bulk request carries at most {MAX_BULK} bytes"),
-                                ),
-                            )
-                            .await?;
-                            continue;
-                        }
-                        let ticket =
-                            tickets.issue(admission.clone(), Purpose::Upload(uploads.clone()));
-                        send(
-                            lines,
-                            &ServerMessage::Response {
-                                id,
-                                result: Reply::Ticket { ticket },
-                            },
-                        )
-                        .await?;
-                        continue;
-                    }
-                    Operation::Subscribe { query, generation } => {
-                        let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                        let task = tasks.spawn(subscription(
-                            id.clone(),
-                            query,
-                            generation,
-                            outgoing.clone(),
-                            inbox,
-                        ));
-                        Inflight {
-                            task,
-                            checkpoints: Some(checkpoints),
-                        }
-                    }
-                    operation => {
-                        let task = tasks.spawn(request(
-                            id.clone(),
-                            operation,
-                            instance.clone(),
-                            outgoing.clone(),
-                            remote_control.clone(),
-                        ));
-                        Inflight {
-                            task,
-                            checkpoints: None,
-                        }
-                    }
-                };
-                inflight.insert(id, entry);
-            }
-            ClientMessage::Checkpoint { id, frame } => {
+        let (id, start) = match message {
+            ClientMessage::Request { id, operation } => (id, Start::Request(operation)),
+            ClientMessage::Subscribe { id, operation } => (id, Start::Subscribe(operation)),
+            ClientMessage::Checkpoint { id, checkpoint } => {
                 match inflight
                     .get(&id)
                     .and_then(|entry| entry.checkpoints.as_ref())
                 {
                     Some(checkpoints) => {
-                        if checkpoints.try_send(frame).is_err() {
+                        if checkpoints.try_send(checkpoint).is_err() {
                             // Ending the subscription tells the client to reopen it
                             // for a complete reading rather than drop a checkpoint.
                             if let Some(entry) = inflight.remove(&id) {
@@ -522,7 +509,7 @@ pub(super) async fn session<C: Carrier>(
                                 lines,
                                 &error(
                                     Some(id),
-                                    ErrorCode::Unavailable,
+                                    ErrorCode::Busy,
                                     "subscription fell behind its checkpoints; subscribe again",
                                 ),
                             )
@@ -532,21 +519,24 @@ pub(super) async fn session<C: Carrier>(
                     None => {
                         send(
                             lines,
-                            &error(
-                                Some(id),
-                                ErrorCode::Invalid,
+                            &ServerError::new(
+                                ErrorCode::NotFound,
                                 "no live subscription has this ID",
-                            ),
+                            )
+                            .with(serde_json::json!({ "id": id }))
+                            .into_message(Some(id)),
                         )
                         .await?
                     }
                 }
+                continue;
             }
             ClientMessage::Cancel { id } => {
                 // An answered request has nothing left to forget.
                 if let Some(entry) = inflight.remove(&id) {
                     entry.task.abort();
                 }
+                continue;
             }
             ClientMessage::Hello(_) | ClientMessage::Status => {
                 send(
@@ -568,7 +558,87 @@ pub(super) async fn session<C: Carrier>(
                 .await?;
                 return Ok(());
             }
+        };
+        admitted.requested();
+        if id.is_empty() || id.len() > 128 {
+            send(
+                lines,
+                &error(
+                    Some(id),
+                    ErrorCode::Invalid,
+                    "request ID must contain 1–128 bytes",
+                ),
+            )
+            .await?;
+            continue;
         }
+        if inflight.contains_key(&id) {
+            send(
+                lines,
+                &ServerError::new(ErrorCode::Conflict, "request ID is still unanswered")
+                    .with(serde_json::json!({ "id": id }))
+                    .into_message(Some(id)),
+            )
+            .await?;
+            continue;
+        }
+        let entry = match start {
+            Start::Request(Operation::Server(ServerOperation::Attach { owner })) => {
+                let ticket = tickets.issue(admission.clone(), Purpose::Terminal(owner));
+                send(lines, &ticket_response(id, ticket)).await?;
+                continue;
+            }
+            Start::Request(Operation::Server(ServerOperation::Upload { bytes })) => {
+                if bytes > MAX_BULK {
+                    send(
+                        lines,
+                        &ServerError::new(
+                            ErrorCode::Invalid,
+                            format!("an uploaded request carries at most {MAX_BULK} bytes"),
+                        )
+                        .with(serde_json::json!({ "max_bulk": MAX_BULK }))
+                        .into_message(Some(id)),
+                    )
+                    .await?;
+                    continue;
+                }
+                let ticket = tickets.issue(admission.clone(), Purpose::Upload(uploads.clone()));
+                send(lines, &ticket_response(id, ticket)).await?;
+                continue;
+            }
+            Start::Subscribe(query) => {
+                let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
+                let task = tasks.spawn(subscription(id.clone(), query, outgoing.clone(), inbox));
+                Inflight {
+                    task,
+                    checkpoints: Some(checkpoints),
+                }
+            }
+            Start::Request(operation) => {
+                let task = tasks.spawn(request(
+                    id.clone(),
+                    operation,
+                    instance.clone(),
+                    outgoing.clone(),
+                    remote_control.clone(),
+                ));
+                Inflight {
+                    task,
+                    checkpoints: None,
+                }
+            }
+        };
+        inflight.insert(id, entry);
+    }
+}
+
+/// `{ticket}`: single use, bound to this connection's admission, expiring in
+/// [`TICKET_TTL`](super::ticket::TICKET_TTL).
+fn ticket_response(id: String, ticket: String) -> ServerMessage {
+    ServerMessage::Response {
+        id,
+        trace_id: crate::id::TraceId::default(),
+        result: serde_json::json!({ "ticket": ticket }),
     }
 }
 
@@ -583,11 +653,12 @@ pub(super) async fn ticketed<C: Carrier>(
     let Some(purpose) = tickets.redeem(ticket, admission) else {
         send(
             carrier,
-            &error(
-                None,
-                ErrorCode::Invalid,
+            &ServerError::new(
+                ErrorCode::NotFound,
                 "ticket is unknown, expired or was issued to another connection",
-            ),
+            )
+            .with(serde_json::json!({ "ticket": ticket }))
+            .into_message(None),
         )
         .await?;
         return Ok(None);
@@ -597,9 +668,10 @@ pub(super) async fn ticketed<C: Carrier>(
             let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
                 Ok(destination) => destination,
                 Err(failure) => {
-                    send(carrier, &error(None, ErrorCode::Unavailable, format!(
-                            "Session owner is unavailable; no provider restarted and no input replayed: {failure}"
-                        ))).await?;
+                    // A missing owner endpoint means the owner ended.
+                    send(carrier, &ServerError::new(ErrorCode::NotFound, format!(
+                        "Session owner is not running; no provider restarted and no input replayed: {failure}"
+                    )).with(serde_json::json!({ "owner": owner })).into_message(None)).await?;
                     return Ok(None);
                 }
             };
@@ -618,8 +690,8 @@ pub(super) async fn ticketed<C: Carrier>(
             send(carrier, &ServerMessage::Admitted).await?;
             let line = tokio::time::timeout(BULK, carrier.next())
                 .await
-                .context("no bulk request in time")?
-                .context("closed before its bulk request")?
+                .context("no uploaded request in time")?
+                .context("closed before its uploaded request")?
                 .map_err(Into::into)?;
             match serde_json::from_str::<ClientMessage>(&line) {
                 Ok(message @ ClientMessage::Request { .. }) => {
@@ -632,7 +704,7 @@ pub(super) async fn ticketed<C: Carrier>(
                         &error(
                             None,
                             ErrorCode::Invalid,
-                            "a bulk connection carries one request",
+                            "an upload connection carries one request",
                         ),
                     )
                     .await?;
@@ -665,11 +737,12 @@ async fn deliver_or_spill<C: Carrier>(
     if text.len() > MAX_BULK {
         return send(
             carrier,
-            &error(
-                Some(id),
+            &ServerError::new(
                 ErrorCode::Unavailable,
                 format!("answer exceeds {MAX_BULK} bytes"),
-            ),
+            )
+            .with(serde_json::json!({ "max_bulk": MAX_BULK }))
+            .into_message(Some(id)),
         )
         .await;
     }
@@ -684,7 +757,7 @@ async fn deliver_or_spill<C: Carrier>(
 async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
     let parts = lines.into_parts();
     let mut socket = parts.io;
-    // Owner-protocol bytes the client pipelined behind its attach request.
+    // Owner-protocol bytes the client pipelined behind its ticket.
     if !parts.read_buf.is_empty() {
         destination.write_all(&parts.read_buf).await?;
     }
@@ -695,19 +768,21 @@ async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
     Ok(())
 }
 
-/// Why a request was not answered with a `Reply`.
-struct Refusal {
-    code: ErrorCode,
-    message: String,
+/// The [`ServerError`] a shared operation named anywhere in `error`'s chain,
+/// else `otherwise` with the error's text.
+fn refused(error: anyhow::Error, otherwise: ErrorCode) -> ServerError {
+    match error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<ServerError>())
+    {
+        Some(named) => named.clone(),
+        None => ServerError::new(otherwise, error.to_string()),
+    }
 }
 
-impl From<anyhow::Error> for Refusal {
-    fn from(error: anyhow::Error) -> Self {
-        Self {
-            code: ErrorCode::Unavailable,
-            message: error.to_string(),
-        }
-    }
+/// A read that failed without naming a code depends on something unavailable.
+fn unavailable(error: impl Into<anyhow::Error>) -> ServerError {
+    refused(error.into(), ErrorCode::Unavailable)
 }
 
 async fn request(
@@ -718,16 +793,18 @@ async fn request(
     remote_control: Option<mpsc::Sender<Control>>,
 ) -> String {
     let started = Instant::now();
-    let result = operate(operation, &id, &instance, remote_control).await;
-    tracing::debug!(request = %id, %instance, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
+    let trace_id = crate::id::TraceId::default();
+    let result = operate(operation, &id, &instance, &trace_id, remote_control).await;
+    tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
     let message = match result {
         Ok(result) => ServerMessage::Response {
             id: id.clone(),
+            trace_id,
             result,
         },
         Err(refusal) => {
-            tracing::warn!(request = %id, %instance, error = %refusal.message, "Server request failed");
-            error(Some(id.clone()), refusal.code, refusal.message)
+            tracing::warn!(request = %id, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
+            refusal.into_message(Some(id.clone()))
         }
     };
     // A closed connection drops the answer; the effect stands.
@@ -739,17 +816,16 @@ async fn operate(
     operation: Operation,
     id: &str,
     instance: &str,
+    trace_id: &crate::id::TraceId,
     remote_control: Option<mpsc::Sender<Control>>,
-) -> Result<Reply, Refusal> {
-    Ok(match operation {
-        Operation::MobileStatus => {
+) -> Result<serde_json::Value, ServerError> {
+    match operation {
+        Operation::Server(ServerOperation::MobileStatus) => {
             let (reply, result) = tokio::sync::oneshot::channel();
             mobile_control(remote_control, Control::Status { reply }).await?;
-            Reply::MobileStatus {
-                status: result.await.map_err(anyhow::Error::from)?,
-            }
+            serde_json::to_value(result.await.map_err(unavailable)?).map_err(unavailable)
         }
-        Operation::ConfigureRemote { configuration } => {
+        Operation::Server(ServerOperation::ConfigureRemote { configuration }) => {
             let (reply, result) = tokio::sync::oneshot::channel();
             mobile_control(
                 remote_control,
@@ -761,74 +837,81 @@ async fn operate(
             .await?;
             let configuration = result
                 .await
-                .map_err(anyhow::Error::from)?
-                .map_err(anyhow::Error::msg)?;
-            Reply::Remote { configuration }
+                .map_err(unavailable)?
+                .map_err(|message| ServerError::new(ErrorCode::Unavailable, message))?;
+            Ok(serde_json::json!({ "configuration": configuration }))
         }
-        Operation::SessionOwner { session } => {
+        Operation::Server(ServerOperation::SessionOwner { session }) => {
             let owner = tokio::task::spawn_blocking(move || -> Result<_> {
-                let registry = crate::store::read_existing_registry()?
-                    .context("Machine registry is unavailable")?;
+                let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
+                    ServerError::new(ErrorCode::Unavailable, "Machine registry is unavailable")
+                        .with(serde_json::json!({ "resource": "machine_registry" }))
+                })?;
                 Ok(registry.sqlite.session_transport(session.as_str())?)
             })
             .await
-            .map_err(anyhow::Error::from)??;
-            Reply::SessionOwner { owner }
+            .map_err(unavailable)?
+            .map_err(unavailable)?;
+            Ok(serde_json::json!({ "owner": owner }))
         }
-        Operation::Read { query } => Reply::Read {
-            value: tokio::task::spawn_blocking(move || {
-                crate::journal::request::isolate(|| query.read())
-            })
-            .await
-            .map_err(anyhow::Error::from)??,
-        },
-        Operation::Configuration { request } => {
-            let mut target = serde_json::to_value(&request).map_err(anyhow::Error::from)?;
+        Operation::Read(query) => {
+            tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| query.read()))
+                .await
+                .map_err(unavailable)?
+                .map_err(unavailable)
+        }
+        Operation::Server(ServerOperation::Configuration { request }) => {
+            let mut target = serde_json::to_value(&request).map_err(unavailable)?;
             target
                 .as_object_mut()
                 .expect("configuration request is an object")
                 .remove("value");
-            execute_command(target, id, instance, true, move |output, _errors| {
-                use std::io::Write;
-                writeln!(output, "{}", crate::config::api::run(request)?)?;
-                Ok(())
+            effect(target, id, instance, trace_id, move || {
+                crate::config::api::run(request)
             })
             .await
-            .map_err(outcome_unknown)?
         }
-        Operation::Command { change } if change.delegates() => {
-            let recovery = change_recovery(&change);
-            delegate(change, id, instance)
-                .await
-                .map_err(|error| Refusal {
-                    code: ErrorCode::OutcomeUnknown,
-                    message: format!("{error}; {recovery}"),
-                })?
+        Operation::Write(change) => {
+            if let Some(argv) = change.delegated() {
+                let recovery = change_recovery(&change);
+                return delegate(argv, &change, id, instance, trace_id)
+                    .await
+                    .map_err(|error| {
+                        ServerError::new(
+                            ErrorCode::OutcomeUnknown,
+                            format!("{error:#}; {recovery}"),
+                        )
+                    });
+            }
+            let mut target = serde_json::to_value(&change).map_err(unavailable)?;
+            if let Some(fields) = target.as_object_mut() {
+                for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
+                    fields.remove(field);
+                }
+            }
+            effect(target, id, instance, trace_id, move || change.run()).await
         }
-        Operation::Command { change } => command(change, id, instance)
-            .await
-            .map_err(outcome_unknown)?,
-        Operation::Subscribe { .. } | Operation::Attach { .. } | Operation::Bulk { .. } => {
-            unreachable!("the session dispatches subscriptions and tickets")
+        Operation::Server(ServerOperation::Attach { .. } | ServerOperation::Upload { .. }) => {
+            unreachable!("the session answers tickets")
         }
-    })
+    }
 }
 
 /// Mobile setup belongs to the Machine's own user: the private socket only.
 async fn mobile_control(
     remote_control: Option<mpsc::Sender<Control>>,
     request: Control,
-) -> Result<(), Refusal> {
+) -> Result<(), ServerError> {
     let Some(control) = remote_control else {
-        return Err(Refusal {
-            code: ErrorCode::Invalid,
-            message: "Mobile access is configured on the Machine itself".into(),
-        });
+        return Err(ServerError::new(
+            ErrorCode::Invalid,
+            "Mobile access is configured on the Machine itself",
+        ));
     };
     control
         .send(request)
         .await
-        .map_err(|_| anyhow::anyhow!("mobile listener is not running"))?;
+        .map_err(|_| ServerError::new(ErrorCode::Unavailable, "mobile listener is not running"))?;
     Ok(())
 }
 
@@ -842,7 +925,14 @@ fn change_recovery(change: &Write) -> &'static str {
 
 /// The whole CLI operation in an `lf` child: Graph launch and Session owner
 /// startup stay with their existing owners, never with the server process.
-async fn delegate(change: Write, id: &str, instance: &str) -> Result<Reply> {
+/// Its `--json` output is the value; a failed exit is its diagnostics.
+async fn delegate(
+    argv: Vec<String>,
+    change: &Write,
+    id: &str,
+    instance: &str,
+    trace_id: &crate::id::TraceId,
+) -> Result<serde_json::Value> {
     let executable = crate::os_process::resolve_lf_binary()?;
     let mut command = tokio::process::Command::new(&executable);
     // A service has no caller Session/Task. Never lend its launcher's identity
@@ -852,12 +942,11 @@ async fn delegate(change: Write, id: &str, instance: &str) -> Result<Reply> {
             command.env_remove(key);
         }
     }
-    let trace_id = crate::id::TraceId::default();
     command.env("LF_TRACE_ID", trace_id.as_str());
     command.env("LF_HOME", crate::store::lf_home_dir());
     command.env("LF_BIN", executable);
     command
-        .args(change.argv())
+        .args(argv)
         .current_dir(change.directory())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -880,15 +969,20 @@ async fn delegate(change: Write, id: &str, instance: &str) -> Result<Reply> {
         (output, errors, status)
     })
     .await?;
-    let code = status?.code().unwrap_or(1);
-    let output = output?;
-    Ok(Reply::Command {
-        trace_id,
-        code,
-        value: serde_json::from_str(&output).ok(),
-        output,
-        stderr: errors?,
-    })
+    let status = status?;
+    let errors = errors?;
+    for line in errors.lines() {
+        tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
+    }
+    anyhow::ensure!(
+        status.success(),
+        "{}",
+        match errors.trim() {
+            "" => format!("lf exited with {status}"),
+            said => said.to_owned(),
+        }
+    );
+    Ok(serde_json::from_str(&output?)?)
 }
 
 async fn read_command_output(stream: impl tokio::io::AsyncRead + Unpin) -> Result<String> {
@@ -904,29 +998,81 @@ async fn read_command_output(stream: impl tokio::io::AsyncRead + Unpin) -> Resul
     Ok(String::from_utf8(bytes)?)
 }
 
-fn outcome_unknown(error: anyhow::Error) -> Refusal {
-    Refusal {
-        code: ErrorCode::OutcomeUnknown,
-        message: format!("{error}; inspect the affected work before retrying"),
+/// Run a write on a request worker under `trace_id`. Once admitted,
+/// disconnection releases the client; the effect finishes without replay.
+/// Diagnostics the shared functions print go to the request's log.
+async fn effect(
+    target: serde_json::Value,
+    id: &str,
+    instance: &str,
+    trace_id: &crate::id::TraceId,
+    run: impl FnOnce() -> Result<serde_json::Value> + Send + 'static,
+) -> Result<serde_json::Value, ServerError> {
+    let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
+    tokio::task::spawn_blocking(move || {
+        let mut diagnostics = Vec::new();
+        let result = crate::journal::request::run(&trace_id, &target, || {
+            crate::journal::request::diagnostics(&mut diagnostics, run)
+        });
+        for line in String::from_utf8_lossy(&diagnostics).lines() {
+            tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
+        }
+        tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
+        result.map_err(written)
+    })
+    .await
+    .map_err(|join| outcome_unknown(join.into()))?
+}
+
+/// The code a failed write names, else the one its error's type implies.
+/// A write that failed for another reason may have taken partial effect.
+fn written(error: anyhow::Error) -> ServerError {
+    use crate::store::StoreError;
+    use crate::work::selection::SelectionError;
+    if let Some(named) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<ServerError>())
+    {
+        return named.clone();
     }
+    let code = error.chain().find_map(|cause| {
+        if let Some(store) = cause.downcast_ref::<StoreError>() {
+            return match store {
+                StoreError::NotFound => Some(ErrorCode::NotFound),
+                StoreError::Stale(_) => Some(ErrorCode::Conflict),
+                StoreError::InvalidData(_) | StoreError::Serde(_) => Some(ErrorCode::Invalid),
+                _ => None,
+            };
+        }
+        if cause.is::<SelectionError>() || cause.is::<serde_json::Error>() {
+            return Some(ErrorCode::Invalid);
+        }
+        None
+    });
+    match code {
+        Some(code) => ServerError::new(code, format!("{error:#}")),
+        None => outcome_unknown(error),
+    }
+}
+
+fn outcome_unknown(error: anyhow::Error) -> ServerError {
+    ServerError::new(
+        ErrorCode::OutcomeUnknown,
+        format!("{error:#}; inspect the affected work before retrying"),
+    )
 }
 
 async fn subscription(
     id: String,
     query: Read,
-    generation: u64,
     outgoing: mpsc::Sender<ServerMessage>,
-    checkpoints: mpsc::Receiver<serde_json::Value>,
+    checkpoints: mpsc::Receiver<u64>,
 ) -> String {
-    if let Err(failure) = watch(&id, query, generation, &outgoing, checkpoints).await {
-        // The error ends the subscription for the client; its last reading
-        // already carried the watch's failure.
+    if let Err(failure) = watch(&id, query, &outgoing, checkpoints).await {
+        // The error ends the subscription for the client; a watch that
+        // started sent its failure as its last reading.
         let _ = outgoing
-            .send(error(
-                Some(id.clone()),
-                ErrorCode::Unavailable,
-                failure.to_string(),
-            ))
+            .send(unavailable(failure).into_message(Some(id.clone())))
             .await;
     }
     id
@@ -954,9 +1100,8 @@ impl Drop for Watch {
 async fn watch(
     id: &str,
     query: Read,
-    generation: u64,
     outgoing: &mpsc::Sender<ServerMessage>,
-    mut checkpoints: mpsc::Receiver<serde_json::Value>,
+    mut checkpoints: mpsc::Receiver<u64>,
 ) -> Result<()> {
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
@@ -970,17 +1115,16 @@ async fn watch(
         outgoing,
         ServerMessage::Response {
             id: id.into(),
-            result: Reply::Subscribed,
+            trace_id: crate::id::TraceId::default(),
+            result: serde_json::Value::Null,
         },
     )
     .await?;
     loop {
         tokio::select! {
-            frame = checkpoints.recv() => {
-                let Some(frame) = frame else { return Ok(()) };
-                // The shared watch owns checkpoint parsing and its final error
-                // reading, including argument validation and request limits.
-                watch.request(&serde_json::to_vec(&frame)?);
+            checkpoint = checkpoints.recv() => {
+                let Some(checkpoint) = checkpoint else { return Ok(()) };
+                watch.checkpoint(checkpoint);
             }
             () = notify.notified() => {
                 let pull = Arc::clone(&watch);
@@ -989,7 +1133,7 @@ async fn watch(
                 if let Some(frame) = frame {
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
                     reason = frame["unavailable"].as_str().map(str::to_owned);
-                    deliver(outgoing, ServerMessage::Reading { id: id.into(), generation, frame }).await?;
+                    deliver(outgoing, ServerMessage::Reading { id: id.into(), frame }).await?;
                 }
                 if watch.ended() {
                     anyhow::bail!("{}", reason.unwrap_or_else(|| "the watch ended".into()));
@@ -999,101 +1143,8 @@ async fn watch(
     }
 }
 
-async fn command(change: Write, id: &str, instance: &str) -> Result<Reply> {
-    use clap::Parser;
-    let mut target = serde_json::to_value(&change)?;
-    if let Some(fields) = target.as_object_mut() {
-        for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
-            fields.remove(field);
-        }
-    }
-    let args: Vec<_> = std::iter::once("lf".to_owned())
-        .chain(change.argv())
-        .collect();
-    let json = args.iter().any(|arg| arg == "--json");
-    execute_command(target, id, instance, json, move |output, errors| {
-        let cli = match crate::lf::Cli::try_parse_from(&args).and_then(crate::lf::Cli::checked) {
-            Ok(cli) => cli,
-            Err(error) => {
-                use std::io::Write;
-                let stream = if error.use_stderr() {
-                    &mut *errors
-                } else {
-                    &mut *output
-                };
-                write!(stream, "{error}")?;
-                return Err(crate::process::CommandExit(
-                    u8::try_from(error.exit_code()).expect("Clap exit code fits a byte"),
-                )
-                .into());
-            }
-        };
-        anyhow::ensure!(
-            crate::lf::commands::mutation::accepts(&cli),
-            "unsupported mutation"
-        );
-        let mut input = change.input().unwrap_or_default().as_bytes();
-        crate::lf::commands::mutation::run(
-            &cli,
-            &args,
-            change.directory(),
-            &mut crate::lf::commands::mutation::CommandIo {
-                input: &mut input,
-                output,
-                error: errors,
-            },
-        )
-    })
-    .await
-}
-
-/// `json`: the command's spelling prints JSON, so stdout that parses becomes `value`.
-async fn execute_command(
-    target: serde_json::Value,
-    id: &str,
-    instance: &str,
-    json: bool,
-    execute: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>) -> Result<()> + Send + 'static,
-) -> Result<Reply> {
-    let id = id.to_owned();
-    let instance = instance.to_owned();
-    // Once admitted, disconnection releases the viewer; effects finish without replay.
-    tokio::task::spawn_blocking(move || {
-        let trace_id = crate::id::TraceId::default();
-        let mut output = Vec::new();
-        let mut errors = Vec::new();
-        let result =
-            crate::journal::request::run(&trace_id, &target, || execute(&mut output, &mut errors));
-        let code = i32::from(crate::journal::command_exit_code(&result));
-        if let Err(error) = result {
-            use std::io::Write;
-            if !error.is::<crate::process::CommandExit>() {
-                writeln!(errors, "Error: {error:?}")?;
-            }
-        }
-        tracing::info!(request = %id, %instance, code, %trace_id, "Server command finished");
-        anyhow::ensure!(
-            output.len() < MAX_BULK / 2 && errors.len() < MAX_BULK / 2,
-            "command output exceeded its limit"
-        );
-        let value = json.then(|| serde_json::from_slice(&output).ok()).flatten();
-        Ok(Reply::Command {
-            trace_id,
-            code,
-            value,
-            output: String::from_utf8(output)?,
-            stderr: String::from_utf8(errors)?,
-        })
-    })
-    .await?
-}
-
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
-    ServerMessage::Error {
-        id,
-        code,
-        message: message.into(),
-    }
+    ServerError::new(code, message).into_message(id)
 }
 
 fn line(message: &ServerMessage) -> String {
@@ -1129,13 +1180,13 @@ async fn send_line<C: Carrier>(carrier: &mut C, line: String) -> Result<()> {
 mod tests {
     use std::sync::Arc;
 
-    use super::{connection, deliver_or_spill};
+    use super::{connection, deliver_or_spill, Clients};
     use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
     use crate::server::ticket::{Admission, Tickets};
     use crate::server::wire::{
-        ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, Reply, ServerMessage, MAX_BULK,
-        MAX_MESSAGE, REVISION,
+        ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, ServerMessage, ServerOperation,
+        MAX_BULK, MAX_MESSAGE, REVISION,
     };
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
@@ -1150,14 +1201,15 @@ mod tests {
     impl Client {
         /// A connection to a session with a private, uninitialized Machine.
         fn connect() -> Self {
-            Self::connect_with(Default::default())
+            Self::connect_with(&Clients::default(), Default::default())
         }
 
-        /// A connection whose tickets another connection can redeem.
-        fn connect_with(tickets: Arc<Tickets>) -> Self {
+        /// A connection listed in `clients` whose tickets another connection can redeem.
+        fn connect_with(clients: &Clients, tickets: Arc<Tickets>) -> Self {
             let (client, server) = UnixStream::pair().unwrap();
+            let clients = clients.clone();
             let server = tokio::spawn(async move {
-                connection(server, "incarnation", "fixture", None, tickets).await
+                connection(server, "incarnation", "fixture", &clients, None, tickets).await
             });
             let (read, writer) = client.into_split();
             Self {
@@ -1201,7 +1253,7 @@ mod tests {
 
         /// Present a ticket on a fresh connection and read `admitted`.
         async fn redeem(tickets: Arc<Tickets>, ticket: &str) -> Self {
-            let mut connection = Self::connect_with(tickets);
+            let mut connection = Self::connect_with(&Clients::default(), tickets);
             connection
                 .send(&ClientMessage::Ticket {
                     ticket: ticket.into(),
@@ -1216,55 +1268,73 @@ mod tests {
     }
 
     async fn ticket_reply(client: &mut Client, id: &str) -> String {
-        let ServerMessage::Response {
-            id: of,
-            result: Reply::Ticket { ticket },
-        } = client.receive().await.unwrap()
-        else {
+        let ServerMessage::Response { id: of, result, .. } = client.receive().await.unwrap() else {
             panic!("expected a ticket for {id}")
         };
         assert_eq!(of, id);
-        ticket
+        result["ticket"]
+            .as_str()
+            .expect("a ticket string")
+            .to_owned()
+    }
+
+    fn catalog() -> Operation {
+        Operation::Server(ServerOperation::Configuration {
+            request: crate::config::api::Request::Catalog,
+        })
+    }
+
+    /// Serialize the tests that read an empty Machine registry through env.
+    fn with_empty_home(body: impl std::future::Future<Output = ()>) {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        // block_on is synchronous, so the env guard never spans an await point.
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(body);
     }
 
     #[test]
-    fn tickets_carry_bulk_requests_and_large_answers_off_the_control_connection() {
+    fn tickets_carry_uploaded_requests_and_large_answers_off_the_control_connection() {
         with_empty_home(async {
             let tickets = Arc::new(Tickets::default());
-            let mut client = Client::connect_with(tickets.clone());
+            let clients = Clients::default();
+            let mut client = Client::connect_with(&clients, tickets.clone());
             client.hello(REVISION, REVISION).await;
             // A request over the control limit travels on its own connection and
             // is answered on the control connection under its own id.
             client
                 .send(&ClientMessage::Request {
                     id: "u".into(),
-                    operation: Operation::Bulk { bytes: 200 },
+                    operation: Operation::Server(ServerOperation::Upload { bytes: 200 }),
                 })
                 .await;
             let ticket = ticket_reply(&mut client, "u").await;
-            let mut bulk = Client::redeem(tickets.clone(), &ticket).await;
-            bulk.send(&ClientMessage::Request {
-                id: "r".into(),
-                operation: catalog(),
-            })
-            .await;
-            let ServerMessage::Response {
-                id,
-                result: Reply::Command { code, .. },
-            } = client.receive().await.unwrap()
-            else {
+            let mut upload = Client::redeem(tickets.clone(), &ticket).await;
+            upload
+                .send(&ClientMessage::Request {
+                    id: "r".into(),
+                    operation: catalog(),
+                })
+                .await;
+            let ServerMessage::Response { id, result, .. } = client.receive().await.unwrap() else {
                 panic!("expected the uploaded request's answer")
             };
-            assert_eq!((id.as_str(), code), ("r", 0));
-            bulk.ended().await;
+            assert_eq!(id, "r");
+            assert!(result.is_array(), "the catalog is its value");
+            upload.ended().await;
             // A ticket is single use.
-            let mut again = Client::connect_with(tickets.clone());
+            let mut again = Client::connect_with(&clients, tickets.clone());
             again.send(&ClientMessage::Ticket { ticket }).await;
             assert!(matches!(
                 again.receive().await.unwrap(),
                 ServerMessage::Error {
                     id: None,
-                    code: ErrorCode::Invalid,
+                    code: ErrorCode::NotFound,
                     ..
                 }
             ));
@@ -1277,9 +1347,8 @@ mod tests {
                 &mut carrier,
                 ServerMessage::Response {
                     id: "big".into(),
-                    result: Reply::Read {
-                        value: value.clone(),
-                    },
+                    trace_id: crate::id::TraceId::default(),
+                    result: value.clone(),
                 },
                 &Admission::Local,
                 &tickets,
@@ -1298,7 +1367,8 @@ mod tests {
             let mut fetch = Client::redeem(tickets.clone(), &ticket).await;
             let ServerMessage::Response {
                 id,
-                result: Reply::Read { value: fetched },
+                result: fetched,
+                ..
             } = fetch.receive().await.unwrap()
             else {
                 panic!("expected the spilled answer")
@@ -1324,18 +1394,19 @@ mod tests {
     fn attach_ticket_bridges_a_second_connection_to_the_owner() {
         with_empty_home(async {
             let tickets = Arc::new(Tickets::default());
+            let clients = Clients::default();
             let owner = LfProcessId::new();
             let listener =
                 tokio::net::UnixListener::bind(crate::transport::endpoint(&owner).unwrap())
                     .unwrap();
-            let mut client = Client::connect_with(tickets.clone());
+            let mut client = Client::connect_with(&clients, tickets.clone());
             client.hello(REVISION, REVISION).await;
             client
                 .send(&ClientMessage::Request {
                     id: "t".into(),
-                    operation: Operation::Attach {
+                    operation: Operation::Server(ServerOperation::Attach {
                         owner: owner.clone(),
-                    },
+                    }),
                 })
                 .await;
             let ticket = ticket_reply(&mut client, "t").await;
@@ -1371,49 +1442,31 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, .. } if id == "a"
             ));
-            // An owner that ended between ticket and redemption fails explicitly.
+            // An owner that ended between ticket and redemption fails by name.
             drop(listener);
             client
                 .send(&ClientMessage::Request {
                     id: "gone".into(),
-                    operation: Operation::Attach { owner },
+                    operation: Operation::Server(ServerOperation::Attach { owner }),
                 })
                 .await;
             let ticket = ticket_reply(&mut client, "gone").await;
-            let mut late = Client::connect_with(tickets.clone());
+            let mut late = Client::connect_with(&clients, tickets.clone());
             late.send(&ClientMessage::Ticket { ticket }).await;
-            assert!(matches!(
-                late.receive().await.unwrap(),
-                ServerMessage::Error {
-                    id: None,
-                    code: ErrorCode::Unavailable,
-                    ..
-                }
-            ));
+            let ServerMessage::Error {
+                id: None,
+                code: ErrorCode::NotFound,
+                data,
+                ..
+            } = late.receive().await.unwrap()
+            else {
+                panic!("expected the owner to be missing")
+            };
+            assert!(data.unwrap()["owner"].is_string());
             late.ended().await;
             drop(client.writer);
             client.server.await.unwrap().unwrap();
         });
-    }
-
-    fn catalog() -> Operation {
-        Operation::Configuration {
-            request: crate::config::api::Request::Catalog,
-        }
-    }
-
-    /// Serialize the tests that read an empty Machine registry through env.
-    fn with_empty_home(body: impl std::future::Future<Output = ()>) {
-        let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let home = tempfile::tempdir().unwrap();
-        let _home =
-            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        // block_on is synchronous, so the env guard never spans an await point.
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(body);
     }
 
     #[test]
@@ -1438,15 +1491,11 @@ mod tests {
             }
             let mut answered = Vec::new();
             for _ in 0..2 {
-                let ServerMessage::Response {
-                    id,
-                    result: Reply::Command { code, value, .. },
-                } = client.receive().await.unwrap()
+                let ServerMessage::Response { id, result, .. } = client.receive().await.unwrap()
                 else {
-                    panic!("expected a command result")
+                    panic!("expected a result")
                 };
-                assert_eq!(code, 0);
-                assert!(value.unwrap().is_array(), "catalog parses as JSON");
+                assert!(result.is_array(), "the catalog is its value");
                 answered.push(id);
             }
             answered.sort();
@@ -1474,13 +1523,19 @@ mod tests {
             (REVISION - 1, REVISION - 1, "client"),
         ] {
             let mut client = Client::connect();
-            let ServerMessage::Error { id, code, message } =
-                client.hello(revision, min_revision).await
+            let ServerMessage::Error {
+                id,
+                code,
+                message,
+                data,
+            } = client.hello(revision, min_revision).await
             else {
                 panic!("expected an error")
             };
             assert_eq!(id, None);
             assert_eq!(code, ErrorCode::Incompatible);
+            let update = if side == "client" { "client" } else { "server" };
+            assert_eq!(data.unwrap()["update"], update);
             assert!(
                 message.ends_with(&format!("update the {side}")),
                 "{message}"
@@ -1493,7 +1548,15 @@ mod tests {
     async fn revision_one_frame_gets_a_revision_one_refusal() {
         let (mut client, server) = UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            connection(server, "incarnation", "fixture", None, Default::default()).await
+            connection(
+                server,
+                "incarnation",
+                "fixture",
+                &Clients::default(),
+                None,
+                Default::default(),
+            )
+            .await
         });
         let request = br#"{"version":1,"id":"old","operation":{"kind":"status"}}"#;
         client.write_u32(request.len() as u32).await.unwrap();
@@ -1522,6 +1585,42 @@ mod tests {
         client.ended().await;
     }
 
+    async fn status(clients: &Clients) -> Vec<crate::server::wire::ConnectedClient> {
+        let mut probe = Client::connect_with(clients, Default::default());
+        probe.send(&ClientMessage::Status).await;
+        let Some(ServerMessage::Status(status)) = probe.receive().await else {
+            panic!("expected status")
+        };
+        probe.ended().await;
+        status.clients
+    }
+
+    #[test]
+    fn status_lists_welcomed_clients_until_they_close() {
+        with_empty_home(async {
+            let clients = Clients::default();
+            let mut desktop = Client::connect_with(&clients, Default::default());
+            let ServerMessage::Welcome(welcome) = desktop.hello(REVISION, REVISION).await else {
+                panic!("expected welcome");
+            };
+            desktop
+                .send(&ClientMessage::Request {
+                    id: "a".into(),
+                    operation: catalog(),
+                })
+                .await;
+            desktop.receive().await.unwrap();
+            let listed = status(&clients).await;
+            assert_eq!(listed.len(), 1, "{listed:?}");
+            assert_eq!(listed[0].id, welcome.client_id);
+            assert_eq!(listed[0].client.name, "fixture");
+            assert_eq!(listed[0].requests, 1);
+            drop(desktop.writer);
+            desktop.server.await.unwrap().unwrap();
+            assert!(status(&clients).await.is_empty());
+        });
+    }
+
     #[test]
     fn cancel_ends_a_subscription_while_a_sibling_request_answers() {
         with_empty_home(async {
@@ -1532,32 +1631,24 @@ mod tests {
             ));
             // Live processes need no Machine registry: an empty activity reading.
             client
-                .send(&ClientMessage::Request {
+                .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Operation::Subscribe {
-                        query: Read::MonitorPs,
-                        generation: 4,
-                    },
+                    operation: Read::MonitorPs,
                 })
                 .await;
             assert!(matches!(
                 client.receive().await.unwrap(),
-                ServerMessage::Response { id, result: Reply::Subscribed } if id == "ps"
+                ServerMessage::Response { id, result: serde_json::Value::Null, .. } if id == "ps"
             ));
-            let ServerMessage::Reading {
-                id,
-                generation,
-                frame,
-            } = client.receive().await.unwrap()
-            else {
+            let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
                 panic!("expected the first reading")
             };
-            assert_eq!((id.as_str(), generation), ("ps", 4));
+            assert_eq!(id, "ps");
             assert!(frame["unavailable"].is_null(), "{frame}");
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
-                    frame: serde_json::json!({"id": 3}),
+                    checkpoint: 3,
                 })
                 .await;
             let ServerMessage::Reading { frame, .. } = client.receive().await.unwrap() else {
@@ -1576,18 +1667,18 @@ mod tests {
             // Nothing follows the cancel for `ps`; the sibling still answers.
             assert!(matches!(
                 client.receive().await.unwrap(),
-                ServerMessage::Response { id, result: Reply::Command { .. } } if id == "after"
+                ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "after"
             ));
             // A cancelled subscription takes no more checkpoints.
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
-                    frame: serde_json::json!({"id": 5}),
+                    checkpoint: 5,
                 })
                 .await;
             assert!(matches!(
                 client.receive().await.unwrap(),
-                ServerMessage::Error { id: Some(id), code: ErrorCode::Invalid, .. } if id == "ps"
+                ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "ps"
             ));
             drop(client.writer);
             client.server.await.unwrap().unwrap();
@@ -1611,7 +1702,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_overlong_line_ends_the_connection() {
+    async fn an_overlong_control_line_names_the_upload_ticket_then_closes() {
         let mut client = Client::connect();
         assert!(matches!(
             client.hello(REVISION, REVISION).await,
@@ -1624,11 +1715,13 @@ mod tests {
             id: None,
             code: ErrorCode::Invalid,
             message,
+            data,
         } = client.receive().await.unwrap()
         else {
             panic!("expected the control limit")
         };
-        assert!(message.contains("bulk ticket"), "{message}");
+        assert!(message.contains("upload ticket"), "{message}");
+        assert_eq!(data.unwrap()["max_message"], MAX_MESSAGE);
         client.ended().await;
     }
 }

@@ -1,1 +1,1 @@
-{"type":"request","id":"mobile-status-1","operation":{"kind":"mobile_status"}}
+{"type":"request","id":"mobile-status-1","operation":{"kind":"mobile.status"}}

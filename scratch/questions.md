@@ -33,3 +33,15 @@ connection. Assumptions made while implementing, each reversible:
 - `lf context` reports `.lf/wave/product/MEMORY.md` 30 tokens over its 16000
   target before this slice. Wave memory is read-only here; the Wave operator
   owns that trim.
+- The phone and this checkout speak the revision 2 PR #1813 (LOO-593) shape
+  as approved on November 5: dotted operation kinds, `response {result}` typed
+  per kind, `subscribe` as its own message, `u64` checkpoints, no `generation`
+  on readings. Re-merging that branch was an executive decision; its decisions
+  live in PR #1813's `scratch/questions.md`, not here.
+- Names chosen for this Task's additions inside that scheme: `view.select`
+  (every view plan by expression), `task.start` (create and run a Task, as its
+  own `lf` process), `session.start`, `mobile.status`, `mobile.configure`,
+  `request.upload`, `terminal.attach` answering `{ticket}`.
+- The phone lists repositories through `desktop.portfolio`, which PR #1813
+  documents as Desktop-only. It is the one read that answers every repository
+  without a directory; a `repository.list` read is the alternative.

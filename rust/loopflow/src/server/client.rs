@@ -10,14 +10,15 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, Reply, ServerMessage, Welcome,
-    MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerError, ServerMessage,
+    ServerOperation, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::id::LfProcessId;
 use crate::lf::commands::read::Read;
 
-/// How long the server has to answer `status`, `hello`, `attach` or a ticket.
-/// A session's later waits are unbounded unless the caller sets its own limit.
+/// How long the server has to answer `status`, `hello`, `terminal.attach` or
+/// a ticket. A session's later waits are unbounded unless the caller sets its
+/// own limit.
 const HANDSHAKE: Duration = Duration::from_secs(10);
 
 /// `lf server status`: readiness observed without opening Work.
@@ -30,6 +31,8 @@ pub struct Status {
     pub instance: Option<String>,
     /// The newest protocol revision the server speaks.
     pub revision: Option<u32>,
+    /// Every welcomed connection still open; empty when no server answered.
+    pub clients: Vec<ConnectedClient>,
     pub error: Option<String>,
 }
 
@@ -40,6 +43,7 @@ pub fn status() -> Result<Status> {
         listening: false,
         instance: None,
         revision: None,
+        clients: Vec::new(),
         error: None,
     };
     let stream = match connect(&status.socket) {
@@ -51,7 +55,7 @@ pub fn status() -> Result<Status> {
     };
     status.listening = true;
     stream.set_read_timeout(Some(HANDSHAKE))?;
-    let mut socket = Socket::new(stream, 64 * 1024)?;
+    let mut socket = Socket::new(stream)?;
     status.error = match socket
         .send(&ClientMessage::Status)
         .and_then(|()| socket.receive())
@@ -60,6 +64,7 @@ pub fn status() -> Result<Status> {
         Ok(Some(ServerMessage::Status(answer))) => {
             status.instance = Some(answer.instance);
             status.revision = Some(answer.revision);
+            status.clients = answer.clients;
             let expected = crate::installation::ArtifactIdentity::capture(
                 crate::installation::ArtifactRole::Cli,
                 &std::env::current_exe()?,
@@ -90,12 +95,11 @@ pub fn status() -> Result<Status> {
 /// A revision-1 server reads `{"ty` as an absurd frame length and closes.
 const OLDER_PROTOCOL: &str = "Loopflow server closed the connection without answering; it may speak an older protocol; update the selected installation";
 
-/// The server answered a request with an error instead of a result.
-#[derive(Debug, thiserror::Error)]
-#[error("{code}: {message}")]
-pub struct ServerError {
-    pub code: ErrorCode,
-    pub message: String,
+/// What a request returned, and the trace that correlates its diagnostics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    pub trace_id: crate::id::TraceId,
+    pub result: serde_json::Value,
 }
 
 /// One connection: hello and welcome once, then requests, subscriptions and
@@ -117,13 +121,16 @@ impl Connection {
     }
 
     pub fn open_at(path: &Path) -> Result<Self> {
-        Self::start(connect(path)?, path)
+        let connection = Self::start(connect(path)?, path)?;
+        connection.set_read_timeout(None)?;
+        Ok(connection)
     }
 
-    /// Hello and welcome within [`HANDSHAKE`]; the session's reads are then unbounded.
+    /// Hello and welcome within [`HANDSHAKE`], which stays set until the caller
+    /// has what it opened the connection for.
     fn start(stream: UnixStream, path: &Path) -> Result<Self> {
         stream.set_read_timeout(Some(HANDSHAKE))?;
-        let mut socket = Socket::new(stream, 64 * 1024)?;
+        let mut socket = Socket::new(stream)?;
         socket.send(&ClientMessage::Hello(Hello {
             revision: REVISION,
             min_revision: MIN_REVISION,
@@ -137,7 +144,6 @@ impl Connection {
         let answer = socket
             .receive()
             .map_err(|error| stalled(error, "welcome the connection"))?;
-        socket.writer.set_read_timeout(None)?;
         match answer {
             Some(ServerMessage::Welcome(welcome)) => Ok(Self {
                 socket,
@@ -145,9 +151,17 @@ impl Connection {
                 pending: VecDeque::new(),
                 path: path.to_path_buf(),
             }),
-            Some(ServerMessage::Error { code, message, .. }) => {
-                Err(ServerError { code, message }.into())
+            Some(ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            }) => Err(ServerError {
+                code,
+                message,
+                data,
             }
+            .into()),
             Some(other) => anyhow::bail!("Server did not welcome the connection: {other:?}"),
             None => anyhow::bail!(OLDER_PROTOCOL),
         }
@@ -162,9 +176,9 @@ impl Connection {
         Ok(self.socket.writer.set_read_timeout(timeout)?)
     }
 
-    /// Send a request without waiting; its answer arrives through [`Self::request`]
-    /// or [`Self::reading`]. A request over the control limit travels on a
-    /// ticketed connection and is answered here like any other.
+    /// Send a request without waiting; its answer arrives through
+    /// [`Self::request`] or [`Self::reading`]. A request over the control limit
+    /// travels on a ticketed connection and is answered here like any other.
     pub fn send(&mut self, operation: Operation) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let line = Socket::line(&ClientMessage::Request {
@@ -184,10 +198,15 @@ impl Connection {
             line.len() <= MAX_BULK,
             "Server request exceeds {MAX_BULK} bytes"
         );
-        let Reply::Ticket { ticket } = self.request(Operation::Bulk { bytes: line.len() })? else {
-            anyhow::bail!("Server did not issue a bulk ticket")
-        };
-        let mut stream = redeem(&self.path, &ticket)?;
+        let ticket = self
+            .request(Operation::Server(ServerOperation::Upload {
+                bytes: line.len(),
+            }))?
+            .result;
+        let ticket = ticket["ticket"]
+            .as_str()
+            .context("Server did not issue an upload ticket")?;
+        let mut stream = redeem(&self.path, ticket)?;
         stream.write_all(line.as_bytes())?;
         Ok(())
     }
@@ -207,24 +226,47 @@ impl Connection {
     }
 
     /// One request and its answer; other ids' messages wait in `pending`.
-    pub fn request(&mut self, operation: Operation) -> Result<Reply> {
+    pub fn request(&mut self, operation: Operation) -> Result<Response> {
         let id = self.send(operation)?;
         match self.wait(|message| answers(message, &id))? {
-            ServerMessage::Response { result, .. } => Ok(result),
-            ServerMessage::Error { code, message, .. } => Err(ServerError { code, message }.into()),
+            ServerMessage::Response {
+                trace_id, result, ..
+            } => Ok(Response { trace_id, result }),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(ServerError {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
 
     /// Start a subscription and return its id once the server confirms it.
-    pub fn subscribe(&mut self, query: Read, generation: u64) -> Result<String> {
-        let id = self.send(Operation::Subscribe { query, generation })?;
+    pub fn subscribe(&mut self, operation: Read) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.socket.send(&ClientMessage::Subscribe {
+            id: id.clone(),
+            operation,
+        })?;
         match self.wait(|message| answers(message, &id))? {
-            ServerMessage::Response {
-                result: Reply::Subscribed,
+            ServerMessage::Response { .. } => Ok(id),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
                 ..
-            } => Ok(id),
-            ServerMessage::Error { code, message, .. } => Err(ServerError { code, message }.into()),
+            } => Err(ServerError {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -236,15 +278,26 @@ impl Connection {
                 || answers(message, id)
         })? {
             ServerMessage::Reading { frame, .. } => Ok(frame),
-            ServerMessage::Error { code, message, .. } => Err(ServerError { code, message }.into()),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(ServerError {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
 
-    pub fn checkpoint(&mut self, id: &str, frame: serde_json::Value) -> Result<()> {
+    /// Ask subscription `id` for a reading whose `answers` is `checkpoint`.
+    pub fn checkpoint(&mut self, id: &str, checkpoint: u64) -> Result<()> {
         self.socket.send(&ClientMessage::Checkpoint {
             id: id.into(),
-            frame,
+            checkpoint,
         })
     }
 
@@ -297,21 +350,19 @@ pub(crate) fn bridge_existing(owner: &LfProcessId) -> Result<UnixStream> {
     attach(&super::socket_path()?, owner)
 }
 
-/// `attach` on a control connection answers a ticket; the terminal connection
-/// redeems it and then speaks the owner protocol.
+/// `terminal.attach` on a control connection answers `{ticket}`; the terminal
+/// connection redeems it and then speaks the owner protocol.
 pub fn attach(path: &Path, owner: &LfProcessId) -> Result<UnixStream> {
-    let mut connection = Connection::open_at(path)?;
-    connection.set_read_timeout(Some(HANDSHAKE))?;
-    let ticket = match connection
-        .request(Operation::Attach {
+    let mut connection = Connection::start(connect(path)?, path)?;
+    let answer = connection
+        .request(Operation::Server(ServerOperation::Attach {
             owner: owner.clone(),
-        })
-        .map_err(|error| stalled(error, "open the owner bridge"))?
-    {
-        Reply::Ticket { ticket } => ticket,
-        other => anyhow::bail!("Server did not open the owner bridge: {other:?}"),
-    };
-    redeem(path, &ticket)
+        }))
+        .map_err(|error| stalled(error, "open the owner bridge"))?;
+    let ticket = answer.result["ticket"]
+        .as_str()
+        .with_context(|| format!("Server did not open the owner bridge: {answer:?}"))?;
+    redeem(path, ticket)
 }
 
 /// A ticketed connection past `admitted`. The answer is read one byte at a
@@ -339,8 +390,18 @@ fn redeem(path: &Path, ticket: &str) -> Result<UnixStream> {
     }
     match serde_json::from_slice::<ServerMessage>(&line)? {
         ServerMessage::Admitted => {}
-        ServerMessage::Error { code, message, .. } => {
-            return Err(ServerError { code, message }.into())
+        ServerMessage::Error {
+            code,
+            message,
+            data,
+            ..
+        } => {
+            return Err(ServerError {
+                code,
+                message,
+                data,
+            }
+            .into())
         }
         other => anyhow::bail!("Server did not admit the ticket: {other:?}"),
     }
@@ -379,10 +440,10 @@ struct Socket {
 }
 
 impl Socket {
-    fn new(stream: UnixStream, capacity: usize) -> Result<Self> {
+    fn new(stream: UnixStream) -> Result<Self> {
         Ok(Self {
             writer: stream.try_clone()?,
-            reader: BufReader::with_capacity(capacity, stream),
+            reader: BufReader::with_capacity(64 * 1024, stream),
         })
     }
 
@@ -429,8 +490,8 @@ impl Socket {
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::{UnixListener, UnixStream};
-    use std::time::{Duration, Instant};
+    use std::os::unix::net::UnixListener;
+    use std::time::Instant;
 
     use super::{attach, Connection, HANDSHAKE};
     use crate::id::LfProcessId;
@@ -451,6 +512,7 @@ mod tests {
             if after_hello {
                 reader.read_line(&mut line).unwrap();
                 let welcome = ServerMessage::Welcome(Welcome {
+                    client_id: "fixture-client".into(),
                     revision: REVISION,
                     server_revision: REVISION,
                     min_revision: MIN_REVISION,
@@ -493,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn attach_gives_up_on_a_server_that_never_bridges() {
+    fn attach_gives_up_on_a_server_that_never_tickets() {
         let (_home, path) = silent_server(true);
         let started = Instant::now();
         let error = attach(&path, &LfProcessId::new()).expect_err("attach stalled");
@@ -508,14 +570,6 @@ mod tests {
     fn a_welcomed_session_reads_without_a_bound() {
         let (_home, path) = silent_server(true);
         let connection = Connection::open_at(&path).unwrap();
-        let stream: &UnixStream = &connection.socket.writer;
-        assert_eq!(stream.read_timeout().unwrap(), None);
-        connection
-            .set_read_timeout(Some(Duration::from_millis(50)))
-            .unwrap();
-        assert_eq!(
-            stream.read_timeout().unwrap(),
-            Some(Duration::from_millis(50))
-        );
+        assert_eq!(connection.socket.writer.read_timeout().unwrap(), None);
     }
 }

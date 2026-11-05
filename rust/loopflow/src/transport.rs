@@ -2284,7 +2284,7 @@ fn reconnect_server(
         }
         match crate::server::client::bridge_existing(id) {
             Ok(socket) => return Ok(Some(socket)),
-            Err(error) if error.is::<crate::server::client::ServerError>() => {
+            Err(error) if error.is::<crate::server::wire::ServerError>() => {
                 return Err(error);
             }
             Err(error) => write_output(

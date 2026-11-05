@@ -568,26 +568,24 @@ final class MobileTerminalTests: XCTestCase {
 
     func testBackendOwnedFixturesDecodeWithoutDefaults() throws {
         let response: ServerMessage = try machineFixture("reading")
-        guard case .reading("tasks-1", let generation, let frame) = response else { return XCTFail("Expected reading") }
-        XCTAssertEqual(generation, 7)
+        guard case .reading("tasks-1", let frame) = response else { return XCTFail("Expected reading") }
         guard case .object(let fields) = frame else { return XCTFail("Expected watch frame") }
         XCTAssertEqual(fields["unavailable"], .string("repository is unavailable"))
         XCTAssertEqual(fields["body"], .null)
         XCTAssertThrowsError(try JSONDecoder().decode(ServerMessage.self,
             from: Data(#"{"type":"response","id":"x","result":{"kind":"read"}}"#.utf8)))
 
-        let request = ServerClientMessage.request(id: "tasks-1", operation: .subscribe(
-            .roadmap(directory: "/", wave: nil, task: nil, all: true), generation: 7))
+        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .roadmap(directory: "/", wave: nil, task: nil, all: true))
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try machineFixture("subscribe"))
 
         let ownerResponse: ServerMessage = try machineFixture("owner")
-        guard case .response(_, .sessionOwner(let owner)) = ownerResponse else { return XCTFail("Expected Session owner") }
-        XCTAssertEqual(owner, "85c31c1e-850c-4821-878d-55527b6dba46")
-        let commandResponse: ServerMessage = try machineFixture("command")
-        guard case .response(_, .command(let trace, let code, _, _, _)) = commandResponse else { return XCTFail("Expected command result") }
+        guard case .response(_, _, let owner) = ownerResponse else { return XCTFail("Expected Session owner") }
+        XCTAssertEqual(owner["owner"], .string("85c31c1e-850c-4821-878d-55527b6dba46"))
+        let renamed: ServerMessage = try machineFixture("response")
+        guard case .response(_, let trace, let result) = renamed else { return XCTFail("Expected a write's value") }
         XCTAssertFalse(trace.isEmpty)
-        XCTAssertEqual(code, 0)
+        XCTAssertEqual(result["title"], .string("Served name"))
     }
 
     func testFreshControlGrantRestoresKeyboardAfterHiddenAttachment() async throws {

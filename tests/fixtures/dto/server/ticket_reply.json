@@ -1,1 +1,1 @@
-{"type":"response","id":"terminal-1","result":{"kind":"ticket","ticket":"f06b5872-b113-47e5-be82-4320e33d7a3d"}}
+{"type":"response","id":"terminal-1","trace_id":"4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b","result":{"ticket":"f06b5872-b113-47e5-be82-4320e33d7a3d"}}

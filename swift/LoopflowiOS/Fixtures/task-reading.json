@@ -1,226 +1,224 @@
 {
   "type": "response",
   "id": "fixture-tasks",
+  "trace_id": "0f1e2d3c-4b5a-4968-8776-655443322110",
   "result": {
-    "kind": "read",
-    "value": {
-      "dashboard_id": null,
-      "repository": "repo_fixture",
-      "saved_revision": null,
-      "selection": {
-        "id": "working",
-        "expression": {
-          "kind": "intersect",
-          "items": [
-            {
-              "id": "tasks",
-              "expression": {
-                "kind": "filter",
-                "filter": {
-                  "field": "kind",
-                  "value": "task"
-                }
-              }
-            },
-            {
-              "id": "open",
-              "expression": {
-                "kind": "filter",
-                "filter": {
-                  "field": "state",
-                  "value": "open"
-                }
+    "dashboard_id": null,
+    "repository": "repo_fixture",
+    "saved_revision": null,
+    "selection": {
+      "id": "working",
+      "expression": {
+        "kind": "intersect",
+        "items": [
+          {
+            "id": "tasks",
+            "expression": {
+              "kind": "filter",
+              "filter": {
+                "field": "kind",
+                "value": "task"
               }
             }
-          ]
-        }
-      },
-      "resolution": {
-        "members": [
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_1"
-            }
           },
           {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_2"
-            }
-          },
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_3"
+            "id": "open",
+            "expression": {
+              "kind": "filter",
+              "filter": {
+                "field": "state",
+                "value": "open"
+              }
             }
           }
-        ],
-        "attention": [],
-        "unavailable": []
-      },
-      "arrangement": {
-        "order": [
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_1"
-            }
-          },
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_2"
-            }
-          },
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_3"
-            }
-          }
-        ],
-        "hidden": [],
-        "mode": "auto"
-      },
-      "projection": {
-        "visible": [
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_1"
-            }
-          },
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_2"
-            }
-          },
-          {
-            "source": [
-              "working"
-            ],
-            "work": {
-              "repository": "repo_fixture",
-              "kind": "task",
-              "id": "task_fixture_3"
-            }
-          }
-        ],
-        "suppressed": []
-      },
-      "contents": [
+        ]
+      }
+    },
+    "resolution": {
+      "members": [
         {
+          "source": [
+            "working"
+          ],
           "work": {
             "repository": "repo_fixture",
             "kind": "task",
             "id": "task_fixture_1"
-          },
-          "title": "Session input study",
-          "states": [
-            "open",
-            "available"
-          ],
-          "primary_session": "session_fixture_1",
-          "location": null,
-          "argv": null,
-          "unavailable": [],
-          "face": null,
-          "pane_revision": null
+          }
         },
         {
+          "source": [
+            "working"
+          ],
           "work": {
             "repository": "repo_fixture",
             "kind": "task",
             "id": "task_fixture_2"
-          },
-          "title": "Review a change",
-          "states": [
-            "open",
-            "available"
-          ],
-          "primary_session": "session_fixture_2",
-          "location": null,
-          "argv": null,
-          "unavailable": [],
-          "face": null,
-          "pane_revision": null
+          }
         },
         {
+          "source": [
+            "working"
+          ],
           "work": {
             "repository": "repo_fixture",
             "kind": "task",
             "id": "task_fixture_3"
-          },
-          "title": "Session unavailable",
-          "states": [
-            "open",
-            "available"
-          ],
-          "primary_session": null,
-          "location": null,
-          "argv": null,
-          "unavailable": [
-            "No existing Session is recorded"
-          ],
-          "face": null,
-          "pane_revision": null
+          }
         }
       ],
-      "name": null,
-      "pinned": false,
-      "slots": {
-        "root": {
-          "kind": "split",
-          "axis": "vertical",
-          "weights": [
-            2.0,
-            1.0
+      "attention": [],
+      "unavailable": []
+    },
+    "arrangement": {
+      "order": [
+        {
+          "source": [
+            "working"
           ],
-          "children": [
-            {
-              "kind": "slot",
-              "slot": 1
-            },
-            {
-              "kind": "slot",
-              "slot": 0
-            }
-          ]
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_1"
+          }
+        },
+        {
+          "source": [
+            "working"
+          ],
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_2"
+          }
+        },
+        {
+          "source": [
+            "working"
+          ],
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_3"
+          }
         }
+      ],
+      "hidden": [],
+      "mode": "auto"
+    },
+    "projection": {
+      "visible": [
+        {
+          "source": [
+            "working"
+          ],
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_1"
+          }
+        },
+        {
+          "source": [
+            "working"
+          ],
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_2"
+          }
+        },
+        {
+          "source": [
+            "working"
+          ],
+          "work": {
+            "repository": "repo_fixture",
+            "kind": "task",
+            "id": "task_fixture_3"
+          }
+        }
+      ],
+      "suppressed": []
+    },
+    "contents": [
+      {
+        "work": {
+          "repository": "repo_fixture",
+          "kind": "task",
+          "id": "task_fixture_1"
+        },
+        "title": "Session input study",
+        "states": [
+          "open",
+          "available"
+        ],
+        "primary_session": "session_fixture_1",
+        "location": null,
+        "argv": null,
+        "unavailable": [],
+        "face": null,
+        "pane_revision": null
+      },
+      {
+        "work": {
+          "repository": "repo_fixture",
+          "kind": "task",
+          "id": "task_fixture_2"
+        },
+        "title": "Review a change",
+        "states": [
+          "open",
+          "available"
+        ],
+        "primary_session": "session_fixture_2",
+        "location": null,
+        "argv": null,
+        "unavailable": [],
+        "face": null,
+        "pane_revision": null
+      },
+      {
+        "work": {
+          "repository": "repo_fixture",
+          "kind": "task",
+          "id": "task_fixture_3"
+        },
+        "title": "Session unavailable",
+        "states": [
+          "open",
+          "available"
+        ],
+        "primary_session": null,
+        "location": null,
+        "argv": null,
+        "unavailable": [
+          "No existing Session is recorded"
+        ],
+        "face": null,
+        "pane_revision": null
+      }
+    ],
+    "name": null,
+    "pinned": false,
+    "slots": {
+      "root": {
+        "kind": "split",
+        "axis": "vertical",
+        "weights": [
+          2.0,
+          1.0
+        ],
+        "children": [
+          {
+            "kind": "slot",
+            "slot": 1
+          },
+          {
+            "kind": "slot",
+            "slot": 0
+          }
+        ]
       }
     }
   }

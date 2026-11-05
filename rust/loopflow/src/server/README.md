@@ -1,7 +1,7 @@
 # Connect to the local Loopflow server
 
 ```sh
-lf server status   # readiness, socket, protocol revision and server incarnation as JSON
+lf server status   # readiness, socket, protocol revision, incarnation and connected clients as JSON
 ```
 
 Installation prepares client access automatically. Desktop's first connection
@@ -50,90 +50,141 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":1048576,"max_connections":64}}
-→ {"type":"request","id":"a","operation":{"kind":"read","query":{"read":"roadmap",…}}}
-→ {"type":"request","id":"b","operation":{"kind":"subscribe","query":{…},"generation":1}}
-← {"type":"response","id":"a","result":{"kind":"read","value":{…}}}
-← {"type":"response","id":"b","result":{"kind":"subscribed"}}
-← {"type":"reading","id":"b","generation":1,"frame":{"answers":null,"unavailable":null,"body":{…}}}
-→ {"type":"checkpoint","id":"b","frame":{"id":3}}
-← {"type":"reading","id":"b","generation":1,"frame":{"answers":3,…}}
+← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":1048576,"max_connections":64}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true}}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null}}
+← {"type":"response","id":"a","trace_id":"…","result":{…}}
+← {"type":"response","id":"b","trace_id":"…","result":null}
+← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
+→ {"type":"checkpoint","id":"b","checkpoint":3}
+← {"type":"reading","id":"b","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 ```
 
 The first message is `hello` with the revisions the client speaks. The server
-chooses the newest revision both sides speak and answers `welcome` with it, the
-server's own range, its incarnation (`instance` changes with every start), build,
+chooses the newest revision both sides speak and answers `welcome` with it, a
+server-assigned `client_id`, the server's own range, its incarnation (`instance` changes with every start), build,
 executable SHA-256, the Machine reading (`null` while the registry is
 unavailable or uninitialized), capabilities and limits. With no revision in
-common it answers `error {code: incompatible}` naming the side to update, then
-closes. This build speaks revision 2 only; the shape lets a later server speak
+common it answers `error {code: incompatible}` naming the side to update in
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 2 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
 
 `status` before `hello` is the readiness probe: `status {revision, min_revision,
-instance, executable_sha256}`, then the server closes. `lf server status` and
+instance, executable_sha256, clients}`, then the server closes. `lf server status` and
 installation use it so readiness never opens Work or speaks the full protocol;
-`lf server status` also reports `listening` (a server accepted the connection)
-and `revision`. Local readiness compares the executable hash with the selected
+`lf server status` also reports `listening` (a server accepted the connection),
+`revision` and `clients`: each welcomed connection still open, oldest first, as
+`{id, client, connected_at, requests}`, where `client` is the identity its
+`hello` gave and `requests` counts its requests, subscriptions included. The
+identity is for diagnostics and grants nothing. Local readiness compares the executable hash with the selected
 installation, an installation check that never applies to a remote client.
 
 After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
-`operation`; the server answers `response {id, result}` or `error {id, code,
-message}` in whatever order work finishes. `cancel {id}` forgets a request's
-answer or ends a subscription; a command already dispatched still completes and
+`operation`; the server answers `response {id, trace_id, result}` or `error
+{id, code, message, data}` in whatever order work finishes. `result` is the
+operation's value: what its CLI spelling prints with `--json`, `{owner}` for
+`session.owner`, and null once a subscription or attachment is confirmed.
+`trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
+answer or ends a subscription; a write already dispatched still completes and
 answers nothing. Closing the connection cancels every subscription and releases
 every wait; admitted mutations finish. An `error` with a null `id` is about the
 connection and is its last message: the server closes after `busy` at capacity
 (nothing ran; retry shortly) and after `invalid` for a malformed line or a
-repeated `hello`/`status`. `ErrorCode` is `incompatible, invalid, unavailable,
-outcome_unknown, busy`.
+repeated `hello`/`status`. `data` is structured detail or null. Clients branch
+on `code`; only `outcome_unknown` means the request may have taken effect:
 
-- `configuration {request}` uses `config::api::Request` for catalogue, declaration,
+| `code` | Meaning | `data` |
+| --- | --- | --- |
+| `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
+| `invalid` | Malformed message or refused arguments, such as subscribing to a read with no watch | null |
+| `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner}`, `{id}`, `{repository}`, `{expression}` |
+| `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
+| `unavailable` | A dependency is missing or failed: the Machine registry, a watch, a read | `{resource}` when one is named |
+| `outcome_unknown` | The operation may have run; inspect state before retrying | null |
+| `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
+
+A shared operation names its code by returning `wire::ServerError` inside its
+error; anything else a read returns is `unavailable`.
+
+Every operation names its `kind` as a dotted resource and verb, beside its
+fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
+the shared kinds; `wire::ServerOperation` owns the server's own:
+
+| Resource | Reads | Writes |
+| --- | --- | --- |
+| `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs` | `task.create`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.hold`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
+| `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new` |
+| `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
+| `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repository.path` | |
+| `graph` | `graph.list`, `graph.run` | `graph.customize` |
+| `machine`, `process` | `machine.self`, `machine.list`, `machine.doctor`, `process.list` | |
+| `usage`, `history` | `usage.get`, `history.list`, `history.retention` | |
+| `work`, `view`, `config` | `work.resolve`, `view.list`, `view.get`, `config.settings` | `config.file` |
+| `terminal` | | `terminal.attach` |
+| `desktop` | `desktop.portfolio`, `desktop.layout` | `desktop.portfolio.set`, `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
+
+`desktop.*` is Desktop's own arrangement state: which repositories its windows
+show, saved pane layouts and Dashboards. It is served for Desktop and is not
+part of what a phone or bot client is offered.
+
+- `config.file {request}` uses `config::api::Request` for catalogue, declaration,
   explanation and theme access. CLI and Desktop share the same Rust validation
-  and file writer. It returns the ordinary command receipt and never replays a
-  failed or uncertain save. Setting values are omitted from request telemetry.
-- `read {query}` uses the existing `Read` shape and answers `read {value}`: the
-  JSON the command prints, serialized once. A command that prints bare text
+  and file writer. It returns the value `config::api::run` returns and never
+  replays a failed or uncertain save. Setting values are omitted from request telemetry.
+- A read uses the existing `Read` shape and answers with the JSON the command
+  prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is
-  supported. Repository IDs resolve on the destination with `repository_path`;
-  paths in local reads are destination paths. `view_plan` returns the existing
+  supported. Repository IDs resolve on the destination with `repository.path`;
+  paths in local reads are destination paths. `view.get` returns the existing
   WorkViewPlan, including the recorded primary Session; roadmap membership alone
   cannot select one. A missing primary stays absent. Resolve its owner with
-  `session_owner` before attachment.
-- `subscribe {query,generation}` supports every shared read with a watch. It
-  answers `subscribed`, then `reading {id,generation,frame}` messages wrapping
+  `session.owner` before attachment.
+- `subscribe {id, operation}` takes a read with a watch: `view.list`,
+  `session.list` without `limit`, `task.get`, `history.list`, `plan.get`,
+  `repository.planning` and `process.list`. It answers
+  `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
-  {id,frame}` carries the watch's request lines (`{"id":3}` or argument changes);
-  the shared watch validates them, including its 16 KiB limit. A watch that
-  fails sends its `unavailable` reading, then `error {id, unavailable}` ends the
-  subscription; the connection stays open. Reconnect opens a fresh subscription
+  {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
+  that number, changed or not. A subscription's arguments are fixed: new
+  arguments are a new subscription with a complete first reading. A watch that
+  fails sends its `unavailable` reading, then `error {id, code: unavailable}`
+  ends the subscription; the connection stays open. A read with no watch is
+  `invalid`. Reconnect opens a fresh subscription
   and receives a complete reading; no replay cursor exists.
-- `command {change}` accepts the shared `Write` shape. The server calls the same
-  Rust mutation dispatcher as the CLI, with the request's directory and streams.
-  `command {trace_id,code,value,output,stderr}` returns its exit status, output
-  and diagnostics; `value` is stdout parsed as JSON when the command's spelling
-  carries `--json` and stdout parses, otherwise null. `task_from_session
-  {directory,id,title}` adopts the selected conversation and returns the Task
-  without launching work; CLI and server share its creation handler. Ordinary
-  writes start no CLI child. Machine routing still uses SSH and never falls back
-  to local execution. Requests create no Process rows. A lost response means
-  outcome unknown; inspect state before retrying. IDs correlate diagnostics and
-  are **not** durable deduplication receipts. No automatic resubmission.
-- `session_owner {session}` resolves a Session ID to `session_owner {owner}`.
+- A write uses the shared `Write` shape. `Write::run` calls the shared Rust
+  function its CLI handler calls and returns the typed value; the CLI prints
+  that value with `--json` and renders it as text otherwise. Nothing parses
+  standard output. `task.create {directory,id,title}` adopts the selected
+  conversation and returns the Task without launching work. A write whose Work
+  lives on another Machine (`task.claim`, `task.unassign`, `task.hold`,
+  `session.resume`) runs its `lf … --json` spelling there over SSH and returns
+  what that prints, which is the destination's value; it never falls back to
+  local execution. Requests create no Process rows; diagnostics the shared
+  functions print go to the request's log. A refusal the shared code names
+  (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
+  record `not_found`) answers that code; any other failure is
+  `outcome_unknown`, since the write may have taken partial effect. A lost
+  response means outcome unknown; inspect state before retrying. IDs correlate
+  diagnostics and are **not** durable deduplication receipts. No automatic
+  resubmission.
+- `session.owner {session}` resolves a Session ID to `{owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.
-- `attach {owner}` names the exact existing owner Process ID and answers
-  `ticket {ticket}`. The terminal opens a connection of its own, sends `ticket`
-  as its first message, reads `admitted`, then carries the unchanged binary owner
+- `terminal.attach {owner}` names the exact existing owner Process ID and answers
+  `{ticket}`. The terminal opens a connection of its own, sends `ticket` as its
+  first message, reads `admitted`, then carries the unchanged binary owner
   protocol in `transport/README.md` and `transport/wire.rs`: raw bytes locally,
-  binary frames remotely. A ticket (`ticket.rs`) is single use, expires unused
-  after 30 s and is redeemable only by the admission that requested it: the same
-  user locally, the same Tailscale node and user remotely. Each terminal has its
-  own connection, so readings never wait behind terminal bytes, a control failure
-  never closes a bridged terminal, and the bridge reads no Work. The owner alone grants input/geometry,
+  binary frames remotely. An owner whose endpoint refuses at redemption is
+  `not_found {owner}`: it ended. A ticket (`ticket.rs`) is single use, expires
+  unused after 30 s and is redeemable only by the admission that requested it:
+  the same user locally, the same Tailscale node and user remotely; any other
+  ticket is `not_found {ticket}`. Each terminal has its own connection, so
+  readings never wait behind terminal bytes, a control failure never closes a
+  bridged terminal, and the bridge reads no Work. The owner alone grants input/geometry,
   handles bounded output continuation and revokes stale control. No automatic
   owner replacement or raw-input replay. Desktop automatically reconnects the
   exact owner with bounded backoff, keeping connection status in native chrome
@@ -146,13 +197,15 @@ outcome_unknown, busy`.
 - Bulk. An answer or reading larger than `limits.max_message` never travels on
   the control connection: the client receives `bulk {id, ticket, bytes}`, redeems
   the ticket on a second connection, and reads `admitted` followed by the original
-  message as one line. A request larger than the limit asks for `bulk {bytes}`,
-  receives `ticket`, and sends its one `request` line on the ticketed connection;
+  message as one line. A request larger than the limit asks for
+  `request.upload {bytes}`, receives `{ticket}`, and sends its one `request`
+  line on the ticketed connection;
   the answer arrives on the control connection under the request's id. Ticketed
   connections carry up to 64 MiB and a transfer has two minutes; larger messages
   are refused with `unavailable`. Clients fetch spills off their reader so other
   readings never wait. A control line over the limit is answered
-  `error {id: null, invalid}` and the connection closes. Nothing is paged.
+  `error {id: null, invalid}` whose data names `max_message`, and the connection
+  closes. Nothing is paged.
 
 Desktop holds one connection per server location for the app's lifetime,
 opened on first use and reopened on the next request after a loss with bounded
@@ -162,6 +215,11 @@ fails every pending request as outcome unknown and every watch, which the
 window reopens for a complete reading. Bulk fetches and oversize uploads use
 ticketed connections of their own. The phone (`swift/LoopflowiOS/MachineConnection.swift`)
 keeps one control connection per foreground session and the same ticket flow.
+
+Every client gives the server ten seconds to answer `status`, `hello` or
+`attach`; a server that accepts and stalls fails the open with that diagnosis
+and the caller's backoff retries. A welcomed session's waits and the bridged
+stream are unbounded unless the caller sets its own limit.
 
 Request diagnostics correlate the response trace with its target, duration,
 result, service incarnation and request ID. The existing log formatter adds the

@@ -19,13 +19,13 @@ final class RemoteTaskObservation: MobileTaskObservation {
     }
 
     static func open(connection: MachineConnection, query: ServedRead) async throws -> RemoteTaskObservation {
-        let subscription = try await connection.subscribe(query, generation: 1)
+        let subscription = try await connection.subscribe(query)
         let observation = RemoteTaskObservation(subscription: subscription)
         observation.reader = Task { [weak observation] in
             do {
-                for try await reading in subscription.readings {
+                for try await frame in subscription.readings {
                     guard let observation, !observation.closed else { return }
-                    try observation.receive(generation: reading.generation, frame: reading.frame)
+                    try observation.receive(frame)
                 }
                 throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
             } catch { observation?.close(error: error) }
@@ -47,7 +47,7 @@ final class RemoteTaskObservation: MobileTaskObservation {
             try await withCheckedThrowingContinuation { continuation in
                 refreshing = (checkpoint, continuation)
                 Task {
-                    do { try await subscription.checkpoint(.object(["id": .integer(Int64(checkpoint))])) }
+                    do { try await subscription.checkpoint(checkpoint) }
                     catch { close(error: error) }
                 }
             }
@@ -68,8 +68,8 @@ final class RemoteTaskObservation: MobileTaskObservation {
         refreshing = nil
     }
 
-    private func receive(generation: UInt64, frame: JSONValue) throws {
-        let reading = try Self.decode(generation: generation, frame: frame)
+    private func receive(_ frame: JSONValue) throws {
+        let reading = try Self.decode(frame: frame)
         continuation.yield(reading.reading)
         if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
@@ -77,8 +77,7 @@ final class RemoteTaskObservation: MobileTaskObservation {
         }
     }
 
-    static func decode(generation: UInt64, frame: JSONValue) throws -> (answers: UInt64?, reading: MobileTaskReading) {
-        guard generation == 1 else { throw RegistryQueryError("Received a different Task subscription") }
+    static func decode(frame: JSONValue) throws -> (answers: UInt64?, reading: MobileTaskReading) {
         struct Frame: Decodable {
             let answers: UInt64?
             let unavailable: String?

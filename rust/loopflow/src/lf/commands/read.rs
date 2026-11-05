@@ -47,24 +47,43 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 
 /// A read an app serves inside its own process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "read", rename_all = "snake_case", deny_unknown_fields)]
+/// On the wire each read is a resource-named `kind` (`task.get`); `desktop.*`
+/// reads are Desktop's own arrangement state.
+#[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
     /// `lf monitor ps`: live Loopflow call trees.
+    #[serde(rename = "process.list")]
     MonitorPs,
     /// `lf --cwd <directory> desktop plans`: the plans a repository window shows.
+    #[serde(rename = "view.list")]
     DesktopPlans { directory: PathBuf },
-    /// `lf desktop plans --all`: one selection across the Machine's repositories.
+    /// `lf desktop plans --all [--expression <expression>]`: one selection
+    /// across the Machine's repositories, as the phone lists open Tasks.
+    #[serde(rename = "view.select")]
     AllViewPlans { expression: Option<String> },
     /// `lf --cwd <directory> desktop sessions`, with `--interactive all`
-    /// when `headless` Sessions are shown too.
-    DesktopSessions { directory: PathBuf, headless: bool },
+    /// when `headless` Sessions are shown too: every row, or with a `limit`
+    /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
+    /// list has a watch.
+    #[serde(rename = "session.list")]
+    SessionList {
+        directory: PathBuf,
+        headless: bool,
+        after: Option<String>,
+        limit: Option<u32>,
+        /// Only the Sessions of this Task, as `--task <task>` filters them.
+        task: Option<String>,
+    },
     /// `lf --cwd <directory> desktop task <issue>`: the Task pane.
+    #[serde(rename = "task.get")]
     DesktopTask { directory: PathBuf, issue: String },
     /// `lf task diff <issue> --files --base <base>`: a Task's changed files.
+    #[serde(rename = "task.changes")]
     TaskChanges { issue: String, base: String },
     /// `lf task diff <issue> [path] --base <base>`, or with `--draft` and the
     /// draft on stdin: one Task's patch.
+    #[serde(rename = "task.diff")]
     TaskDiff {
         issue: String,
         path: Option<String>,
@@ -72,13 +91,18 @@ pub enum Read {
         draft: Option<String>,
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
+    #[serde(rename = "task.file")]
     TaskFile { issue: String, path: String },
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
+    #[serde(rename = "wave.list")]
     Waves,
     /// `lf machine id`: this Machine's identity.
+    #[serde(rename = "machine.self")]
     MachineId,
     /// `lf portfolio`: the repositories this Machine's windows show.
+    #[serde(rename = "desktop.portfolio")]
     Portfolio,
+    #[serde(rename = "config.settings")]
     Settings {
         directory: PathBuf,
         wave: Option<String>,
@@ -87,28 +111,35 @@ pub enum Read {
         step: Option<String>,
     },
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
+    #[serde(rename = "desktop.layout")]
     PaneLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> ops people`: who owns the repository's Tasks.
+    #[serde(rename = "repository.people")]
     People { directory: PathBuf },
     /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
+    #[serde(rename = "graph.list")]
     Graphs { directory: PathBuf },
     /// `lf --cwd <directory> desktop view [expression] --plan`: what a view
     /// shows; no expression is the repository's own.
+    #[serde(rename = "view.get")]
     ViewPlan {
         directory: PathBuf,
         expression: Option<String>,
     },
     /// `lf --cwd <directory> graph list --processes --for-task <task>
     /// [--after <after>]`: one page of the Graphs that ran for a Task.
+    #[serde(rename = "task.runs")]
     GraphProcesses {
         directory: PathBuf,
         task: String,
         after: Option<String>,
     },
     /// `lf graph show <id> --processes`: one Graph that ran, with its steps.
+    #[serde(rename = "graph.run")]
     GraphProcess { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
+    #[serde(rename = "usage.get")]
     Usage {
         days: u32,
         wave: Option<String>,
@@ -117,24 +148,32 @@ pub enum Read {
     },
     /// `lf usage --days 0 --task <task> --context`: what each of those
     /// inputs was made of.
+    #[serde(rename = "task.context")]
     TaskContext { task: String },
     /// `lf --cwd <directory> desktop wave <wave>`: one Wave's Projects and
     /// Tasks, after syncing its repository with the tracker.
+    #[serde(rename = "wave.get")]
     WaveDetail { directory: PathBuf, wave: String },
     /// `lf --cwd <directory> desktop done --wave <wave> [--after <after>]`:
-    /// one page of a Wave's closed Tasks.
+    /// one page of a Wave's closed Tasks. Only `closed` lists exist; open
+    /// Tasks are `plan.get`'s.
+    #[serde(rename = "task.list")]
     ClosedTasks {
         directory: PathBuf,
         wave: String,
         after: Option<String>,
+        closed: bool,
     },
     /// `lf machine list`: your registered Machines.
+    #[serde(rename = "machine.list")]
     Machines,
     /// `lf history`: what Sessions did, by Work.
+    #[serde(rename = "history.list")]
     History(HistoryWindow),
     /// `lf --cwd <directory> desktop plan [wave] [--task <task>] [--all]`:
     /// Waves and Tasks. Read once, it first asks the tracker about each
     /// repository read; its watch reads the store.
+    #[serde(rename = "plan.get")]
     Roadmap {
         directory: PathBuf,
         wave: Option<String>,
@@ -143,38 +182,34 @@ pub enum Read {
     },
     /// `lf --cwd <directory> config planning status`: where the repository's
     /// planning is exchanged. Its watch exchanges it while it runs.
+    #[serde(rename = "repository.planning")]
     PlanningStatus { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
+    #[serde(rename = "work.resolve")]
     WorkLink { directory: PathBuf, url: String },
     /// `lf --repository <id> config repository --path`: a repository plan's
     /// checkout on this Machine.
+    #[serde(rename = "repository.path")]
     RepositoryPath { id: RepositoryId },
     /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
     /// new Task there would take up.
+    #[serde(rename = "wave.graph")]
     WaveGraph {
         directory: PathBuf,
         wave: Option<String>,
     },
-    /// `lf --cwd <directory> desktop sessions --page --limit 100 [--after …]`,
-    /// with `--interactive all` when `headless` Sessions are shown too.
-    SessionPage {
-        directory: PathBuf,
-        headless: bool,
-        after: Option<String>,
-        task: Option<String>,
-    },
     /// `lf --cwd <directory> ops tokens [--days <days>]`: the codebase's size.
+    #[serde(rename = "repository.tokens")]
     Tokens {
         directory: PathBuf,
         days: Option<u32>,
     },
     /// `lf history retention`: how much Session history providers keep.
+    #[serde(rename = "history.retention")]
     Retention,
     /// `lf doctor`: the ledger's self-audit.
+    #[serde(rename = "machine.doctor")]
     Doctor,
-    /// `lf session bind --dry-run --task <task> -- <session>`: the Task a
-    /// bind would assign, without assigning it.
-    BindPreview { session: String, task: String },
 }
 
 impl Read {
@@ -189,13 +224,21 @@ impl Read {
                 argv.extend(optional("--expression", expression.as_ref()));
                 argv
             }
-            Self::DesktopSessions {
+            Self::SessionList {
                 directory,
                 headless,
+                after,
+                limit,
+                task,
             } => {
                 let mut argv = at(directory, &["desktop", "sessions"]);
                 argv.extend(words(session_flags(*headless)));
                 argv.push("--json".into());
+                if let Some(limit) = limit {
+                    argv.extend(words(&["--page", "--limit", &limit.to_string()]));
+                    argv.extend(optional("--after", after.as_ref()));
+                }
+                argv.extend(optional("--task", task.as_ref()));
                 argv
             }
             Self::DesktopTask { directory, issue } => {
@@ -292,6 +335,7 @@ impl Read {
                 directory,
                 wave,
                 after,
+                ..
             } => {
                 let mut argv = at(directory, &["desktop", "done", "--wave", wave, "--json"]);
                 argv.extend(optional("--after", after.as_ref()));
@@ -335,19 +379,6 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::SessionPage {
-                directory,
-                headless,
-                after,
-                task,
-            } => {
-                let mut argv = at(directory, &["desktop", "sessions", "--json", "--page"]);
-                argv.extend(words(session_flags(*headless)));
-                argv.extend(words(&["--limit", "100"]));
-                argv.extend(optional("--after", after.as_ref()));
-                argv.extend(optional("--task", task.as_ref()));
-                argv
-            }
             Self::Tokens { directory, days } => {
                 let mut argv = at(directory, &["ops", "tokens", "--json"]);
                 argv.extend(optional("--days", *days));
@@ -355,16 +386,6 @@ impl Read {
             }
             Self::Retention => words(&["history", "retention", "--json"]),
             Self::Doctor => words(&["doctor", "--json"]),
-            Self::BindPreview { session, task } => words(&[
-                "session",
-                "bind",
-                "--dry-run",
-                "--json",
-                "--task",
-                task,
-                "--",
-                session,
-            ]),
         }
     }
 
@@ -387,9 +408,20 @@ impl Read {
             Self::AllViewPlans { expression } => {
                 value(&super::desktop::read_all_view_plans(expression.as_deref())?)
             }
-            Self::DesktopSessions { directory, .. } | Self::SessionPage { directory, .. } => value(
-                &super::session::read_once(&self.session_filter(directory)?, Shape::Desktop)?,
-            ),
+            Self::SessionList {
+                directory,
+                after,
+                limit,
+                ..
+            } => {
+                if after.is_some() && limit.is_none() {
+                    return Err(invalid("`after` pages a list: name its `limit` too").into());
+                }
+                value(&super::session::read_once(
+                    &self.session_filter(directory)?,
+                    Shape::Desktop,
+                )?)
+            }
             Self::DesktopTask { directory, issue } => {
                 value(&super::desktop::read_task_pane(directory, issue)?)
             }
@@ -434,7 +466,11 @@ impl Read {
                 let plan = super::desktop::plan_view(None, directory, expression.as_deref())?;
                 // The command prints this plan, then exits 3.
                 if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
-                    anyhow::bail!("{}", plan.resolution.unavailable.join("; "));
+                    return Err(not_found(
+                        plan.resolution.unavailable.join("; "),
+                        serde_json::json!({ "expression": expression }),
+                    )
+                    .into());
                 }
                 value(&plan)
             }
@@ -477,10 +513,14 @@ impl Read {
             Self::WaveDetail { directory, wave } => {
                 value(&super::waves::desktop_status(directory, wave)?)
             }
+            Self::ClosedTasks { closed: false, .. } => {
+                Err(invalid("only closed Tasks are listed; read plan.get for open ones").into())
+            }
             Self::ClosedTasks {
                 directory,
                 wave,
                 after,
+                closed: true,
             } => value(&super::waves::desktop_closed_tasks(
                 directory,
                 wave,
@@ -505,8 +545,13 @@ impl Read {
             // The command prints the path alone.
             Self::RepositoryPath { id } => {
                 let checkout = super::work_route::repository_path(id)?;
-                let repo = crate::repository::CanonicalRepo::containing(&checkout)?
-                    .ok_or_else(|| anyhow::anyhow!("repository plan {id} has no local checkout"))?;
+                let repo =
+                    crate::repository::CanonicalRepo::containing(&checkout)?.ok_or_else(|| {
+                        not_found(
+                            format!("repository plan {id} has no local checkout"),
+                            serde_json::json!({ "repository": id }),
+                        )
+                    })?;
                 Ok(repo.to_string().into())
             }
             Self::WaveGraph { directory, wave } => {
@@ -518,14 +563,15 @@ impl Read {
                 ))??)
             }
             Self::Tokens { directory, days } => super::tokens::codebase(directory, *days),
-            Self::Retention => value(
-                &super::history_transcript::retention_summary()?
-                    .ok_or_else(|| anyhow::anyhow!("No Sessions recorded."))?,
-            ),
+            Self::Retention => value(&super::history_transcript::retention_summary()?.ok_or_else(
+                || {
+                    not_found(
+                        "No Sessions recorded.",
+                        serde_json::json!({ "resource": "sessions" }),
+                    )
+                },
+            )?),
             Self::Doctor => value(&super::doctor::report()?),
-            Self::BindPreview { session, task } => {
-                value(&super::session::binding_preview(session, task)?)
-            }
         }
     }
 
@@ -539,14 +585,19 @@ impl Read {
     ) -> anyhow::Result<Subscription> {
         let transport = Transport::Pull(Box::new(wake));
         let subscription = match self {
-            Self::AllViewPlans { expression } => {
-                super::desktop::watch_all_view_plans(expression, transport)
-            }
             Self::MonitorPs => super::top::watch_ps(transport),
             Self::DesktopPlans { directory } => {
                 super::desktop::watch_plans(None, directory, transport)
             }
-            Self::DesktopSessions { ref directory, .. } => super::session::watch_list(
+            Self::AllViewPlans { expression } => {
+                super::desktop::watch_all_view_plans(expression, transport)
+            }
+            Self::SessionList {
+                ref directory,
+                limit: None,
+                after: None,
+                ..
+            } => super::session::watch_list(
                 self.session_filter(directory)?,
                 Shape::Desktop,
                 transport,
@@ -565,7 +616,13 @@ impl Read {
                 &super::planning::status_repository(&directory)?,
                 transport,
             ),
-            other => anyhow::bail!("`lf {}` has no --watch", other.argv().join(" ")),
+            other => {
+                return Err(crate::server::wire::ServerError::new(
+                    crate::server::wire::ErrorCode::Invalid,
+                    format!("`lf {}` has no --watch", other.argv().join(" ")),
+                )
+                .into())
+            }
         }?;
         Ok(subscription.expect("a pulled watch returns its subscription"))
     }
@@ -594,6 +651,19 @@ fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
     Ok(tokio::runtime::Runtime::new()?.block_on(future))
 }
 
+fn invalid(message: &str) -> crate::server::wire::ServerError {
+    crate::server::wire::ServerError::new(crate::server::wire::ErrorCode::Invalid, message)
+}
+
+/// A served read's named absence; the CLI prints its message.
+fn not_found(
+    message: impl Into<String>,
+    data: serde_json::Value,
+) -> crate::server::wire::ServerError {
+    crate::server::wire::ServerError::new(crate::server::wire::ErrorCode::NotFound, message)
+        .with(data)
+}
+
 fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
     Ok(serde_json::to_value(value)?)
 }
@@ -608,7 +678,7 @@ mod tests {
         let read = |json: &str| serde_json::from_str::<Read>(json).unwrap().argv();
         assert_eq!(
             read(
-                r#"{"read":"history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#
+                r#"{"kind":"history.list","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#
             ),
             [
                 "history",
@@ -622,7 +692,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            read(r#"{"read":"desktop_sessions","directory":"/r","headless":true}"#),
+            read(
+                r#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null}"#
+            ),
             [
                 "--cwd",
                 "/r",
@@ -635,12 +707,12 @@ mod tests {
         );
         assert_eq!(
             read(
-                r#"{"read":"task_diff","issue":"FIX-1","path":null,"base":"parent","draft":null}"#
+                r#"{"kind":"task.diff","issue":"FIX-1","path":null,"base":"parent","draft":null}"#
             ),
             ["task", "diff", "FIX-1", "--base", "parent", "--json"]
         );
         assert_eq!(
-            read(r#"{"read":"view_plan","directory":"/r","expression":"state:backlog"}"#),
+            read(r#"{"kind":"view.get","directory":"/r","expression":"state:backlog"}"#),
             [
                 "--cwd",
                 "/r",

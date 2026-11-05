@@ -523,20 +523,18 @@ fn backup_before_migration(
     Ok(Some(backup_path))
 }
 
-/// Each release that migrates clones the store first. Once a migration commits
-/// only the generation it made stays, and once its install settles none does
-/// (`kept` 0). Names this writer did not produce are left alone, and a failed
-/// removal is retried by the next migration or settlement.
-pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
+/// The clones this writer made beside `path`, oldest first:
+/// `loopflow.db.backup-<version>-<16 hex>`. Names it did not produce are not listed.
+pub(crate) fn migration_backups(path: &Path) -> Vec<PathBuf> {
     let (Some(parent), Some(file_name)) = (
         path.parent(),
         path.file_name().and_then(|name| name.to_str()),
     ) else {
-        return;
+        return Vec::new();
     };
     let prefix = format!("{file_name}.backup-");
     let Ok(entries) = std::fs::read_dir(parent) else {
-        return;
+        return Vec::new();
     };
     let mut backups: Vec<(std::time::SystemTime, PathBuf)> = entries
         .filter_map(Result::ok)
@@ -555,8 +553,17 @@ pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
         .collect();
     backups.sort();
+    backups.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Each release that migrates clones the store first. Once a migration commits
+/// only the generation it made stays (`kept` 1); once its install settles with no
+/// process left on an older build, none does (`kept` 0). A failed removal is
+/// retried by the next migration or settlement.
+pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
+    let backups = migration_backups(path);
     let superseded = backups.len().saturating_sub(kept);
-    for (_, backup) in backups.into_iter().take(superseded) {
+    for backup in backups.into_iter().take(superseded) {
         if let Err(error) = std::fs::remove_file(&backup) {
             tracing::warn!(%error, backup = %backup.display(), "superseded migration backup was not removed");
             continue;

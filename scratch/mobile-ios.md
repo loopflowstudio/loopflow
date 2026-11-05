@@ -69,48 +69,60 @@ proof history.
 ### Server protocol revision 2 on the phone — November 5
 
 Jack Heart's steer: adopt revision 2, attach terminals by ticket rather than a
-protocol switch, and bound control messages. Decisions taken in this slice:
+protocol switch, and bound control messages. Revision 2 is PR #1813's shape
+(LOO-593, approved November 5), merged here: operations named by dotted `kind`,
+`response {id, trace_id, result}` typed per kind, `subscribe {id, operation}`,
+`checkpoint {id, checkpoint}` with integer checkpoints, readings without a
+generation. Decisions taken in this slice:
 
 - **One control connection** per client: hello/welcome, requests by id,
   subscriptions, checkpoints and cancel (`wire.rs`, `ServerProtocol.swift`). The
   phone opens it on first use per foreground session, reopens after a loss, and
   closes it on background (`MobileClient.suspend`). Each request waits at most
   15 s, then cancels its own id; the connection stays.
+- **This Task's operations in that scheme:** `view.select {expression}` (every
+  view plan; the phone's Task list and watch), `session.list` gains `task`,
+  `task.start` and `session.start` run as the server's own `lf` child
+  (`Write::delegated`), `mobile.status`, `mobile.configure {configuration}`,
+  `terminal.attach {owner}` and `request.upload {bytes}` answer `{ticket}`.
 - **Tickets** (`server/ticket.rs`): single use, 30 s, bound to the admission that
   asked (local UID, or remote node + user). Redeemed on a second connection:
   `/v1/ticket` remotely, a fresh Unix connection locally; first line `ticket`,
   answer `admitted`, then the purpose. One implementation serves both carriers.
-- **Terminal attach:** `attach {owner}` answers `ticket`; the terminal connection
+- **Terminal attach:** `terminal.attach {owner}` answers `{ticket}`; the terminal connection
   redeems it and carries the unchanged owner protocol as binary frames. The
   bridge stays a byte copy with no store read; the control connection never
   becomes a byte stream.
 - **Control limit 1 MiB** (`welcome.limits.max_message`); ticketed connections
   carry up to 64 MiB; larger is refused with `unavailable`. A control line over
-  the limit is answered with a null-id `invalid` naming the bulk ticket, then
-  the connection closes.
+  the limit is answered with a null-id `invalid` whose data names `max_message`,
+  then the connection closes.
 - **Per operation:** no paging. Any answer or reading above the limit spills
   whole: the server sends `bulk {id, ticket, bytes}` on the control connection
   and the client fetches the original message by ticket, off its reader, so other
   readings never wait behind it (`task_file`, `history`, `task_diff`, oversized
-  view plans and session pages). Requests above the limit (Task save) ask for a
-  `bulk {bytes}` ticket, upload the one request line, and receive the answer on
-  the control connection under the request's id. Measured on this Machine: plans
+  view plans and session pages). Requests above the limit (Task save) ask
+  `request.upload {bytes}` for a ticket, upload the one request line, and receive
+  the answer on the control connection under the request's id. Measured on this Machine: plans
   61 KB for 43 Tasks, history 29 KB, a sessions page 179 KB; the spill is the
   exception path today.
 - **Deleted:** revision-1 `MachineConnection` framing (four-byte prefix, 64 KiB
   chunk reassembly, one operation per WebSocket), `MachineRequest/Response/
-  Operation`, `Reply::Bridged`, the `bootstrap` request and `tests/fixtures/dto/machine/`.
-  Nothing speaks revision 1.
+  Operation`, `Reply::Bridged`, the `bootstrap` request and `tests/fixtures/dto/machine/`;
+  with the merge, the untyped `Reply`/`ServerReply` envelope, `generation` on
+  readings and the `command`, `bulk_request`, `all_view_plans` and `task_create`
+  fixtures. Nothing speaks revision 1.
 
-Checks (November 5): `cargo test -p loopflow --lib server::` 19 pass;
-`--test served_reads` 5 pass; `--test transport_tests server_` 18 pass and the
-task-create carrier-loss test pass (`/tmp/mobile-rev2-rust-integration.log`);
-`cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` pass;
-`scripts/test_desktop.sh --filter 'ServerClientTests|ServerProtocolTests'` 17 pass
-(`/tmp/mobile-rev2-desktop.log`); iOS `xcodebuild test -only-testing:LoopflowiOSTests`
-81 pass, 2 skipped (`/tmp/mobile-rev2-ios.log`). The opt-in host-Tailscale
-acceptance (`transport_tests mobile_native_acceptance`) has not been rerun on
-revision 2; it needs the private host certificate and belongs to demo.
+Checks (November 5, after the merge): `cargo test -p loopflow --lib server::`
+20 pass; `--test served_reads` 5 pass; `--test transport_tests server_` 17 pass
+(one run saw `server_subscriptions_refresh_work_and_resolve_primary_session`
+fail at its `view.get` request under the parallel suite; it passed alone and on
+rerun, unresolved); `--test integration task_create_survives` pass;
+`scripts/test_desktop.sh --filter 'ServerClientTests|ServerProtocolTests|RegistryQueryTests'`
+37 pass; iOS `xcodebuild test -only-testing:LoopflowiOSTests` 81 pass, 2 skipped.
+The opt-in host-Tailscale acceptance (`transport_tests mobile_native_acceptance`)
+has not been rerun on revision 2; it needs the private host certificate and
+belongs to demo.
 
 ## Remaining work and acceptance
 

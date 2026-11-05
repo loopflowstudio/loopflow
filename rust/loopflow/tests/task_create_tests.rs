@@ -68,7 +68,7 @@ impl Drop for Service {
 #[test]
 fn task_create_survives_a_dropped_carrier_and_server_restart() {
     use loopflow::lf::commands::write::Write as Change;
-    use loopflow::server::wire::{Operation, Reply};
+    use loopflow::server::wire::Operation;
     let task = CreationFixture::new();
     task.repo.push();
     let id = loopflow::id::TaskCreateRequestId::new();
@@ -80,9 +80,7 @@ fn task_create_survives_a_dropped_carrier_and_server_restart() {
         wave: None,
         graph: Some("feature".into()),
     };
-    let operation = || Operation::Command {
-        change: change.clone(),
-    };
+    let operation = || Operation::Write(change.clone());
     let service = Service::start(&task);
     let mut lost = service.connect();
     lost.send(operation()).unwrap();
@@ -127,18 +125,10 @@ fn task_create_survives_a_dropped_carrier_and_server_restart() {
     drop(service);
     let service = Service::start(&task);
     let reply = service.connect().request(operation()).unwrap();
-    let Reply::Command {
-        value,
-        code,
-        stderr,
-        ..
-    } = reply
-    else {
-        panic!("{reply:?}");
-    };
-    assert_eq!(code, 0, "{stderr}");
-    assert_eq!(value.expect("task create --json prints JSON"), saved);
-    let args = change.argv();
+    assert_eq!(reply.result, saved);
+    let args = change
+        .delegated()
+        .expect("task.start runs as its own lf process");
     let output = task.run(&args.iter().map(String::as_str).collect::<Vec<_>>());
     assert!(
         output.status.success(),

@@ -20,30 +20,30 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
-## Limit recovery (c0b373, 2026-11-05)
+## Limit recovery (c0b373, reconciled 2026-11-05)
 
-Jack Heart split LOO-714's recovery half into c0b373 on November 5: work keeps
-moving when an account runs out, with one place or none to recover Sessions.
-`provider_rate_limited` types the failure, never text; a text-only limit cools
-the account by default. A Graph step recovers inside its own Process: it fails
-over carrying its native thread (adopt copies; the pin follows the real launch),
-then polls the wall clock each minute while every route account cools, so the
-Graph never fails and no completed step replays. `agent_limit_recoveries` is the
-truth: `retry_at` set is waiting, null is moved. A step that dies waiting is
-where the next `lf task run` starts; one predicate, `restarts_by_itself`
-(assigned, unfinished, unblocked), decides both the sweep and whether status
-promises that restart. Shared Claude limits reach lf only through the
-`StopFailure` hook (no stream, no reset time): the login moves once, open Claude
-Sessions follow on their next message, nothing types into a terminal. Isolated
-and Codex Sessions move on resume. No model/harness fallback; failovers are capped.
+Jack Heart split LOO-714's recovery half into c0b373 (PR #1828): work keeps
+moving when an account or model runs out. `provider_rate_limited` types the
+failure, never text. Limits keep the provider's window name and scope; a
+model-suffixed window cools one model only. Accounts rank by soonest reset of
+the limiting window, then room, so none resets with quota unused. A Graph step
+recovers inside its own Process (the Graph never fails, no step replays):
+another account carrying its thread, then another model (bare harness only),
+then the next `default_agent` provider, then a wall-clock wait. An explicit
+`harness:model` changes accounts only. A step that dies waiting is where
+`lf task run` restarts; `restarts_by_itself` decides the sweep and the status
+promise. Running Claude re-reads its login only when
+`.credentials.json` changes mtime (live test, 2.1.318), so `activate` touches
+it. One selector (`--blocked`, `--on`) serves `lf session list`, `session move`
+and `account drain`; busy Sessions move at their Stop hook; moves never write
+preferences; nothing in the repo pins a provider.
 
-Lessons: a thread with no transcript cannot move, so failover falls back once to
-a fresh thread with the whole task; a provider's words cool an account only on a
-failed exit; Graph membership reads Process ancestry, since transport-served
-sessions lose `LF_GRAPH_ID`. Proof: Codex fixtures and unit tests, no live limit
-or demo. Open at review: cooling a whole account on `seven_day_overage_included`,
-unbounded waits, a restarted step's lost conversation (LOO-435), repeated skill
-names restarting at the first.
+Lessons: a thread without a transcript gets a fresh seeded one; a provider's
+words cool an account only on a failed exit; the pin follows the real launch.
+Proof: fixtures and unit tests only. Accepted, unbuilt: delete
+isolation (one shared home per Machine), laptop-driven remote logins, no
+long-lived tokens (Claude access tokens last about 8h). Open: overage cooling a
+whole account, unbounded waits, a restarted step's lost conversation (LOO-435).
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
@@ -595,14 +595,10 @@ is integrated. This supersedes relocation, parallel layouts and offline migratio
 Capture keys select history; Session IDs select mutations, and Session/Exec
 provenance supplies authority.
 Preserve paths, payloads, feedback, native identity and usage; missing payload
-cannot erase resumable identity. Checksum-pinned v0.13.3 stub-provider proofs and
-#1450's merge establish no installed conversion or interruption authority.
-
-Writable hard-link aliases, a recovery check/write race altering replacement
-metadata and unresolved Mac boot custody remain counterevidence, not repaired by
-deleting probes. Exact proofs and references:
-`5948e490eb7414a059f27ba39f838423a4730465:wave/infrastructure/MEMORY.md`
-under this heading.
+cannot erase resumable identity. Installed conversion remains unproved.
+Counterevidence (hard-link aliases, a recovery metadata race, Mac boot custody)
+and proofs: `5948e490eb7414a059f27ba39f838423a4730465:wave/infrastructure/MEMORY.md`,
+this heading.
 
 ## Transient recovery (LOO-326, curated 2026-10-09)
 
@@ -643,9 +639,8 @@ this heading.
 Jack Heart closed LOO-295 and LOO-342 on machine usage and declined retired Ask
 work; acceptance artifacts: `35e759aaf4:wave/infrastructure/MEMORY.md`, this
 heading. LOO-324: cross-binary history discovers native Session records across
-folders, never duplicating transcripts or replaying context. A usage threshold
-redirects future launches only; actual exhaustion triggers shared failover;
-isolated agents keep their own account/fallback. The Linear brief owns scope.
+folders, never duplicating transcripts or replaying context; account failover
+is under Limit recovery above. The Linear brief owns scope.
 [LOO-298 decisions](#data-model-and-performance-decisions-curated-2026-10-17)
 supersede older Run-owner, historical-import, pinned-Home and demo-before-landing
 directions.

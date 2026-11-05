@@ -776,14 +776,16 @@ final class WorkModel {
     }
 
     /// The placeholder's one action for any Work whose conversation is not open
-    /// here. A primary, or a Task shown in a Dashboard tile, opens in place through
+    /// here. A primary, or a Task shown in a tile of any presented board, opens in place through
     /// the warm opener: Rust's Start after a refused reveal, else Retry on the
     /// workspace intent. A selected Task's pane opens through its link, which can
     /// resolve the checkout its Start creates. Automatic opening runs through the
     /// warm queue.
     func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
         let key = workspace.key
-        let inTile = selectedViewPlan != nil && workspaceRegistry?.visibleWork.contains(key) == true
+        // A presented board: a Dashboard, Working Tasks, a Wave view or the repository page.
+        let boardShown = selectedViewPlan != nil || navigation.waveView != nil
+        let inTile = boardShown && workspaceRegistry?.visibleWork.contains(key) == true
         guard key.kind == .task, !inTile else {
             guard let registry = workspaceRegistry else { return }
             switch key.kind {

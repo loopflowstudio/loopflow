@@ -259,15 +259,16 @@ struct WorkDestinationTests {
     }
 
     /// A Dashboard whose one tile is `task`, retained at `location`, with the
-    /// tile's placeholder and the store its button opens through.
+    /// tile's placeholder and the store its button opens through. The repository
+    /// page shows the same tile beside the repository conversation.
     private func dashboardTile(_ task: RoadmapTask, snapshot: RoadmapSnapshot, query: RegistryQuery,
-                               location: WorkspaceIdentity) -> (WorkModel, SessionsWorkspaceRegistry, SessionsWorkspace, ConversationPlaceholder) {
+                               location: WorkspaceIdentity, onRepositoryPage: Bool = false) -> (WorkModel, SessionsWorkspaceRegistry, SessionsWorkspace, ConversationPlaceholder) {
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let key = model.workspaceKey(for: .task(id: task.id), repository: "repo")
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                                                    members: [fixtureViewContent(work: key, title: task.task.name)])], reason: "")
-        model.selectWorkingTasksDashboard()
+        if onRepositoryPage { model.select(nil) } else { model.selectWorkingTasksDashboard() }
         let tile = registry.workspace(for: key, title: task.task.name, location: location)
         let store = registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query)
         return (model, registry, tile, ConversationPlaceholder(workspace: tile, model: model, sessions: store))
@@ -328,6 +329,47 @@ struct WorkDestinationTests {
         #expect(tile.conversationError == nil)
         #expect(model.navigation.destination == .workingTasks)
         #expect(registry.visibleWork == [tile.key])
+    }
+
+    @Test("A repository page tile whose opening failed retries in place and the page stays")
+    func repositoryPageTileRetriesInPlace() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
+        let record = try tileRecord(task, at: location)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let launches = DestinationReadCounter()
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["desktop", "plan"]) { return planning }
+            if args.starts(with: ["task", "location"]) { return try tileLocation(args, task: task, location: location) }
+            if args.prefix(2) == ["session", "resume"] {
+                if await launches.next() > 1 { return encoded }
+                throw RegistryQueryError("Conversation launcher unavailable")
+            }
+            throw RegistryQueryError("Opening in a tile reads nothing else")
+        }
+        let (model, registry, tile, placeholder) = dashboardTile(task, snapshot: snapshot, query: query,
+                                                                 location: location, onRepositoryPage: true)
+        #expect(model.navigation.destination == .work(nil))
+        #expect(model.navigation.waveView == .repository)
+        #expect(registry.visibleWork.contains(tile.key))
+        try placeholder.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button().tap()
+        for _ in 0..<200 where tile.conversationError == nil || tile.openingConversation {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(tile.conversationError == "Conversation launcher unavailable")
+        let retry = try placeholder.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
+        #expect(try retry.labelView().text().string() == "Retry")
+        try retry.tap()
+        for _ in 0..<200 where tile.multiplexer.pane(forSessionId: record.id) == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(tile.multiplexer.pane(forSessionId: record.id) != nil)
+        #expect(tile.conversationError == nil)
+        #expect(model.navigation.destination == .work(nil))
+        #expect(model.selection == nil)
+        #expect(registry.visibleWork.contains(tile.key))
     }
 
     @Test("A finished tile without history offers Rust's Start after its refused reveal, in place")

@@ -261,8 +261,7 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 ```
 
 `--graph-decision-retry missing` exhausts the corrections of an invalid answer;
-`replace` proves a failed turn decides nothing. `--public-connect` covers a
-live headless-to-terminal handoff.
+`replace` proves a failed turn decides nothing.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.
@@ -302,7 +301,8 @@ Exchange preserves Workflow/placement, live driver, Session/native identity and
 append-only history without starting an engine or provider turn. After imported
 completion, the current client explicitly starts and completes another turn on the
 same engine. The controlled protocol client is headless, not a rendered TUI or
-running Workflow-edge proof. Prepare the script's uv dependencies before
+running Workflow-edge proof. It needs re-authoring before it runs again: it seeds the
+renamed `task_workflows` table and resumes a Run, which `lf resume` refuses. Prepare the script's uv dependencies before
 running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead

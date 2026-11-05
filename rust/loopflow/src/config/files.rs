@@ -944,11 +944,12 @@ mod tests {
         assert!(crate::engine::config::set(&destination, "planning.provider", "linear").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
         crate::engine::config::set(&destination, "chrome", "false").unwrap();
-        assert!(
-            !crate::config::load_config(Some(repo.path()))
+        assert_eq!(
+            crate::config::load_config(Some(repo.path()))
                 .unwrap()
                 .unwrap()
-                .chrome
+                .chrome,
+            Some(false)
         );
     }
 }

@@ -162,15 +162,19 @@ startup also waits without a cutoff; viewer and release publication policies sta
 Jack Heart authorized repair preserving editing, diagnostics and history; accounts
 stay out of scope. Merged #1595 (`e204ce6072`) scopes parent output to announced
 private Process logs; transport keeps native descriptors, OpenCode its stderr log.
-Installed repair, macOS pending-request and title/reconnect startup remain unproved.
+Installed repair and macOS pending-request startup remain unproved.
 
-LOO-516: Jack Heart requested durable private relay-failure evidence, not
-attribution of an unobserved cause. Retain bounded observed Session events with
-the original AgentProcess, operation and direction, independent of a started
-native turn. Unexpected renderer resets stay evidence; explicit close stays quiet.
-Observations claim no attachment and settle no turns; store failure must not end
-reconnect. Gate, CI and delivery remain open. Detail and probe evidence:
-`acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
+LOO-516's relay evidence left with the relay: `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Task 430c74 (Jack Heart, 2026-11-05): lf is a session manager beside the harness,
+never in its byte path. Codex 0.166.0 app-server fans every notification and
+approval to every subscriber, so a side observer records while the TUI talks to
+the server directly; a thread has no rollout to resume until a turn or `thread/name/set`.
+Any initialized client gets `thread/started` for threads others start or fork
+(`parentThreadId` null; `forkedFromId` on a fork; title writer `ephemeral`), so
+the observer follows `/new` and `/fork` as Claude's `/clear` is followed.
+A Session's app-server is private, so lf's instructions, hooks and roots are `-c`
+overrides on `codex app-server`, not thread config: person-started threads have them.
+Codex trusts hooks per handler (`:{group}:{handler}`, defaults filled in before hashing).
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -273,7 +277,7 @@ and export acceptance remain unproved. Jack selected unambiguous Task prefixes
 Peer/installed acceptance and full CI remain unproved in this evidence. Exact
 October decisions, superseded mechanics, fixture counts and linked archives:
 `04bdec77e312a4bd0166a027113fb4a952732b9e:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Archives neither prove delivery nor restore removed writers.
+this heading.
 
 ## On-demand Linear acquisition (lf-6f396c0, 2026-10-11)
 
@@ -478,7 +482,7 @@ and selected stable entries.
 LOO-708 (Jack Heart, November 2): exec removes Claude launcher/viewer heap;
 only the owner's direct child hands off settlement. Graph steps still wait.
 Blocking child wait wakes descriptors without taking runtimes' SIGCHLD.
-Pre-compression stand-ins: owner/relay 20/2.5 MB; no installed acceptance.
+No installed acceptance.
 LOO-705 supplies the Session successor; replaying relay argv targets a dead owner.
 LOO-712 owns encoding. Every resume/new-thread entry must carry its resulting
 Session across exec without replay. Owner/returning-launcher settlement share
@@ -686,8 +690,11 @@ Lesson: store skew surfaces as an error naming the skew and `lf install`, never
 as an empty registry — agents take "nothing here" as fact.
 `open_existing_store` is the one opener (`Ok(None)` only when no file). A refusal
 names one fix, passed through verbatim; appending `lf doctor` sent operators to a
-command that installs nothing. Limit: a step's long-lived connection meeting a
-`-- breaks:` migration mid-write still fails with raw SQLite text.
+command that installs nothing. Task 337044 (2026-11-05, Jack Heart) deletes the
+reader floor: older lf opens any newer store; staging replaces it (MIGRATIONS.md).
+Released builds still read `reader_floor`, so new rows carry the newest one
+(f5981e removes). `lf self install preflight` reads `~/.lf/loopflow.db` whatever
+`LF_HOME` says.
 
 ## One main Home (LOO-342, curated 2026-10-10)
 
@@ -706,11 +713,8 @@ PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
 - Store opens validate ledger/schema, leaving full integrity scans to migration,
   doctor and install. Keep the Session fence outside runtime waits; OpenCode's
   fenced post remains bounded at 10 s. Exec observation waits 15 s, then warns
-  and runs unrecorded. Exact measurements and counterexamples remain in the
-  `6448e3c9e7:wave/infrastructure/MEMORY.md` archive; current timings live under
-  `<Home>/perf/`.
-- **Install preflight/promote read the OS account's Home whatever `LF_HOME`
-  says.** Tests running them are container-only installation proofs.
+  and runs unrecorded. Measurements and counterexamples:
+  `6448e3c9e7:wave/infrastructure/MEMORY.md`; current timings under `<Home>/perf/`.
 - Task decisions no longer depend on historical execution; checkout cleanup
   still retains live or unknown providers. LOO-408 owns the installed proof.
 
@@ -786,7 +790,7 @@ unproved by that work. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../../docs/subscriptions.md).
 
-Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
+Main #1511 (`e69d5103f`): Codex terminals used `--no-daemon` (0.161.0-verified; #1552 removed it).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
 
@@ -1092,7 +1096,7 @@ Preserve first accepted usage and conflicting-repeat partiality. Window by the
 owning fact's terminal time; publish measured coverage beside percentiles.
 Unknown authority cannot be inferred from observer time or trace prose.
 
-Plan ownership above records LOO-406's current direction. KRs are explicit
+KRs are explicit
 judgments; preserve unrelated provider associations and diagnose ambiguous moves.
 Standing frontier plans need no invented completion date. No fourth planning noun
 was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.

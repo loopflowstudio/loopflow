@@ -92,27 +92,14 @@ clone is the restore point for the generation its build was written against, so
 the clone stays while such a process can still show the migration lost something,
 until the next install's commit. A file named any other way is never touched.
 
-## Older lf keeps opening an additively extended store
+## Older lf keeps opening a newer store
 
-`build.rs` proves each slug migration additive by applying it over the schema
-before it — every old object survives unchanged, new objects are tables or
-non-unique indexes, new columns are nullable or defaulted, and no statement
-writes an existing table. Force a semantic break, such as a new status value an
-older reader rejects, with `-- breaks: <reason>`. Nothing declares a migration
-additive.
+Every build opens any store whose history extends its own. A store a newer lf
+migrated has more ledger rows than this build knows; this build checks the rows
+it knows and runs against the superset. Nothing is compared past its own
+frontier, and nothing a migration does decides whether an older lf opens.
 
-A migration's reader floor is the newest breaking migration at or before it;
-released batches and breaking migrations name themselves. Every ledger row
-records it. A build opens a store holding migrations it does not know only when
-it knows their floor, and then requires every object it expects to be present
-unchanged; tables may have gained columns. Otherwise it refuses with
-`this store needs an lf that knows drop_waves (it has drop_waves; latest known task_graphs); run \`lf install\``.
-Install previews name the breaking migration a candidate would apply. Promotion
-never applies history it does not know; selecting an older build the floor
-admits, as a rollback does, applies nothing and is allowed.
-
-## Destructive change is staged
-
+So a migration must leave older lf working: destructive change is staged.
 Jack Heart's rule (2026-10-27): expand, wait for older lf to exit, export, drop.
 A new migration is additive against `origin/main`'s schema, or it is a contract:
 
@@ -144,6 +131,10 @@ under the migration fence, so an interrupted upgrade still has every document it
 replaced.
 The check measures; nothing at runtime refuses to install or migrate.
 
+Rename and reshape are expand then contract. A process older than the window
+meets a dropped column as an error from the one statement that reads it; the
+rest of the store still answers.
+
 New code must accept what an older writer leaves behind. While older lf still
 runs, it writes rows without the new columns, so read `NULL` there sensibly, and
 avoid `INSERT OR REPLACE` on extended tables: an older writer's replace drops
@@ -151,16 +142,10 @@ the newer columns. Runtime SQL names its columns — `check_migrations.py` rejec
 positional `INSERT ... VALUES` and `SELECT *` outside tests — and JSON persisted
 in the store tolerates fields it does not know.
 
-## Reader catalog
-
-```bash
-lf self install reader-catalog    # the floors this build knows, one per line
-```
-
-Every package (green main and release) ships this list as `reader-catalog.txt`
-beside its archive. A build opens a store when its catalog holds the floor of
-the store's newest migration; `store::migrations::can_open(store, catalog)`
-answers that, so an updater can rule out a candidate before downloading it.
+`schema_migrations.reader_floor` is shipped history this build never reads. Each
+new row repeats the ledger's newest floor, because builds released before its
+deletion check every row past their own head and refuse one with none; Task
+f5981e removes the write 30 days after that release.
 
 ## What the check enforces
 
@@ -185,7 +170,7 @@ foreign keys. The process reads that schema once per file and SQLite schema cook
 (`PRAGMA schema_version`, bumped by every committed DDL change from any process);
 in-memory databases and reads inside a write transaction always read afresh.
 Neither cache holds a validity result, an open SQLite connection or the ledger:
-applied versions, checksums and reader floors are read on every open.
+applied versions and checksums are read on every open.
 
 | State | Message |
 | --- | --- |
@@ -193,11 +178,12 @@ applied versions, checksums and reader floors are read on every open.
 | Behind the chain, `~/.lf/loopflow.db` | names the pending migration and `lf install`, which finishes installing this build (or a private `LF_HOME` for unmerged work) |
 | Pre-namespace `001_initial` stamp | adopted as `0.10.001_initial` — same bytes, no data moved |
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
-| Newer migrations whose floor this build knows | opens; this build's schema must survive unchanged |
-| Newer migrations whose floor this build does not know | names the migration the store needs |
+| Newer migrations after this build's history | opens; applies nothing and compares no schema |
 | Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it (named from the ledger when that build recorded itself), or run `lf install` |
 
 Every refusal names a build that opens the store; none suggests deleting it.
+Only a build newer than the store is refused for being out of step, and only a
+fresh process meets that.
 
 ## Why there is no separate "schema change without a migration" check
 

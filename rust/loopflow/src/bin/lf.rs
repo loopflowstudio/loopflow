@@ -1673,6 +1673,11 @@ fn run() -> anyhow::Result<()> {
     if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
         journal::mark_read();
     }
+    // The observer runs beside a conversation for days. It opens the store only
+    // to record, and failing to open it must not stop it.
+    if matches!(cli.command, Some(Commands::CodexObserve)) {
+        return loopflow::harness::codex_connection::run_observer();
+    }
     if cli.harness_callback() {
         journal::harness_issued();
     }
@@ -1918,18 +1923,11 @@ fn run() -> anyhow::Result<()> {
                 Ok(())
             }
             Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
-            Some(InstallCommand::CanOpen { tag }) => loopflow::lf::commands::install::can_open(tag),
             Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch.as_deref())
             }
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)
-            }
-            Some(InstallCommand::ReaderCatalog) => {
-                for floor in loopflow::store::migrations::reader_catalog() {
-                    println!("{floor}");
-                }
-                Ok(())
             }
             Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)
@@ -2803,6 +2801,7 @@ fn execute_command(
         Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
+        Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Ops(OpsCommand::Machine {

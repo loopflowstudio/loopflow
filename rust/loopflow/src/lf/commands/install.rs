@@ -37,7 +37,7 @@ use crate::build_info;
 use crate::store::migrations;
 
 mod published;
-pub use published::{adopt, can_open, install, schedule, Stream};
+pub use published::{adopt, install, schedule, Stream};
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
@@ -78,26 +78,17 @@ impl CandidateIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Compatibility {
-    /// The store's applied frontier equals the candidate's latest known
-    /// migration: it recognizes the store exactly, with nothing to apply.
-    Exact { frontier: String },
+    /// The store has applied everything the candidate knows, and a newer build
+    /// may have extended it. Selecting the candidate applies nothing, so
+    /// rollback stays possible.
+    Current { frontier: String },
     /// The candidate knows migrations the store has not applied. Safe to
     /// advance when origin/main carries every one of them.
     AheadPending {
         applied_frontier: String,
         latest_known: String,
-        /// The newest pending migration older builds cannot read past; builds
-        /// that do not know it can no longer open the store. `None` when no
-        /// reader is locked out.
-        raised_reader_floor: Option<String>,
         /// Pending migrations origin/main has not added.
         unmerged: Vec<String>,
-    },
-    /// A newer build migrated the store, and its reader floor still admits the
-    /// candidate. Selecting it applies nothing, so rollback stays possible.
-    Behind {
-        applied_frontier: String,
-        reader_floor: String,
     },
     /// The store carries a migration, checksum, or schema the candidate does not
     /// recognize — the 2026-07-17 case. Reason is `store::migrations`' own text.
@@ -196,7 +187,7 @@ pub fn decide(
         Compatibility::Incompatible { reason } => reasons.push(format!(
             "candidate cannot operate the shared store: {reason}"
         )),
-        Compatibility::Exact { .. } | Compatibility::Behind { .. } => {}
+        Compatibility::Current { .. } => {}
         Compatibility::AheadPending { unmerged, .. } if !unmerged.is_empty() => {
             reasons.push(format!(
                 "candidate carries migrations origin/main has not added ({}); the shared store applies only merged migrations — install a main build with `lf install --dev`",
@@ -259,45 +250,24 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
             }
         }
     };
-    let newer_floor =
-        migrations::validate_sqlite(conn).and_then(|()| migrations::newer_store_floor(conn));
-    match newer_floor {
-        Ok(Some(reader_floor)) => {
-            return Compatibility::Behind {
-                applied_frontier: frontier.unwrap_or_default(),
-                reader_floor,
-            }
-        }
-        Ok(None) => {}
-        Err(error) => {
-            return Compatibility::Incompatible {
-                reason: error.to_string(),
-            }
-        }
+    if let Err(error) = migrations::validate_sqlite(conn) {
+        return Compatibility::Incompatible {
+            reason: error.to_string(),
+        };
     }
-    match migrations::raised_reader_floor(conn).and_then(|raised_reader_floor| {
-        Ok((raised_reader_floor, migrations::pending_unmerged(conn)?))
-    }) {
-        Ok((raised_reader_floor, unmerged)) => {
-            let latest_known = migrations::latest_known_version();
-            match frontier {
-                Some(frontier) if frontier == latest_known => Compatibility::Exact { frontier },
-                Some(applied_frontier) => Compatibility::AheadPending {
-                    applied_frontier,
-                    latest_known,
-                    raised_reader_floor,
-                    unmerged,
-                },
-                // `validate_sqlite` refuses an empty store, so `Ok` with no
-                // frontier is unreachable in practice; treat it as ahead-of-empty.
-                None => Compatibility::AheadPending {
-                    applied_frontier: "(uninitialized)".to_string(),
-                    latest_known,
-                    raised_reader_floor: None,
-                    unmerged,
-                },
-            }
-        }
+    match migrations::requires_migration_sqlite(conn)
+        .and_then(|owed| Ok((owed, migrations::pending_unmerged(conn)?)))
+    {
+        Ok((false, _)) => Compatibility::Current {
+            frontier: frontier.unwrap_or_default(),
+        },
+        Ok((true, unmerged)) => Compatibility::AheadPending {
+            // `validate_sqlite` refuses an empty store, so `Ok` with no frontier
+            // is unreachable in practice; treat it as ahead-of-empty.
+            applied_frontier: frontier.unwrap_or_else(|| "(uninitialized)".to_string()),
+            latest_known: migrations::latest_known_version(),
+            unmerged,
+        },
         Err(error) => Compatibility::Incompatible {
             reason: error.to_string(),
         },
@@ -311,7 +281,6 @@ fn read_store_evidence(store_path: &Path) -> Compatibility {
         return Compatibility::AheadPending {
             applied_frontier: "(uninitialized)".to_string(),
             latest_known: migrations::latest_known_version(),
-            raised_reader_floor: None,
             unmerged: migrations::unmerged_migrations()
                 .into_iter()
                 .map(str::to_string)
@@ -388,10 +357,7 @@ fn _read_executable_compatibility(
     store_path: &Path,
     compatibility: &Compatibility,
 ) -> ExecutableCompatibility {
-    if matches!(
-        compatibility,
-        Compatibility::Exact { .. } | Compatibility::Behind { .. }
-    ) {
+    if matches!(compatibility, Compatibility::Current { .. }) {
         return match rusqlite::Connection::open_with_flags(
             store_path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -527,31 +493,21 @@ fn render_human(preview: &PromotionPreview) {
         candidate.latest_known_migration
     );
     match &preview.compatibility {
-        Compatibility::Exact { frontier } => {
-            println!("  store frontier {frontier} (candidate recognizes it exactly)")
+        Compatibility::Current { frontier } => {
+            println!("  store frontier {frontier} (nothing to apply)")
         }
         Compatibility::AheadPending {
             applied_frontier,
             latest_known,
-            raised_reader_floor,
             unmerged,
         } => {
             println!(
                 "  store frontier {applied_frontier}; candidate is ahead through {latest_known}"
             );
-            if let Some(floor) = raised_reader_floor {
-                println!("  lf builds without {floor} can no longer open the store");
-            }
             if !unmerged.is_empty() {
                 println!("  unmerged       {}", unmerged.join(", "));
             }
         }
-        Compatibility::Behind {
-            applied_frontier,
-            reader_floor,
-        } => println!(
-            "  store frontier {applied_frontier}; candidate is behind\n  reader floor {reader_floor} admits it"
-        ),
         Compatibility::Incompatible { reason } => println!("  INCOMPATIBLE: {reason}"),
         Compatibility::Unreadable { reason } => println!("  UNREADABLE: {reason}"),
     }
@@ -647,7 +603,6 @@ mod compatibility_tests {
         let pending = |unmerged: &[&str]| Compatibility::AheadPending {
             applied_frontier: "older".to_string(),
             latest_known: "current".to_string(),
-            raised_reader_floor: None,
             unmerged: unmerged.iter().map(|name| name.to_string()).collect(),
         };
         assert_eq!(
@@ -662,15 +617,10 @@ mod compatibility_tests {
 
     #[test]
     fn any_build_promotes_onto_a_store_it_reads() {
-        let exact = Compatibility::Exact {
+        let current = Compatibility::Current {
             frontier: "current".to_string(),
         };
-        assert_eq!(decide(&exact, &executable()), Verdict::Promote);
-        let behind = Compatibility::Behind {
-            applied_frontier: "newer".to_string(),
-            reader_floor: "older".to_string(),
-        };
-        assert_eq!(decide(&behind, &executable()), Verdict::Promote);
+        assert_eq!(decide(&current, &executable()), Verdict::Promote);
     }
 
     #[test]
@@ -818,39 +768,30 @@ mod compatibility_tests {
     }
 
     #[test]
-    fn rollback_stays_open_within_the_reader_floor() {
+    fn an_older_candidate_selects_a_store_a_newer_build_migrated() {
         let directory = tempfile::tempdir().unwrap();
-        let additive = directory.path().join("additive.db");
-        let connection = rusqlite::Connection::open(&additive).unwrap();
-        crate::store::migrations::apply_sqlite(&connection).unwrap();
-        crate::store::migrations::apply_newer_migration(
-            &connection,
+        for (index, sql) in [
             "ALTER TABLE waves ADD COLUMN colour TEXT;",
-            true,
-        )
-        .unwrap();
-        let compatibility = read_store_evidence(&additive);
-        assert!(
-            matches!(compatibility, Compatibility::Behind { .. }),
-            "{compatibility:?}"
-        );
-        let executable = super::_read_executable_compatibility(&additive, &compatibility);
-        assert_eq!(decide(&compatibility, &executable), Verdict::Promote);
-
-        let breaking = directory.path().join("breaking.db");
-        let connection = rusqlite::Connection::open(&breaking).unwrap();
-        crate::store::migrations::apply_sqlite(&connection).unwrap();
-        let newer = crate::store::migrations::apply_newer_migration(
-            &connection,
-            "ALTER TABLE waves ADD COLUMN colour TEXT;",
-            false,
-        )
-        .unwrap();
-        assert!(matches!(
-            read_store_evidence(&breaking),
-            Compatibility::Incompatible { reason }
-                if reason.contains(&format!("this store needs an lf that knows {newer} (it has "))
-        ));
+            "ALTER TABLE waves DROP COLUMN promoted_at;",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // A fresh path per case: Linux reuses a deleted file's inode, and two
+            // stores at one path, inode and schema cookie share a cached schema.
+            let store = directory.path().join(format!("loopflow-{index}.db"));
+            let connection = rusqlite::Connection::open(&store).unwrap();
+            crate::store::migrations::apply_sqlite(&connection).unwrap();
+            let newer = crate::store::migrations::apply_newer_migration(&connection, sql).unwrap();
+            let compatibility = read_store_evidence(&store);
+            assert_eq!(
+                compatibility,
+                Compatibility::Current { frontier: newer },
+                "{sql}"
+            );
+            let executable = super::_read_executable_compatibility(&store, &compatibility);
+            assert_eq!(decide(&compatibility, &executable), Verdict::Promote);
+        }
     }
 
     #[test]
@@ -862,7 +803,7 @@ mod compatibility_tests {
         crate::store::migrations::apply_sqlite(&connection).unwrap();
         let compatibility = super::read_store_evidence(&store);
         assert!(
-            matches!(compatibility, Compatibility::Exact { .. }),
+            matches!(compatibility, Compatibility::Current { .. }),
             "{compatibility:?}"
         );
 
@@ -3093,7 +3034,6 @@ mod settle_tests {
     fn inventory(binaries: Vec<RunningBinary>) -> BinaryInventory {
         BinaryInventory {
             selected: None,
-            store_floor: None,
             binaries,
         }
     }
@@ -3103,7 +3043,6 @@ mod settle_tests {
             path: Some(PathBuf::from("/home/.lf/bin/lf-d49c57c")),
             version: Some("0.15.1".into()),
             selected: false,
-            cannot_open_store: false,
             processes: vec![RunningLfProcess {
                 id: LfProcessId::new(),
                 pid: 1,
@@ -3267,8 +3206,6 @@ mod artifact_tests {
         assert!(BufReader::new(process.stdout.take().unwrap())
             .lines()
             .any(|line| line.unwrap() == "ready"));
-        let by_hand = bin.join("hotfix-61609c56");
-        fs::write(&by_hand, "hotfix").unwrap();
         let unfinished = artifacts.join("published-partial");
         fs::create_dir_all(&unfinished).unwrap();
 
@@ -3292,7 +3229,7 @@ mod artifact_tests {
 
         assert!(selected.exists() && previous.exists() && selected_app.exists());
         assert!(survived, "a binary a live process executes was removed");
-        assert!(by_hand.exists() && unfinished.exists());
+        assert!(unfinished.exists());
         assert!(!superseded.exists() && !daemon.exists() && !superseded_app.exists());
     }
 

@@ -96,6 +96,10 @@ elif os.path.basename(sys.argv[0]) == 'codex':
         let machine = self.home.path().join("machine");
         if let Ok(params) = fs::read(machine.join("native-config.json")) {
             received["params"] = serde_json::from_slice(&params).unwrap();
+            received["server"] = serde_json::from_slice(
+                &fs::read(machine.join("native-server-config.json")).unwrap(),
+            )
+            .unwrap();
             received["turns"] =
                 serde_json::from_slice(&fs::read(machine.join("native-turns.json")).unwrap())
                     .unwrap();
@@ -180,18 +184,19 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             "{value}"
         ),
         "codex" => {
-            assert_eq!(
-                value["params"]["sandbox"],
-                if enabled {
-                    "danger-full-access"
-                } else {
-                    "workspace-write"
-                },
-                "{value}"
-            );
+            if enabled {
+                assert_eq!(value["params"]["sandbox"], "danger-full-access", "{value}");
+            } else {
+                assert!(value["params"].get("sandbox").is_none(), "{value}");
+            }
             assert_eq!(
                 value["params"]["approvalPolicy"],
-                if enabled { "never" } else { "on-request" },
+                // Unset leaves the person's own Codex configuration in charge.
+                if enabled {
+                    Value::from("never")
+                } else {
+                    Value::Null
+                },
                 "{value}"
             );
             assert!(!args(value).contains(&"--dangerously-bypass-approvals-and-sandbox"));
@@ -484,6 +489,32 @@ fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
     ]);
     bypass(&explicit, "claude", false);
     assert!(args(&explicit).contains(&"--no-chrome"));
+}
+
+#[test]
+fn unset_chrome_leaves_the_claude_setting_alone_until_a_choice_is_explicit() {
+    let fixture = Fixture::new("claude");
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "agent: claude\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
+    fn chrome_flags(value: &Value) -> Vec<&str> {
+        args(value)
+            .into_iter()
+            .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
+            .collect()
+    }
+    let attended = fixture.run(&["-i", ":", "hello"]);
+    assert!(chrome_flags(&attended).is_empty(), "{attended}");
+    let session = fixture.session();
+    let resumed = fixture.run(&["session", "resume", &session]);
+    assert!(chrome_flags(&resumed).is_empty(), "{resumed}");
+    let headless = fixture.run(&["-b", ":", "hello"]);
+    assert!(chrome_flags(&headless).is_empty(), "{headless}");
+    let off = fixture.run(&["-i", "--chrome", "off", ":", "hello"]);
+    assert_eq!(chrome_flags(&off), ["--no-chrome"]);
+    let on = fixture.run(&["-i", "--chrome", "on", ":", "hello"]);
+    assert_eq!(chrome_flags(&on), ["--chrome"]);
 }
 
 #[test]
@@ -790,7 +821,7 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
     let mut first = fixture
         .command()
         .args(["-i", "--account", "fixture@example.com", ":", "hello"])
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -822,13 +853,18 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     let first = first.wait_with_output().unwrap();
-    success(&first);
-    let stderr = String::from_utf8_lossy(&first.stderr);
+    // The owner reports a client's exit in the terminal it ran in.
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(first.status.success(), "{:?}: {printed}", first.status);
     assert!(
-        stderr.contains(&format!(
+        printed.contains(&format!(
             "This conversation moved to account other@example.com: lf resume {session}"
         )),
-        "{stderr}"
+        "{printed}"
     );
     // SAFETY: signal 0 only probes whether the fixture's client still exists.
     assert_ne!(unsafe { libc::kill(client, 0) }, 0, "client still running");
@@ -921,7 +957,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         for received in [first, resumed] {
             let arguments = args(&received);
             let root = if provider == "codex" {
-                received["params"]["config"]["sandbox_workspace_write.writable_roots"]
+                received["server"]["sandbox_workspace_write.writable_roots"]
                     .as_array()
                     .unwrap()
                     .iter()

@@ -112,10 +112,4 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @unchecked Sendable {
             throw LocalLfError(errorDescription: "this Machine follows dev; `lf install --dev` updates this app")
         }
     }
-
-    /// Veto a release whose build can't open the store; `lf` names when that changes.
-    func updater(_ updater: SPUUpdater, shouldProceedWithUpdate item: SUAppcastItem,
-                 updateCheck: SPUUpdateCheck) throws {
-        try AppUpdates.runLf(["install", "can-open", "v\(item.versionString)"])
-    }
 }

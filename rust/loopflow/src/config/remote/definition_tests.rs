@@ -95,7 +95,7 @@ fn forwarded_general_choice_excludes_executor_definition_preferences() {
         let resolved = probe(repo.path());
         assert_eq!(resolved.config.agent().unwrap(), "codex:origin");
         assert!(!resolved.config.yolo);
-        assert!(resolved.config.chrome);
+        assert_eq!(resolved.config.chrome, Some(true));
         assert!(!executor.path().join(".lf/profile-retention.json").exists());
         remote::receive(Some(repo.path())).unwrap();
         assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:origin");
@@ -259,7 +259,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
                 let pair = &resolved[index..index + 2];
                 assert_eq!(pair[0].config.agent().unwrap(), "codex:named");
                 assert!(pair[0].config.yolo);
-                assert!(pair[0].config.chrome);
+                assert_eq!(pair[0].config.chrome, Some(true));
                 assert_eq!(pair[1].config.agent().unwrap(), "codex:anonymous");
                 assert_eq!(
                     pair[0].settings["agent"].selected().unwrap().key,
@@ -366,7 +366,7 @@ fn captured_origin_instructions_keep_executor_host_preferences() {
     );
     let selected = resolve(repo.path(), captured[0].clone());
     assert_eq!(selected.config.agent().unwrap(), "codex:origin");
-    assert!(!selected.config.chrome);
+    assert_eq!(selected.config.chrome, Some(false));
     assert_eq!(
         selected.settings["chrome"].selected().unwrap().locator,
         executor

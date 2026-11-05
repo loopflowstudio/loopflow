@@ -101,10 +101,44 @@ backoff that grows from 1 to 30 minutes. Pending or missing checks keep waiting;
 time alone never starts a repair. For progress through a closed laptop, ship
 from an always-on Machine (below).
 
+## Updates
+
+```bash
+lf schedule hourly             # also weekly, daily, 5min; none keeps the current cadence
+tail ~/.lf/logs/refresh.log    # what each scheduled update did
+```
+
+Installing a build schedules `lf install` on your stream: daily at 09:00 local
+time, or the cadence already set. On macOS this is the LaunchAgent
+`com.loopflow.refresh`, which also runs at login and whenever it loads. On Linux
+it is a crontab line.
+
+Turn it off on macOS:
+
+```bash
+launchctl disable gui/$(id -u)/com.loopflow.refresh
+launchctl bootout gui/$(id -u)/com.loopflow.refresh
+```
+
+Both are needed: `bootout` alone lasts until the next login or install. While it
+is disabled, installs warn that updates aren't scheduled, and `lf install --dev`
+exits with an error after installing its build. Loopflow.app still updates itself
+through Sparkle.
+
+Turn it back on, which also runs `lf install` once:
+
+```bash
+launchctl enable gui/$(id -u)/com.loopflow.refresh
+lf schedule
+```
+
+On Linux, delete the crontab line ending `# loopflow install schedule`. The next
+install adds it back.
+
 ## Schedule it yourself
 
-Loopflow keeps no scheduler. Any lf command runs from your own crontab, launchd
-or systemd timer:
+The update job is the only one Loopflow registers. Any other lf command runs from
+your own crontab, launchd or systemd timer:
 
 ```bash
 # crontab -e

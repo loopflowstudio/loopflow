@@ -18,8 +18,9 @@ not search for, repair or change the earlier tab.
 
 Container choice comes from where you are, never from a stored mapping. Inside a
 Rex session or Herdr workspace, a Task tab joins it; in cmux, a Task workspace
-joins your window. Outside one, or when opening a repository or Wave, `lf open`
-creates a new container named for the Wave or repository.
+joins your window, not yet the group your workspace is in. Outside one, or when
+opening a repository or Wave, `lf open` creates a new container named for the
+Wave or repository.
 
 Opening presents existing Work. It does not start a Task's Graph, create a provider
 conversation, submit a turn or take conversation input. A Shell tool creates a
@@ -202,8 +203,9 @@ reconstruct that workspace after the follower exits.
 
 Another `lf open --wave product` launches a new session with fresh Task tabs for
 the current started, unfinished set. Starting a Task does not open a closed host
-app. Each Machine's launch follows its own Tasks; a Task that first starts on a
-Machine where this launch opened nothing arrives with the next open.
+app. Each Machine's launch follows its own Tasks. Today a Task that first starts
+on a Machine where this launch opened nothing arrives only with the next open;
+that is current behavior under review, not the accepted contract.
 
 ## Split where you are working
 
@@ -271,11 +273,12 @@ shells; Rex shells remain Rex's responsibility.
 
 This integration remains unfinished, and nothing enforces it today. Live
 conversation viewers in Rex are attached viewers, so the shared Session lifetime
-owner already sees them. A retained Rex tab whose programs stopped has no source
-LF can associate with its Task without a host inventory, which this design
-removes; that capability gap is open, not resolved as absence. Requested work,
-drafts and pending requests remain protected. Closing an unfinished Task view does
-not delete its checkout or branches.
+owner already sees them. The cleanup consumer is LOO-717's `lf task presence`
+lease, which is not merged. Rex's own inventory lists blocks by identity, so a
+retained tab whose programs stopped can still be found by block id at cleanup
+time without an LF registry; that query is not written. Requested work, drafts and
+pending requests remain protected. Closing an unfinished Task view does not delete
+its checkout or branches.
 
 ## Delivery boundaries
 

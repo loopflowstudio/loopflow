@@ -132,14 +132,10 @@ scene, owner, stdin and drafts; transport classification prevents local affordan
 No replay, local fallback or filesystem CAS. Two-CLI/seeded fixtures establish
 neither running Flows nor configured SSH/native acceptance; mixed exchange and admission remain.
 
-Jack Heart (October 10) accepted Rex conventions in LOO-427: ordinary
-`--repo`/`--task`/`--pane`, then verified caller-terminal inference within Work,
-then one eligible pane; ambiguity never follows focus. Caller inference requires the original PTY. Mutations return affected
-pane IDs, including created/reused companions, not readiness. `help --json` derives
-syntax and Desktop result schemas from Clap/Rust DTOs; installed support and current
-Work eligibility stay separate. Native proof remains. LOO-397 is unstarted.
-Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-403)
-and LOO-453 (readiness/events).
+LOO-427 Rex pane conventions (Jack Heart, October 10; caller inference needs the
+original PTY, ambiguity never follows focus) are archived at
+`e38da0fff4:.lf/wave/product/MEMORY.md`, this heading; "Native host workspaces"
+below supersedes their reuse model. LOO-397 is unstarted; LOO-452/453 follow-ups stand.
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
 October 13 replaced their visible strip with sidebar switching, retaining ownership.
@@ -581,33 +577,34 @@ absence, so repairs need a fresh authorized read. These records changed no Task.
 
 ## Native host workspaces (LOO-498/717, revised 2026-11-05)
 
-Jack Heart selected Rex first, bounded Herdr second. November 4: one-way LF
-templates; Rex owns edits, shells and restoration.
-Reopen preserves native work; confirmed absence permits template launch.
-A Task occurrence present in a successful Rex inventory is the cleanup hold
-(held beats unknown beats released); IDs never authorize replay.
-Named copies and prepared handoff remain required. Transport separates passive
-attachment from explicit input transfer. Receipts report native creation and,
-separately, each observer's readiness (connected/history/ended/failed/uncertain);
-`--retry-observers` adds a pane beside the retained one. Retry and restart pass
-on isolated Rex; a real provider's handoff is unproved.
-Started Tasks arrive passively; backlog is explicit. Native splits must use their
-Task's worktree/Machine.
+Jack Heart selected Rex first, bounded Herdr second, then on November 5 a fresh
+launch on every `lf open` with no LF persistence of hosts, host workspaces or
+occurrences anywhere. Config `task_layout` owns templates, the DB
+owns Desktop's sticky Task layouts, Rex owns sessions, tabs, splits, shells and
+restoration. Repository or Wave → session, Task → tab, workspace → splits; a Task
+joins the caller's container. Superseded at `9187804aee`: reopen reuse, named
+copies, inventory holds, `--retry-observers`, marker recovery. Arrivals follow in
+memory from a Workspace tab; closed tabs stay closed; an uncertain create is
+reported once, never retried. Native IDs never prove continuity or authorize
+replay; invalid cwd falls back home, so LF checks the checkout first. Rex inventory
+exposes block label, window and owner plus per-block `pwd`/`process`, never argv.
+
 Jack (November 5): a cwd-less raw split landing in HOME is no verdict; the app
-inherits the source terminal's reported or process directory. The owner publishes
-its directory to viewers; controllers withdraw it on leaving; shells never report.
-App Split unproved.
+inherits the source terminal's reported or process directory. Tool panes report
+their checkout; controllers withdraw on leaving; shells never report. App Split,
+cmux and two-Machine opens are unproved; the November 4–5 demos failed on store
+skew and a vanished session.
 
 Jack superseded Rex away/native-settlement: retained Task Session terminals prevent
 cleanup regardless of focus; confirmed final removal releases, unknown does not.
-LF cleans Desktop-owned shells only. LOO-717 owns shared lifetime; its settlement
-API still needs revision to consume the adapter's hold. Requested work finishes
-first; unfinished checkouts survive Close. Deleted-checkout reconstruction excluded.
-Desktop: two-minute eligible-idle and fifteen-minute completed-and-away cleanup;
-return cancels. Dirty files do not veto; changed committed refs stay protected.
+LF cleans Desktop-owned shells only. LOO-717 (#1811) persists `task_host_occurrences`
+leases via `lf task presence`, which conflicts with the no-occurrence decision;
+unresolved. Requested work finishes first; unfinished checkouts survive Close;
+deleted-checkout reconstruction is excluded. Desktop keeps 717's 2/15-minute
+grace; return cancels.
 
 #1818 protects active input on failed attachment; #1807 binding keeps the provider's
-cwd, and later attachments report the selected directory. Contract: docs/workspaces.md.
+cwd; later attachments report the selected directory. Contract: docs/workspaces.md.
 
 ## Workspace redesign decisions
 

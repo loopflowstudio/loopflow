@@ -49,16 +49,23 @@ No separate Task was requested or created.
 
 ## Still open
 
-- **Retained-terminal protection.** `hold.rs` read occurrence rows that no longer
-  exist; nothing consumed it. Live viewers are attached Sessions the lifetime owner
-  already sees. A stopped-but-retained Rex tab has no non-inventory association to
-  its Task. Gap stated in docs; LOO-717 (PR #1811, still at `b81df60579`) owns the
-  consumer. Options for Jack: Rex block metadata (if Rex adds it), a host query by
-  argv/label at cleanup time, or accepting the gap.
+- **Retained-terminal protection** (requirement, not waived). LOO-717's consumer
+  is `lf task presence` with a 30 s lease in `task_host_occurrences` (PR #1811,
+  `b81df60579`, conflicting with main). Decision for Jack: does that lease table
+  count as the rejected LF occurrence persistence? Without an LF registry, live
+  viewers can lease their own `REX_BLOCK`; exited-but-retained blocks need 717's
+  executor to query `session.list_blocks` by id at cleanup time. Details:
+  rex-workspace.md "Remaining".
+- **Arrivals on a Machine with no initial workspace** (requirement, not waived).
+  Today they wait for another open; the prior `--arrive-task` forwarding needed the
+  deleted registry. Decision for Jack: open on every routed Machine at launch, or
+  forward each arrival as a fresh single-Task launch.
+- **cmux group.** A Task opened inside cmux joins the caller's window, not its
+  group. Resolving the group from `CMUX_WORKSPACE_ID` is reversible and untested
+  against a live app.
+- **Template validation at `lf set`.** Invalid `task_layout` is rejected only when
+  a launch reads it. Validating in the setter is small; not done.
 - **Native app Split** in Rex/Herdr/Desktop remains owed to the demo (needs a focused
   app window; this run sat inside Jack's live Rex).
 - **Bound-later conversations** report their selected directory on later attachments
   though the running provider keeps its original cwd (reversible, one line).
-- **Wave memory.** `.lf/wave/product/MEMORY.md` still describes `--retry-observers`
-  and registry reuse (line ~592). Memory is read-only in this step; propose replacing
-  that paragraph with the fresh-launch contract at the next memory-maintaining step.

@@ -204,14 +204,60 @@ snapshot keeps whatever draft tables it has.
 Rex); arrivals do not change the active window (native Rex); a Task opened from a
 Rex shell joins that session; source drafts never reach argv (layout unit test).
 
-### Remaining
+### Remaining (reconciled November 5, realign)
 
-1. Retained-terminal protection: gap stated in docs and `questions.md`; LOO-717
-   owns the consumer. No replacement inventory was added.
-2. Demo: app Split from each pane (Rex, Herdr, Desktop), cmux end to end, configured
-   agent-tool routing after viewer move, two-Machine open, real-provider input
-   transfer through "view again". `workspace-demo.md` holds earlier dated evidence.
-3. `.lf/wave/product/MEMORY.md` update proposal in `questions.md`.
+Jack Heart's two unresolved requirements stay requirements; neither is waived here.
+
+1. **Retained Rex Task Session terminals must protect checkout cleanup.** Nothing
+   enforces it. The consumer is LOO-717 (PR #1811 at `b81df60579`, conflicting with
+   main): `lf task presence <issue> --occurrence <id> --state retained|away|closed|unknown
+   --revision <n> --native-settled <bool> [--owner '{"machine_id","pid","started_at",
+   "settles_on_exit"}']`, a 30 s lease (`HOST_LEASE`), a 15 min grace, stored in
+   `task_host_occurrences` (`task_workspace_lifetimes.sql`); lease expiry is unknown,
+   never release. **Conflict:** that table persists host occurrences in LF, which
+   Jack's November 5 decision rejects anywhere. Open decision for Jack: is 717's
+   lease the one exception (an observation, not a workspace recipe), or does 717's
+   API need a stateless shape?
+   Native inventory without an LF registry (isolated Rex probe, November 5):
+   `session.list_blocks` returns block_id, label, flavor, window_id, owner and
+   host_id; block methods `pwd` (last OSC 7 report, owner pid) and `process` (child
+   pid/path/home). No argv, cwd option or env is readable. So:
+   - Live LF tools in a block (`session view`, `task view`, `task tool`) see their
+     own `REX_BLOCK`/`REX_SESSION`; each can lease occurrence
+     `rex:<endpoint>#<block>` as retained with `--owner` its own pid, renewing
+     under 30 s, and report `closed` on SIGHUP. Concrete LF work once 717 lands.
+   - An exited program in a retained block (observer `exit.on_completion=false`)
+     renews nothing, so the lease goes unknown and blocks cleanup until a
+     cleanup-time host query: `session.list_blocks` by block id says present
+     (still retained, regardless of focus) or absent (closed). Keyed by id, so
+     renamed tabs keep their association. Needs 717's executor to call the host,
+     which it does not today (it observes `--owner` exit through `lf machine process`).
+   - Matching window labels to Task titles is rename-fragile; not the primary path.
+2. **Automatic arrivals on a Machine with no initial workspace wait for another
+   open.** `open_machines` launches remotely only on peers holding a started,
+   unfinished Task now, and the follower skips remote routes. At `9187804aee` the
+   follower forwarded `--arrive-task` through `remote_open` into the registry's
+   remote container; the registry left, so that path left. Options for Jack:
+   (a) a repository/Wave launch opens on every routed Machine (`store.machines()`),
+   each with its own session and follower, at the cost of an SSH request and a
+   failure receipt per unreachable Machine; (b) the follower forwards
+   `open --task <id> --host rex --local-workspace --no-focus` on arrival, creating a
+   fresh session there each time (fresh-launch semantics, no container reuse).
+3. **cmux container.** Rex and Herdr Tasks join the caller's container; cmux Tasks
+   join the caller's window (`Container { id: None }`), outside any group the
+   caller's workspace belongs to. `cmux identify` and `workspace-group list --json`
+   can resolve the caller's group from `CMUX_WORKSPACE_ID`; `new-workspace --group
+   <id> --group-placement afterCurrent --group-reference <ws>` places it. Reversible,
+   unverified against a live app; it would match the Rex/Herdr hierarchy.
+4. **Template authoring validation.** `task_layout` parses as `TaskLayoutTemplate`
+   at config read; `instantiate` rejects captured Session/location/shell execution/
+   files and runs `WorkPaneLayout::validate` only when a launch reads it. `lf set
+   task_layout` accepts an invalid tree, and the first `lf open` fails with
+   "task_layout setting". Validating in the setter with a placeholder key is small
+   and reversible; not done.
+5. Demo: app Split from each pane (Rex, Herdr, Desktop), cmux end to end, agent-tool
+   routing after viewer move, two-Machine open, real-provider input transfer through
+   "view again". `workspace-demo.md` holds the dated failed demos.
 
 ### Carried evidence
 
@@ -224,8 +270,8 @@ Rex shell joins that session; source drafts never reach argv (layout unit test).
   nothing so `cd` governs; a leaving viewer clears its report; bound-later
   conversations report the selected directory. Rex's app action is the only Split
   that inherits, and which source it prefers is unobserved.
-- LOO-717 (PR #1811, `b81df60579`) still requires native settlement; Jack's revised
-  contract (`04388b59-a9ab-434c-a1d2-c120ec38b7e9`) has not reached its API.
+- LOO-717 (PR #1811, `b81df60579`) keeps occurrence leases and `--native-settled`;
+  Jack's revised retained-regardless-of-focus contract has not reached its API.
 - Herdr 0.9.3/protocol 22 and cmux 0.65.0 (CLI at
   `/Applications/cmux.app/Contents/Resources/bin/cmux`) capabilities as above.
 
@@ -235,6 +281,10 @@ Compress (November 5): `cargo clippy -p loopflow --all-targets -- -D warnings` c
 after merging template validation into `instantiate`, sharing Task-tab creation
 between launch and follower, and deleting unreachable Herdr/cmux focus arms; lib
 `open::` 16/16 and `configured_task_layout…` passed; gate owns the rest.
+
+Realign (November 5): no code change; compress results stand. Isolated Rex
+inventory probe `/tmp/loo498-rex-inventory-probe.py` (throwaway server): block
+list has no argv/env; `pwd`/`process` are per-block methods.
 
 Check (November 5 fresh-launch pass): lib `open::` 16/16, `config::` 76/76,
 `work_open_tests::` 21/21 (+2 ignored native), native `rex_native_fresh…` and

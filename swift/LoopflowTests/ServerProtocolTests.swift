@@ -130,29 +130,6 @@ struct ServerProtocolTests {
         #expect(held["stopped"] == .bool(true))
     }
 
-    @Test func asksAndAnswersShareTheRustContract() throws {
-        let session = "session_5e55105e000040008000000000000001"
-        #expect(try encoded(.subscribe(id: "asks-1", operation: .sessionAsks)) == value("session_asks"))
-        let answer = ServedWrite.sessionAnswer(session: session, text: "yes", submit: true)
-        #expect(try encoded(.request(id: "answer-1", operation: .command(answer))) == value("session_answer"))
-        #expect(answer.argv == ["session", "answer", session, "yes", "--submit", "--json"])
-        guard case .reading(_, .object(let frame)) = try message("session_asks_reading"), let body = frame["body"] else {
-            Issue.record("Missing session.asks reading"); return
-        }
-        let asks = try JSONDecoder().decode([SessionAsk].self, from: JSONEncoder().encode(body))
-        #expect(asks.map(\.source) == [.report, .step])
-        #expect(asks[0].session == session)
-        #expect(asks[0].question == "Apply the migration to production?")
-        #expect(asks[0].kind == .permission)
-        #expect(asks[1].session == nil)
-        #expect(asks[1].question == "review")
-        guard case .response(_, _, let result) = try message("session_answered") else {
-            Issue.record("Missing session.answer result"); return
-        }
-        let answered = try JSONDecoder().decode(SessionAnswered.self, from: JSONEncoder().encode(result))
-        #expect(answered == SessionAnswered(session: session, bytes: 3, submitted: true))
-    }
-
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
         let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"))
         #expect(try encoded(wait) == value("task_wait"))

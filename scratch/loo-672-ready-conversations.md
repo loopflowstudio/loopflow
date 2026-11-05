@@ -177,6 +177,9 @@ reconciliation and conversation lookup agree.
   automatic preparation of both absence cases replaced them.
 - The hidden warm host and any launch that depends on a pane mounting.
 - The warm queue's `reveal` naming: it is `openWarmConversations`/`openings`.
+- Proposed (seventh concept review, pending implement): the `runtime?.owner != nil`
+  term in `SessionsContentView.showsTerminals`; a Task's panes follow its state and
+  the person's choice, never its owner.
 - Preserve explicit Start as recovery outside eligible working Task navigation;
   preserve Rust's Start/Reveal/Take back intents, Close and late-result fences,
   selected-first scheduling, input claims and LOO-717 retention. No new launch,
@@ -241,6 +244,30 @@ unprompted; opening reads, and operation begins with the person's first request,
 from Desktop or `lf resume`. The November 4 and 5 assumptions in `questions.md`
 record the CLI consequence. Open choices unchanged: the five demo questions of
 the fifth pass, less the first, which Jack's direction answered.
+
+Concept review, November 5 (seventh pass, against the sixth-review implications):
+the experience and its five concepts hold; the three implications are in the tree
+as recorded, the three skills and `PRIMARY_MESSAGE` agree, and `conversationIsOpening`
+leaves no primary on a gate. One residue of the deleted owner rule remains, in
+`SessionsContentView.showsTerminals`: a Task's panes show when it is working, when
+someone owns it, or when the person chose them. Working Tasks are now covered by
+their intent and unstarted ones by `awaitsStart`, so the owner term decides only a
+finished Task's default: an owned finished Task without history shows the shared
+placeholder with Rust's Start or a refusal, while the same Task nobody owns shows
+its record, and a refused reveal's offer or error is never rendered there. Who owns
+a finished Task says nothing about whether it has a conversation to show. Next
+implement direction, proposed: delete the owner term, so a finished Task shows its
+conversation once the selected reveal presents it (`presentSession` already chooses
+terminals) and its record otherwise, with Toggle still reaching the placeholder;
+cover a finished unowned Task revealing into visible panes and a finished Task
+without history showing its record. Consequence, settled by the accepted "preserve
+explicit Start as recovery" line: `RegistryQuery.startOffer` and `conversationStart`
+then reach a person only through a chosen terminals view on a finished Task without
+history, since an unstarted Task's pane is `TaskStartOffer` and never renders them;
+keep them, and the `prefetch-15` tests, as that recovery. No new product choice: the
+four demo questions of the fifth pass stand, and none of the owed native cases
+(repository, Waves, working and unstarted Tasks, return to an existing conversation)
+touches a finished Task, so this change can follow the demo if the loop prefers.
 
 ## Verification
 

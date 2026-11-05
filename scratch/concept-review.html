@@ -23,30 +23,31 @@ ol li { margin:.5rem 0; }
 <body>
 <main>
 <header>
-<p>LOO-672 · concept-review step, sixth pass · November 5, 2026</p>
-<p>Built from <code>scratch/loo-672-ready-conversations.md</code>, <code>scratch/questions.md</code>, <code>scratch/loo-672-load-prefetch.md</code>, <code>swift/LoopflowMac/WorkModel.swift</code>, <code>swift/LoopflowMac/Views/SessionsView.swift</code>, <code>swift/LoopflowMac/Views/WorkspacePanesView.swift</code>, <code>swift/Loopflow/Models/WaveWorkMap.swift</code>, <code>rust/loopflow/src/ops/human_session.rs</code>, the two session skills</p>
+<p>LOO-672 · concept-review step, seventh pass · November 5, 2026</p>
+<p>Built from <code>scratch/loo-672-ready-conversations.md</code>, <code>scratch/questions.md</code>, <code>scratch/loo-672-load-prefetch.md</code>, <code>swift/LoopflowMac/WorkModel.swift</code>, <code>swift/LoopflowMac/Views/SessionsView.swift</code>, <code>swift/LoopflowMac/Views/WorkspacePanesView.swift</code>, <code>swift/LoopflowMac/Views/TaskWorkView.swift</code>, <code>swift/Loopflow/Models/WaveWorkMap.swift</code>, <code>rust/loopflow/src/ops/human_session.rs</code>, the three session skills</p>
 </header>
 
-<h1>Everything opens. One Task kind still waits for a click it was never meant to need.</h1>
-<p>Jack Heart said "auto open everything <em>and</em> prefetch everything", and that once something is selected you should see its session. The primaries change delivers that for the repository, every Wave and every owned working Task. A started Task nobody owns still shows the gate, because of a November 4 assumption that borrowed the Wave board's "nothing moves an unassigned Task" rule. Opening a conversation moves nothing: its first turn reads, claims nothing and starts nothing. So the exclusion has no requirement behind it, and the accepted direction already removes it. Marked <span class="proposed">proposed</span> below; everything else exists in the working tree. These findings come from reading the code, not from running it.</p>
+<h1>Everything opens. The owner rule we deleted still decides one pane.</h1>
+<p>The three implications of the sixth pass are in the tree: a started Task nobody owns opens like any working Task, an unstarted Task's pane is a Task-start offer, and Tasks and primaries share one placeholder with one Retry. Reading the code again, the owner survives in one predicate: whether a selected Task shows its conversation panes at all. Working Tasks are now covered by their intent and unstarted ones by their Start offer, so that term decides only what a <em>finished</em> Task shows by default. Who owns a finished Task says nothing about whether it has a conversation to show. Marked <span class="proposed">proposed</span> below; everything else exists in the working tree. These findings come from reading the code, not from running it.</p>
 
 <h2>What the person does</h2>
 <table>
 <tr><th>Action</th><th>What happens</th></tr>
 <tr><td>Open the app</td><td>The repository and each Wave conversation start in the background beside the Task bound; selected, visible, then recent working Tasks fill the two preparation slots. Nothing waits for a pane.</td></tr>
 <tr><td>Select the repository or a Wave</td><td>The pane adopts the already running conversation, which has read and reported and is waiting for the first request. The operator begins at that request, never on open.</td></tr>
-<tr><td>Select an owned working Task</td><td>Adopts the running conversation, same provider process.</td></tr>
-<tr><td>Select a started Task nobody owns</td><td>Today: "No Task conversation open" and a Claim/Start offer. <span class="proposed">Proposed: opens like any working Task; the reading pass claims nothing.</span></td></tr>
-<tr><td>Select an unstarted Task</td><td>Today: "No Task conversation open" with Start. <span class="proposed">Proposed: the pane says the Task is not started and offers Start.</span> It has no checkout, so there is no conversation to open, and placing one starts the Task, which opening never authorizes.</td></tr>
+<tr><td>Select a working Task, owned or not</td><td>Adopts the running conversation, same provider process. Opening claims nothing.</td></tr>
+<tr><td>Select an unstarted Task</td><td>The pane says the Task is not started and offers Start, beside its brief. It has no checkout, so there is no conversation to open.</td></tr>
+<tr><td>Select a finished Task</td><td>Its history is revealed and the pane shows it. Today, with no history: owned shows the placeholder with Rust's Start or a refusal, unowned shows the Task's record and never the offer or the error. <span class="proposed">Proposed: owner ignored; the record until a conversation is presented, Toggle still reaches the placeholder.</span></td></tr>
 <tr><td>Select a conversation held elsewhere</td><td>Passive: last screen and <strong>Take back</strong>.</td></tr>
 <tr><td>Close a pane</td><td>Closed here until a deliberate reselection, which reopens it. Close is the one way to keep a selected Work unopened.</td></tr>
-<tr><td>A launch fails</td><td>The failure and <strong>Retry</strong>. The old Open gate is gone for primaries; <span class="proposed">one placeholder for Tasks and primaries alike</span>.</td></tr>
+<tr><td>A launch fails</td><td>The failure and <strong>Retry</strong>, one placeholder for every Work, routed by kind.</td></tr>
 </table>
 
 <h2>Concepts and APIs</h2>
 <table>
 <tr><th>Concept</th><th>Owner</th></tr>
-<tr><td>Which Work opens itself</td><td><code>RoadmapTask.conversationIntent</code> for Tasks; primaries always Start. <span class="proposed">Proposed: <code>isWorking ? .start : .reveal</code>, no owner term.</span></td></tr>
+<tr><td>Which Work opens itself</td><td><code>RoadmapTask.conversationIntent</code>: working → Start, else reveal; primaries always Start. <code>awaitsStart</code> is unstarted and open.</td></tr>
+<tr><td>What a selected Task shows</td><td><code>showsTerminals</code>: not a Task, or working, <span class="proposed">or owned (proposed: deleted)</span>, or chosen. <code>presentSession</code> chooses terminals when a conversation arrives.</td></tr>
 <tr><td>What may open, and in what order</td><td><code>warmWork</code>: selected, visible tiles, <code>warmPrimaries</code>, <code>recentTasks</code>; <code>prefetchPrimary</code>, <code>prefetch</code>, <code>openWarmConversations</code></td></tr>
 <tr><td>When a provider starts</td><td><code>SessionsStore</code> on <code>.prepared</code>, through <code>GhosttySurfacePool.start</code>; the pane adopts, never launches</td></tr>
 <tr><td>Who may take input</td><td><code>open_without_replacing</code>; only Take back replaces a holder</td></tr>
@@ -55,18 +56,18 @@ ol li { margin:.5rem 0; }
 
 <h2>Counterexamples that held</h2>
 <ul>
-<li>Load started no Graph and ran no operator: the primaries' first turn is the reading pass, from Desktop and from <code>lf resume</code> alike.</li>
-<li>A primary on another Machine is refused by the queue's Machine check; its checkout is Rust's persistent one, which Desktop's navigation never names, so only the Machine is compared.</li>
-<li>Close on the repository conversation survives refresh and prefetch; a deliberate visit readmits it.</li>
+<li>A started Task nobody owns opens; the Wave board's "nothing moves an unassigned Task" rule is untouched because the reading pass claims nothing.</li>
+<li>An unstarted Task never reaches a conversation gate: its slot, tile and pane offer Rust's <code>task run</code>.</li>
+<li>No primary shows "Conversation not open" except after Close or a failure: a queued primary reads as opening as soon as the Machine is known.</li>
+<li>A primary on another Machine is refused by the queue's Machine check; its checkout is Rust's persistent one, so only the Machine is compared.</li>
 <li>A store without a runtime prepares and launches nothing, so headless registries and tests never spawn <code>lf</code>.</li>
-<li>The Stopped run's untouched conversation reported its recorded comment without acting on it.</li>
 </ul>
 
 <h2>Settled here</h2>
-<p>Three implications of the accepted direction go to the next implement iteration: started unassigned Tasks open like any working Task; an unstarted Task's pane is a Task-start offer in its own words, not the rejected conversation gate; and Task and primary panes share one placeholder with one Retry routed by kind, since the primary branch's "not reported yet" copy cannot render (no pane exists before the Machine is known). None changes a concept or an API shape beyond deleting a term and a duplicate branch. The product rule behind the first-turn change is recorded as a rule, not a limitation: a primary never operates unprompted.</p>
+<p>One implication goes to the next implement iteration, proposed: delete the owner term from <code>showsTerminals</code>, so a Task's panes follow its state and the person's choice. A finished Task then shows its conversation once the selected reveal presents it and its record otherwise. Consequence: Rust's explicit Start after a refused reveal reaches a person only through a chosen terminals view on a finished Task without history, since an unstarted Task's pane never renders it; the accepted design keeps explicit Start as recovery, so it stays. None of the owed native demo cases touches a finished Task, so this can follow the demo if the loop prefers.</p>
 
 <h2>Next proof</h2>
-<p>Native, still owed: a fresh load with no saved history opens the repository and each Wave conversation unselected; selection reveals the started Session; no operator pass or Graph launched; returning to an existing Task conversation keeps it. <code>prepare-redemo.py</code> needs a Wave in the loaded repository. Then the older list: exact drafts across A → B → A, cold return past the warm set, Rex takeover, Close across refresh, relaunch identity, the twenty-Task footprint and the folder-trust dialog in a hidden pane.</p>
+<p>Native, still owed: a fresh load with no saved history opens the repository and each Wave conversation unselected; selection reveals the started Session; no operator pass or Graph launched; returning to an existing Task conversation keeps it; a started Task nobody owns opens; an unstarted Task offers Start. <code>prepare-redemo.py</code> needs a Wave in the loaded repository. Then the older list: exact drafts across A → B → A, cold return past the warm set, Rex takeover, Close across refresh, relaunch identity, the twenty-Task footprint and the folder-trust dialog in a hidden pane.</p>
 
 <h2>For the demo</h2>
 <ol>

@@ -147,35 +147,39 @@ fn local(
         ),
         Commands::Session { cmd } => super::session::mutate(cli, directory, cmd, io),
         Commands::Ship {
-            stop: true, reason, ..
+            stop: true,
+            reason,
+            json,
+            ..
         } => {
             let issue = cli.task.as_deref().context("No Task selected")?;
-            write!(
-                io.output,
-                "{}",
-                super::ship::stop(issue, reason.as_deref())?
-            )?;
+            let stopped = super::ship::stopped(issue, reason.as_deref())?;
+            if *json {
+                writeln!(io.output, "{}", serde_json::to_string(&stopped)?)?;
+            } else {
+                write!(io.output, "{}", super::ship::render_stopped(&stopped))?;
+            }
             Ok(())
         }
         Commands::Portfolio { cmd, json } => {
             crate::portfolio::write(cmd.as_ref(), *json, directory, io)
         }
         Commands::Graph {
-            cmd: crate::lf::GraphCommand::Customize { name },
+            cmd: crate::lf::GraphCommand::Customize { name, json },
         } => {
-            let repo = crate::repo::working_directory_in(directory)?;
-            writeln!(
-                io.output,
-                "{}",
-                crate::graph::customize(name, &repo)?.display()
-            )?;
+            let customized = super::graph::customize(name, directory)?;
+            if *json {
+                writeln!(io.output, "{}", serde_json::to_string(&customized)?)?;
+            } else {
+                writeln!(io.output, "{}", customized.path.display())?;
+            }
             Ok(())
         }
         Commands::Desktop { cmd } => {
             let saved =
                 super::desktop::save_arrangement(cli.repository.as_ref(), directory, cmd, io.input)
                     .map_err(super::desktop::exit_status)?;
-            writeln!(io.output, "{saved}")?;
+            writeln!(io.output, "{}", serde_json::to_string(&saved)?)?;
             Ok(())
         }
         _ => anyhow::bail!("not a shared mutation"),
@@ -199,14 +203,30 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             }
             Ok(())
         }
-        TaskCommand::Reopen { issue, reason } => {
-            crate::ops::task::task_reopen(issue, reason.as_deref())?;
-            writeln!(io.output, "{issue}: reopened; its Graph unchanged")?;
+        TaskCommand::Reopen {
+            issue,
+            reason,
+            json,
+        } => {
+            let task = crate::ops::task::task_reopen(issue, reason.as_deref())?;
+            if *json {
+                writeln!(io.output, "{}", serde_json::to_string_pretty(&task)?)?;
+            } else {
+                writeln!(io.output, "{issue}: reopened; its Graph unchanged")?;
+            }
             Ok(())
         }
-        TaskCommand::Complete { issue, reason } => {
-            crate::ops::task::task_complete(repo, issue, reason.as_deref())?;
-            writeln!(io.output, "{issue}: completed")?;
+        TaskCommand::Complete {
+            issue,
+            reason,
+            json,
+        } => {
+            let task = crate::ops::task::task_complete(repo, issue, reason.as_deref())?;
+            if *json {
+                writeln!(io.output, "{}", serde_json::to_string_pretty(&task)?)?;
+            } else {
+                writeln!(io.output, "{issue}: completed")?;
+            }
             Ok(())
         }
         TaskCommand::Save {
@@ -243,6 +263,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             rank,
             assignee,
             wave,
+            json,
         } => {
             let result = crate::ops::task::task_edit(
                 repo,
@@ -250,9 +271,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
                 wave.as_deref(),
                 task_edit_update(title, notes, *rank, assignee),
             )?;
-            writeln!(io.output, "{}: updated", result.id)?;
-            print_planning_sync(&result.sync, io)?;
-            Ok(())
+            print_edit(&result, *json, "updated", io)
         }
         TaskCommand::Move {
             issue,
@@ -266,11 +285,11 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             }
             Ok(())
         }
-        TaskCommand::Move { issue, wave, .. } => {
+        TaskCommand::Move {
+            issue, wave, json, ..
+        } => {
             let result = crate::ops::task::task_move_membership(repo, issue, wave.as_deref())?;
-            writeln!(io.output, "{}: membership saved", result.id)?;
-            print_planning_sync(&result.sync, io)?;
-            Ok(())
+            print_edit(&result, *json, "membership saved", io)
         }
         _ => unreachable!("accepts selects Task mutations"),
     }
@@ -382,11 +401,19 @@ pub fn selected_task_repository(
     Ok(repo)
 }
 
-fn print_planning_sync(
-    sync: &crate::store::planning_sync::PlanningSyncStatus,
+/// `--json` prints the edit; text prints `<id>: <done>` and its sync on stderr.
+fn print_edit(
+    edit: &crate::ops::task::TaskEdit,
+    json: bool,
+    done: &str,
     io: &mut CommandIo<'_>,
 ) -> Result<()> {
-    for line in sync.lines() {
+    if json {
+        writeln!(io.output, "{}", serde_json::to_string_pretty(edit)?)?;
+        return Ok(());
+    }
+    writeln!(io.output, "{}: {done}", edit.id)?;
+    for line in edit.sync.lines() {
         writeln!(io.error, "{line}")?;
     }
     Ok(())

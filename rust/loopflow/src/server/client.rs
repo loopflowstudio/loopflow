@@ -9,8 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, Reply, ServerError,
-    ServerMessage, ServerOperation, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerError, ServerMessage,
+    ServerOperation, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::id::LfProcessId;
 use crate::lf::commands::read::Read;
@@ -93,6 +93,13 @@ pub fn status() -> Result<Status> {
 /// A revision-1 server reads `{"ty` as an absurd frame length and closes.
 const OLDER_PROTOCOL: &str = "Loopflow server closed the connection without answering; it may speak an older protocol; update the selected installation";
 
+/// What a request returned, and the trace that correlates its diagnostics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    pub trace_id: crate::id::TraceId,
+    pub result: serde_json::Value,
+}
+
 /// One connection: hello and welcome once, then requests, subscriptions and
 /// cancels by id for its lifetime.
 #[derive(Debug)]
@@ -173,10 +180,12 @@ impl Connection {
     }
 
     /// One request and its answer; other ids' messages wait in `pending`.
-    pub fn request(&mut self, operation: Operation) -> Result<Reply> {
+    pub fn request(&mut self, operation: Operation) -> Result<Response> {
         let id = self.send(operation)?;
         match self.wait(|message| answers(message, &id))? {
-            ServerMessage::Response { result, .. } => Ok(result),
+            ServerMessage::Response {
+                trace_id, result, ..
+            } => Ok(Response { trace_id, result }),
             ServerMessage::Error {
                 code,
                 message,
@@ -200,10 +209,7 @@ impl Connection {
             operation,
         })?;
         match self.wait(|message| answers(message, &id))? {
-            ServerMessage::Response {
-                result: Reply::Subscribed,
-                ..
-            } => Ok(id),
+            ServerMessage::Response { .. } => Ok(id),
             ServerMessage::Error {
                 code,
                 message,
@@ -300,15 +306,11 @@ pub(crate) fn bridge_existing(owner: &LfProcessId) -> Result<UnixStream> {
 pub fn attach(path: &Path, owner: &LfProcessId) -> Result<UnixStream> {
     let mut connection = Connection::start(connect(path)?, 1)?;
     connection.set_read_timeout(Some(HANDSHAKE))?;
-    match connection
+    connection
         .request(Operation::Server(ServerOperation::Attach {
             owner: owner.clone(),
         }))
-        .map_err(|error| stalled(error, "open the owner bridge"))?
-    {
-        Reply::Bridged => {}
-        other => anyhow::bail!("Server did not open the owner bridge: {other:?}"),
-    }
+        .map_err(|error| stalled(error, "open the owner bridge"))?;
     let stream = connection.socket.reader.into_inner();
     stream.set_read_timeout(None)?;
     Ok(stream)

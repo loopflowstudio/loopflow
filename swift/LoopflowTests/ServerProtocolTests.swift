@@ -65,14 +65,15 @@ struct ServerProtocolTests {
     }
 
     @Test func commandTraceAndExistingOwnerShareRustFixtures() throws {
-        guard case .response(let id, .command(let trace, let code, let value, let output, _)) = try message("command") else {
-            Issue.record("Missing command"); return
+        guard case .response(let id, let trace, .object(let renamed)) = try message("response") else {
+            Issue.record("Missing response"); return
         }
         #expect(id == "rename-1")
         #expect(trace == "85c31c1e-850c-4821-878d-55527b6dba46")
-        #expect(code == 0)
-        #expect(value == (try JSONDecoder().decode(JSONValue.self, from: Data(output.utf8))))
-        guard case .response(_, .sessionOwner(let process)) = try message("owner") else { Issue.record("Missing owner"); return }
+        #expect(renamed["title"] == .string("Served name"))
+        guard case .response(_, _, .object(let owned)) = try message("owner"), case .string(let process)? = owned["owner"] else {
+            Issue.record("Missing owner"); return
+        }
         #expect(process == trace)
         let owner = ServerClientMessage.request(id: "owner-1", operation: .sessionOwner(session: "session_5e55105e000040008000000000000001"))
         #expect(try encoded(owner) == self.value("session_owner"))

@@ -48,8 +48,8 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true}}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null}}
-← {"type":"response","id":"a","result":{"kind":"read","value":{…}}}
-← {"type":"response","id":"b","result":{"kind":"subscribed"}}
+← {"type":"response","id":"a","trace_id":"…","result":{…}}
+← {"type":"response","id":"b","trace_id":"…","result":null}
 ← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","frame":{"answers":3,…}}
@@ -79,9 +79,12 @@ installation, an installation check that never applies to a remote client.
 
 After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
-`operation`; the server answers `response {id, result}` or `error {id, code,
-message, data}` in whatever order work finishes. `cancel {id}` forgets a request's
-answer or ends a subscription; a command already dispatched still completes and
+`operation`; the server answers `response {id, trace_id, result}` or `error
+{id, code, message, data}` in whatever order work finishes. `result` is the
+operation's value: what its CLI spelling prints with `--json`, `{owner}` for
+`session.owner`, and null once a subscription or attachment is confirmed.
+`trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
+answer or ends a subscription; a write already dispatched still completes and
 answers nothing. Closing the connection cancels every subscription and releases
 every wait; admitted mutations finish. An `error` with a null `id` is about the
 connection and is its last message: the server closes after `busy` at capacity
@@ -125,10 +128,10 @@ part of what a phone or bot client is offered.
 
 - `config.file {request}` uses `config::api::Request` for catalogue, declaration,
   explanation and theme access. CLI and Desktop share the same Rust validation
-  and file writer. It returns the ordinary command receipt and never replays a
-  failed or uncertain save. Setting values are omitted from request telemetry.
-- A read uses the existing `Read` shape and answers `read {value}`: the
-  JSON the command prints, serialized once. A command that prints bare text
+  and file writer. It returns the value `config::api::run` returns and never
+  replays a failed or uncertain save. Setting values are omitted from request telemetry.
+- A read uses the existing `Read` shape and answers with the JSON the command
+  prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is
   supported. Repository IDs resolve on the destination with `repository.path`;
   paths in local reads are destination paths. `view.get` returns the existing
@@ -147,22 +150,27 @@ part of what a phone or bot client is offered.
   ends the subscription; the connection stays open. A read with no watch is
   `invalid`. Reconnect opens a fresh subscription
   and receives a complete reading; no replay cursor exists.
-- A write uses the shared `Write` shape. The server calls the same
-  Rust mutation dispatcher as the CLI, with the request's directory and streams.
-  `command {trace_id,code,value,output,stderr}` returns its exit status, output
-  and diagnostics; `value` is stdout parsed as JSON when the command's spelling
-  carries `--json` and stdout parses, otherwise null. `task.create
-  {directory,id,title}` adopts the selected conversation and returns the Task
-  without launching work; CLI and server share its creation handler. Ordinary
-  writes start no CLI child. Machine routing still uses SSH and never falls back
-  to local execution. Requests create no Process rows. A lost response means
-  outcome unknown; inspect state before retrying. IDs correlate diagnostics and
-  are **not** durable deduplication receipts. No automatic resubmission.
-- `session.owner {session}` resolves a Session ID to `session_owner {owner}`.
+- A write uses the shared `Write` shape. `Write::run` calls the shared Rust
+  function its CLI handler calls and returns the typed value; the CLI prints
+  that value with `--json` and renders it as text otherwise. Nothing parses
+  standard output. `task.create {directory,id,title}` adopts the selected
+  conversation and returns the Task without launching work. A write whose Work
+  lives on another Machine (`task.claim`, `task.unassign`, `task.hold`,
+  `session.resume`) runs its `lf … --json` spelling there over SSH and returns
+  what that prints, which is the destination's value; it never falls back to
+  local execution. Requests create no Process rows; diagnostics the shared
+  functions print go to the request's log. A refusal the shared code names
+  (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
+  record `not_found`) answers that code; any other failure is
+  `outcome_unknown`, since the write may have taken partial effect. A lost
+  response means outcome unknown; inspect state before retrying. IDs correlate
+  diagnostics and are **not** durable deduplication receipts. No automatic
+  resubmission.
+- `session.owner {session}` resolves a Session ID to `{owner}`.
   A null owner means no recorded transport; resolution never starts a provider.
   An owner can finish between lookup and attachment, which then fails explicitly.
 - `terminal.attach {owner}` takes the exact existing owner Process ID on a connection of
-  its own: hello, one attach request, `bridged`, then the unchanged binary owner
+  its own: hello, one attach request, its response, then the unchanged binary owner
   protocol in `transport/README.md` and `transport/wire.rs`. An owner whose
   endpoint refuses is `not_found {owner}`: it ended. Each terminal has
   its own socket, so readings never wait behind terminal bytes and a control

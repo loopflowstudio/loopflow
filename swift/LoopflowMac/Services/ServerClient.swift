@@ -8,30 +8,21 @@ import Loopflow
 enum ServerClient {
     /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
     static func read(_ query: ServedRead, location: ServerLocation = .shared) async throws -> String {
-        guard case .read(let value) = try await request(.read(query), location: location) else {
-            throw RegistryQueryError("Unexpected Server reading")
-        }
+        let value = try await request(.read(query), location: location)
         if case .string(let text) = value { return text }
         return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
     }
 
+    /// What the write returned, as JSON: what `lf <write> --json` prints.
     static func write(_ change: ServedWrite, location: ServerLocation = .shared) async throws -> String {
-        try commandOutput(await request(.command(change), location: location))
+        String(decoding: try JSONEncoder().encode(await request(.command(change), location: location)), as: UTF8.self)
     }
 
     static func configuration(_ value: JSONValue, location: ServerLocation = .shared) async throws -> Data {
-        Data(try commandOutput(await request(.configuration(value), location: location)).utf8)
+        try JSONEncoder().encode(await request(.configuration(value), location: location))
     }
 
-    private static func commandOutput(_ reply: ServerReply) throws -> String {
-        guard case .command(_, let code, _, let output, let stderr) = reply else {
-            throw RegistryQueryError("Server command outcome unknown; inspect the affected work before retrying")
-        }
-        guard code == 0 else { throw RegistryQueryError(stderr, stdout: output) }
-        return output
-    }
-
-    private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> ServerReply {
+    private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> JSONValue {
         try Task.checkCancellation()
         let link = try await links.link(for: location)
         return try await link.request(operation)
@@ -146,7 +137,7 @@ final class ServerLink: @unchecked Sendable {
     private let fd: Int32
     private let state = NSLock()
     private let writes = NSLock()
-    private var pending: [String: CheckedContinuation<ServerReply, any Error>] = [:]
+    private var pending: [String: CheckedContinuation<JSONValue, any Error>] = [:]
     private var subscriptions: [String: ServerSubscription] = [:]
     private var failure: (any Error)?
     private var reader: LineReader
@@ -193,7 +184,7 @@ final class ServerLink: @unchecked Sendable {
 
     /// One request and its answer. Cancelling the task sends `cancel` and
     /// releases the wait; a command already dispatched may still complete.
-    func request(_ operation: ServerOperation) async throws -> ServerReply {
+    func request(_ operation: ServerOperation) async throws -> JSONValue {
         let id = UUID().uuidString
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -256,7 +247,7 @@ final class ServerLink: @unchecked Sendable {
 
     private func dispatch(_ line: Data) throws {
         switch try JSONDecoder().decode(ServerMessage.self, from: line) {
-        case .response(let id, let result):
+        case .response(let id, _, let result):
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(returning: result) }
             // `subscribed` confirms a registered subscription; anything else is
             // a late answer to a forgotten request.

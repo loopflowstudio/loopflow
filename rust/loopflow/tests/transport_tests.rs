@@ -4513,10 +4513,11 @@ impl<'a> ServerProof<'a> {
         connection
     }
 
-    fn request(&self, operation: Value) -> loopflow::server::wire::Reply {
+    fn request(&self, operation: Value) -> Value {
         self.connect()
             .request(serde_json::from_value(operation).unwrap())
             .unwrap()
+            .result
     }
 
     fn viewer(&self, owner: &str) -> Viewer {
@@ -4677,8 +4678,6 @@ fn server_status_does_not_install_or_create_work() {
 
 #[test]
 fn server_subscriptions_refresh_work_and_resolve_primary_session() {
-    use loopflow::server::wire::Reply;
-
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
     let _cleanup = StopOwner(&fixture, owner.clone());
@@ -4712,15 +4711,13 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     )
     .unwrap();
     // The read shares the watch's connection.
-    let Reply::Read { value: socket_plan } = watch
+    let socket_plan = watch
         .request(
             serde_json::from_value(json!({"kind":"view.get","directory":fixture.repo.path(),"expression":"task:INF-123"}))
                 .unwrap(),
         )
         .unwrap()
-    else {
-        panic!("expected a read")
-    };
+        .result;
     let cli = service
         .command(&["desktop", "view", "task:INF-123", "--plan", "--json"])
         .output()
@@ -5245,12 +5242,8 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let owner_pid = pid_of_process(&fixture, &owner);
     let session = fixture.session_of_owner(&owner);
     let first_instance = service.ready();
-    let loopflow::server::wire::Reply::SessionOwner { owner: resolved } =
-        service.request(json!({"kind":"session.owner","session":session}))
-    else {
-        panic!("expected the Session owner")
-    };
-    assert_eq!(serde_json::to_value(resolved).unwrap(), owner);
+    let resolved = service.request(json!({"kind":"session.owner","session":session}));
+    assert_eq!(resolved["owner"], owner);
     let mut viewer = service.viewer(&owner);
     viewer.input("draft");
     drop(viewer); // Desktop quit: the owner keeps its native editor.

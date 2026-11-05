@@ -344,7 +344,7 @@ struct DesktopHeadlessTests {
             run: { args, _ in
                 if args.prefix(2) == ["desktop", "plan"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
-                    || args.last == "ship" || args.last == "--stop" {
+                    || args.contains("ship") {
                     await started.add(args)
                 }
                 return "{}"
@@ -418,7 +418,7 @@ struct DesktopHeadlessTests {
 
         // Completion has its own operation and does not move the Workflow.
         await model.completeTask(task)
-        #expect(await started.calls.last == ["task", "complete", task.task.identifier])
+        #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
         // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
@@ -427,8 +427,8 @@ struct DesktopHeadlessTests {
             try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
         try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
-        for _ in 0..<200 where await started.calls.last?.last != "--stop" { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls.last == ["--task", shipping.task.identifier, "ship", "--stop"])
+        for _ in 0..<200 where await started.calls.last?.contains("--stop") != true { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["--task", shipping.task.identifier, "ship", "--stop", "--json"])
 
         // The toast after Auto-Ship offers Undo; after Stop Auto-Ship it only reports.
         var undone = false

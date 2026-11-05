@@ -1,5 +1,6 @@
-//! Commands submitted by native clients to the Loopflow server.
-//! CLI and server share mutation dispatch; the carrier owns its I/O and trace.
+//! Writes submitted by native clients to the Loopflow server. [`Write::run`]
+//! calls the shared functions the CLI handlers call and returns the value the
+//! CLI prints with `--json`; the carrier owns its trace.
 
 use std::path::{Path, PathBuf};
 
@@ -124,7 +125,9 @@ pub enum Write {
     /// `lf portfolio <change> --json`, run from `/`: which repositories the
     /// app shows.
     #[serde(rename = "desktop.portfolio.set")]
-    Portfolio { change: Vec<String> },
+    Portfolio {
+        change: crate::portfolio::PortfolioCommand,
+    },
     /// `lf desktop query [--revision <revision>] -- <id> <expression>`.
     #[serde(rename = "desktop.dashboard.query")]
     DashboardQuery {
@@ -197,74 +200,219 @@ pub enum Write {
 }
 
 impl Write {
-    /// The `lf` command this write equals, without the binary.
-    pub fn argv(&self) -> Vec<String> {
-        let mut argv = vec!["--cwd".to_owned(), self.directory().display().to_string()];
-        let (notes_flag, revision_flag, query, path);
-        let words: Vec<&str> = match self {
-            Self::TaskFromSession { id, title, .. } => {
-                vec![
-                    "task",
-                    "create",
-                    "--session",
-                    id,
-                    "--title",
-                    title,
-                    "--json",
-                ]
+    /// Make this write on the caller's thread and return what it wrote: the
+    /// value the CLI spelling prints with `--json`. CLI handlers call the same
+    /// shared functions and print that value.
+    pub fn run(&self) -> anyhow::Result<serde_json::Value> {
+        if let Some(value) = self.routed()? {
+            return Ok(value);
+        }
+        let directory = self.directory();
+        let task_repo = |issue: &str| crate::ops::task::task_repository(directory, Some(issue));
+        match self {
+            Self::TaskFromSession { id, title, .. } => value(&crate::ops::task::task_create(
+                &crate::ops::task::task_repository(directory, None)?,
+                None,
+                Some(title.clone()),
+                None,
+                crate::ops::task::TaskAdoptionOptions {
+                    session: Some(id.clone()),
+                    worktree: None,
+                },
+            )?),
+            Self::TaskComplete { issue, .. } => value(&crate::ops::task::task_complete(
+                &task_repo(issue)?,
+                issue,
+                None,
+            )?),
+            Self::TaskReopen { issue, .. } => value(&crate::ops::task::task_reopen(issue, None)?),
+            Self::TaskNotes { issue, notes, .. } => value(&crate::ops::task::task_edit(
+                &task_repo(issue)?,
+                issue,
+                None,
+                super::mutation::task_edit_update(&None, &Some(notes.clone()), None, &None),
+            )?),
+            Self::TaskAbandon { issue, .. } => value(&crate::ops::task::task_abandon(
+                &task_repo(issue)?,
+                Some(issue),
+                false,
+            )?),
+            Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
+                use crate::ops::task_ownership::{change, OwnershipChange};
+                let requested = match self {
+                    Self::TaskClaim { .. } => OwnershipChange::Claim,
+                    _ => OwnershipChange::Unassign,
+                };
+                value(&change(&task_repo(issue)?, issue, requested)?)
             }
-            Self::TaskComplete { issue, .. } => vec!["task", "complete", issue],
-            Self::TaskReopen { issue, .. } => vec!["task", "reopen", issue],
-            Self::TaskAbandon { issue, .. } => vec!["task", "abandon", issue],
-            Self::TaskNotes { issue, notes, .. } => {
-                notes_flag = format!("--notes={notes}");
-                vec!["task", "edit", issue, &notes_flag]
-            }
-            Self::TaskClaim { issue, .. } => vec!["task", "claim", issue, "--json"],
-            Self::TaskUnassign { issue, .. } => vec!["task", "unassign", issue, "--json"],
-            Self::ShipStop { issue, .. } => vec!["--task", issue, "ship", "--stop"],
-            Self::TaskMove { issue, wave, .. } => match wave {
-                Some(wave) => vec!["task", "move", issue, "--wave", wave],
-                None => vec!["task", "move", issue, "--no-wave"],
-            },
+            Self::ShipStop { issue, .. } => value(&super::ship::stopped(issue, None)?),
+            Self::TaskMove { issue, wave, .. } => value(&crate::ops::task::task_move_membership(
+                &task_repo(issue)?,
+                issue,
+                wave.as_deref(),
+            )?),
             Self::TaskSave {
                 issue,
                 path,
                 revision,
+                content,
                 ..
-            } => vec![
-                "task",
-                "save",
-                issue,
-                path,
-                "--revision",
-                revision,
-                "--json",
-            ],
-            Self::SessionRename { id, name, .. } => {
-                vec!["session", "rename", "--json", "--", id, name]
+            } => {
+                let content = super::mutation::read_task_draft(&mut content.as_bytes())?;
+                value(&crate::ops::task::task_save(
+                    issue, path, revision, &content,
+                )?)
             }
+            Self::SessionRename { id, name, .. } => value(&super::session::renamed(id, name)?),
             Self::SessionBind {
                 id, task, preview, ..
-            } => {
-                let mut words = vec!["session", "bind", "--json", "--task", task];
-                if *preview {
-                    words.push("--dry-run");
-                }
-                words.extend(["--", id]);
-                words
+            } => super::session::bound(id, task, *preview),
+            Self::SessionResume { .. } | Self::SessionNew { .. } => {
+                let (cli, _) = self
+                    .cli()
+                    .expect("a Session preparation has a CLI spelling")?;
+                value(&super::session::prepared(&cli, directory)?)
             }
-            Self::SessionResume {
+            Self::WaveAdd {
+                wave, objective, ..
+            } => {
+                let repo = crate::repo::require_repo_root(directory, "this command")?;
+                value(&tokio::runtime::Runtime::new()?.block_on(
+                    crate::ops::wave_lifecycle::add(&repo, wave, objective.as_deref()),
+                )?)
+            }
+            Self::PlanningRefresh { wave, .. } => {
+                let refreshed = super::ops::refresh_status(directory, Some(wave))?;
+                Ok(serde_json::from_str(&super::waves::status_json(
+                    directory,
+                    Some(refreshed.as_deref().unwrap_or(wave)),
+                    super::waves::Shape::Tasks,
+                )?)?)
+            }
+            Self::NewChapter {
+                name,
+                plan,
+                preview,
+                ..
+            } => {
+                let repo = crate::repo::require_repo_root(directory, "this command")?;
+                value(&crate::ops::chapter::new_chapter(
+                    &repo,
+                    name,
+                    plan.as_bytes(),
+                    None,
+                    *preview,
+                )?)
+            }
+            Self::GraphCustomize { name, .. } => value(&super::graph::Customized {
+                path: crate::graph::customize(
+                    name,
+                    &crate::repo::working_directory_in(directory)?,
+                )?,
+            }),
+            Self::Portfolio { change } => value(&crate::portfolio::change(change, directory)?),
+            Self::DashboardQuery { .. }
+            | Self::DashboardPin { .. }
+            | Self::DashboardUnpin { .. }
+            | Self::DashboardRename { .. }
+            | Self::DashboardSlots { .. }
+            | Self::PaneLayout { .. } => {
+                use crate::lf::DesktopCommand;
+                let command = match self {
+                    Self::DashboardQuery {
+                        id,
+                        expression,
+                        revision,
+                        ..
+                    } => DesktopCommand::Query {
+                        container: id.clone(),
+                        expression: expression.clone(),
+                        revision: *revision,
+                    },
+                    Self::DashboardPin { id, revision, .. } => DesktopCommand::Pin {
+                        query: id.clone(),
+                        revision: *revision,
+                    },
+                    Self::DashboardUnpin { id, revision, .. } => DesktopCommand::Unpin {
+                        query: id.clone(),
+                        revision: *revision,
+                    },
+                    Self::DashboardRename {
+                        id, name, revision, ..
+                    } => DesktopCommand::Rename {
+                        target: format!("query:{id}"),
+                        name: name.clone(),
+                        revision: u64::try_from(*revision)?,
+                    },
+                    Self::DashboardSlots { id, revision, .. } => DesktopCommand::Layout {
+                        work: format!("query:{id}"),
+                        save: true,
+                        revision: Some(*revision),
+                    },
+                    Self::PaneLayout { work, .. } => DesktopCommand::Layout {
+                        work: work.clone(),
+                        save: true,
+                        revision: None,
+                    },
+                    _ => unreachable!("matched above"),
+                };
+                let mut input = self.input().unwrap_or_default().as_bytes();
+                super::desktop::save_arrangement(None, directory, &command, &mut input)
+            }
+            Self::DashboardHide { id, member, .. } | Self::DashboardShow { id, member, .. } => {
+                let verb = if matches!(self, Self::DashboardHide { .. }) {
+                    "hide"
+                } else {
+                    "show"
+                };
+                super::desktop::save_tile(
+                    None,
+                    directory,
+                    &format!("query:{id}"),
+                    member,
+                    verb,
+                    &Default::default(),
+                )
+            }
+            Self::TileMove {
+                board,
+                member,
+                destination,
+                ..
+            } => super::desktop::save_tile(
+                None,
                 directory,
+                board,
+                member,
+                "move",
+                &[("destination".to_owned(), destination.clone())].into(),
+            ),
+        }
+    }
+
+    /// The writes whose Work can live on another Machine, or whose Session
+    /// preparation reads the CLI's selectors, as `lf` spells them. SSH runs
+    /// this spelling on the destination; nothing else parses it.
+    fn cli(&self) -> Option<anyhow::Result<(crate::lf::Cli, Vec<String>)>> {
+        let mut args = vec![
+            "lf".to_owned(),
+            "--cwd".to_owned(),
+            self.directory().display().to_string(),
+        ];
+        let words: Vec<&str> = match self {
+            Self::TaskClaim { issue, .. } => vec!["task", "claim", issue, "--json"],
+            Self::TaskUnassign { issue, .. } => vec!["task", "unassign", issue, "--json"],
+            Self::ShipStop { issue, .. } => vec!["--task", issue, "ship", "--stop", "--json"],
+            Self::SessionResume {
                 id,
                 task,
                 wave,
                 agent,
+                ..
             } => {
                 let mut words = Vec::new();
                 if id.is_none() && task.is_none() && wave.is_none() {
-                    path = directory.display().to_string();
-                    words.extend(["--repo", path.as_str()]);
+                    args.extend(["--repo".to_owned(), self.directory().display().to_string()]);
                 }
                 if let Some(agent) = agent {
                     words.extend(["--agent", agent]);
@@ -288,96 +436,48 @@ impl Write {
                 words.extend(["session", "new", id, "--prepare", "--json"]);
                 words
             }
-            Self::WaveAdd {
-                wave, objective, ..
-            } => {
-                let mut words = vec!["wave", "add", wave.as_str()];
-                if let Some(objective) = objective {
-                    words.extend(["--objective", objective]);
-                }
-                words.push("--json");
-                words
-            }
-            Self::PlanningRefresh { wave, .. } => {
-                vec!["wave", "status", wave, "--sync", "--json"]
-            }
-            Self::NewChapter { name, preview, .. } => {
-                let mut words = vec![
-                    "wave",
-                    "new-chapter",
-                    "--all",
-                    name,
-                    "--plan",
-                    "/dev/stdin",
-                    "--json",
-                ];
-                if *preview {
-                    words.push("--dry-run");
-                }
-                words
-            }
-            Self::GraphCustomize { name, .. } => vec!["graph", "customize", name],
-            Self::Portfolio { change } => std::iter::once("portfolio")
-                .chain(change.iter().map(String::as_str))
-                .chain(["--json"])
-                .collect(),
-            Self::DashboardQuery {
-                id,
-                expression,
-                revision,
-                ..
-            } => {
-                let mut words = vec!["desktop", "query"];
-                if let Some(revision) = revision {
-                    revision_flag = format!("--revision={revision}");
-                    words.push(&revision_flag);
-                }
-                words.extend(["--", id, expression]);
-                words
-            }
-            Self::DashboardPin { id, revision, .. } | Self::DashboardUnpin { id, revision, .. } => {
-                revision_flag = format!("--revision={revision}");
-                let verb = if matches!(self, Self::DashboardPin { .. }) {
-                    "pin"
-                } else {
-                    "unpin"
-                };
-                vec!["desktop", verb, &revision_flag, "--", id]
-            }
-            Self::DashboardRename {
-                id, name, revision, ..
-            } => {
-                revision_flag = format!("--revision={revision}");
-                query = format!("query:{id}");
-                vec!["desktop", "rename", &revision_flag, "--", &query, name]
-            }
-            Self::DashboardHide { id, member, .. } | Self::DashboardShow { id, member, .. } => {
-                path = format!("query:{id}/{member}");
-                let verb = if matches!(self, Self::DashboardHide { .. }) {
-                    "hide"
-                } else {
-                    "show"
-                };
-                vec!["desktop", verb, "-p", &path]
-            }
-            Self::DashboardSlots { id, revision, .. } => {
-                revision_flag = format!("--revision={revision}");
-                query = format!("query:{id}");
-                vec!["desktop", "layout", &query, "--save", &revision_flag]
-            }
-            Self::TileMove {
-                board,
-                member,
-                destination,
-                ..
-            } => {
-                path = format!("{board}/{member}");
-                vec!["desktop", "move", "-p", &path, "--destination", destination]
-            }
-            Self::PaneLayout { work, .. } => vec!["desktop", "layout", work, "--save"],
+            _ => return None,
         };
-        argv.extend(words.into_iter().map(str::to_owned));
-        argv
+        args.extend(words.into_iter().map(str::to_owned));
+        Some(
+            <crate::lf::Cli as clap::Parser>::try_parse_from(&args)
+                .and_then(crate::lf::Cli::checked)
+                .map_err(anyhow::Error::from)
+                .map(|cli| (cli, args)),
+        )
+    }
+
+    /// What the destination printed, when this write's Work lives on another
+    /// Machine: its `lf … --json` prints what its API returns.
+    fn routed(&self) -> anyhow::Result<Option<serde_json::Value>> {
+        let Some(spelled) = self.cli() else {
+            return Ok(None);
+        };
+        let (cli, args) = spelled?;
+        let Some(forward) = super::work_route::forward(&cli, &args, self.directory())? else {
+            return Ok(None);
+        };
+        let (mut output, mut error) = (Vec::new(), Vec::new());
+        let ran = forward.run(
+            &cli,
+            self.directory(),
+            &mut super::mutation::CommandIo {
+                input: &mut std::io::empty(),
+                output: &mut output,
+                error: &mut error,
+            },
+        );
+        let diagnostics = String::from_utf8_lossy(&error);
+        if let Err(failed) = ran {
+            return Err(match diagnostics.trim() {
+                "" => failed,
+                said => failed.context(format!("the destination said: {said}")),
+            });
+        }
+        for line in diagnostics.lines() {
+            crate::journal::request::diagnostic(format_args!("{line}"));
+        }
+        Ok(Some(serde_json::from_slice(&output)?))
     }
 
     /// What the command reads from stdin.
@@ -425,68 +525,61 @@ impl Write {
     }
 }
 
+fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
+    Ok(serde_json::to_value(value)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Write;
-    use crate::lf::Cli;
-    use clap::Parser;
-    use std::path::PathBuf;
 
     /// The JSON `RegistryQueryTests.servedWriteEncodings` encodes in Swift.
     #[test]
     fn desktop_encodings_name_their_writes() {
-        let write = |json: &str| serde_json::from_str::<Write>(json).unwrap().argv();
-        assert_eq!(
-            write(r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#),
-            ["--cwd", "/r", "task", "move", "FIX-1", "--no-wave"]
-        );
-        assert_eq!(
-            write(
-                r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#
-            ),
-            [
-                "--cwd",
-                "/r",
-                "desktop",
-                "unpin",
-                "--revision=3",
-                "--",
-                "picked"
-            ]
-        );
-        assert_eq!(
-            write(
-                r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#
-            ),
-            [
-                "--cwd",
-                "/r",
-                "desktop",
-                "query",
-                "--",
-                "picked",
-                "-state:done"
-            ]
-        );
-        assert_eq!(
-            write(r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#),
-            ["--cwd", "/r", "--task", "FIX-1", "ship", "--stop"]
-        );
-        assert_eq!(
-            write(r#"{"kind":"desktop.portfolio.set","change":["remove","/r"]}"#),
-            ["--cwd", "/", "portfolio", "remove", "/r", "--json"]
-        );
-        let chapter = serde_json::from_str::<Write>(
+        for json in [
+            r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#,
+            r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
+            r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
+            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
+            r#"{"kind":"chapter.start","directory":"/r","name":"October","plan":"{}","preview":true}"#,
+            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
+            r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#,
+            r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
+        ] {
+            let write: Write = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                serde_json::to_value(&write).unwrap(),
+                serde_json::from_str::<serde_json::Value>(json).unwrap()
+            );
+        }
+        let chapter: Write = serde_json::from_str(
             r#"{"kind":"chapter.start","directory":"/r","name":"October","plan":"{}","preview":true}"#,
         )
         .unwrap();
         assert_eq!(chapter.input(), Some("{}"));
-        assert_eq!(chapter.argv().last().map(String::as_str), Some("--dry-run"));
+    }
+
+    #[test]
+    fn routed_writes_spell_the_command_ssh_runs() {
+        let spelled = |json: &str| {
+            let (_, args) = serde_json::from_str::<Write>(json)
+                .unwrap()
+                .cli()
+                .expect("a routed write")
+                .unwrap();
+            args
+        };
         assert_eq!(
-            write(
+            spelled(r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#),
+            ["lf", "--cwd", "/r", "--task", "FIX-1", "ship", "--stop", "--json"]
+        );
+        assert_eq!(
+            spelled(
                 r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
             ),
             [
+                "lf",
                 "--cwd",
                 "/r",
                 "--repo",
@@ -498,8 +591,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            write(r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#),
+            spelled(r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#),
             [
+                "lf",
                 "--cwd",
                 "/r",
                 "--agent",
@@ -511,165 +605,11 @@ mod tests {
                 "--json"
             ]
         );
-        let save = serde_json::from_str::<Write>(
-            r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
+        assert!(serde_json::from_str::<Write>(
+            r#"{"kind":"task.complete","directory":"/r","issue":"FIX-1"}"#
         )
-        .unwrap();
-        assert_eq!(save.input(), Some("text"));
-    }
-
-    #[test]
-    fn every_write_parses_as_the_lf_command_it_names() {
-        let directory = PathBuf::from("/tmp/repo");
-        let writes = [
-            Write::TaskFromSession {
-                directory: directory.clone(),
-                id: "session_1".into(),
-                title: "Adopt work".into(),
-            },
-            Write::TaskComplete {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::TaskReopen {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::TaskNotes {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                notes: "--not a flag".into(),
-            },
-            Write::TaskMove {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                wave: None,
-            },
-            Write::TaskSave {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                path: "a.txt".into(),
-                revision: "r".into(),
-                content: "text".into(),
-            },
-            Write::SessionRename {
-                directory: directory.clone(),
-                id: "session_1".into(),
-                name: "-n".into(),
-            },
-            Write::SessionBind {
-                directory: directory.clone(),
-                id: "session_1".into(),
-                task: "FIX-1".into(),
-                preview: false,
-            },
-            Write::WaveAdd {
-                directory: directory.clone(),
-                wave: "product".into(),
-                objective: None,
-            },
-            Write::PlanningRefresh {
-                directory: directory.clone(),
-                wave: "product".into(),
-            },
-            Write::TaskAbandon {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::NewChapter {
-                directory: directory.clone(),
-                name: "October".into(),
-                plan: "{}".into(),
-                preview: false,
-            },
-            Write::Portfolio {
-                change: vec!["add".into(), "/tmp/repo".into()],
-            },
-            Write::TaskUnassign {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::ShipStop {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::SessionResume {
-                directory: directory.clone(),
-                id: None,
-                task: Some("FIX-1".into()),
-                wave: None,
-                agent: Some("codex".into()),
-            },
-            Write::SessionNew {
-                directory: directory.clone(),
-                id: "session_1".into(),
-                agent: None,
-            },
-        ];
-        // Arrangement, a customized Graph and a chapter preview record nothing.
-        let arrangement = [
-            Write::GraphCustomize {
-                directory: directory.clone(),
-                name: "code".into(),
-            },
-            Write::NewChapter {
-                directory: directory.clone(),
-                name: "October".into(),
-                plan: "{}".into(),
-                preview: true,
-            },
-            Write::DashboardQuery {
-                directory: directory.clone(),
-                id: "picked".into(),
-                expression: "-state:done".into(),
-                revision: Some(3),
-            },
-            Write::DashboardUnpin {
-                directory: directory.clone(),
-                id: "picked".into(),
-                revision: 3,
-            },
-            Write::DashboardRename {
-                directory: directory.clone(),
-                id: "picked".into(),
-                name: "-n".into(),
-                revision: 3,
-            },
-            Write::DashboardHide {
-                directory: directory.clone(),
-                id: "picked".into(),
-                member: "task:task_1".into(),
-            },
-            Write::DashboardSlots {
-                directory: directory.clone(),
-                id: "picked".into(),
-                revision: 3,
-                slots: "null".into(),
-            },
-            Write::TileMove {
-                directory: directory.clone(),
-                board: "working-tasks".into(),
-                member: "task:task_1".into(),
-                destination: "task:task_2".into(),
-            },
-            Write::PaneLayout {
-                directory,
-                work: "task:task_1".into(),
-                layout: "{}".into(),
-            },
-        ];
-        let command = |write: &Write| {
-            let argv = std::iter::once("lf".to_owned()).chain(write.argv());
-            Cli::try_parse_from(argv)
-                .unwrap_or_else(|error| panic!("{write:?}: {error}"))
-                .command
-                .unwrap()
-        };
-        for write in writes {
-            assert!(command(&write).changes_work(), "{write:?}");
-        }
-        for write in arrangement {
-            assert!(!command(&write).changes_work(), "{write:?}");
-        }
+        .unwrap()
+        .cli()
+        .is_none());
     }
 }

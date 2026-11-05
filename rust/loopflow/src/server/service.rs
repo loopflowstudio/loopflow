@@ -16,11 +16,11 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation, Reply,
+    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation,
     ServerError, ServerMessage, ServerOperation, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE,
     MIN_REVISION, REVISION,
 };
-use crate::lf::commands::{read::Read, watch::Subscription, write::Write};
+use crate::lf::commands::{read::Read, watch::Subscription};
 
 /// How long a connection has to send its first message.
 const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -375,7 +375,7 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                                 continue;
                             }
                         };
-                        send(&mut lines, &ServerMessage::Response { id, result: Reply::Bridged }).await?;
+                        send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result: serde_json::Value::Null }).await?;
                         // The connection now speaks only the owner protocol; other
                         // answers on it are dropped with the task set.
                         return bridge(lines, destination).await;
@@ -456,15 +456,17 @@ async fn request(
     outgoing: mpsc::Sender<ServerMessage>,
 ) -> String {
     let started = Instant::now();
-    let result = operate(operation, &id, &instance).await;
-    tracing::debug!(request = %id, %instance, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
+    let trace_id = crate::id::TraceId::default();
+    let result = operate(operation, &id, &instance, &trace_id).await;
+    tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
     let message = match result {
         Ok(result) => ServerMessage::Response {
             id: id.clone(),
+            trace_id,
             result,
         },
         Err(refusal) => {
-            tracing::warn!(request = %id, %instance, code = %refusal.code, error = %refusal.message, "Server request failed");
+            tracing::warn!(request = %id, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
             refusal.into_message(Some(id.clone()))
         }
     };
@@ -473,8 +475,13 @@ async fn request(
     id
 }
 
-async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply, ServerError> {
-    Ok(match operation {
+async fn operate(
+    operation: Operation,
+    id: &str,
+    instance: &str,
+    trace_id: &crate::id::TraceId,
+) -> Result<serde_json::Value, ServerError> {
+    match operation {
         Operation::Server(ServerOperation::SessionOwner { session }) => {
             let owner = tokio::task::spawn_blocking(move || -> Result<_> {
                 let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
@@ -486,43 +493,101 @@ async fn operate(operation: Operation, id: &str, instance: &str) -> Result<Reply
             .await
             .map_err(unavailable)?
             .map_err(unavailable)?;
-            Reply::SessionOwner { owner }
+            Ok(serde_json::json!({ "owner": owner }))
         }
-        Operation::Read(query) => Reply::Read {
-            value: tokio::task::spawn_blocking(move || {
-                crate::journal::request::isolate(|| query.read())
-            })
-            .await
-            .map_err(unavailable)?
-            .map_err(unavailable)?,
-        },
+        Operation::Read(query) => {
+            tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| query.read()))
+                .await
+                .map_err(unavailable)?
+                .map_err(unavailable)
+        }
         Operation::Server(ServerOperation::Configuration { request }) => {
             let mut target = serde_json::to_value(&request).map_err(unavailable)?;
             target
                 .as_object_mut()
                 .expect("configuration request is an object")
                 .remove("value");
-            execute_command(target, id, instance, true, move |output, _errors| {
-                use std::io::Write;
-                writeln!(output, "{}", crate::config::api::run(request)?)?;
-                Ok(())
+            effect(target, id, instance, trace_id, move || {
+                crate::config::api::run(request)
             })
             .await
-            .map_err(outcome_unknown)?
         }
-        Operation::Write(change) => command(change, id, instance)
-            .await
-            .map_err(outcome_unknown)?,
+        Operation::Write(change) => {
+            let mut target = serde_json::to_value(&change).map_err(unavailable)?;
+            if let Some(fields) = target.as_object_mut() {
+                for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
+                    fields.remove(field);
+                }
+            }
+            effect(target, id, instance, trace_id, move || change.run()).await
+        }
         Operation::Server(ServerOperation::Attach { .. }) => {
             unreachable!("the session dispatches attachment")
         }
+    }
+}
+
+/// Run a write on a request worker under `trace_id`. Once admitted,
+/// disconnection releases the client; the effect finishes without replay.
+/// Diagnostics the shared functions print go to the request's log.
+async fn effect(
+    target: serde_json::Value,
+    id: &str,
+    instance: &str,
+    trace_id: &crate::id::TraceId,
+    run: impl FnOnce() -> Result<serde_json::Value> + Send + 'static,
+) -> Result<serde_json::Value, ServerError> {
+    let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
+    tokio::task::spawn_blocking(move || {
+        let mut diagnostics = Vec::new();
+        let result = crate::journal::request::run(&trace_id, &target, || {
+            crate::journal::request::diagnostics(&mut diagnostics, run)
+        });
+        for line in String::from_utf8_lossy(&diagnostics).lines() {
+            tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
+        }
+        tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
+        result.map_err(written)
     })
+    .await
+    .map_err(|join| outcome_unknown(join.into()))?
+}
+
+/// The code a failed write names, else the one its error's type implies.
+/// A write that failed for another reason may have taken partial effect.
+fn written(error: anyhow::Error) -> ServerError {
+    use crate::store::StoreError;
+    use crate::work::selection::SelectionError;
+    if let Some(named) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<ServerError>())
+    {
+        return named.clone();
+    }
+    let code = error.chain().find_map(|cause| {
+        if let Some(store) = cause.downcast_ref::<StoreError>() {
+            return match store {
+                StoreError::NotFound => Some(ErrorCode::NotFound),
+                StoreError::Stale(_) => Some(ErrorCode::Conflict),
+                StoreError::InvalidData(_) | StoreError::Serde(_) => Some(ErrorCode::Invalid),
+                _ => None,
+            };
+        }
+        if cause.is::<SelectionError>() || cause.is::<serde_json::Error>() {
+            return Some(ErrorCode::Invalid);
+        }
+        None
+    });
+    match code {
+        Some(code) => ServerError::new(code, format!("{error:#}")),
+        None => outcome_unknown(error),
+    }
 }
 
 fn outcome_unknown(error: anyhow::Error) -> ServerError {
     ServerError::new(
         ErrorCode::OutcomeUnknown,
-        format!("{error}; inspect the affected work before retrying"),
+        format!("{error:#}; inspect the affected work before retrying"),
     )
 }
 
@@ -579,7 +644,8 @@ async fn watch(
         outgoing,
         ServerMessage::Response {
             id: id.into(),
-            result: Reply::Subscribed,
+            trace_id: crate::id::TraceId::default(),
+            result: serde_json::Value::Null,
         },
     )
     .await?;
@@ -604,95 +670,6 @@ async fn watch(
             }
         }
     }
-}
-
-async fn command(change: Write, id: &str, instance: &str) -> Result<Reply> {
-    use clap::Parser;
-    let mut target = serde_json::to_value(&change)?;
-    if let Some(fields) = target.as_object_mut() {
-        for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
-            fields.remove(field);
-        }
-    }
-    let args: Vec<_> = std::iter::once("lf".to_owned())
-        .chain(change.argv())
-        .collect();
-    let json = args.iter().any(|arg| arg == "--json");
-    execute_command(target, id, instance, json, move |output, errors| {
-        let cli = match crate::lf::Cli::try_parse_from(&args).and_then(crate::lf::Cli::checked) {
-            Ok(cli) => cli,
-            Err(error) => {
-                use std::io::Write;
-                let stream = if error.use_stderr() {
-                    &mut *errors
-                } else {
-                    &mut *output
-                };
-                write!(stream, "{error}")?;
-                return Err(crate::process::CommandExit(
-                    u8::try_from(error.exit_code()).expect("Clap exit code fits a byte"),
-                )
-                .into());
-            }
-        };
-        anyhow::ensure!(
-            crate::lf::commands::mutation::accepts(&cli),
-            "unsupported mutation"
-        );
-        let mut input = change.input().unwrap_or_default().as_bytes();
-        crate::lf::commands::mutation::run(
-            &cli,
-            &args,
-            change.directory(),
-            &mut crate::lf::commands::mutation::CommandIo {
-                input: &mut input,
-                output,
-                error: errors,
-            },
-        )
-    })
-    .await
-}
-
-/// `json`: the command's spelling prints JSON, so stdout that parses becomes `value`.
-async fn execute_command(
-    target: serde_json::Value,
-    id: &str,
-    instance: &str,
-    json: bool,
-    execute: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>) -> Result<()> + Send + 'static,
-) -> Result<Reply> {
-    let id = id.to_owned();
-    let instance = instance.to_owned();
-    // Once admitted, disconnection releases the viewer; effects finish without replay.
-    tokio::task::spawn_blocking(move || {
-        let trace_id = crate::id::TraceId::default();
-        let mut output = Vec::new();
-        let mut errors = Vec::new();
-        let result =
-            crate::journal::request::run(&trace_id, &target, || execute(&mut output, &mut errors));
-        let code = i32::from(crate::journal::command_exit_code(&result));
-        if let Err(error) = result {
-            use std::io::Write;
-            if !error.is::<crate::process::CommandExit>() {
-                writeln!(errors, "Error: {error:?}")?;
-            }
-        }
-        tracing::info!(request = %id, %instance, code, %trace_id, "Server command finished");
-        anyhow::ensure!(
-            output.len() < MAX_MESSAGE / 2 && errors.len() < MAX_MESSAGE / 2,
-            "command output exceeded its limit"
-        );
-        let value = json.then(|| serde_json::from_slice(&output).ok()).flatten();
-        Ok(Reply::Command {
-            trace_id,
-            code,
-            value,
-            output: String::from_utf8(output)?,
-            stderr: String::from_utf8(errors)?,
-        })
-    })
-    .await?
 }
 
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
@@ -728,8 +705,8 @@ mod tests {
     use super::{connection, Clients};
     use crate::lf::commands::read::Read;
     use crate::server::wire::{
-        ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, Reply, ServerMessage,
-        ServerOperation, MAX_MESSAGE, REVISION,
+        ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, ServerMessage, ServerOperation,
+        MAX_MESSAGE, REVISION,
     };
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
@@ -835,15 +812,11 @@ mod tests {
             }
             let mut answered = Vec::new();
             for _ in 0..2 {
-                let ServerMessage::Response {
-                    id,
-                    result: Reply::Command { code, value, .. },
-                } = client.receive().await.unwrap()
+                let ServerMessage::Response { id, result, .. } = client.receive().await.unwrap()
                 else {
-                    panic!("expected a command result")
+                    panic!("expected a result")
                 };
-                assert_eq!(code, 0);
-                assert!(value.unwrap().is_array(), "catalog parses as JSON");
+                assert!(result.is_array(), "the catalog is its value");
                 answered.push(id);
             }
             answered.sort();
@@ -978,7 +951,7 @@ mod tests {
                 .await;
             assert!(matches!(
                 client.receive().await.unwrap(),
-                ServerMessage::Response { id, result: Reply::Subscribed } if id == "ps"
+                ServerMessage::Response { id, result: serde_json::Value::Null, .. } if id == "ps"
             ));
             let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
                 panic!("expected the first reading")
@@ -1007,7 +980,7 @@ mod tests {
             // Nothing follows the cancel for `ps`; the sibling still answers.
             assert!(matches!(
                 client.receive().await.unwrap(),
-                ServerMessage::Response { id, result: Reply::Command { .. } } if id == "after"
+                ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "after"
             ));
             // A cancelled subscription takes no more checkpoints.
             client

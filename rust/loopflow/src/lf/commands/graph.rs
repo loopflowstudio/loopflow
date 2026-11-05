@@ -105,6 +105,21 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
     )
 }
 
+/// What `lf graph customize` wrote.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Customized {
+    /// The repository file that defines the Graph.
+    pub path: std::path::PathBuf,
+}
+
+/// `lf graph customize <name>` in `directory`'s repository.
+pub fn customize(name: &str, directory: &Path) -> Result<Customized> {
+    let repo = crate::repo::working_directory_in(directory)?;
+    Ok(Customized {
+        path: crate::graph::customize(name, &repo)?,
+    })
+}
+
 pub fn show(name: &str, repo: &Path) -> Result<()> {
     let graph = crate::graph::load_authored_graph(name, repo)?;
     let items = compile_graph(&graph, repo)?;

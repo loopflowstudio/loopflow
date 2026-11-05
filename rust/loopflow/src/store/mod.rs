@@ -90,6 +90,9 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("not found")]
     NotFound,
+    /// A compare-and-swap named a revision that is no longer current.
+    #[error("{0}")]
+    Stale(String),
     #[error("invalid data: {0}")]
     InvalidData(String),
     #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]

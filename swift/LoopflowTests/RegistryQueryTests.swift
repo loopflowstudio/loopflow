@@ -118,11 +118,11 @@ struct RegistryQueryTests {
         }
         let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil)
         #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#))
-        #expect(move.argv == ["task", "move", "FIX-1", "--no-wave"])
+        #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
         let stop = ServedWrite.shipStop(directory: "/r", issue: "FIX-1")
         #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#))
-        #expect(stop.argv == ["--task", "FIX-1", "ship", "--stop"])
+        #expect(stop.argv == ["--task", "FIX-1", "ship", "--stop", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
             #"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
@@ -136,7 +136,7 @@ struct RegistryQueryTests {
             #"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#))
         #expect(query.argv == ["desktop", "query", "--", "picked", "-state:done"])
         let portfolio = ServedWrite.portfolio(change: ["remove", "/r"])
-        #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":["remove","/r"]}"#))
+        #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
         #expect(portfolio.argv == ["portfolio", "remove", "/r", "--json"])
         #expect(portfolio.cwd == "/")
         let chapter = ServedWrite.newChapter(directory: "/r", name: "October", plan: "{}", preview: true)

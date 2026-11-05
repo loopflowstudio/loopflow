@@ -379,6 +379,30 @@ async fn rename_session(
     crate::ops::human_session::rename(&store, id, &requested, source).await
 }
 
+/// `lf session rename <id> <name>`: the renamed Session.
+pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
+    tokio::runtime::Runtime::new()?.block_on(rename_session(
+        id,
+        &[name.to_owned()],
+        SessionTitleSource::Human,
+    ))
+}
+
+/// `lf session bind <id> --task <task> --json`: the bound Session, or with
+/// `preview` (`--dry-run`) the Task a bind would assign, assigning nothing.
+pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<serde_json::Value> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        Ok(if preview {
+            serde_json::to_value(
+                crate::ops::human_session::preview_binding(&store, id, task).await?,
+            )?
+        } else {
+            serde_json::to_value(crate::ops::human_session::bind(&store, id, task).await?)?
+        })
+    })
+}
+
 /// What `lf session list --json` prints for `filter` in `shape`.
 pub(crate) fn read_once(
     filter: &crate::session::SessionFilter,
@@ -619,7 +643,7 @@ async fn reopen(
 /// What `lf session resume|new --prepare` run from `directory` records and
 /// prints: the conversation and the command that opens it, with no provider
 /// started.
-fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<SessionRecord> {
+pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<SessionRecord> {
     let Some(crate::lf::Commands::Session { cmd }) = &cli.command else {
         bail!("not a Session command");
     };
@@ -761,7 +785,11 @@ async fn rename(
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
-        bail!("{label} cannot be empty");
+        return Err(crate::server::wire::ServerError::new(
+            crate::server::wire::ErrorCode::Invalid,
+            format!("{label} cannot be empty"),
+        )
+        .into());
     }
     Ok(text)
 }

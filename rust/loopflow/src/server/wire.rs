@@ -85,9 +85,13 @@ pub enum ServerOperation {
 pub enum ServerMessage {
     Welcome(Welcome),
     Status(Status),
+    /// What the request returned: a read's or write's value, `{owner}` for
+    /// `session.owner`, null once a subscription or attachment is confirmed.
+    /// `trace_id` correlates the server's diagnostics for it.
     Response {
         id: String,
-        result: Reply,
+        trace_id: crate::id::TraceId,
+        result: serde_json::Value,
     },
     Reading {
         id: String,
@@ -152,27 +156,6 @@ pub struct Limits {
     pub max_connections: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Reply {
-    Read {
-        value: serde_json::Value,
-    },
-    Subscribed,
-    Command {
-        trace_id: crate::id::TraceId,
-        code: i32,
-        /// Stdout parsed as JSON when the command's spelling prints JSON.
-        value: Option<serde_json::Value>,
-        output: String,
-        stderr: String,
-    },
-    SessionOwner {
-        owner: Option<LfProcessId>,
-    },
-    Bridged,
-}
-
 /// What a client can branch on. Nothing ran for any code but `outcome_unknown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -194,9 +177,10 @@ pub enum ErrorCode {
 }
 
 /// A refused request, as an `error` message carries it. Shared operations
-/// return it inside `anyhow::Error` to name their code; the server sends it as is.
+/// return it inside `anyhow::Error` to name their code; the server sends it as
+/// is, and the CLI prints its message.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("{code}: {message}")]
+#[error("{message}")]
 pub struct ServerError {
     pub code: ErrorCode,
     pub message: String,
@@ -262,7 +246,7 @@ mod tests {
         for raw in [
             include_str!("../../../../tests/fixtures/dto/server/welcome.json"),
             include_str!("../../../../tests/fixtures/dto/server/status.json"),
-            include_str!("../../../../tests/fixtures/dto/server/command.json"),
+            include_str!("../../../../tests/fixtures/dto/server/response.json"),
             include_str!("../../../../tests/fixtures/dto/server/owner.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),

@@ -65,6 +65,33 @@ made while delivering them, for Jack to confirm or reverse:
   answers `invalid: data did not match any variant…`; a named-kind error would
   need a hand-written deserializer.
 
+- **Typed writes keep one CLI spelling, for SSH and Session preparation.**
+  `task.claim`, `task.unassign`, `task.hold`, `session.resume` and `session.new`
+  still build an `lf` spelling (`Write::cli`), because their Work can live on
+  another Machine and SSH runs the destination's ordinary `lf … --json`, whose
+  output is that Machine's API value. Session preparation also reads its
+  selectors (`--agent`, `--task`, `--wave`, `--repo`) through the parsed Cli
+  (`SessionConnectionArgs::target`); typing that resolver is a deeper refactor
+  of `session.rs`. No other write parses or prints a CLI spelling.
+- **CLI gained `--json` where a write had only text.** `lf task complete`,
+  `task reopen`, `task edit`, `task move` (membership), `ship --stop` and
+  `graph customize` now print with `--json` exactly what the server returns:
+  the Task, the Task edit (`{id, sync}`), `{issue, stopped}` and `{path}`.
+  `task.abandon` returns the identifier string, as `lf task abandon --json` did.
+- **Unnamed write failures are `outcome_unknown`.** A write's error names its
+  code when the shared code raises `wire::ServerError` (an empty Session name is
+  `invalid`) or when its type implies one (`StoreError::NotFound` →
+  `not_found`, the new `StoreError::Stale` for Dashboard revisions →
+  `conflict`, selection and JSON errors → `invalid`). Anything else may have
+  partially applied (planning sync, SSH), so it is `outcome_unknown`. Naming
+  more codes means typing more of `OpsError`, which today is mostly strings.
+- **Write diagnostics live in the log, not the response.** Notes the shared
+  functions print to stderr ("Saved locally; pending Linear sync", the bound
+  conversation's directory) go to `logs/lf.log` under the request's trace.
+  The values carry the same facts where they matter (`cwd`, `sync`).
+- **`desktop.portfolio.set` takes a typed `change`.** `PortfolioCommand` now
+  derives serde, tagged by `action`; Swift maps its word list to it.
+
 ### CLI paths that differ from their API name
 
 Input for the follow-on Task that aligns CLI, config and API namespaces. Kinds

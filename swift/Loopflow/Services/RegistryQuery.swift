@@ -263,14 +263,14 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var argv: [String] {
         switch self {
         case .taskFromSession(_, let id, let title): ["task", "create", "--session", id, "--title", title, "--json"]
-        case .taskComplete(_, let issue): ["task", "complete", issue]
-        case .taskReopen(_, let issue): ["task", "reopen", issue]
-        case .taskAbandon(_, let issue): ["task", "abandon", issue]
-        case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
+        case .taskComplete(_, let issue): ["task", "complete", issue, "--json"]
+        case .taskReopen(_, let issue): ["task", "reopen", issue, "--json"]
+        case .taskAbandon(_, let issue): ["task", "abandon", issue, "--json"]
+        case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)", "--json"]
         case .taskOwnership(_, let issue, let claimed): ["task", claimed ? "claim" : "unassign", issue, "--json"]
-        case .shipStop(_, let issue): ["--task", issue, "ship", "--stop"]
+        case .shipStop(_, let issue): ["--task", issue, "ship", "--stop", "--json"]
         case .taskMove(_, let issue, let wave):
-            ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
+            ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
         case .taskSave(_, let issue, let path, let revision, _):
             ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
@@ -286,7 +286,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
         case .newChapter(_, let name, _, let preview):
             ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"] + (preview ? ["--dry-run"] : [])
-        case .graphCustomize(_, let name): ["graph", "customize", name]
+        case .graphCustomize(_, let name): ["graph", "customize", name, "--json"]
         case .portfolio(let change): ["portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
             ["desktop", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
@@ -302,6 +302,21 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["desktop", "move", "-p", "\(board)/\(member)", "--destination", destination]
         case .paneLayout(_, let work, _): ["desktop", "layout", work, "--save"]
         }
+    }
+
+    /// `lf portfolio <change>`'s words as Rust's `PortfolioCommand`, tagged by
+    /// `action`: `folder [path]`, `manual`, `add|import <paths…>`, `remove <path>`.
+    private static func portfolioChange(_ words: [String]) -> JSONValue {
+        let action = words.first ?? ""
+        let rest = Array(words.dropFirst())
+        var fields: [String: JSONValue] = ["action": .string(action)]
+        switch action {
+        case "folder": fields["path"] = rest.first.map(JSONValue.string) ?? .null
+        case "add", "import": fields["paths"] = .array(rest.map(JSONValue.string))
+        case "remove": fields["path"] = rest.first.map(JSONValue.string) ?? .null
+        default: break
+        }
+        return .object(fields)
     }
 
     /// `lf [--repo <repo>] [--agent <agent>] <command> --prepare --json`.
@@ -367,7 +382,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .graphCustomize(let directory, let name):
             TaggedFields("graph.customize", ["directory": directory, "name": name])
         case .portfolio(let change):
-            TaggedFields("desktop.portfolio.set", ["change": change])
+            TaggedFields("desktop.portfolio.set", ["change": Self.portfolioChange(change)])
         case .dashboardQuery(let directory, let id, let expression, let revision):
             TaggedFields("desktop.dashboard.query", ["directory": directory, "id": id, "expression": expression,
                                              "revision": revision])
@@ -805,7 +820,8 @@ public struct RegistryQuery: Sendable {
 
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         // Without a repository it customizes from `/`, where the app runs.
-        try await write(.graphCustomize(directory: cwd ?? "/", name: name)).trimmingCharacters(in: .whitespacesAndNewlines)
+        struct Customized: Decodable { let path: String }
+        return try Self.decode(Customized.self, from: await write(.graphCustomize(directory: cwd ?? "/", name: name))).path
     }
 
     /// Run the Task's graph until its next interactive step; returns once it

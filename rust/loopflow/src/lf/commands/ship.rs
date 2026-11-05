@@ -16,13 +16,29 @@ use crate::ops::task::ship::{
 };
 use crate::ops::task::{TaskProcessOptions, TaskRunStart};
 
-/// `lf ship --stop`: withdraw the Task's Auto-Ship approval and say what it was.
-pub fn stop(issue: &str, reason: Option<&str>) -> Result<String> {
-    Ok(if ship_stop(issue, reason)? {
+/// What `lf ship --stop` withdrew.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ShipStopped {
+    pub issue: String,
+    /// A run was shipping the Task; otherwise only the stop was saved.
+    pub stopped: bool,
+}
+
+/// `lf ship --stop`: withdraw the Task's Auto-Ship approval.
+pub fn stopped(issue: &str, reason: Option<&str>) -> Result<ShipStopped> {
+    Ok(ShipStopped {
+        issue: issue.to_owned(),
+        stopped: ship_stop(issue, reason)?,
+    })
+}
+
+pub fn render_stopped(stopped: &ShipStopped) -> String {
+    let issue = &stopped.issue;
+    if stopped.stopped {
         format!("{issue} stopped shipping\n")
     } else {
         format!("{issue} is not shipping; no run ships it until `lf ship {issue}`\n")
-    })
+    }
 }
 
 pub fn run(

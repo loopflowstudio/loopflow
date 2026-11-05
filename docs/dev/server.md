@@ -44,8 +44,8 @@ Desktop ── private Unix socket ── server
 phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 
 server read/subscribe ─ shared Rust readers
-server command ─ request worker ─┐
-CLI mutation ───────────────────┴─ shared Rust mutation dispatcher
+server write ─ request worker ─ Write::run ─┐
+CLI mutation ─ mutation dispatcher ─────────┴─ shared Rust write functions
 server attach ─ exact existing Session owner ─ provider / PTY
 
 Desktop execution launch ─ ordinary CLI ─ existing Session / Graph owners
@@ -61,12 +61,13 @@ terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
 Every shared native Work read, write and subscription uses this server. Desktop
-links no Loopflow Rust library or C bridge. CLI commands and served writes use
-`lf/commands/mutation.rs` for routing, selection, defaults, effects and formatting.
-Each caller supplies a directory and input/output/error streams. The server runs
-that dispatcher in a request-scoped worker, returning output, errors and exit
-status without starting an ordinary per-write CLI child or changing process-global
-cwd, environment or standard streams.
+links no Loopflow Rust library or C bridge. Served writes and CLI handlers call
+the same shared Rust functions, which return typed values: `Write::run`
+(`lf/commands/write.rs`) returns the value as the response, and the CLI
+(`lf/commands/mutation.rs`) prints it with `--json` or renders it as text. The
+server runs a write in a request-scoped worker with the request's directory,
+without starting a CLI child, parsing standard output or changing
+process-global cwd, environment or standard streams.
 
 Served writes create no Process rows and inherit no launcher Session or Task
 attribution. `journal::request` carries tracing and diagnostics into nested
@@ -76,7 +77,7 @@ Canceling releases the client's wait, but an admitted mutation may still complet
 A lost reply means outcome unknown: refresh authoritative state before another
 deliberate edit, and never automatically replay the request.
 
-Session-to-Task adoption uses served mutation dispatch without launching work.
+Session-to-Task adoption (`task.create`) shares its creation function with the CLI and launches no work.
 Create-and-run and other execution launches retain their ordinary CLI path and
 existing Session/Graph owners. Ghostty rendering and app-owned automation retain
 their boundaries.

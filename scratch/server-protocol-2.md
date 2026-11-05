@@ -85,8 +85,8 @@ client ── hello{revision 2, min 2, client} ──▶ server
 client ◀── welcome{client_id, revision 2, server 2, min 2, instance, build, limits, capabilities} ── server
 client ── request{id a, plan.get} ──▶
 client ── subscribe{id b, session.list} ──▶
-client ◀── response{id a, value}
-client ◀── response{id b, subscribed}
+client ◀── response{id a, trace_id, result}
+client ◀── response{id b, trace_id, null}
 client ◀── reading{id b, frame}
 client ── checkpoint{id b, checkpoint 3} ──▶
 client ◀── reading{id b, …}
@@ -155,19 +155,19 @@ lists those rows as `clients`.
 
 ### Results
 
-- `read` answers `response {id, value}` where `value` is the JSON the shared
-  reader produced, not a string containing it. `read.rs` already has the typed
+- Every answer is `response {id, trace_id, result}`. A read's `result` is the
+  JSON the shared reader produced, not a string containing it. `read.rs` already has the typed
   value in hand before `pretty()`; the server serializes once and the client
   decodes once.
 - `reading {id, frame}` carries the subscription's request id, which alone
   names the subscription. `checkpoint {id, checkpoint}` is typed: the next
   reading's `answers` carries the number. A subscription's arguments are fixed;
   changing them is a new subscription.
-- `command` answers `response {id, trace_id, code, value, output, stderr}`.
-  When the write's CLI spelling prints JSON (its `argv` carries `--json`), the
-  server parses stdout into `value`; otherwise `value` is null and `output`
-  holds the text. Diagnostics stay beside the value. No second mutation
-  implementation: the shared dispatcher still produces the text.
+- A write's `result` is the typed value its shared Rust function returns.
+  The CLI is inverted: it prints what the API returns, with `--json`, and
+  renders text from the same value otherwise. Nothing scrapes standard output;
+  failures are `error {id, code, message, data}`. Only a write whose Work lives
+  on another Machine reads the destination's `lf … --json` output over SSH.
 - Errors are `{code, message, data}`. `code` is a domain code a client can
   branch on (`incompatible, invalid, not_found, conflict, unavailable,
   outcome_unknown, busy`); `data` is structured detail such as the missing

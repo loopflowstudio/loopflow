@@ -16,14 +16,14 @@ struct ServerClientTests {
             case "request":
                 let id = message["id"] as! String
                 if sawCancel.get() {
-                    respond(["type": "response", "id": id, "result": ["kind": "read", "value": ["id": "home_fixture"]]])
+                    respond(["type": "response", "id": id, "trace_id": "trace", "result": ["id": "home_fixture"]])
                 } else {
                     firstId.set(id) // The cancelled read: answer it late, after the cancel.
                 }
             case "cancel":
                 sawCancel.set(true)
                 if let late = firstId.get() {
-                    respond(["type": "response", "id": late, "result": ["kind": "read", "value": ["id": "late"]]])
+                    respond(["type": "response", "id": late, "trace_id": "trace", "result": ["id": "late"]])
                 }
             default: break
             }
@@ -42,24 +42,28 @@ struct ServerClientTests {
         #expect(!reading.contains("late"))
     }
 
-    @Test func failedCommandPreservesOutputAndDiagnosis() async throws {
+    @Test func refusedWriteThrowsItsCodeAndWritesReturnTheirValue() async throws {
         let peer = try ServerPeer()
+        let refused = Mutex<Bool>(false)
         peer.serve { message, respond in
-            if message["type"] as? String == "request" {
-                respond(["type": "response", "id": message["id"]!, "result": [
-                    "kind": "command", "trace_id": "trace", "code": 7, "value": NSNull(),
-                    "output": "saved partial result", "stderr": "fixture command failed",
-                ]])
+            guard message["type"] as? String == "request" else { return true }
+            if refused.get() {
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": ["path": "/r/.lf/graphs/code.yaml"]])
+            } else {
+                refused.set(true)
+                respond(["type": "error", "id": message["id"]!, "code": "conflict",
+                         "message": "Dashboard changed; read it again before editing", "data": NSNull()])
             }
             return true
         }
         do {
             _ = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
-            Issue.record("A failed command succeeded")
-        } catch let error as RegistryQueryError {
-            #expect(error.stdout == "saved partial result")
-            #expect(error.localizedDescription == "fixture command failed")
+            Issue.record("A refused write succeeded")
+        } catch {
+            #expect(error.localizedDescription == "conflict: Dashboard changed; read it again before editing")
         }
+        let written = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
+        #expect(try JSONDecoder().decode([String: String].self, from: Data(written.utf8)) == ["path": "/r/.lf/graphs/code.yaml"])
     }
 
     @Test func disconnectFailsEveryPendingRequestAndTheNextReopens() async throws {
@@ -81,7 +85,7 @@ struct ServerClientTests {
         }
         peer.serve { message, respond in
             if message["type"] as? String == "request" {
-                respond(["type": "response", "id": message["id"]!, "result": ["kind": "read", "value": "/src/again"]])
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "/src/again"])
             }
             return true
         }
@@ -102,7 +106,7 @@ struct ServerClientTests {
         #expect(elapsed >= 9 && elapsed < 20, "waited \(elapsed)s")
         peer.serve { message, respond in
             if message["type"] as? String == "request" {
-                respond(["type": "response", "id": message["id"]!, "result": ["kind": "read", "value": "/src/after-stall"]])
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "/src/after-stall"])
             }
             return true
         }
@@ -117,7 +121,7 @@ struct ServerClientTests {
             case ("subscribe", _):
                 let id = message["id"] as! String
                 subscription.set(id)
-                respond(["type": "response", "id": id, "result": ["kind": "subscribed"]])
+                respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
                 respond(["type": "reading", "id": id, "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
                 #expect(message["checkpoint"] as? Int == 4)
@@ -125,7 +129,7 @@ struct ServerClientTests {
                 respond(["type": "reading", "id": id, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
-                respond(["type": "response", "id": message["id"]!, "result": ["kind": "read", "value": "still here"]])
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "still here"])
             default: break
             }
             return true

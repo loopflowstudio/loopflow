@@ -115,7 +115,9 @@ public enum ServerOperation: Encodable, Sendable {
 public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
-    case response(id: String, result: ServerReply)
+    /// What the request returned: a read's or write's value, `{owner}` for
+    /// `session.owner`, null once a subscription or attachment is confirmed.
+    case response(id: String, traceID: String, result: JSONValue)
     case reading(id: String, frame: JSONValue)
     /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
@@ -123,14 +125,15 @@ public enum ServerMessage: Decodable, Sendable {
     /// structured detail, `.null` when there is none.
     case error(id: String?, code: String, message: String, data: JSONValue)
 
-    private enum Keys: String, CodingKey { case type, id, result, frame, code, message, data }
+    private enum Keys: String, CodingKey { case type, id, result, frame, code, message, data, traceID = "trace_id" }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .type) {
         case "welcome": self = .welcome(try ServerWelcome(from: decoder))
         case "status": self = .status(try ServerStatus(from: decoder))
         case "response":
-            self = .response(id: try box.decode(String.self, forKey: .id), result: try box.decode(ServerReply.self, forKey: .result))
+            self = .response(id: try box.decode(String.self, forKey: .id), traceID: try box.decode(String.self, forKey: .traceID),
+                             result: try box.decode(JSONValue.self, forKey: .result))
         case "reading":
             self = .reading(id: try box.decode(String.self, forKey: .id), frame: try box.decode(JSONValue.self, forKey: .frame))
         case "error":
@@ -194,29 +197,4 @@ public struct ServerConnectedClient: Decodable, Equatable, Sendable {
     public let requests: UInt64
 
     private enum CodingKeys: String, CodingKey { case id, client, requests, connectedAt = "connected_at" }
-}
-
-public enum ServerReply: Decodable, Sendable {
-    case read(JSONValue)
-    case subscribed
-    /// `value` is stdout parsed as JSON when the command's spelling prints JSON.
-    case command(traceID: String, code: Int, value: JSONValue?, output: String, stderr: String)
-    case sessionOwner(owner: String?)
-    case bridged
-
-    private enum Keys: String, CodingKey { case kind, value, output, stderr, code, owner, traceID = "trace_id" }
-    public init(from decoder: Decoder) throws {
-        let box = try decoder.container(keyedBy: Keys.self)
-        switch try box.decode(String.self, forKey: .kind) {
-        case "read": self = .read(try box.decode(JSONValue.self, forKey: .value))
-        case "subscribed": self = .subscribed
-        case "command":
-            self = .command(traceID: try box.decode(String.self, forKey: .traceID), code: try box.decode(Int.self, forKey: .code),
-                            value: try box.decodeIfPresent(JSONValue.self, forKey: .value),
-                            output: try box.decode(String.self, forKey: .output), stderr: try box.decode(String.self, forKey: .stderr))
-        case "session_owner": self = .sessionOwner(owner: try box.decodeIfPresent(String.self, forKey: .owner))
-        case "bridged": self = .bridged
-        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: box, debugDescription: "Unsupported server result; update the client")
-        }
-    }
 }

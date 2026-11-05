@@ -9,9 +9,10 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerError, ServerMessage,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerMessage,
     ServerOperation, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
+use crate::engine::Error;
 use crate::id::LfProcessId;
 use crate::lf::commands::read::Read;
 
@@ -151,7 +152,7 @@ impl Connection {
                 message,
                 data,
                 ..
-            }) => Err(ServerError {
+            }) => Err(Error {
                 code,
                 message,
                 data,
@@ -193,7 +194,7 @@ impl Connection {
                 message,
                 data,
                 ..
-            } => Err(ServerError {
+            } => Err(Error {
                 code,
                 message,
                 data,
@@ -217,7 +218,7 @@ impl Connection {
                 message,
                 data,
                 ..
-            } => Err(ServerError {
+            } => Err(Error {
                 code,
                 message,
                 data,
@@ -227,19 +228,21 @@ impl Connection {
         }
     }
 
-    /// The next reading of subscription `id`; an error for it ends the subscription.
-    pub fn reading(&mut self, id: &str) -> Result<serde_json::Value> {
+    /// The next reading of subscription `id`, or `None` once it ended after
+    /// its last; an error for it ends the subscription.
+    pub fn reading(&mut self, id: &str) -> Result<Option<serde_json::Value>> {
         match self.wait(|message| {
-            matches!(message, ServerMessage::Reading { id: of, .. } if of == id)
+            matches!(message, ServerMessage::Reading { id: of, .. } | ServerMessage::Ended { id: of } if of == id)
                 || answers(message, id)
         })? {
-            ServerMessage::Reading { frame, .. } => Ok(frame),
+            ServerMessage::Reading { frame, .. } => Ok(Some(frame)),
+            ServerMessage::Ended { .. } => Ok(None),
             ServerMessage::Error {
                 code,
                 message,
                 data,
                 ..
-            } => Err(ServerError {
+            } => Err(Error {
                 code,
                 message,
                 data,

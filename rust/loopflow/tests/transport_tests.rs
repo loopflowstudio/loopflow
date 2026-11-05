@@ -4688,10 +4688,10 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let tasks = watch
         .subscribe(serde_json::from_value(query).unwrap())
         .unwrap();
-    let initial = watch.reading(&tasks).unwrap();
+    let initial = watch.reading(&tasks).unwrap().expect("a reading");
     assert!(initial["unavailable"].is_null(), "{initial}");
     watch.checkpoint(&tasks, 17).unwrap();
-    let confirmed = watch.reading(&tasks).unwrap();
+    let confirmed = watch.reading(&tasks).unwrap().expect("a reading");
     assert_eq!(confirmed["answers"], 17);
 
     // Write parity, concurrent traces and no request Process rows are covered
@@ -4732,7 +4732,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     assert_eq!(socket_plan["contents"][0]["primary_session"], session);
     watch.checkpoint(&tasks, 18).unwrap();
     loop {
-        let changed = watch.reading(&tasks).unwrap();
+        let changed = watch.reading(&tasks).unwrap().expect("a reading");
         if changed["answers"] == 18 {
             assert!(changed["body"].to_string().contains("INF-123"), "{changed}");
             break;

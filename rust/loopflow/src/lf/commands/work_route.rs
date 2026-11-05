@@ -329,6 +329,55 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     }))
 }
 
+/// The route of the Task `selector` names, when its Work lives on another
+/// Machine. Reads records only.
+pub(crate) fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+    let Some(store) = read_registry()? else {
+        return Ok(None);
+    };
+    let Some(task) = resolve_task_id(&store, selector, None)? else {
+        return Ok(None);
+    };
+    let route = store.task_execution_route(&task)?;
+    Ok((route.machine_id != store.local_machine()?.id).then_some(route))
+}
+
+/// What `lf <args> --json` prints on the route's Machine: its API's value.
+/// Its diagnostics go to the request's log.
+pub(crate) fn run_remote(
+    route: TaskExecutionRoute,
+    directory: &Path,
+    args: &[String],
+) -> Result<serde_json::Value> {
+    let spelled = std::iter::once("lf".to_owned()).chain(args.iter().cloned());
+    let cli = <Cli as clap::Parser>::try_parse_from(spelled)?.checked()?;
+    let (mut output, mut error) = (Vec::new(), Vec::new());
+    let ran = super::ssh::run_with_io(
+        route.machine_id.clone().as_str(),
+        false,
+        &cli,
+        args,
+        Some(route),
+        directory,
+        Some(&mut super::mutation::CommandIo {
+            input: &mut std::io::empty(),
+            output: &mut output,
+            error: &mut error,
+        }),
+    );
+    let diagnostics = String::from_utf8_lossy(&error);
+    if let Err(failed) = ran {
+        return Err(match diagnostics.trim() {
+            "" => failed,
+            said => failed.context(format!("the destination said: {said}")),
+        });
+    }
+    for line in diagnostics.lines() {
+        crate::journal::request::diagnostic(format_args!("{line}"));
+    }
+    Ok(serde_json::from_slice(&output)?)
+}
+
 /// The Session an explicit `resume <session>` names.
 pub(super) fn resumed_session(cli: &Cli) -> Option<&str> {
     match &cli.command {

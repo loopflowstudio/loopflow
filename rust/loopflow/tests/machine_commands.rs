@@ -2579,7 +2579,7 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
 fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     use loopflow::lf::commands::write::Write as Mutation;
     use loopflow::server::client::Connection;
-    use loopflow::server::wire::{Operation, ServerError};
+    use loopflow::server::wire::Operation;
     use std::io::Read;
     use std::time::{Duration, Instant};
 
@@ -2669,7 +2669,10 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
         &fixture.root.path().join("bin/ssh"),
         "#!/bin/sh\necho 'peer unavailable' >&2\nexit 255\n",
     );
-    let refused = send(false).unwrap_err().downcast::<ServerError>().unwrap();
+    let refused = send(false)
+        .unwrap_err()
+        .downcast::<loopflow::engine::Error>()
+        .unwrap();
     assert!(
         refused.message.contains("peer unavailable") || refused.message.contains("unavailable"),
         "{refused:?}"

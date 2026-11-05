@@ -2066,6 +2066,9 @@ until `lf ship`."
         /// Print where it would run and the most it could cost; run nothing
         #[arg(long)]
         quote: bool,
+        /// Print what the run set out to do, as `task.run` returns it
+        #[arg(long)]
+        json: bool,
     },
     /// Complete a Task without moving its Graph
     Complete {

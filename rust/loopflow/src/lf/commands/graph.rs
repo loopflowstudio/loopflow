@@ -166,8 +166,15 @@ pub struct RepeatedRunFailure {
 ///
 /// With `release`, a bare run inside its execution owner lets its launcher go
 /// once the first attempt has registered, and carries on with its output in
-/// that attempt's log.
-pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> Result<()> {
+/// that attempt's log. `announce` hears the first registered Graph process
+/// and that log, before the launcher goes.
+pub fn run_task_graph_for(
+    cli: &Cli,
+    task: &Task,
+    run: &str,
+    release: bool,
+    announce: &mut dyn FnMut(&LfProcessId, Option<&Path>) -> Result<()>,
+) -> Result<()> {
     let checkout = task.worktree()?;
     let args = task_run_args(cli, task.id.as_str(), &["graph", "run"]);
     let store = block_on(open_graph_store())?;
@@ -189,24 +196,22 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
             .transpose()?;
         let sink = log.as_ref().map(|log| log.file.try_clone()).transpose()?;
         let status = spawn_task_child(&args, checkout, sink, Some(cursor), |child| {
-            let Some(mut log) = log.take() else {
-                return Ok(());
-            };
-            match registration(store, &process, mark, child)? {
-                Some(registered) => {
+            let registered = registration(store, &process, mark, child)?;
+            match (registered, log.take()) {
+                (Some(registered), Some(mut log)) => {
                     log.settle(&registered)?;
                     if !released {
-                        println!(
-                            "{} · {run} running as Graph process {registered}\n  follow: lf task status {}\n  log:    {}",
-                            task.identifier,
-                            task.identifier,
-                            log.path.display()
-                        );
+                        announce(&registered, Some(&log.path))?;
                         release_launcher(&log.file)?;
                         released = true;
                     }
                 }
-                None => log.replay(),
+                (Some(registered), None) if !released => {
+                    announce(&registered, None)?;
+                    released = true;
+                }
+                (None, Some(log)) => log.replay(),
+                _ => {}
             }
             Ok(())
         })?;
@@ -254,6 +259,54 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
         );
         attempt += 1;
     }
+}
+
+/// `lf task run`: place the Task and carry its run in this process. What the
+/// run set out to do is announced once, as `task.run` returns it: printed,
+/// and reported to the launcher that started this process detached.
+pub fn carry_task_run(
+    cli: &Cli,
+    repo: &Path,
+    issue: &str,
+    options: crate::ops::task::TaskProcessOptions,
+    json: bool,
+) -> Result<()> {
+    use crate::engine::task::TaskRun;
+    use crate::ops::task::{TaskRunMode, TaskRunStart};
+    let mode = if cli.interactive {
+        TaskRunMode::InPlace
+    } else if cli.batch {
+        TaskRunMode::Headless
+    } else {
+        TaskRunMode::Stop
+    };
+    let (task, start) = crate::ops::task::task_place(repo, issue, options, mode)?;
+    let issue = task.identifier.clone();
+    let announce = |run: &TaskRun| -> Result<()> {
+        crate::engine::launch::report(Ok(run));
+        if json {
+            println!("{}", serde_json::to_string(run)?);
+        } else if let Some(text) = run.render() {
+            println!("{text}");
+        }
+        Ok(())
+    };
+    let step = match start {
+        TaskRunStart::Run(step) => step,
+        TaskRunStart::Waiting(step) => return announce(&TaskRun::Waiting { issue, step }),
+        TaskRunStart::Ended => return announce(&TaskRun::Ended { issue }),
+    };
+    // This process carries the run; its Graph process writes where the
+    // Task stopped. A run that never arrives leaves the Task to start it again.
+    run_task_graph_for(cli, &task, &step, true, &mut |graph, log| {
+        announce(&TaskRun::Running {
+            issue: issue.clone(),
+            run: step.clone(),
+            graph_process: graph.clone(),
+            log: log.map(Path::to_path_buf),
+        })
+    })?;
+    Ok(crate::ops::task::task_run_finished(&task)?)
 }
 
 fn exit_of(status: std::process::ExitStatus) -> crate::process::CommandExit {

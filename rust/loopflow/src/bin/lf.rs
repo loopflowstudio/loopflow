@@ -1287,13 +1287,14 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             json,
             steer,
         } => {
-            let result = loopflow::ops::task::task_comment(
-                repo,
-                issue,
-                wave.as_deref(),
-                message.as_deref(),
-                *steer,
-            )?;
+            let result = match message {
+                Some(message) => {
+                    loopflow::engine::task::comment(repo, issue, wave.as_deref(), message, *steer)?
+                }
+                None => {
+                    loopflow::ops::task::task_comment(repo, issue, wave.as_deref(), None, false)?
+                }
+            };
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
             } else if result.comments.is_empty() {
@@ -1324,7 +1325,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             Ok(())
         }
         TaskCommand::Interrupt { issue, json } => {
-            let result = loopflow::ops::task::task_interrupt(issue)?;
+            let result = loopflow::engine::task::interrupt(issue)?;
             print_task_control(&result, *json)
         }
         TaskCommand::Wait {
@@ -1333,17 +1334,22 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             timeout,
             json,
         } => {
+            let timeout = timeout
+                .as_deref()
+                .map(loopflow::config::parse_duration)
+                .transpose()?;
             let until = if until == "submitted" {
                 loopflow::ops::task::TaskWaitUntil::Open
             } else {
                 loopflow::ops::task::TaskWaitUntil::Terminal
             };
-            let timeout = timeout
-                .as_deref()
-                .map(loopflow::config::parse_duration)
-                .transpose()?;
-            let task = loopflow::ops::task::task_wait(issue, until, timeout)?;
-            print_task(&task, *json)
+            let waited = loopflow::engine::task::wait(issue, until, timeout)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&waited)?);
+                Ok(())
+            } else {
+                print_task_snapshot(&waited.task, false)
+            }
         }
     }
 }
@@ -1353,6 +1359,9 @@ fn main() -> std::process::ExitCode {
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
         let result = run();
+        if let Err(error) = &result {
+            loopflow::engine::launch::report::<()>(Err(error));
+        }
         loopflow::transport::report_exit(journal::command_exit_code(&result));
         result
     });
@@ -2248,6 +2257,16 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if execution && loopflow::transport::delegate_current(cli.batch)? {
         return Ok(());
     }
+    // Only the run or ship a launcher started reports; an execution owner
+    // in between passes the handoff on untouched.
+    if matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { .. }
+        }) | Some(Commands::Ship { stop: false, .. })
+    ) {
+        loopflow::engine::launch::expect();
+    }
     if loopflow::lf::commands::mutation::accepts(&cli) {
         let directory = match cli.wt.as_deref() {
             Some(name) => loopflow::lf::commands::ops::resolve_worktree(name)?,
@@ -2458,6 +2477,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 reason,
+                json,
                 ..
             },
     }) = &cli.command
@@ -2469,7 +2489,8 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             .context("No Task selected")?;
         let directory = loopflow::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(issue))?;
-        let (task, start) = loopflow::ops::task::task_place(
+        return loopflow::lf::commands::graph::carry_task_run(
+            &cli,
             &repo,
             issue,
             loopflow::ops::task::TaskProcessOptions {
@@ -2482,34 +2503,14 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 directive: directive.clone(),
                 branch: None,
             },
-            if cli.interactive {
-                loopflow::ops::task::TaskRunMode::InPlace
-            } else if cli.batch {
-                loopflow::ops::task::TaskRunMode::Headless
-            } else {
-                loopflow::ops::task::TaskRunMode::Stop
-            },
-        )?;
-        let step = match start {
-            loopflow::ops::task::TaskRunStart::Run(step) => step,
-            loopflow::ops::task::TaskRunStart::Waiting(step) => {
-                println!("Task {} waits at {step}", task.identifier);
-                return Ok(());
-            }
-            loopflow::ops::task::TaskRunStart::Ended => {
-                println!("Task {} reached the end of its graph", task.identifier);
-                return Ok(());
-            }
-        };
-        // This process carries the run; its Graph process writes where the
-        // Task stopped. A run that never arrives leaves the Task to start it again.
-        loopflow::lf::commands::graph::run_task_graph_for(&cli, &task, &step, true)?;
-        return Ok(loopflow::ops::task::task_run_finished(&task)?);
+            *json || cli.json,
+        );
     }
     if let Some(Commands::Ship {
         graph,
         reason,
         stop: false,
+        json,
         ..
     }) = &cli.command
     {
@@ -2523,6 +2524,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             &issue,
             graph.as_deref(),
             reason.as_deref(),
+            *json,
         );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {

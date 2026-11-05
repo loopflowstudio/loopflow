@@ -639,11 +639,12 @@ pub(crate) fn read_task_pane(
         &crate::repo::working_directory_in(directory)?,
         Some(issue),
     )?;
-    let status = crate::ops::task::task_status(&repo, Some(issue))?;
+    // A read reads what the store records; `wave.sync` exchanges planning.
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
+        let status = crate::ops::task::read_task_status(&store, &repo, issue).await?;
         super::waves::task_pane(&store, status).await
     })
 }
@@ -655,11 +656,19 @@ pub(crate) fn watch_task_pane(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     let repo = crate::ops::task::task_repository(directory, Some(issue))?;
-    let status = crate::ops::task::task_status(&repo, Some(issue))?;
-    let task = status
-        .task
-        .context("only a registered Task can be watched")?;
-    super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop, transport)
+    let identifier = tokio::runtime::Runtime::new()?.block_on(async {
+        let store = crate::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .context("no Loopflow store exists on this Machine")?;
+        let status = crate::ops::task::read_task_status(&store, &repo, issue).await?;
+        anyhow::Ok(
+            status
+                .task
+                .context("only a registered Task can be watched")?
+                .identifier,
+        )
+    })?;
+    super::waves::watch_task_status(&repo, identifier, Shape::Desktop, transport)
 }
 
 /// `lf desktop plans`: every plan a repository window shows, the default and

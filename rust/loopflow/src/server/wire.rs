@@ -2,6 +2,7 @@
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only. Each carrier delimits messages its own way; the Unix socket
 //! carries one JSON object per line.
+use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
 use crate::lf::commands::{read::Read, write::Write};
 use serde::{Deserialize, Serialize};
@@ -97,6 +98,11 @@ pub enum ServerMessage {
         id: String,
         frame: serde_json::Value,
     },
+    /// The subscription's last reading was its answer (`task.wait` reached
+    /// its state); nothing follows for `id`.
+    Ended {
+        id: String,
+    },
     /// `id` is null before a request exists. An error for a subscription ends it.
     Error {
         id: Option<String>,
@@ -156,66 +162,15 @@ pub struct Limits {
     pub max_connections: usize,
 }
 
-/// What a client can branch on. Nothing ran for any code but `outcome_unknown`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorCode {
-    /// No protocol revision in common; `data` names the side to update.
-    Incompatible,
-    /// The message or request is malformed or its arguments are refused.
-    Invalid,
-    /// The named Task, Session, owner or subscription does not exist; `data` names it.
-    NotFound,
-    /// The request contradicts current state: a reused id or a stale revision.
-    Conflict,
-    /// A dependency is missing or failed: the Machine registry, a watch, a provider.
-    Unavailable,
-    /// The operation may have taken effect; inspect state before retrying.
-    OutcomeUnknown,
-    /// The server is at capacity or the client fell behind; retry shortly.
-    Busy,
-}
-
-/// A refused request, as an `error` message carries it. Shared operations
-/// return it inside `anyhow::Error` to name their code; the server sends it as
-/// is, and the CLI prints its message.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("{message}")]
-pub struct ServerError {
-    pub code: ErrorCode,
-    pub message: String,
-    pub data: Option<serde_json::Value>,
-}
-
-impl ServerError {
-    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            data: None,
-        }
-    }
-
-    pub fn with(mut self, data: serde_json::Value) -> Self {
-        self.data = Some(data);
-        self
-    }
-
-    pub fn into_message(self, id: Option<String>) -> ServerMessage {
-        ServerMessage::Error {
+impl ServerMessage {
+    /// The `error` message that answers request `id` (null: the connection) with `error`.
+    pub fn error(id: Option<String>, error: Error) -> Self {
+        Self::Error {
             id,
-            code: self.code,
-            message: self.message,
-            data: self.data,
+            code: error.code,
+            message: error.message,
+            data: error.data,
         }
-    }
-}
-
-/// The wire name, so a message reads `outcome_unknown: …` on every client.
-impl std::fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = serde_json::to_value(self).expect("an error code serializes as a string");
-        f.write_str(name.as_str().expect("an error code serializes as a string"))
     }
 }
 
@@ -236,6 +191,13 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_run.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_ship.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_hold.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_steer.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_comment.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_wait.json"),
         ] {
             let message: ClientMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(
@@ -251,6 +213,10 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
             include_str!("../../../../tests/fixtures/dto/server/not_found.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_running.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_shipping.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_held.json"),
+            include_str!("../../../../tests/fixtures/dto/server/ended.json"),
         ] {
             let message: ServerMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(

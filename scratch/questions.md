@@ -173,3 +173,60 @@ viewer path that hands the frame to it instead of the PTY. The CLI viewer would
 still have to decode and repaint through the formatter for a plain terminal, so
 VT formatter output remains the one format every viewer can display. The owner
 protocol framing is unchanged.
+
+## Engine — November 5, 2026
+
+Step 1 (task.* and the core loop). Decisions made headless; each is reversible.
+
+- **Where the run lives.** A Task run outlives its request and needs a
+  registered Process to carry it (`task_place` records the carrier; retries
+  live in `run_task_graph_for`). The server has no Process and must not hold
+  the run, so `engine::task::run` and `::ship` start the same command a
+  terminal would (`lf [-b] [-a <agent>] task run <issue> [--from <step>]`,
+  `lf --task <issue> ship`) under its own execution owner via
+  `os_process::start_lf_session`, the path `restart_ships` already uses, and
+  read the typed value back from a private report file the command writes once
+  (`LF_LAUNCH_REPORT=<path>`, taken and cleared on startup of the command). That is a process launch, not an argv round
+  trip: nothing parses stdout, and the CLI's `--json` print and the report are
+  one value (`engine::task::TaskRun`, `TaskShip`). Open: if Jack wants no
+  carrier process at all, the run has to become a server-owned job, which the
+  server README currently rules out ("creates no … Graphs").
+- **Harness when the request names none.** `task.run` with `agent: null`
+  passes no `--agent`; each step resolves its harness as `lf task run` does
+  (the step's/Wave's/repository's configured default, else the builtin).
+  Jack's rule that Tasks run on Claude is a setting on his repositories, not a
+  server default; a client that must pin it sends `agent: "claude"`.
+- **Auto-Ship without `approve`.** `approve: false` is bare `lf task run`: it
+  stops before the next interactive step, but a graph with none ahead reaches
+  `end`, and reaching `end` approves Auto-Ship (the documented rule). A client
+  that must never approve should check `task.get`'s graph first, or Jack may
+  want `task.run` to refuse when no interactive step lies ahead.
+- **Placement.** The served `task.run` skips `--pool`/`--rent`/`--quote`
+  placement; the carrier's ordinary dispatch still applies default placement.
+- **Remote Tasks.** `task.run`, `task.ship`, `task.hold`, `task.claim` and
+  `task.unassign` route through `work_route::remote_task` + `run_remote`
+  (typed route lookup; Clap is parsed only for the SSH spelling). For
+  `task.run`/`task.ship` the destination's `lf … --json` delegates into an
+  owner and relays its output over SSH; the value parses only if nothing else
+  reaches stdout first. Untested against a real second Machine.
+- **`session.resume` / `session.new`** keep `Write::cli` for SSH routing and
+  Session preparation; they belong to step 4's `session.*` pass.
+- **`task.comment` result.** It returns the thread after the save
+  (`TaskComments`, what `lf task comment --json` prints), not only the saved
+  comment; the saved one is the last entry. A narrower `{comment}` result is a
+  one-line change if a client wants it.
+- **`task.wait` output.** `lf task wait --json` now prints the reading
+  `{reached, task}` (it printed the bare snapshot), so a timed-out wait says it
+  did not reach its state. The served subscription ends with a new `ended
+  {id}` message; Swift's `ServerClient` finishes the stream on it.
+- **Read purity.** `task.get` (`desktop task`) ran `task_status`, which syncs
+  the repository with Linear and inspects unknown issues; it now reads the
+  store (`read_task_status`). `wave.get` and `plan.get` still sync; they are
+  `wave.*`, not this step.
+- **Errors.** `wire::ServerError`/`ErrorCode` moved to `engine::Error` /
+  `engine::ErrorCode`; the wire carries them. A refused detached run (for
+  example a Task whose planning cannot launch) answers `outcome_unknown` with
+  the carrier's message, as any untyped write failure does.
+- **Desktop callers.** `WorkModel.shipTask` and `runTask` still spawn `lf`;
+  moving them to `task.ship` / `task.run` needs `task.run` to take a `graph`
+  and the headless test that taps the ship argv to change.

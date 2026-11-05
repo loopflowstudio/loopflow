@@ -153,11 +153,11 @@ fn local(
             ..
         } => {
             let issue = cli.task.as_deref().context("No Task selected")?;
-            let stopped = super::ship::stopped(issue, reason.as_deref())?;
+            let held = crate::engine::task::hold(directory, issue, reason.as_deref())?;
             if *json {
-                writeln!(io.output, "{}", serde_json::to_string(&stopped)?)?;
+                writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
             } else {
-                write!(io.output, "{}", super::ship::render_stopped(&stopped))?;
+                writeln!(io.output, "{}", held.render())?;
             }
             Ok(())
         }
@@ -190,12 +190,12 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     match command {
         TaskCommand::Create { .. } => super::task_create::create(repo, command, io).map(drop),
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use crate::ops::task_ownership::{change, render, OwnershipChange};
+            use crate::ops::task_ownership::{render, OwnershipChange};
             let requested = match command {
                 TaskCommand::Claim { .. } => OwnershipChange::Claim,
                 _ => OwnershipChange::Unassign,
             };
-            let ownership = change(repo, issue, requested)?;
+            let ownership = crate::engine::task::ownership(repo, issue, requested)?;
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             } else {

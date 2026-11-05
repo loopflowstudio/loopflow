@@ -47,7 +47,7 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
 fn configuration_edits_use_the_server_without_work_processes() {
     use loopflow::config::api::Request;
     use loopflow::config::files::Destination;
-    use loopflow::server::wire::{Operation, ServerError, ServerOperation};
+    use loopflow::server::wire::{Operation, ServerOperation};
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
@@ -71,7 +71,7 @@ fn configuration_edits_use_the_server_without_work_processes() {
                 request,
             }))
             .map(|response| response.result)
-            .map_err(|error| error.downcast::<ServerError>().unwrap())
+            .map_err(|error| error.downcast::<loopflow::engine::Error>().unwrap())
     };
     let catalog = request(Request::Catalog).unwrap();
     assert!(catalog
@@ -169,7 +169,7 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
 #[test]
 fn served_session_adoption_matches_cli_without_new_execution() {
     use loopflow::lf::commands::write::Write;
-    use loopflow::server::wire::{Operation, ServerError};
+    use loopflow::server::wire::Operation;
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
@@ -267,7 +267,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             title: " ".into(),
         })
         .unwrap_err()
-        .downcast::<ServerError>()
+        .downcast::<loopflow::engine::Error>()
         .unwrap();
         assert!(!refused.message.is_empty());
         assert_eq!(
@@ -434,7 +434,8 @@ fn server_operations_match_their_lf_commands() {
         | Read::WaveGraph { .. }
         | Read::Tokens { .. }
         | Read::Retention
-        | Read::Doctor => (
+        | Read::Doctor
+        | Read::TaskWait { .. } => (
             [
                 Read::MonitorPs,
                 plans(),
@@ -553,6 +554,10 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::Retention,
                 Read::Doctor,
+                Read::TaskWait {
+                    issue: "INF-123".into(),
+                    until: loopflow::ops::task::TaskWaitUntil::Terminal,
+                },
             ],
             [
                 history(),
@@ -597,7 +602,7 @@ fn server_operations_match_their_lf_commands() {
         unchanged(&words, &mut || {
             let mut connection = loopflow::server::client::Connection::open().unwrap();
             let id = connection.subscribe(served.clone()).unwrap();
-            frame = connection.reading(&id).unwrap();
+            frame = connection.reading(&id).unwrap().expect("a reading");
         });
         let served = frame;
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
@@ -680,8 +685,15 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskNotes { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::ShipStop { .. }
+        | Write::TaskHold { .. }
         | Write::TaskMove { .. }
+        // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
+        // compares the run, and comments differ by their saved IDs.
+        | Write::TaskRun { .. }
+        | Write::TaskShip { .. }
+        | Write::TaskSteer { .. }
+        | Write::TaskComment { .. }
+        | Write::TaskInterrupt { .. }
         | Write::TaskSave { .. }
         | Write::SessionRename { .. }
         | Write::SessionBind { .. }
@@ -898,7 +910,65 @@ fn server_operations_match_their_lf_commands() {
     // from approving it until `lf ship`, retaining who requested the stop. The
     // ship process it kills and the merge request it takes back are the ship
     // tests'.
-    let stop = Write::ShipStop {
+    // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
+    let interrupt = Write::TaskInterrupt {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    };
+    compare(interrupt.clone(), &|| interrupt.clone(), &|| {
+        effect("INF-123")
+    });
+    // A steer and a comment save the same text by the same author; each save
+    // has its own ID.
+    for steer in [true, false] {
+        let (directory, issue, message) = (
+            directory.clone(),
+            "INF-123".to_owned(),
+            format!("served {steer}"),
+        );
+        let saved = if steer {
+            Write::TaskSteer {
+                directory,
+                issue,
+                message,
+            }
+        } else {
+            Write::TaskComment {
+                directory,
+                issue,
+                message,
+            }
+        };
+        let last = |thread: &Value| {
+            let comment = thread["comments"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .clone();
+            let body = comment["body"].as_str().unwrap();
+            (
+                body[..body.find("<!--").unwrap_or(body.len())]
+                    .trim()
+                    .to_owned(),
+                comment["author"].clone(),
+            )
+        };
+        let before = processes(&database);
+        let written = server_write(saved.clone());
+        assert_eq!(
+            processes(&database),
+            before,
+            "served comment fabricated a Process"
+        );
+        let args = spelled(&saved);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let printed: Value =
+            serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap();
+        assert_eq!(last(&written), last(&printed), "{args:?}");
+        assert_eq!(last(&written).0, format!("served {steer}"));
+    }
+    let stop = Write::TaskHold {
         directory: directory.clone(),
         issue: "INF-123".into(),
     };
@@ -913,6 +983,7 @@ fn server_operations_match_their_lf_commands() {
     };
     assert!(compare(stop.clone(), &|| stop.clone(), &stopped) > 0);
     assert_eq!(stopped()["kind"], "person", "no stop saved");
+
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::Portfolio.read().unwrap());
     let manual = Write::Portfolio {
@@ -995,7 +1066,8 @@ fn server_operations_match_their_lf_commands() {
     // A refused write names its code and changes nothing; the CLI refuses
     // the same spelling. The default diagnostic log includes the request
     // trace, target, outcome and real server PID.
-    use loopflow::server::wire::{ErrorCode, Operation, ServerError};
+    use loopflow::engine::ErrorCode;
+    use loopflow::server::wire::Operation;
     let failure = Write::SessionRename {
         directory: directory.clone(),
         id: session.clone(),
@@ -1005,7 +1077,7 @@ fn server_operations_match_their_lf_commands() {
         .unwrap()
         .request(Operation::Write(failure.clone()))
         .unwrap_err()
-        .downcast::<ServerError>()
+        .downcast::<loopflow::engine::Error>()
         .unwrap();
     assert_eq!(refused.code, ErrorCode::Invalid, "{refused:?}");
     let cli = isolated_lf(repo.path(), home.path(), &spelled(&failure))
@@ -1166,6 +1238,29 @@ fn server_operations_match_their_lf_commands() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    // Last, since the detached run's Processes finish on their own clock:
+    // `task.run` starts `lf task run` detached and answers what it reports.
+    // This fixture's Task has no launchable planning, so the run it started
+    // reports the refusal `lf task run` prints, and nothing ran.
+    let run = Write::TaskRun {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        from: Some("demo".into()),
+        agent: None,
+        approve: false,
+    };
+    let refused = loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Write(run))
+        .unwrap_err()
+        .downcast::<loopflow::engine::Error>()
+        .unwrap();
+    assert!(
+        refused
+            .message
+            .contains("Task planning has invalid ownership"),
+        "{refused:?}"
+    );
 }
 
 /// The processes this test started that are still running.
@@ -1350,9 +1445,53 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::ShipStop { directory, issue } => (
+        Write::TaskHold { directory, issue } => (
             path(directory),
             words(&["--task", issue, "ship", "--stop", "--json"]),
+        ),
+        Write::TaskRun {
+            directory,
+            issue,
+            from,
+            agent,
+            approve,
+        } => {
+            let mut spelled = Vec::new();
+            if *approve {
+                spelled.push("--batch".to_owned());
+            }
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["task", "run", issue]));
+            if let Some(from) = from {
+                spelled.extend(words(&["--from", from]));
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::TaskShip { directory, issue } => {
+            (path(directory), words(&["--task", issue, "ship", "--json"]))
+        }
+        Write::TaskSteer {
+            directory,
+            issue,
+            message,
+        } => (
+            path(directory),
+            words(&["task", "comment", issue, "--steer", message, "--json"]),
+        ),
+        Write::TaskComment {
+            directory,
+            issue,
+            message,
+        } => (
+            path(directory),
+            words(&["task", "comment", issue, message, "--json"]),
+        ),
+        Write::TaskInterrupt { directory, issue } => (
+            path(directory),
+            words(&["task", "interrupt", issue, "--json"]),
         ),
         Write::TaskMove {
             directory,

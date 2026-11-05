@@ -16,10 +16,10 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation,
-    ServerError, ServerMessage, ServerOperation, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE,
-    MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
+    ServerOperation, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
+use crate::engine::{Error, ErrorCode};
 use crate::lf::commands::{read::Read, watch::Subscription};
 
 /// How long a connection has to send its first message.
@@ -160,14 +160,14 @@ pub(super) async fn run() -> Result<()> {
 
 /// Capacity answers before closing, so the client knows nothing ran.
 async fn refuse_busy(mut socket: UnixStream) {
-    let line = line(
-        &ServerError::new(
+    let line = line(&ServerMessage::error(
+        None,
+        Error::new(
             ErrorCode::Busy,
             format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
         )
-        .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS }))
-        .into_message(None),
-    );
+        .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS })),
+    ));
     let _ = tokio::time::timeout(SEND, socket.write_all(line.as_bytes())).await;
 }
 
@@ -229,7 +229,7 @@ async fn connection(
         };
         return send(
             &mut lines,
-            &ServerError::new(
+            &ServerMessage::error(None, Error::new(
                 ErrorCode::Incompatible,
                 format!(
                     "Server speaks protocol revisions {MIN_REVISION}–{REVISION}; the client speaks {}–{}; update the {side}",
@@ -240,7 +240,7 @@ async fn connection(
                 "server": { "revision": REVISION, "min_revision": MIN_REVISION },
                 "update": if hello.min_revision > REVISION { "server" } else { "client" },
             }))
-            .into_message(None),
+            ),
         )
         .await;
     };
@@ -338,7 +338,7 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                                     send(&mut lines, &error(Some(id), ErrorCode::Busy, "subscription fell behind its checkpoints; subscribe again")).await?;
                                 }
                             }
-                            None => send(&mut lines, &ServerError::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })).into_message(Some(id))).await?,
+                            None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })))).await?,
                         }
                         continue;
                     }
@@ -360,7 +360,7 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                     continue;
                 }
                 if inflight.contains_key(&id) {
-                    send(&mut lines, &ServerError::new(ErrorCode::Conflict, "request ID is still unanswered").with(serde_json::json!({ "id": id })).into_message(Some(id))).await?;
+                    send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::Conflict, "request ID is still unanswered").with(serde_json::json!({ "id": id })))).await?;
                     continue;
                 }
                 let entry = match admission {
@@ -369,9 +369,9 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                             Ok(destination) => destination,
                             Err(failure) => {
                                 // A missing owner endpoint means the owner ended.
-                                send(&mut lines, &ServerError::new(ErrorCode::NotFound, format!(
+                                send(&mut lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound, format!(
                                     "Session owner is not running; no provider restarted and no input replayed: {failure}"
-                                )).with(serde_json::json!({ "owner": owner })).into_message(Some(id))).await?;
+                                )).with(serde_json::json!({ "owner": owner })))).await?;
                                 continue;
                             }
                         };
@@ -432,21 +432,9 @@ async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
     Ok(())
 }
 
-/// The [`ServerError`] a shared operation named anywhere in `error`'s chain,
-/// else `otherwise` with the error's text.
-fn refused(error: anyhow::Error, otherwise: ErrorCode) -> ServerError {
-    match error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<ServerError>())
-    {
-        Some(named) => named.clone(),
-        None => ServerError::new(otherwise, error.to_string()),
-    }
-}
-
 /// A read that failed without naming a code depends on something unavailable.
-fn unavailable(error: impl Into<anyhow::Error>) -> ServerError {
-    refused(error.into(), ErrorCode::Unavailable)
+fn unavailable(error: impl Into<anyhow::Error>) -> Error {
+    Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
 async fn request(
@@ -467,7 +455,7 @@ async fn request(
         },
         Err(refusal) => {
             tracing::warn!(request = %id, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
-            refusal.into_message(Some(id.clone()))
+            ServerMessage::error(Some(id.clone()), refusal)
         }
     };
     // A closed connection drops the answer; the effect stands.
@@ -480,12 +468,12 @@ async fn operate(
     id: &str,
     instance: &str,
     trace_id: &crate::id::TraceId,
-) -> Result<serde_json::Value, ServerError> {
+) -> Result<serde_json::Value, Error> {
     match operation {
         Operation::Server(ServerOperation::SessionOwner { session }) => {
             let owner = tokio::task::spawn_blocking(move || -> Result<_> {
                 let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
-                    ServerError::new(ErrorCode::Unavailable, "Machine registry is unavailable")
+                    Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
                         .with(serde_json::json!({ "resource": "machine_registry" }))
                 })?;
                 Ok(registry.sqlite.session_transport(session.as_str())?)
@@ -536,7 +524,7 @@ async fn effect(
     instance: &str,
     trace_id: &crate::id::TraceId,
     run: impl FnOnce() -> Result<serde_json::Value> + Send + 'static,
-) -> Result<serde_json::Value, ServerError> {
+) -> Result<serde_json::Value, Error> {
     let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
     tokio::task::spawn_blocking(move || {
         let mut diagnostics = Vec::new();
@@ -547,48 +535,10 @@ async fn effect(
             tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
         }
         tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
-        result.map_err(written)
+        result.map_err(|error| Error::written(&error))
     })
     .await
-    .map_err(|join| outcome_unknown(join.into()))?
-}
-
-/// The code a failed write names, else the one its error's type implies.
-/// A write that failed for another reason may have taken partial effect.
-fn written(error: anyhow::Error) -> ServerError {
-    use crate::store::StoreError;
-    use crate::work::selection::SelectionError;
-    if let Some(named) = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<ServerError>())
-    {
-        return named.clone();
-    }
-    let code = error.chain().find_map(|cause| {
-        if let Some(store) = cause.downcast_ref::<StoreError>() {
-            return match store {
-                StoreError::NotFound => Some(ErrorCode::NotFound),
-                StoreError::Stale(_) => Some(ErrorCode::Conflict),
-                StoreError::InvalidData(_) | StoreError::Serde(_) => Some(ErrorCode::Invalid),
-                _ => None,
-            };
-        }
-        if cause.is::<SelectionError>() || cause.is::<serde_json::Error>() {
-            return Some(ErrorCode::Invalid);
-        }
-        None
-    });
-    match code {
-        Some(code) => ServerError::new(code, format!("{error:#}")),
-        None => outcome_unknown(error),
-    }
-}
-
-fn outcome_unknown(error: anyhow::Error) -> ServerError {
-    ServerError::new(
-        ErrorCode::OutcomeUnknown,
-        format!("{error:#}; inspect the affected work before retrying"),
-    )
+    .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
 async fn subscription(
@@ -601,7 +551,7 @@ async fn subscription(
         // The error ends the subscription for the client; a watch that
         // started sent its failure as its last reading.
         let _ = outgoing
-            .send(unavailable(failure).into_message(Some(id.clone())))
+            .send(ServerMessage::error(Some(id.clone()), unavailable(failure)))
             .await;
     }
     id
@@ -634,6 +584,7 @@ async fn watch(
 ) -> Result<()> {
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
+    let ends = query.clone();
     let watch = Watch(Some(Arc::new(
         tokio::task::spawn_blocking(move || {
             crate::journal::request::isolate(|| query.subscribe(move || wake.notify_one()))
@@ -662,7 +613,11 @@ async fn watch(
                 if let Some(frame) = frame {
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
                     reason = frame["unavailable"].as_str().map(str::to_owned);
+                    let last = ends.ends_after(&frame["body"]);
                     deliver(outgoing, ServerMessage::Reading { id: id.into(), frame }).await?;
+                    if last {
+                        return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
+                    }
                 }
                 if watch.ended() {
                     anyhow::bail!("{}", reason.unwrap_or_else(|| "the watch ended".into()));
@@ -673,7 +628,7 @@ async fn watch(
 }
 
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
-    ServerError::new(code, message).into_message(id)
+    ServerMessage::error(id, Error::new(code, message))
 }
 
 fn line(message: &ServerMessage) -> String {
@@ -703,9 +658,10 @@ async fn send(lines: &mut Lines, message: &ServerMessage) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{connection, Clients};
+    use crate::engine::ErrorCode;
     use crate::lf::commands::read::Read;
     use crate::server::wire::{
-        ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, ServerMessage, ServerOperation,
+        ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation,
         MAX_MESSAGE, REVISION,
     };
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};

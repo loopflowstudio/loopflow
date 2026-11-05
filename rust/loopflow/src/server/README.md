@@ -54,6 +54,11 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false}}
+← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
+→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"}}
+← {"type":"reading","id":"d","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
+← {"type":"ended","id":"d"}
 ```
 
 The first message is `hello` with the revisions the client speaks. The server
@@ -102,7 +107,7 @@ on `code`; only `outcome_unknown` means the request may have taken effect:
 | `outcome_unknown` | The operation may have run; inspect state before retrying | null |
 | `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
 
-A shared operation names its code by returning `wire::ServerError` inside its
+A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
 
 Every operation names its `kind` as a dotted resource and verb, beside its
@@ -111,7 +116,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 
 | Resource | Reads | Writes |
 | --- | --- | --- |
-| `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs` | `task.create`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.hold`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
+| `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs`, `task.wait` | `task.create`, `task.run`, `task.ship`, `task.hold`, `task.steer`, `task.comment`, `task.interrupt`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
 | `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new` |
 | `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
 | `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repository.path` | |
@@ -139,8 +144,8 @@ part of what a phone or bot client is offered.
   cannot select one. A missing primary stays absent. Resolve its owner with
   `session.owner` before attachment.
 - `subscribe {id, operation}` takes a read with a watch: `view.list`,
-  `session.list` without `limit`, `task.get`, `history.list`, `plan.get`,
-  `repository.planning` and `process.list`. It answers
+  `session.list` without `limit`, `task.get`, `task.wait`, `history.list`,
+  `plan.get`, `repository.planning` and `process.list`. It answers
   `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
@@ -149,16 +154,35 @@ part of what a phone or bot client is offered.
   fails sends its `unavailable` reading, then `error {id, code: unavailable}`
   ends the subscription; the connection stays open. A read with no watch is
   `invalid`. Reconnect opens a fresh subscription
-  and receives a complete reading; no replay cursor exists.
+  and receives a complete reading; no replay cursor exists. `task.wait {issue,
+  until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
+  changes; after the reading whose `reached` is true the server sends `ended
+  {id}` and nothing more for it. Requested once, it is that reading now, as
+  `lf task wait --timeout 0s --json` prints it.
+- The core loop is `engine::task`, which the CLI handlers call too.
+  `task.run {directory, issue, from, agent, approve}` and `task.ship
+  {directory, issue}` outlive the request, so the server starts their
+  command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
+  detached under its own execution owner and answers what that process
+  reports once it knows: `{state: running, graph_process, log}` when the
+  Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
+  {process, log}`, or the refusal it printed. The connection never waits on
+  the run. `approve` is `-b`: every step headless to `end`, approving
+  Auto-Ship; without it the run stops before the next interactive step, and
+  one with none ahead reaches `end` as bare `lf task run` does. A null `agent`
+  uses each step's configured harness. `lf task run <issue> --json` and `lf
+  ship --json` print the same value. `task.hold` withdraws the approval
+  (`{issue, stopped}`), `task.steer` and `task.comment {message}` save to the
+  thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
   standard output. `task.create {directory,id,title}` adopts the selected
   conversation and returns the Task without launching work. A write whose Work
-  lives on another Machine (`task.claim`, `task.unassign`, `task.hold`,
-  `session.resume`) runs its `lf … --json` spelling there over SSH and returns
-  what that prints, which is the destination's value; it never falls back to
-  local execution. Requests create no Process rows; diagnostics the shared
+  lives on another Machine (`task.run`, `task.ship`, `task.hold`,
+  `task.claim`, `task.unassign`, `session.resume`) runs its `lf … --json`
+  spelling there over SSH and returns what that prints, which is the
+  destination's value; it never falls back to local execution. Requests create no Process rows; diagnostics the shared
   functions print go to the request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is

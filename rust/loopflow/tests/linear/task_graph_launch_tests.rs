@@ -1336,6 +1336,13 @@ fn a_run_continues_after_the_step_it_stopped_at_and_from_goes_back_or_skips() {
     assert!(waits.text.contains("waits at review"), "{}", waits.text);
     assert_eq!(task.graph()["position"], at("review"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    // With `--json` it prints what `task.run` returns to a client.
+    let waits = task.run(&["task", "run", "INF-123", "--from", "review", "--json"]);
+    assert!(waits.status.success(), "{}", refusal(waits.clone()));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&waits.stdout).unwrap(),
+        serde_json::json!({"state": "waiting", "issue": "INF-123", "step": "review"})
+    );
     // From a step that runs, the run starts there: proof again, to review.
     task.task_run_ok(&["task", "run", "INF-123", "--from", "proof"]);
     assert_eq!(task.graph()["position"], at("review"));

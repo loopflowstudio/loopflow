@@ -45,7 +45,8 @@ phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 
 server read/subscribe ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
-CLI mutation ─ mutation dispatcher ─────────┴─ shared Rust write functions
+CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
+server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph owners
 server attach ─ exact existing Session owner ─ provider / PTY
 
 Desktop execution launch ─ ordinary CLI ─ existing Session / Graph owners
@@ -78,8 +79,10 @@ A lost reply means outcome unknown: refresh authoritative state before another
 deliberate edit, and never automatically replay the request.
 
 Session-to-Task adoption (`task.create`) shares its creation function with the CLI and launches no work.
-Create-and-run and other execution launches retain their ordinary CLI path and
-existing Session/Graph owners. Ghostty rendering and app-owned automation retain
+`task.run` and `task.ship` start the same command a terminal would, detached
+under its own execution owner, and answer the typed value that process reports
+(`engine/launch.rs`); the request never carries the run. Create-and-run and
+Session launches retain their ordinary CLI path and existing Session/Graph owners. Ghostty rendering and app-owned automation retain
 their boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
 

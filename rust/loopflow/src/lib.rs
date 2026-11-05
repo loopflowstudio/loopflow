@@ -13,6 +13,7 @@ pub mod definition;
 pub(crate) mod desktop_exits;
 pub mod diagnostic_log;
 pub mod durable;
+pub mod engine;
 pub mod error;
 pub(crate) mod ghostty_vt;
 pub mod git;

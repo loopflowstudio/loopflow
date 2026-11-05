@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::engine::task;
+
 /// A typed mutation with the same defaults and effects as its CLI spelling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 /// On the wire each write is a resource-named `kind` (`task.complete`);
@@ -43,9 +45,41 @@ pub enum Write {
     /// `lf task unassign <issue> --json`.
     #[serde(rename = "task.unassign")]
     TaskUnassign { directory: PathBuf, issue: String },
-    /// `lf --task <issue> ship --stop`: withdraws the Task's Auto-Ship approval.
+    /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
+    /// detached: the Graph process it started, or where the Task now waits.
+    /// `approve` is `-b`: every step headless to `end`, approving Auto-Ship.
+    #[serde(rename = "task.run")]
+    TaskRun {
+        directory: PathBuf,
+        issue: String,
+        from: Option<String>,
+        agent: Option<String>,
+        approve: bool,
+    },
+    /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
+    #[serde(rename = "task.ship")]
+    TaskShip { directory: PathBuf, issue: String },
+    /// `lf --task <issue> ship --stop --json`: withdraws the Task's Auto-Ship approval.
     #[serde(rename = "task.hold")]
-    ShipStop { directory: PathBuf, issue: String },
+    TaskHold { directory: PathBuf, issue: String },
+    /// `lf task comment <issue> --steer <message> --json`: direction for the
+    /// Task's runs, whoever writes it.
+    #[serde(rename = "task.steer")]
+    TaskSteer {
+        directory: PathBuf,
+        issue: String,
+        message: String,
+    },
+    /// `lf task comment <issue> <message> --json`; an agent's is progress.
+    #[serde(rename = "task.comment")]
+    TaskComment {
+        directory: PathBuf,
+        issue: String,
+        message: String,
+    },
+    /// `lf task interrupt <issue> --json`.
+    #[serde(rename = "task.interrupt")]
+    TaskInterrupt { directory: PathBuf, issue: String },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
     #[serde(rename = "task.move")]
     TaskMove {
@@ -237,15 +271,38 @@ impl Write {
                 Some(issue),
                 false,
             )?),
-            Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
-                use crate::ops::task_ownership::{change, OwnershipChange};
-                let requested = match self {
-                    Self::TaskClaim { .. } => OwnershipChange::Claim,
-                    _ => OwnershipChange::Unassign,
-                };
-                value(&change(&task_repo(issue)?, issue, requested)?)
+            Self::TaskClaim { issue, .. } => value(&task::ownership(
+                directory,
+                issue,
+                crate::ops::task_ownership::OwnershipChange::Claim,
+            )?),
+            Self::TaskUnassign { issue, .. } => value(&task::ownership(
+                directory,
+                issue,
+                crate::ops::task_ownership::OwnershipChange::Unassign,
+            )?),
+            Self::TaskRun {
+                issue,
+                from,
+                agent,
+                approve,
+                ..
+            } => value(&task::run(
+                directory,
+                issue,
+                from.as_deref(),
+                agent.as_deref(),
+                *approve,
+            )?),
+            Self::TaskShip { issue, .. } => value(&task::ship(directory, issue)?),
+            Self::TaskHold { issue, .. } => value(&task::hold(directory, issue, None)?),
+            Self::TaskSteer { issue, message, .. } => {
+                value(&task::comment(directory, issue, None, message, true)?)
             }
-            Self::ShipStop { issue, .. } => value(&super::ship::stopped(issue, None)?),
+            Self::TaskComment { issue, message, .. } => {
+                value(&task::comment(directory, issue, None, message, false)?)
+            }
+            Self::TaskInterrupt { issue, .. } => value(&task::interrupt(issue)?),
             Self::TaskMove { issue, wave, .. } => value(&crate::ops::task::task_move_membership(
                 &task_repo(issue)?,
                 issue,
@@ -390,9 +447,10 @@ impl Write {
         }
     }
 
-    /// The writes whose Work can live on another Machine, or whose Session
+    /// The Session writes whose Work can live on another Machine, and whose
     /// preparation reads the CLI's selectors, as `lf` spells them. SSH runs
-    /// this spelling on the destination; nothing else parses it.
+    /// this spelling on the destination; nothing else parses it. Task writes
+    /// route through [`crate::engine::task`].
     fn cli(&self) -> Option<anyhow::Result<(crate::lf::Cli, Vec<String>)>> {
         let mut args = vec![
             "lf".to_owned(),
@@ -400,9 +458,6 @@ impl Write {
             self.directory().display().to_string(),
         ];
         let words: Vec<&str> = match self {
-            Self::TaskClaim { issue, .. } => vec!["task", "claim", issue, "--json"],
-            Self::TaskUnassign { issue, .. } => vec!["task", "unassign", issue, "--json"],
-            Self::ShipStop { issue, .. } => vec!["--task", issue, "ship", "--stop", "--json"],
             Self::SessionResume {
                 id,
                 task,
@@ -500,7 +555,12 @@ impl Write {
             | Self::TaskNotes { directory, .. }
             | Self::TaskClaim { directory, .. }
             | Self::TaskUnassign { directory, .. }
-            | Self::ShipStop { directory, .. }
+            | Self::TaskRun { directory, .. }
+            | Self::TaskShip { directory, .. }
+            | Self::TaskHold { directory, .. }
+            | Self::TaskSteer { directory, .. }
+            | Self::TaskComment { directory, .. }
+            | Self::TaskInterrupt { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
             | Self::SessionRename { directory, .. }
@@ -546,6 +606,11 @@ mod tests {
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
+            r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","from":"implement","agent":"claude","approve":false}"#,
+            r#"{"kind":"task.ship","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
+            r#"{"kind":"task.comment","directory":"/r","issue":"FIX-1","message":"landed"}"#,
+            r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
         ] {
             let write: Write = serde_json::from_str(json).unwrap();
             assert_eq!(
@@ -570,10 +635,6 @@ mod tests {
                 .unwrap();
             args
         };
-        assert_eq!(
-            spelled(r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#),
-            ["lf", "--cwd", "/r", "--task", "FIX-1", "ship", "--stop", "--json"]
-        );
         assert_eq!(
             spelled(
                 r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
@@ -605,11 +666,12 @@ mod tests {
                 "--json"
             ]
         );
-        assert!(serde_json::from_str::<Write>(
-            r#"{"kind":"task.complete","directory":"/r","issue":"FIX-1"}"#
-        )
-        .unwrap()
-        .cli()
-        .is_none());
+        for json in [
+            r#"{"kind":"task.complete","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.claim","directory":"/r","issue":"FIX-1"}"#,
+        ] {
+            assert!(serde_json::from_str::<Write>(json).unwrap().cli().is_none());
+        }
     }
 }

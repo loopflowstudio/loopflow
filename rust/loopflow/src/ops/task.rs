@@ -50,7 +50,6 @@ use crate::config::ConfigSource;
 use crate::work::task::comment::TaskComments;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
@@ -71,9 +70,14 @@ use crate::work::task::{
 use crate::work::wave::Wave;
 use time::format_description::well_known::Rfc3339;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What `lf task wait --until` waits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskWaitUntil {
+    /// Its PR is open, or it finished first.
+    #[serde(rename = "submitted")]
     Open,
+    /// It is done or abandoned.
     Terminal,
 }
 
@@ -285,18 +289,6 @@ impl<'a> TaskComparison<'a> {
             base_commit: &task.base_commit,
         })
     }
-}
-
-fn active_pr(task: &Task) -> OpsResult<TaskPr> {
-    let task_id = task.id.clone();
-    block_on_task(async move {
-        task_store()
-            .await?
-            .active_task_pr(&task_id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| task_error("Task has no active PR"))
-    })
 }
 
 // File access reads recorded checkout location without reconciling PR or execution state.
@@ -1877,7 +1869,9 @@ pub async fn read_task_status(
         .map_err(task_error)?
         .flatten()
         .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    registered_task_status(store, task).await
+    let mut result = registered_task_status(store, task).await?;
+    result.planning_stale = planning_stale(&result);
+    Ok(result)
 }
 
 async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
@@ -2566,31 +2560,41 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
     }))
 }
 
-pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> OpsResult<Task> {
-    let started = Instant::now();
-    loop {
-        let (task, status) = block_on_task(async {
-            let store = task_store().await?;
-            let task = store
-                .get_task_by_issue(issue)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-            let status = task_work_status(&store, &task).await?;
-            Ok((task, status))
-        })?;
-        let reached = match until {
-            TaskWaitUntil::Open => {
-                matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
-                    || active_pr(&task).is_ok_and(|pr| pr.phase() == PrPhase::Open)
-            }
-            TaskWaitUntil::Terminal => matches!(status, WorkStatus::Done | WorkStatus::Abandoned),
-        };
-        if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
-            return Ok(task);
+/// [`task_wait_reading`] in the Machine's store.
+pub fn task_wait_now(issue: &str, until: TaskWaitUntil) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        task_wait_reading(&store, issue, until).await
+    })
+}
+
+/// The Task `issue` names as it stands in `store`, and whether it has reached
+/// `until`; `None` when no Task has that name.
+pub async fn task_wait_reading(
+    store: &SharedStore,
+    issue: &str,
+    until: TaskWaitUntil,
+) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
+        return Ok(None);
+    };
+    let finished = matches!(
+        task_work_status(store, &task).await?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    );
+    let reached = match until {
+        TaskWaitUntil::Open => {
+            finished
+                || store
+                    .active_task_pr(&task.id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|pr| pr.phase() == PrPhase::Open)
         }
-        std::thread::sleep(Duration::from_secs(1));
-    }
+        TaskWaitUntil::Terminal => finished,
+    };
+    Ok(Some((read_task_snapshot(store, task).await?, reached)))
 }
 
 /// Read the saved Task thread or save a comment without allocating execution state.

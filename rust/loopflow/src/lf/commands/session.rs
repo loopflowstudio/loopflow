@@ -785,8 +785,8 @@ async fn rename(
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
-        return Err(crate::server::wire::ServerError::new(
-            crate::server::wire::ErrorCode::Invalid,
+        return Err(crate::engine::Error::new(
+            crate::engine::ErrorCode::Invalid,
             format!("{label} cannot be empty"),
         )
         .into());

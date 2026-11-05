@@ -204,6 +204,14 @@ pub enum Read {
     /// `lf doctor`: the ledger's self-audit.
     #[serde(rename = "machine.doctor")]
     Doctor,
+    /// `lf task wait <issue> --until <until> --timeout 0s --json`: the Task now
+    /// and whether it reached `until`. Subscribed, it reads on each change and
+    /// ends after the reading that reached it.
+    #[serde(rename = "task.wait")]
+    TaskWait {
+        issue: String,
+        until: crate::ops::task::TaskWaitUntil,
+    },
 }
 
 impl Read {
@@ -373,6 +381,22 @@ impl Read {
             }
             Self::Retention => words(&["history", "retention", "--json"]),
             Self::Doctor => words(&["doctor", "--json"]),
+            Self::TaskWait { issue, until } => {
+                let until = match until {
+                    crate::ops::task::TaskWaitUntil::Open => "submitted",
+                    crate::ops::task::TaskWaitUntil::Terminal => "terminal",
+                };
+                words(&[
+                    "task",
+                    "wait",
+                    issue,
+                    "--until",
+                    until,
+                    "--timeout",
+                    "0s",
+                    "--json",
+                ])
+            }
         }
     }
 
@@ -556,6 +580,7 @@ impl Read {
                 },
             )?),
             Self::Doctor => value(&super::doctor::report()?),
+            Self::TaskWait { issue, until } => value(&crate::engine::task::waited(issue, *until)?),
         }
     }
 
@@ -597,15 +622,24 @@ impl Read {
                 &super::planning::status_repository(&directory)?,
                 transport,
             ),
+            Self::TaskWait { issue, until } => {
+                crate::engine::task::watch_wait(issue, until, transport)
+            }
             other => {
-                return Err(crate::server::wire::ServerError::new(
-                    crate::server::wire::ErrorCode::Invalid,
+                return Err(crate::engine::Error::new(
+                    crate::engine::ErrorCode::Invalid,
                     format!("`lf {}` has no --watch", other.argv().join(" ")),
                 )
                 .into())
             }
         }?;
         Ok(subscription.expect("a pulled watch returns its subscription"))
+    }
+
+    /// Whether a subscription to this read ends after `body`, a reading's
+    /// body: `task.wait` ends once the Task reached what it waits for.
+    pub fn ends_after(&self, body: &serde_json::Value) -> bool {
+        matches!(self, Self::TaskWait { .. }) && body["reached"] == serde_json::Value::Bool(true)
     }
 
     /// The Sessions a `desktop sessions` read lists, its argv's flags parsed
@@ -632,17 +666,13 @@ fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
     Ok(tokio::runtime::Runtime::new()?.block_on(future))
 }
 
-fn invalid(message: &str) -> crate::server::wire::ServerError {
-    crate::server::wire::ServerError::new(crate::server::wire::ErrorCode::Invalid, message)
+fn invalid(message: &str) -> crate::engine::Error {
+    crate::engine::Error::new(crate::engine::ErrorCode::Invalid, message)
 }
 
 /// A served read's named absence; the CLI prints its message.
-fn not_found(
-    message: impl Into<String>,
-    data: serde_json::Value,
-) -> crate::server::wire::ServerError {
-    crate::server::wire::ServerError::new(crate::server::wire::ErrorCode::NotFound, message)
-        .with(data)
+fn not_found(message: impl Into<String>, data: serde_json::Value) -> crate::engine::Error {
+    crate::engine::Error::new(crate::engine::ErrorCode::NotFound, message).with(data)
 }
 
 fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {

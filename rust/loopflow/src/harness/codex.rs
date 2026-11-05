@@ -46,8 +46,9 @@ use crate::store::ProviderAccountId;
 fn build_thread_request(
     launch: &AgentConfig,
     resume_agent_session: Option<&AgentSessionId>,
+    headless: bool,
 ) -> (&'static str, serde_json::Map<String, Value>) {
-    let mut params = build_codex_thread_start_params(launch);
+    let mut params = build_codex_thread_start_params(launch, headless);
     match resume_agent_session {
         Some(session_id) => {
             params.insert(
@@ -1004,8 +1005,9 @@ impl CodexHarness {
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
 
+        let native = self.approval == ApprovalPolicy::NativeClient;
         let (thread_method, mut thread_params) =
-            build_thread_request(launch, self.resume_agent_session.as_ref());
+            build_thread_request(launch, self.resume_agent_session.as_ref(), !native);
         // Keep shell policy on the thread. Repeating -c after app-server also
         // replaces the wrapper's global config overrides in Codex's CLI parser.
         let mut config = json!({
@@ -1013,15 +1015,6 @@ impl CodexHarness {
             "allow_login_shell": false,
             "features.shell_snapshot": false,
         });
-        let native = self.approval == ApprovalPolicy::NativeClient;
-        if native
-            && launch.write_scope == crate::agent::AgentWriteScope::Configured
-            && !launch.skip_permissions
-        {
-            // The native UI supplies interactive approval policy. The shared
-            // builder's unattended default belongs only to headless turns.
-            thread_params.remove("approvalPolicy");
-        }
         let roots = if native && launch.write_scope == crate::agent::AgentWriteScope::Configured {
             launch
                 .cwd
@@ -1291,7 +1284,7 @@ mod tests {
         };
         let saved_session = AgentSessionId::from("saved-native-thread");
         for session in [None, Some(&saved_session)] {
-            let (_, params) = build_thread_request(&config, session);
+            let (_, params) = build_thread_request(&config, session, true);
             assert_eq!(params["developerInstructions"], "Fixed additions.");
             assert!(!params.contains_key("baseInstructions"));
             assert!(!params.contains_key("model_instructions_file"));
@@ -1304,7 +1297,7 @@ mod tests {
             cwd: Some("/tmp/project".into()),
             ..AgentConfig::default()
         };
-        let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()));
+        let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()), true);
 
         assert_eq!(method, "thread/resume");
         assert_eq!(
@@ -1319,7 +1312,7 @@ mod tests {
 
     #[test]
     fn new_codex_session_uses_thread_start() {
-        let (method, params) = build_thread_request(&AgentConfig::default(), None);
+        let (method, params) = build_thread_request(&AgentConfig::default(), None, true);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
     }

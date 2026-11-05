@@ -584,7 +584,7 @@ mod tests {
                 prepared.config.agent().unwrap(),
                 inspection.config.agent().unwrap()
             );
-            assert!(prepared.config.chrome);
+            assert_eq!(prepared.config.chrome, Some(true));
             inspection.config.agent().unwrap().to_owned()
         };
         {

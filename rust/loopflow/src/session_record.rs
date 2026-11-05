@@ -94,7 +94,7 @@ pub struct AgentProcessRequest {
     pub write_scope: crate::agent::AgentWriteScope,
     pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
     pub skip_permissions: bool,
-    pub chrome: bool,
+    pub chrome: Option<bool>,
 }
 
 impl AgentProcessRequest {
@@ -3319,7 +3319,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
             isolate: None,
-            chrome: true,
+            chrome: Some(true),
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
             task_prompt: "authored task\n\nwith trailing space ".to_string(),
             agent: Some("codex:gpt-5.6".to_string()),

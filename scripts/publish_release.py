@@ -44,14 +44,12 @@ REQUIRED_SECRETS = (
     "R2_SECRET_ACCESS_KEY",
     "SPARKLE_ED_PRIVATE_KEY",
 )
-READER_CATALOG = "reader-catalog.txt"
 # Every GitHub Release carries exactly these assets.
 RELEASE_ASSETS = frozenset(
     {
         *(f"lf-{target}.tar.gz" for target in TARGETS),
         "Loopflow.dmg",
         "install.sh",
-        READER_CATALOG,
         "SHA256SUMS",
     }
 )
@@ -73,7 +71,6 @@ class ReleaseArtifacts:
     native_archives: tuple[Path, ...]
     dmg: Path
     installer: Path
-    reader_catalog: Path
     checksums: Path
 
 
@@ -183,16 +180,6 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
-def _find_reader_catalog(artifact_dir: Path) -> Path:
-    # Every target's package job writes the same catalog from the same source.
-    catalogs = sorted(artifact_dir.rglob(READER_CATALOG))
-    if not catalogs:
-        raise RuntimeError(f"hosted build produced no {READER_CATALOG}")
-    if len({catalog.read_bytes() for catalog in catalogs}) != 1:
-        raise RuntimeError(f"hosted targets disagree on {READER_CATALOG}")
-    return catalogs[0]
-
-
 def _extract_binary(archives: tuple[Path, ...], output_dir: Path, target: str) -> Path:
     archive = next(path for path in archives if path.name == f"lf-{target}.tar.gz")
     with tarfile.open(archive, "r:gz") as package:
@@ -254,7 +241,6 @@ def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
         *artifacts.native_archives,
         artifacts.dmg,
         artifacts.installer,
-        artifacts.reader_catalog,
         artifacts.checksums,
     ):
         command.extend(["--asset", str(asset)])
@@ -417,7 +403,6 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             return receipt
 
     archives = _find_native_archives(artifact_dir)
-    reader_catalog = _find_reader_catalog(artifact_dir)
     installer = ROOT / "release" / "install.sh"
     if not installer.is_file():
         raise RuntimeError(f"installer not found: {installer}")
@@ -457,7 +442,6 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             shutil.copy2(archive, prepared / archive.name)
         shutil.copy2(dmg, prepared / dmg.name)
         shutil.copy2(installer, prepared / installer.name)
-        shutil.copy2(reader_catalog, prepared / READER_CATALOG)
         paths = tuple(
             sorted(
                 (path for path in prepared.iterdir() if path.is_file()),
@@ -495,9 +479,8 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     _validate_release_candidate(archives)
     dmg = artifact_dir / "Loopflow.dmg"
     installer = artifact_dir / "install.sh"
-    reader_catalog = artifact_dir / READER_CATALOG
     checksums = artifact_dir / "SHA256SUMS"
-    artifacts = ReleaseArtifacts(tag, archives, dmg, installer, reader_catalog, checksums)
+    artifacts = ReleaseArtifacts(tag, archives, dmg, installer, checksums)
     stages = list(candidate.completed_stages)
     _stage_github_release(artifacts)
     stages.append("github_draft_staged")
@@ -518,7 +501,7 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     _run(["lf", "release", "publish", tag, "--finalize"])
     stages.append("github_release_published")
 
-    paths = (*archives, dmg, installer, reader_catalog, checksums)
+    paths = (*archives, dmg, installer, checksums)
     receipt = ArtifactReceipt(
         tag=tag,
         source_commit=source_commit,

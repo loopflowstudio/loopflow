@@ -1,7 +1,7 @@
 # Connect to the local Loopflow server
 
 ```sh
-lf server status   # readiness, socket, protocol revision and server incarnation as JSON
+lf server status   # readiness, socket, protocol revision, incarnation and connected clients as JSON
 ```
 
 Installation prepares client access automatically. Desktop's first connection
@@ -45,7 +45,7 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
+← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"read","query":{"read":"roadmap",…}}}
 → {"type":"request","id":"b","operation":{"kind":"subscribe","query":{…}}}
 ← {"type":"response","id":"a","result":{"kind":"read","value":{…}}}
@@ -57,8 +57,8 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 ```
 
 The first message is `hello` with the revisions the client speaks. The server
-chooses the newest revision both sides speak and answers `welcome` with it, the
-server's own range, its incarnation (`instance` changes with every start), build,
+chooses the newest revision both sides speak and answers `welcome` with it, a
+server-assigned `client_id`, the server's own range, its incarnation (`instance` changes with every start), build,
 executable SHA-256, the Machine reading (`null` while the registry is
 unavailable or uninitialized), capabilities and limits. With no revision in
 common it answers `error {code: incompatible}` naming the side to update, then
@@ -68,10 +68,13 @@ server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
 
 `status` before `hello` is the readiness probe: `status {revision, min_revision,
-instance, executable_sha256}`, then the server closes. `lf server status` and
+instance, executable_sha256, clients}`, then the server closes. `lf server status` and
 installation use it so readiness never opens Work or speaks the full protocol;
-`lf server status` also reports `listening` (a server accepted the connection)
-and `revision`. Local readiness compares the executable hash with the selected
+`lf server status` also reports `listening` (a server accepted the connection),
+`revision` and `clients`: each welcomed connection still open, oldest first, as
+`{id, client, connected_at, requests}`, where `client` is the identity its
+`hello` gave and `requests` counts its requests, subscriptions included. The
+identity is for diagnostics and grants nothing. Local readiness compares the executable hash with the selected
 installation, an installation check that never applies to a remote client.
 
 After `welcome`, many requests share the connection. A `request` carries an `id`

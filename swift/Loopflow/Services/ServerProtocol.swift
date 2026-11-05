@@ -10,7 +10,7 @@ public enum ServerProtocol {
 }
 
 /// Who connected, for diagnostics; it grants nothing.
-public struct ServerClientIdentity: Encodable, Sendable {
+public struct ServerClientIdentity: Codable, Equatable, Sendable {
     public let kind: String
     public let platform: String
     public let name: String
@@ -137,6 +137,8 @@ public enum ServerMessage: Decodable, Sendable {
 }
 
 public struct ServerWelcome: Decodable, Sendable {
+    /// The server's name for this connection, as `lf server status` lists it.
+    public let clientID: String
     /// The revision both sides speak for this connection.
     public let revision: Int
     public let serverRevision: Int
@@ -152,7 +154,8 @@ public struct ServerWelcome: Decodable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case revision, instance, build, machine, capabilities, limits
-        case serverRevision = "server_revision", minRevision = "min_revision", executableSHA256 = "executable_sha256"
+        case clientID = "client_id", serverRevision = "server_revision", minRevision = "min_revision"
+        case executableSHA256 = "executable_sha256"
     }
 }
 
@@ -168,8 +171,24 @@ public struct ServerStatus: Decodable, Sendable {
     public let minRevision: Int
     public let instance: String
     public let executableSHA256: String
+    /// Every welcomed connection still open.
+    public let clients: [ServerConnectedClient]
 
-    private enum CodingKeys: String, CodingKey { case revision, instance, minRevision = "min_revision", executableSHA256 = "executable_sha256" }
+    private enum CodingKeys: String, CodingKey {
+        case revision, instance, clients, minRevision = "min_revision", executableSHA256 = "executable_sha256"
+    }
+}
+
+/// One welcomed connection, from `welcome` until it closes.
+public struct ServerConnectedClient: Decodable, Equatable, Sendable {
+    public let id: String
+    public let client: ServerClientIdentity
+    /// RFC 3339.
+    public let connectedAt: String
+    /// Requests the connection has sent, subscriptions included.
+    public let requests: UInt64
+
+    private enum CodingKeys: String, CodingKey { case id, client, requests, connectedAt = "connected_at" }
 }
 
 public enum ServerReply: Decodable, Sendable {

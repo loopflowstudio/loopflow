@@ -39,7 +39,7 @@ pub struct Hello {
 }
 
 /// Who connected, for diagnostics; it grants nothing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientIdentity {
     pub kind: String,
@@ -98,6 +98,8 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Welcome {
+    /// The server's name for this connection, as `lf server status` lists it.
+    pub client_id: String,
     /// The revision both sides speak for this connection.
     pub revision: u32,
     pub server_revision: u32,
@@ -119,6 +121,20 @@ pub struct Status {
     pub min_revision: u32,
     pub instance: String,
     pub executable_sha256: String,
+    /// Every welcomed connection still open.
+    pub clients: Vec<ConnectedClient>,
+}
+
+/// One welcomed connection, from `welcome` until it closes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectedClient {
+    pub id: String,
+    pub client: ClientIdentity,
+    /// RFC 3339.
+    pub connected_at: String,
+    /// Requests the connection has sent, subscriptions included.
+    pub requests: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

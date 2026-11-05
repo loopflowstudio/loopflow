@@ -9,8 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, Reply, ServerMessage, Welcome,
-    MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Operation, Reply,
+    ServerMessage, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::id::LfProcessId;
 use crate::lf::commands::read::Read;
@@ -29,6 +29,8 @@ pub struct Status {
     pub instance: Option<String>,
     /// The newest protocol revision the server speaks.
     pub revision: Option<u32>,
+    /// Every welcomed connection still open; empty when no server answered.
+    pub clients: Vec<ConnectedClient>,
     pub error: Option<String>,
 }
 
@@ -39,6 +41,7 @@ pub fn status() -> Result<Status> {
         listening: false,
         instance: None,
         revision: None,
+        clients: Vec::new(),
         error: None,
     };
     let stream = match connect(&status.socket) {
@@ -59,6 +62,7 @@ pub fn status() -> Result<Status> {
         Ok(Some(ServerMessage::Status(answer))) => {
             status.instance = Some(answer.instance);
             status.revision = Some(answer.revision);
+            status.clients = answer.clients;
             let expected = crate::installation::ArtifactIdentity::capture(
                 crate::installation::ArtifactRole::Cli,
                 &std::env::current_exe()?,
@@ -371,6 +375,7 @@ mod tests {
             if after_hello {
                 reader.read_line(&mut line).unwrap();
                 let welcome = ServerMessage::Welcome(Welcome {
+                    client_id: "fixture-client".into(),
                     revision: REVISION,
                     server_revision: REVISION,
                     min_revision: MIN_REVISION,

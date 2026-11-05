@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -16,8 +16,8 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
-    ClientMessage, ErrorCode, Hello, Limits, Operation, Reply, ServerMessage, Status, Welcome,
-    MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation, Reply,
+    ServerMessage, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::lf::commands::{read::Read, watch::Subscription, write::Write};
 
@@ -48,6 +48,60 @@ const CAPABILITIES: &[&str] = &[
 
 type Lines = Framed<UnixStream, LinesCodec>;
 
+/// Welcomed connections by client ID, as `lf server status` lists them.
+type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
+
+/// A welcomed connection's row, removed when the connection ends.
+struct Admitted {
+    clients: Clients,
+    id: String,
+}
+
+impl Admitted {
+    fn new(clients: &Clients, client: ClientIdentity) -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
+        let connected_at = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("the current time formats as RFC 3339");
+        lock(clients).insert(
+            id.clone(),
+            ConnectedClient {
+                id: id.clone(),
+                client,
+                connected_at,
+                requests: 0,
+            },
+        );
+        Self {
+            clients: clients.clone(),
+            id,
+        }
+    }
+
+    fn requested(&self) {
+        if let Some(row) = lock(&self.clients).get_mut(&self.id) {
+            row.requests += 1;
+        }
+    }
+}
+
+impl Drop for Admitted {
+    fn drop(&mut self) {
+        lock(&self.clients).remove(&self.id);
+    }
+}
+
+fn lock(clients: &Clients) -> std::sync::MutexGuard<'_, HashMap<String, ConnectedClient>> {
+    clients.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Oldest connection first.
+fn connected(clients: &Clients) -> Vec<ConnectedClient> {
+    let mut rows: Vec<_> = lock(clients).values().cloned().collect();
+    rows.sort_by(|a, b| (&a.connected_at, &a.id).cmp(&(&b.connected_at, &b.id)));
+    rows
+}
+
 pub(super) async fn run() -> Result<()> {
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
@@ -73,6 +127,7 @@ pub(super) async fn run() -> Result<()> {
     );
     let instance: Arc<str> = uuid::Uuid::new_v4().to_string().into();
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let clients = Clients::default();
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         let (socket, _) = listener.accept().await?;
@@ -92,9 +147,10 @@ pub(super) async fn run() -> Result<()> {
         );
         let instance = instance.clone();
         let executable_sha256 = executable_sha256.clone();
+        let clients = clients.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            if let Err(error) = connection(socket, &instance, &executable_sha256).await {
+            if let Err(error) = connection(socket, &instance, &executable_sha256, &clients).await {
                 tracing::warn!(%instance, %error, "Server connection ended");
             }
         });
@@ -111,7 +167,12 @@ async fn refuse_busy(mut socket: UnixStream) {
     let _ = tokio::time::timeout(SEND, socket.write_all(line.as_bytes())).await;
 }
 
-async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &str) -> Result<()> {
+async fn connection(
+    mut socket: UnixStream,
+    instance: &str,
+    executable_sha256: &str,
+    clients: &Clients,
+) -> Result<()> {
     let first = tokio::time::timeout(FIRST_MESSAGE, socket.read_u8())
         .await
         .context("no message within five seconds")??;
@@ -136,6 +197,7 @@ async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &
                     min_revision: MIN_REVISION,
                     instance: instance.into(),
                     executable_sha256: executable_sha256.into(),
+                    clients: connected(clients),
                 }),
             )
             .await;
@@ -174,7 +236,8 @@ async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &
         )
         .await;
     };
-    tracing::debug!(%instance, client = ?hello.client, revision, "Server connection welcomed");
+    let admitted = Admitted::new(clients, hello.client);
+    tracing::debug!(%instance, client = %admitted.id, revision, "Server connection welcomed");
     // A Machine registry that is unavailable or uninitialized leaves `machine`
     // null; file settings stay reachable through the same connection.
     let machine =
@@ -184,6 +247,7 @@ async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &
     send(
         &mut lines,
         &ServerMessage::Welcome(Welcome {
+            client_id: admitted.id.clone(),
             revision,
             server_revision: REVISION,
             min_revision: MIN_REVISION,
@@ -199,7 +263,7 @@ async fn connection(mut socket: UnixStream, instance: &str, executable_sha256: &
         }),
     )
     .await?;
-    session(lines, instance.into()).await
+    session(lines, instance.into(), &admitted).await
 }
 
 /// The newest revision both sides speak.
@@ -235,7 +299,7 @@ struct Inflight {
     checkpoints: Option<mpsc::Sender<u64>>,
 }
 
-async fn session(mut lines: Lines, instance: Arc<str>) -> Result<()> {
+async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> Result<()> {
     let (outgoing, mut queue) = mpsc::channel::<ServerMessage>(QUEUE);
     // Dropping the set aborts every answer still pending; admitted blocking
     // work finishes on its worker. A task returns its request ID.
@@ -255,6 +319,7 @@ async fn session(mut lines: Lines, instance: Arc<str>) -> Result<()> {
                 };
                 match message {
                     ClientMessage::Request { id, operation } => {
+                        admitted.requested();
                         if id.is_empty() || id.len() > 128 {
                             send(&mut lines, &error(Some(id), ErrorCode::Invalid, "request ID must contain 1–128 bytes")).await?;
                             continue;
@@ -645,7 +710,7 @@ async fn send(lines: &mut Lines, message: &ServerMessage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::connection;
+    use super::{connection, Clients};
     use crate::lf::commands::read::Read;
     use crate::server::wire::{
         ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, Reply, ServerMessage,
@@ -663,9 +728,15 @@ mod tests {
     impl Client {
         /// A connection to a session with a private, uninitialized Machine.
         fn connect() -> Self {
+            Self::connect_to(&Clients::default())
+        }
+
+        fn connect_to(clients: &Clients) -> Self {
             let (client, server) = UnixStream::pair().unwrap();
-            let server =
-                tokio::spawn(async move { connection(server, "incarnation", "fixture").await });
+            let clients = clients.clone();
+            let server = tokio::spawn(async move {
+                connection(server, "incarnation", "fixture", &clients).await
+            });
             let (read, writer) = client.into_split();
             Self {
                 reader: BufReader::new(read),
@@ -803,8 +874,9 @@ mod tests {
     #[tokio::test]
     async fn revision_one_frame_gets_a_revision_one_refusal() {
         let (mut client, server) = UnixStream::pair().unwrap();
-        let server =
-            tokio::spawn(async move { connection(server, "incarnation", "fixture").await });
+        let server = tokio::spawn(async move {
+            connection(server, "incarnation", "fixture", &Clients::default()).await
+        });
         let request = br#"{"version":1,"id":"old","operation":{"kind":"status"}}"#;
         client.write_u32(request.len() as u32).await.unwrap();
         client.write_all(request).await.unwrap();
@@ -830,6 +902,42 @@ mod tests {
         assert_eq!(status.instance, "incarnation");
         assert_eq!(status.executable_sha256, "fixture");
         client.ended().await;
+    }
+
+    async fn status(clients: &Clients) -> Vec<crate::server::wire::ConnectedClient> {
+        let mut probe = Client::connect_to(clients);
+        probe.send(&ClientMessage::Status).await;
+        let Some(ServerMessage::Status(status)) = probe.receive().await else {
+            panic!("expected status")
+        };
+        probe.ended().await;
+        status.clients
+    }
+
+    #[test]
+    fn status_lists_welcomed_clients_until_they_close() {
+        with_empty_home(async {
+            let clients = Clients::default();
+            let mut desktop = Client::connect_to(&clients);
+            let ServerMessage::Welcome(welcome) = desktop.hello(REVISION, REVISION).await else {
+                panic!("expected welcome");
+            };
+            desktop
+                .send(&ClientMessage::Request {
+                    id: "a".into(),
+                    operation: catalog(),
+                })
+                .await;
+            desktop.receive().await.unwrap();
+            let listed = status(&clients).await;
+            assert_eq!(listed.len(), 1, "{listed:?}");
+            assert_eq!(listed[0].id, welcome.client_id);
+            assert_eq!(listed[0].client.name, "fixture");
+            assert_eq!(listed[0].requests, 1);
+            drop(desktop.writer);
+            desktop.server.await.unwrap().unwrap();
+            assert!(status(&clients).await.is_empty());
+        });
     }
 
     #[test]

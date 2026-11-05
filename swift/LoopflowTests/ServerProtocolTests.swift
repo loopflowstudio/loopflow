@@ -26,6 +26,7 @@ struct ServerProtocolTests {
             kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1")))
         #expect(try encoded(hello) == value("hello"))
         guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
+        #expect(welcome.clientID == "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
         #expect(welcome.revision == 2)
         #expect(welcome.serverRevision == 2)
         #expect(welcome.minRevision == 2)
@@ -45,6 +46,9 @@ struct ServerProtocolTests {
         #expect(status.minRevision == 2)
         #expect(status.instance == "server-1")
         #expect(status.executableSHA256 == String(repeating: "a", count: 64))
+        #expect(status.clients.map(\.id) == ["6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"])
+        #expect(status.clients.first?.client == ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1"))
+        #expect(status.clients.first?.requests == 12)
     }
 
     @Test func subscriptionsCarryTheirRequestId() throws {

@@ -302,7 +302,7 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "revision": 2, "server_revision": 2, "min_revision": 2, "instance": "fixture",
+                    "type": "welcome", "client_id": "fixture-client", "revision": 2, "server_revision": 2, "min_revision": 2, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
                     "capabilities": [], "limits": ["max_message": 33_554_432, "max_connections": 64],
                 ])

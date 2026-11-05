@@ -82,7 +82,7 @@ bridges; the owner and its Session survive, and Desktop reconnects.
 
 ```text
 client ── hello{revision 2, min 2, client} ──▶ server
-client ◀── welcome{revision 2, server 2, min 2, instance, build, limits, capabilities} ── server
+client ◀── welcome{client_id, revision 2, server 2, min 2, instance, build, limits, capabilities} ── server
 client ── request{id a, read roadmap} ──▶
 client ── request{id b, subscribe desktop_sessions} ──▶
 client ◀── response{id a, value}
@@ -123,7 +123,7 @@ show a 32 MiB reading is a product question for LOO-718, not a protocol one.
 ```json
 {"type":"hello","revision":2,"min_revision":2,
  "client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-{"type":"welcome","revision":2,"server_revision":2,"min_revision":2,
+{"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,
  "instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},
  "capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
 ```
@@ -138,8 +138,11 @@ Local readiness keeps comparing the server's executable hash with the selected
 installation. That is an installation check (same build, same Machine), not a
 protocol check, and it never applies to a phone or a shed.
 
-`welcome` replaces `bootstrap`. `status` stays as a pre-hello probe for
-`lf server status`, so readiness never needs to speak the full protocol.
+`welcome` replaces `bootstrap` and assigns the connection a `client_id`. The
+server keeps one row per welcomed connection (id, hello identity, connected_at,
+request count) until it closes. `status` stays as a pre-hello probe for
+`lf server status`, so readiness never needs to speak the full protocol, and
+lists those rows as `clients`.
 
 ### Results
 

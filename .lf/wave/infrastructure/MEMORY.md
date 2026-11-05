@@ -290,12 +290,17 @@ retains Linux HTTPS reconnect as CI's obligation. October 12 repairs, exact
 failures, commands and counts: `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
 On-demand Linear acquisition.
 
-Jack authorized landing after checks; `6d169dc1` permits publication before live
-measurement while Linear is paused. Hosted candidate CI, live request counts,
+Jack authorized landing after checks (`6d169dc1`). Live counts arrived
+2026-11-05 (Task 647863): 23 uncertain exports and ~11 lf processes sent
+~4,000 requests an hour (`ListTeams` every pass,
+`FindExportIssue` per export) while a `check_before_write` nested in
+`LinearClient::graphql` consumed each creation's five-second deadline, so no
+creation reached Linear. Lessons: no freshness check inside a write; validate the
+Team claim once per process; look for an uncertain creation once per window
+(`max(600 s, delta_fresh_secs())`) and re-send it with its saved id when absent;
+policy in `ops/README.md`. Hosted candidate CI,
 rejected-request quota accounting and installed pending-write recovery remain
-unproved. After installing, manual restoration of `linear.team` with
-`planning.provider: linear` in loopflow, etude, kata and fantasia precedes
-measurement; rollout notes belong in the PR.
+unproved; the 19 unmapped Tasks are the installed check.
 
 ## Session titles (LOO-439, 2026-10-08)
 

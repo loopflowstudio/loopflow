@@ -13,6 +13,7 @@
   `check_before_write` there explicitly.
 - Wave memory `.lf/wave/infrastructure/MEMORY.md` was 89 tokens over its
   16,000-token target. Compress merged duplicated "remains unproved" lists and a
-  pass ledger already kept at `6935bfbadbc2…` into their references; no decision
-  or attribution changed. This Task's own finding (no freshness check inside a
-  write) is in the plan, not yet in Wave memory; realign decides.
+  pass ledger already kept at `6935bfbadbc2…` into their references; realign
+  (2026-11-05) replaced the stale "live request counts remain unproved" paragraph
+  under On-demand Linear acquisition with this Task's measured counts and lessons.
+  No decision or attribution changed.

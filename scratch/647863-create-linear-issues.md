@@ -79,6 +79,8 @@ clean; `scripts/check_migrations.py` ok (export_observed_at unmerged). Gate filt
 `test(ops::linear::task_planning_tests::) | test(store::sqlite::planning_export::) |
 test(store::sqlite::linear_team_checks::) | binary(lf)` minus the two long
 `ops::linear` fixtures named in scripts/testing.md; website suite for docs/work.md.
+Sync (2026-11-05): main unchanged since base `9178a04c`, no conflicts, no rerun;
+realign found code and plan in agreement and recorded the lesson in Wave memory.
 
 ## Remaining (demo step)
 

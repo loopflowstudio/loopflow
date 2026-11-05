@@ -265,7 +265,7 @@ and export acceptance remain unproved. Jack selected unambiguous Task prefixes
 Peer/installed acceptance and full CI remain unproved in this evidence. Exact
 October decisions, superseded mechanics, fixture counts and linked archives:
 `04bdec77e312a4bd0166a027113fb4a952732b9e:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Archives neither prove delivery nor restore removed writers.
+this heading.
 
 ## On-demand Linear acquisition (lf-6f396c0, 2026-10-11)
 
@@ -309,7 +309,6 @@ Fake-API Claude TUI/headless and shared Codex TUI pass; embedded Codex/exec lack
 the endpoint. Live cmux workspace/tab rename passed with a stand-in
 (`/tmp/lf-cmux-demo-owapn43t/`). Docker promotion/retry preserves hooks, settings
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
-Plan: `scratch/every-lf-session-in-cmux.md`.
 
 October 11 hook repair: Jack Heart's comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26`
 requests landing PR #1530 after sync. A held WAL writer reproduced a callback
@@ -319,7 +318,6 @@ wait. Optional prompt hooks bound observation and ownership reads separately
 never retry failed early observation at exit. Unavailable ownership leaves names
 unchanged. Lock fixtures prove source behavior only; installed concurrent-Flow
 acceptance and the slow status/ensure cause remain unproved.
-Plan: `scratch/stop-the-session-title-hook.md`.
 
 Jack Heart's October 11 Kata report (`d4991d61`): prompt timeouts recurred outside
 Loopflow; the Kata lock holder/cause remain unknown. Evidence:
@@ -422,8 +420,7 @@ Demo evidence: `353cd661e:scratch/machine-sign-in-demo.md`.
 
 Gate repaired build-version comparison; OAuth's output-handle warning did not
 reproduce, without a known cause or repair. CI retains Rust and
-macOS sandbox Python checks. Earlier proofs: `178abab13:wave/infrastructure/MEMORY.md`;
-current checks: `scratch/work-on-another-machine-name.md`.
+macOS sandbox Python checks. Earlier proofs: `178abab13:wave/infrastructure/MEMORY.md`.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 
@@ -570,7 +567,7 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `session_record` with `LF_*` cleared.
 
 Earlier cleanup: `66da3fdf7:wave/infrastructure/MEMORY.md`, “Retained capture
-storage and autonomous cleanup”; current direction: Capture cutover.
+storage and autonomous cleanup”.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -706,8 +703,8 @@ additive tails. Lesson: store skew must surface as an error naming the skew and
 fact. `open_existing_store` is the one opener (`Ok(None)` only when no file).
 A refusal names one fix: callers prefix who refused and the path, then pass the
 store's error through verbatim; appending `lf doctor` after it sent operators to
-a command that installs nothing. Limit: a step's own long-lived connection that
-meets a `-- breaks:` migration mid-write still fails with raw SQLite text.
+a command that installs nothing. Task 337044 (2026-11-05, Jack Heart) deletes the
+reader floor: older lf opens any newer store; staging replaces it (MIGRATIONS.md).
 
 ## One main Home (LOO-342, curated 2026-10-10)
 
@@ -729,8 +726,6 @@ PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
   and runs unrecorded. Exact measurements and counterexamples remain in the
   `6448e3c9e7:wave/infrastructure/MEMORY.md` archive; current timings live under
   `<Home>/perf/`.
-- **Install preflight/promote read the OS account's Home whatever `LF_HOME`
-  says.** Tests running them are container-only installation proofs.
 - Task decisions no longer depend on historical execution; checkout cleanup
   still retains live or unknown providers. LOO-408 owns the installed proof.
 
@@ -1090,15 +1085,14 @@ Preserve first accepted usage and conflicting-repeat partiality. Window by the
 owning fact's terminal time; publish measured coverage beside percentiles.
 Unknown authority cannot be inferred from observer time or trace prose.
 
-Plan ownership above records LOO-406's current direction. KRs are explicit
+KRs are explicit
 judgments; preserve unrelated provider associations and diagnose ambiguous moves.
 Standing frontier plans need no invented completion date. No fourth planning noun
 was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Archived pointers
 
-Archives authorize no work; installed worker recovery is under Shipped history.
-Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
+Installed worker recovery is under Shipped history. Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
 earlier follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths”
 referent: `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.
 

@@ -3,9 +3,9 @@
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
 //! and version, and flags the ones a launch through the entry no longer runs
-//! (`installation::superseded`, the judgement owners and `lf resume` share) or
-//! that can't open the store any more. A superseded owner ends itself once its
-//! Sessions hold no work or input and `lf resume` reopens them on the installed lf;
+//! (`installation::superseded`, the judgement owners and `lf resume` share). A
+//! superseded owner ends itself once its Sessions hold no work or input and
+//! `lf resume` reopens them on the installed lf;
 //! rollover does that for every superseded owner at once, including owners that
 //! predate the policy: an idle owner with saved provider history is ended the
 //! way its lifetime policy ends it, and each of its Sessions resumes on the
@@ -44,8 +44,6 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct BinaryInventory {
     /// The lf a launch through the entry runs now; `None` when no entry resolves.
     pub selected: Option<SelectedBinary>,
-    /// The migration a binary must know to open the store.
-    pub store_floor: Option<String>,
     pub binaries: Vec<RunningBinary>,
 }
 
@@ -62,8 +60,6 @@ pub struct RunningBinary {
     pub version: Option<String>,
     /// One build with `selected`: the same file, or the same bytes.
     pub selected: bool,
-    /// It does not know the store's reader floor, so it fails every store open.
-    pub cannot_open_store: bool,
     pub processes: Vec<RunningLfProcess>,
 }
 
@@ -114,16 +110,10 @@ impl RunningBinary {
         }
     }
 
-    /// `lf-d49c57c (0.14.16, can't open the store)`.
+    /// `lf-d49c57c (0.14.16)`.
     pub fn describe(&self) -> String {
-        let mut facts = vec![self
-            .version
-            .clone()
-            .unwrap_or_else(|| "version unknown".into())];
-        if self.cannot_open_store {
-            facts.push("can't open the store".into());
-        }
-        format!("{} ({})", self.name(), facts.join(", "))
+        let version = self.version.as_deref().unwrap_or("version unknown");
+        format!("{} ({version})", self.name())
     }
 }
 
@@ -134,15 +124,10 @@ pub fn inventory() -> Result<BinaryInventory> {
     let target = crate::installation::launch_target()
         .inspect_err(|error| tracing::warn!(%error, "the lf a launch runs now is unknown"))
         .ok();
-    let (store_floor, processes) = if database.exists() {
-        let store = SqliteStore::open_processes_read_only(&database)?;
-        let floor = store.reader_floor().unwrap_or_else(|error| {
-            tracing::warn!(%error, "store reader floor unreadable");
-            None
-        });
-        (floor, live_lf_processes(&store, now)?)
+    let processes = if database.exists() {
+        live_lf_processes(&SqliteStore::open_processes_read_only(&database)?, now)?
     } else {
-        (None, Vec::new())
+        Vec::new()
     };
     let mut versions = HashMap::new();
     let mut version_of = |path: &Path| {
@@ -155,7 +140,7 @@ pub fn inventory() -> Result<BinaryInventory> {
         version: version_of(&path),
         path,
     });
-    let mut binaries = group(processes, |path| {
+    let binaries = group(processes, |path| {
         let version = path.and_then(&mut version_of);
         let is_selected = match path {
             Some(path) => !crate::installation::superseded(path),
@@ -164,19 +149,7 @@ pub fn inventory() -> Result<BinaryInventory> {
         };
         (version, is_selected)
     });
-    if store_floor.is_some() {
-        for binary in &mut binaries {
-            binary.cannot_open_store = binary
-                .path
-                .as_deref()
-                .is_some_and(|path| !binary_opens_store(path));
-        }
-    }
-    Ok(BinaryInventory {
-        selected,
-        store_floor,
-        binaries,
-    })
+    Ok(BinaryInventory { selected, binaries })
 }
 
 fn live_lf_processes(
@@ -241,7 +214,6 @@ fn group(
                 path,
                 version,
                 selected,
-                cannot_open_store: false,
                 processes,
             }
         })
@@ -265,31 +237,12 @@ fn binary_version(path: &Path) -> Option<String> {
     parse_version(&String::from_utf8_lossy(&output.stdout))
 }
 
-/// Whether the binary reads the selected store, by its own read-only
-/// promotion preview; a binary that cannot answer is not judged.
-fn binary_opens_store(path: &Path) -> bool {
-    let mut command = Command::new(path);
-    command
-        .args(["self", "install", "preflight", "--json"])
-        .env_clear()
-        .env("LF_HOME", crate::store::lf_home_dir());
-    if let Some(home) = std::env::var_os("HOME") {
-        command.env("HOME", home);
-    }
-    let Ok(output) = crate::os_process::bounded_output(&mut command, VERSION_TIMEOUT) else {
-        return true;
-    };
-    serde_json::from_slice::<serde_json::Value>(&output.stdout).map_or(true, |preview| {
-        preview["compatibility"]["kind"] != "incompatible"
-    })
-}
-
 fn parse_version(output: &str) -> Option<String> {
     let version = output.trim().strip_prefix("lf ")?.trim();
     (!version.is_empty() && !version.contains(char::is_whitespace)).then(|| version.to_owned())
 }
 
-/// `3 processes on lf-d49c57c (0.14.16); 2 on lf-270110a (0.14.15, can't open the store)`.
+/// `3 processes on lf-d49c57c (0.14.16); 2 on lf-270110a (0.14.15)`.
 pub fn superseded_summary(inventory: &BinaryInventory) -> Option<String> {
     let parts = inventory
         .superseded()
@@ -315,20 +268,17 @@ pub fn render_binaries(inventory: &BinaryInventory) -> String {
         return output;
     }
     for binary in &inventory.binaries {
-        let mut state = vec![if binary.selected {
+        let state = if binary.selected {
             "selected"
         } else {
             "superseded"
-        }];
-        if binary.cannot_open_store {
-            state.push("can't open the store");
-        }
+        };
         output.push_str(&format!(
             "  {:>4}  {:<20} {:<22} {}\n",
             binary.processes.len(),
             binary.name(),
             binary.version.as_deref().unwrap_or("unknown"),
-            state.join(" · "),
+            state,
         ));
     }
     if inventory.superseded().next().is_some() {
@@ -418,18 +368,11 @@ fn owner_disposition(store: &SqliteStore, owner: &LfProcessId) -> Result<Disposi
 }
 
 /// A Graph runner's steps resolve the installed entry at each launch, except
-/// in Desktop's helper, which keeps itself; a runner below the store floor
-/// fails at its next step instead.
+/// in Desktop's helper, which keeps itself.
 fn graph_runner(binary: &RunningBinary) -> Disposition {
     if binary.is_app_helper() {
         return Disposition::Stays(
             "its steps follow Loopflow.app's bundled lf; update Desktop".into(),
-        );
-    }
-    if binary.cannot_open_store {
-        return Disposition::Stays(
-            "can't open the store; it fails at its next step; rerun the Graph (`lf task run` for a Task's route)"
-                .into(),
         );
     }
     Disposition::NextStep
@@ -663,7 +606,6 @@ mod tests {
         assert_eq!(binaries[1].processes.len(), 2);
         let inventory = BinaryInventory {
             selected: None,
-            store_floor: Some("0.14.16".into()),
             binaries,
         };
         assert_eq!(
@@ -701,23 +643,17 @@ mod tests {
             )
             .unwrap();
         }
-        let binary = |path: &str, cannot_open_store| RunningBinary {
+        let binary = |path: &str| RunningBinary {
             path: Some(PathBuf::from(path)),
             version: Some("0.14.16".into()),
             selected: false,
-            cannot_open_store,
             processes: Vec::new(),
         };
-        let installed = binary("/home/.lf/bin/lf-d49c57c", false);
-        let below_floor = binary("/home/.lf/bin/lf-270110a", true);
-        let helper = binary("/Applications/Loopflow.app/Contents/MacOS/lf", false);
+        let installed = binary("/home/.lf/bin/lf-d49c57c");
+        let helper = binary("/Applications/Loopflow.app/Contents/MacOS/lf");
 
         let of = |binary, process| disposition(&store, binary, process).unwrap();
         assert!(matches!(of(&installed, &runner), Disposition::NextStep));
-        let Disposition::Stays(reason) = of(&below_floor, &runner) else {
-            panic!("a runner below the floor stays");
-        };
-        assert!(reason.contains("rerun the Graph"), "{reason}");
         let Disposition::Stays(reason) = of(&helper, &runner) else {
             panic!("a Desktop helper runner stays");
         };

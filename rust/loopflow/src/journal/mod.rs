@@ -362,6 +362,10 @@ pub fn observe_process(command: &[String]) {
     }
     let observe = || -> anyhow::Result<()> {
         let path = crate::store::database_path_from_env()?;
+        // A Machine without a store (a fresh or disposable home) has nothing to record into.
+        if !path.exists() {
+            return Ok(());
+        }
         let ledger = SqliteStore::open_existing_processes(&path, wait)?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {

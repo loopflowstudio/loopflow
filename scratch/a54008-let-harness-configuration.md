@@ -46,8 +46,14 @@ it no longer strips keys after the fact).
 
 Tests: `agent::tests::attended_codex_keeps_its_own_policy…`,
 `agent::session::tests::{unset_chrome_sends_no_flag…, chrome_choice_reaches_no_harness_but_claude,
-bare_harness_sends_no_model…}`, `harness::opencode::tests::bare_opencode_sends_no_model…`,
-`session_launch_contract::{unset_chrome_leaves_the_claude_setting_alone…, resume loop (yolo per harness)}`.
+bare_harness_sends_no_model…, yolo_sends_pi_nothing}`, `harness::opencode::tests::bare_opencode_sends_no_model…`,
+`session_launch_contract::{unset_chrome_leaves_the_claude_setting_alone…, resume loop (yolo for
+Claude, Codex, OpenCode; the Codex fixture's own `on-request` shows through when lf sends nothing)}`.
+
+Realign (2026-11-05): code matched the plan; two bounded mismatches fixed. `docs/security.md`
+claimed headless OpenCode receives `permission: allow`; lf sends permissions only for yolo or
+worktree scope and otherwise answers each `permission.asked` once (`harness/opencode.rs`), and
+only Claude warns when raising a floor. Pi `yolo` parity had no test; `yolo_sends_pi_nothing` adds it.
 
 ## Delete — do not maintain
 - Done: `CODEX_DEFAULT_SERVICE_TIER` (one absence assertion remains as the parity guard),
@@ -55,6 +61,7 @@ bare_harness_sends_no_model…}`, `harness::opencode::tests::bare_opencode_sends
   `approvalPolicy`/`sandbox` removal.
 
 ## Checks
+- Realign: `cargo test -p loopflow --lib -- agent::session::tests::{yolo_sends_pi_nothing,chrome_choice,bare_harness}` 3 ok.
 - Compress: `cargo test -p loopflow --lib -- agent:: harness::codex::` 48 ok; `--test session_launch_contract` 27 ok;
   `cargo clippy -p loopflow --all-targets -D warnings` ok. Gate owns `config::`, `settings_launch_tests`,
   `config_tests`, `agent_tests`, `context_launch_tests`, `cli_discovery`.

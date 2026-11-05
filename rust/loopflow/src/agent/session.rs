@@ -569,6 +569,28 @@ mod tests {
         }
     }
 
+    /// Pi has no permission bypass; `yolo` reaches it as nothing.
+    #[test]
+    fn yolo_sends_pi_nothing() {
+        let cwd = tempfile::tempdir().unwrap();
+        let launch = |skip_permissions| {
+            let config = AgentConfig {
+                agent: Some("pi".into()),
+                cwd: Some(cwd.path().into()),
+                skip_permissions,
+                ..Default::default()
+            };
+            build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap()
+            .args
+        };
+        assert_eq!(launch(true), launch(false));
+    }
+
     #[test]
     fn bare_harness_sends_no_model_and_a_pinned_one_sends_it() {
         let cwd = tempfile::tempdir().unwrap();

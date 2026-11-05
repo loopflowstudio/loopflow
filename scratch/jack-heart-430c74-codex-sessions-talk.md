@@ -1,6 +1,7 @@
 # Codex Sessions talk to app-server directly (430c74)
 
-Status: implemented and compressed, awaiting gate, 2026-11-05.
+Status: implemented, compressed, synced onto main through #1826 and realigned,
+2026-11-05; awaiting gate.
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -49,11 +50,22 @@ ends the PTY, as for Claude.
 
 Every relay target is gone: `CodexConnection`, relay diagnostics, `client.sock`,
 `ClientWatch`, `NativeConnection.relay`, their tests, and `codex_connect.py
---public-connect` with its shared-sibling branches. No deletion target remains.
+--public-connect` with its shared-sibling branches. One relay-era helper stays:
+`_public_connection_contract` in `codex_connect.py`, reachable only through
+`--planning-peers`, which was already broken on main (scratch/questions.md). It
+goes with that fixture's disposition, not this Task.
 
 ## Remaining
 
 - Gate: affected suites once.
+
+## Related work
+
+Task e46a80 (Jack Heart, 2026-11-05, in flight) makes the relay this Task deletes
+tolerate store errors: ~366 lines in `codex_connection.rs`, plus `native_exit.rs`
+and `util.rs`. Whichever lands second meets the conflict; for Codex, this deletion
+is the resolution, and e46a80's provider-independent owner-input decoupling stands
+on its own. Landing order is Jack Heart's call.
 
 Decided 2026-11-05: retired `--public-connect`. Its headless-to-terminal handoff is
 refused by `lf resume` since #1767, and `a_moved_attachment_ends_only_its_own_client`
@@ -63,7 +75,7 @@ Checks: real Codex 0.166.0 `codex_terminal.py` plain and `--transport-failure` a
 demo below passed before compress; after merging main, `codex_connect.py --launch
 --graph-decision-retry replace` passed. Two real-Codex fixtures fail for reasons that
 predate this Task; see scratch/questions.md.
-Compress after merge: `cargo test -p loopflow --lib harness::codex_connection` 5 passed, clippy clean; gate owns the rest.
+Realign after syncing #1826: `cargo test -p loopflow --lib -- harness::codex_connection only_provider_side_commands_are_hidden` 6 passed; gate owns the rest.
 
 ## Demo
 

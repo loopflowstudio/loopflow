@@ -108,8 +108,9 @@ through recording
 and saves failed spawns on the record. Admission is synchronous so async cancellation
 cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
-No post-spawn bind is needed. Codex reconnect holds the endpoint's FIFO;
-Claude and OpenCode currently use anonymous lifelines without that handoff path.
+No post-spawn bind is needed. The Codex launcher holds the endpoint's FIFO lifeline
+across its exec into the client; Claude and OpenCode currently use anonymous lifelines
+without that handoff path.
 The launcher records terminal versus headless mode on each AgentProcess; the
 Session’s historical interactive flag does not select its cleanup policy.
 Writers remain held across attachment transfer. Closing the last holder stops
@@ -139,8 +140,8 @@ is the Graph process continuing its own step's Run to correct a structured answe
 Harness stop and resume use common exact-identity group close under the frozen
 attachment fence. Superseded callers, unknown identity and duplicate OS owners
 cannot signal. Foreground providers are excluded even after exit. Leader death
-alone cannot settle surviving helpers. Codex retains its live connection machinery
-and its refusal to close a server hosting unrelated conversations.
+alone cannot settle surviving helpers. Codex keeps its refusal to close a server
+hosting unrelated conversations.
 
 OpenCode abort uses its existing fenced HTTP writer, without write retries. New
 sessions receive permission rules on creation, not through an unsupported PATCH.

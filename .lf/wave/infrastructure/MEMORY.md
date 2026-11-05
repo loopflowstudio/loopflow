@@ -155,9 +155,13 @@ startup also waits without a cutoff; viewer and release publication policies sta
 Jack Heart authorized repair preserving editing, diagnostics and history; accounts
 stay out of scope. Merged #1595 (`e204ce6072`) scopes parent output to announced
 private Process logs; transport keeps native descriptors, OpenCode its stderr log.
-Installed repair, macOS pending-request and title/reconnect startup remain unproved.
+Installed repair and macOS pending-request startup remain unproved.
 
 LOO-516's relay evidence leaves with the relay (Task 430c74); rows stay: `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Task 430c74 (Jack Heart, 2026-11-05): lf is a session manager beside the harness,
+never in its byte path. Codex 0.166.0 app-server fans every notification and
+approval to every subscriber, so a side observer records while the TUI talks to
+the server directly; a thread has no rollout to resume until a turn or `thread/name/set`.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -796,7 +800,7 @@ unproved by that work. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../../docs/subscriptions.md).
 
-Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
+Main #1511 (`e69d5103f`): Codex terminals used `--no-daemon` (0.161.0-verified; #1552 removed it).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
 

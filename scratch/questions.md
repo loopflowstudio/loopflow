@@ -6,7 +6,7 @@ Assumptions made in the headless implement step, each reversible.
 2. **No model or harness fallback.** Preferences hold one resolved agent with no ordered alternates, so any fallback would invent policy. A model-scoped limit cools the whole account. Overturned at demo: limits are scoped and headless steps fall through account, model, provider (Accepted at demo, items 2–3).
 3. **A rejected event cools the account until its reset**, including `seven_day_overage_included`. If overage rejection leaves the plan's own quota usable, this cools too much.
 4. **Waits have no upper bound.** A weekly limit can hold a step for days, in one idle process, until someone interrupts it.
-5. **Isolated Session resume** no longer passes its recorded account as exact, so a cooled account moves the conversation instead of refusing. The pin still wins whenever that account is eligible. Goes away with item 7 (isolation deleted).
+5. **Isolated Session resume** no longer passes its recorded account as exact, so a cooled account moves the conversation instead of refusing. Settled by item 7: isolation is deleted and a resume never names its original account.
 
 # Jack's direction at demo (November 5, 2026; under discussion, not yet accepted design)
 
@@ -79,7 +79,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 - ccdaddy (third-party): daemon swaps `~/.claude/.credentials.json` account keys under Claude's own locks at a usage threshold (default 80%); running sessions pick it up on the next request.
 11. **Strained accounts are used first.** Routing by soonest reset ranks a 99%-used account that resets soonest ahead of an unobserved one; nothing short of a held-back limit removes it. The older "move off a strained active account" behavior is gone with most-room ordering.
 12. **No draft signal.** Nothing records a typed-but-unsent draft, so `lf session move` treats an available Session as idle and moves it; a busy one (no availability) waits for its Stop hook. The design's "draft-holding Session listed as skipped" has no source yet.
-13. **Pinned Sessions are not bulk-moved.** `lf session move --account` lists Sessions pinned to their own login with the `lf resume --account` that moves them rather than restarting their agent; item 7 deletes isolation, so the restart path was not built.
+13. **Pinned Sessions** — settled by item 7: every Session follows the shared login, so `lf session move --account` moves them all.
 14. **A model change starts a seeded thread.** `lf session move -a claude:opus` on a Claude Session goes through `lf session new -a`, not a native resume with another `--model`; the native thread stays in history.
 15. **Items 7–9 built (November 5).** Choices made headless, each reversible:
     - Replay keeps running in the recorded capture's profile (`AccountLogin::Replayed`): switching this Machine's shared login to another catalog's account would record a switch and move every open Session.

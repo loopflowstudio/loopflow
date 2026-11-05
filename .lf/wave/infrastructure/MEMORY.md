@@ -22,28 +22,27 @@ preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
 ## Limit recovery (c0b373, reconciled 2026-11-05)
 
-Jack Heart split LOO-714's recovery half into c0b373 (PR #1828): work keeps
-moving when an account or model runs out. `provider_rate_limited` types the
-failure, never text. Limits keep the provider's window name and scope; a
-model-suffixed window cools one model only. Accounts rank by soonest reset of
-the limiting window, then room, so none resets with quota unused. A Graph step
-recovers inside its own Process (the Graph never fails, no step replays):
-another account carrying its thread, then another model (bare harness only),
-then the next `default_agent` provider, then a wall-clock wait. An explicit
-`harness:model` changes accounts only. A step that dies waiting is where
-`lf task run` restarts; `restarts_by_itself` decides the sweep and the status
-promise. Running Claude re-reads its login only when
-`.credentials.json` changes mtime (live test, 2.1.318), so `activate` touches
-it. One selector (`--blocked`, `--on`) serves `lf session list`, `session move`
-and `account drain`; busy Sessions move at their Stop hook; moves never write
-preferences; nothing in the repo pins a provider.
+Jack Heart split LOO-714's recovery into c0b373 (PR #1828): work moves on when
+an account or model runs out. `provider_rate_limited` types the failure, never
+text. Limits keep the provider's window name and scope; a model-suffixed window
+cools one model only. Accounts rank by soonest reset of the limiting window,
+then room, so none resets with quota unused. A Graph step recovers inside its
+own Process (no step replays): another account carrying its thread, another
+model (bare harness only), the next `default_agent` provider, then a wall-clock
+wait. An explicit `harness:model` changes accounts only. `lf task run` restarts
+at a step that died waiting; `restarts_by_itself` decides sweep and status.
+Running Claude re-reads its login only on a `.credentials.json` mtime change
+(2.1.318), so `activate` touches it. One selector (`--blocked`, `--on`) serves
+`session list`, `session move` and `account drain`; busy Sessions move at their
+Stop hook; moves never write preferences; the repo pins no provider.
 
-Lessons: a thread without a transcript gets a fresh seeded one; a provider's
-words cool an account only on a failed exit; the pin follows the real launch.
-Proof: fixtures and unit tests only. Accepted, unbuilt: delete
-isolation (one shared home per Machine), laptop-driven remote logins, no
-long-lived tokens (Claude access tokens last about 8h). Open: overage cooling a
-whole account, unbounded waits, a restarted step's lost conversation (LOO-435).
+Built per Jack: one shared home per Machine, no isolation; account-home
+transcripts copy in on resume. Remote logins are fresh, never copies; rentals
+get laptop-refreshed Claude access tokens (~8h); no long-lived tokens.
+Lessons: a thread without a transcript gets a seeded one; provider words cool
+an account only on a failed exit; the pin follows the real launch. Proof:
+fixtures and unit tests. Open: overage cooling an account, unbounded waits, a
+restarted step's lost conversation (LOO-435).
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
@@ -259,7 +258,6 @@ Six fixtures cover preparation/inspection, capture/composition and retention
 (`579b48dcfa`); SSH and installed/configured acceptance remain unproved.
 
 Exporting declarations as CLI flags changes authority. Publication is review only.
-Limit recovery moved to c0b373 (its heading above).
 
 ## Plan ownership (LOO-406/412/449, curated 2026-11-03)
 

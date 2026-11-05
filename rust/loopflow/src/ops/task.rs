@@ -1475,17 +1475,9 @@ pub fn task_create(
     wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
-    regressed_in: Option<String>,
     adoption: TaskAdoptionOptions,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
-    let regression = regressed_in.map(|version| crate::work::task::TaskUpdate {
-        regressed_in: Some(version),
-        ..Default::default()
-    });
-    if let Some(update) = &regression {
-        validate_task_edit_input(update)?;
-    }
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
@@ -1557,12 +1549,6 @@ pub fn task_create(
             false,
         )
         .await?;
-        if let Some(update) = &regression {
-            store
-                .edit_task(&task.id, task.revision, update)
-                .await
-                .map_err(task_error)?;
-        }
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
         store
             .get_task(&task.id)
@@ -2277,7 +2263,7 @@ pub struct TaskEdit {
 pub(crate) fn validate_task_edit_input(update: &crate::work::task::TaskUpdate) -> OpsResult<()> {
     if *update == crate::work::task::TaskUpdate::default() {
         return Err(task_error(
-            "task edit requires --title, --notes, --rank, --assignee or --regressed-in",
+            "task edit requires --title, --notes, --rank or --assignee",
         ));
     }
     if update
@@ -2286,13 +2272,6 @@ pub(crate) fn validate_task_edit_input(update: &crate::work::task::TaskUpdate) -
         .is_some_and(|title| title.trim().is_empty())
     {
         return Err(task_error("Task title cannot be empty"));
-    }
-    if let Some(version) = &update.regressed_in {
-        if crate::work::task::release_version(version).as_ref() != Some(version) {
-            return Err(task_error(format!(
-                "--regressed-in {version:?} is not a release version like v0.15.3"
-            )));
-        }
     }
     Ok(())
 }

@@ -26,7 +26,7 @@ Jack Heart split LOO-714's recovery into c0b373 (PR #1828): work moves on when
 an account or model runs out. `provider_rate_limited` types the failure, never
 text. Limits keep the provider's window name and scope; a model-suffixed window
 cools one model only. Accounts rank by soonest reset of the limiting window,
-then room, so none resets with quota unused. A Graph step recovers inside its
+then room. A Graph step recovers inside its
 own Process (no step replays): another account carrying its thread, another
 model (bare harness only), the next `default_agent` provider, then a wall-clock
 wait. An explicit `harness:model` changes accounts only. `lf task run` restarts
@@ -36,13 +36,13 @@ Running Claude re-reads its login only on a `.credentials.json` mtime change
 `session list`, `session move` and `account drain`; busy Sessions move at their
 Stop hook; moves never write preferences; the repo pins no provider.
 
-Built per Jack: one shared home per Machine, no isolation; account-home
-transcripts copy in on resume. Remote logins are fresh, never copies; rentals
-get laptop-refreshed Claude access tokens (~8h); no long-lived tokens.
-Lessons: a thread without a transcript gets a seeded one; provider words cool
-an account only on a failed exit; the pin follows the real launch. Proof:
-fixtures and unit tests. Open: overage cooling an account, unbounded waits, a
-restarted step's lost conversation (LOO-435).
+Per Jack: one shared home and login per provider per Machine, no isolation; a
+login switch moves (and reports) every open Session of that provider. Remote
+logins are fresh; rentals get laptop-refreshed Claude access tokens (~8h),
+resent every 2h by `lf install schedule`; no long-lived tokens. Lessons: a
+thread without a transcript gets a seeded one; provider words cool an account
+only on a failed exit; the pin follows the real launch. Open: overage cooling
+an account, unbounded waits, LOO-435.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
@@ -213,12 +213,6 @@ attribution nor deduplication. Preserve frozen capture/Process/Work,
 independent steers, separate queued results and LOO-415's owner. Release's lesson:
 candidate proof cannot bypass supported installation. Gate, broader native
 acceptance and delivery remain open.
-
-## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
-
-Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
-#1545 merged; installed savings remain unproved:
-`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`.
 
 ## Settings authority (LOO-714, revised 2026-11-03)
 
@@ -1030,9 +1024,8 @@ telemetry red; fresh failures join existing work.
   `~/.local/bin/lf` resolves into it); `LF_DESKTOP` routes by id only to a dev
   Desktop, and fixtures set a test id so a Machine's real app never answers. Source
   and every build carry `com.loopflow.mac.dev`; release packaging stamps the release
-  id. Promotion stages in `<Applications>/.Loopflow.app.noindex/` and sweeps earlier
-  sibling copies. Same-id copies registered elsewhere stay registered; removing them
-  means parsing `lsregister -dump`.
+  id. Promotion stages in `<Applications>/.Loopflow.app.noindex/`; same-id copies
+  registered elsewhere stay registered.
 - **Git exclusions can fail after staging work** (LOO-664, 2026-10-27).
   Apple Git 2.50.1 rejects a literal ignored `.lf/tmp` exclusion after staging
   ordinary edits; the rooted glob `[.]lf/tmp/**` avoids it, and a separate
@@ -1069,12 +1062,8 @@ telemetry red; fresh failures join existing work.
   installs gui-domain LaunchAgents on macOS; Linux keeps crontab. Real scheduled
   firings remain LOO-645's evidence.
 - **Release orchestration, publication and caller edits are separate evidence**
-  (August 2026): an unpublished v0.12.14 despite cron/workflow success, and a
-  scheduled retry that removed two pre-run memory edits, remain at
-  `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas. Judge product state; keep
-  same-tag recovery singular; LOO-261 owns clean-host candidate validation and
-  LOO-266 preserving caller branch, index and working bytes across every release
-  exit.
+  (August 2026; `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas). Judge
+  product state; LOO-261 and LOO-266 own the remaining release proofs.
 
 ## Durable model lessons (curated 2026-10-02)
 
@@ -1110,6 +1099,8 @@ follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths” referent:
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.
 Review replacement (LOO-377, #1429):
 `3b07e13404:.lf/wave/infrastructure/MEMORY.md`, that heading.
+Test maintenance reduction (lf-6d3ff35, #1545; savings unproved):
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`.
 
 ## Direct invocation and large inputs (curated 2026-11-03)
 

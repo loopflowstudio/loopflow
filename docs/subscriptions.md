@@ -483,9 +483,10 @@ renewed it. A connect, by hand or before a launch, sends the next token once
 the rental's is within two hours of expiry, and so does the install schedule
 every 2 hours (`lf machine credentials renew`; nothing when no rental is
 live). After a refresh, the laptop sends the new token to every live rental at
-once. The rental registers the identity the laptop verified. Only `sk-ant-oat` subscription tokens are accepted; an API
-key bills per token. A background run skips an account whose rental login still
-needs an approval, and `-b --rent` refuses before renting when no account has one.
+once. The rental registers the identity the laptop verified. Only `sk-ant-oat`
+subscription tokens are accepted; an API key bills per token. A background run
+skips an account whose rental login still needs an approval, and `-b --rent`
+refuses before renting when no account has one.
 
 An account-selected launch connects the requested account if missing. Invocation selectors resolve
 against the laptop's managed logins;

@@ -124,6 +124,7 @@ Item 7 makes the login a property of the Machine, not of a Session: one shared h
 
 Still Jack's at demo, not blocking here: `scratch/questions.md` 3, 4, 11 and 16.
 Checks (implement, Nov 5, after concept review): `--lib human_session::moves_bulk::` (1) and `install::published::` (17) pass; clippy clean. Gate: `dto_fixtures::`, `served_reads`, docs check.
+Realign (Nov 5, after concept-review fixes): all three verified in code (`follow_login` reads every open interactive Session after the switch; `renew_rentals` skips non-live rentals); stale-promise grep over `docs/` returns none; one doc paragraph rewrapped; nothing rerun.
 
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).

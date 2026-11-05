@@ -54,20 +54,19 @@ legible; they do not contain hostile code.
 
 ## Know the effective action policy
 
-Loopflow chooses an automation floor for headless work:
+Loopflow chooses an automation floor for headless work only:
 
-- Codex gets `workspace-write`; non-interactive runs also get approval policy
-  `never`.
+- Non-interactive Codex runs get `workspace-write` and approval policy `never`.
 - Non-interactive Claude runs skip permission prompts.
 - Non-interactive OpenCode receives `permission: allow`.
 - Pi uses its own tool policy and credentials; it provides no built-in sandbox.
 - More-permissive vendor configuration remains more permissive.
 - Less-permissive vendor configuration is raised to this floor with a warning.
 
-Interactive launches retain the vendor's interactive approval behavior where
-possible. `yolo: true` selects the vendor's full bypass mode; for Codex that
-also disables its sandbox. See [Configuration](/docs/config#yolo) for the exact
-vendor flags.
+Interactive launches send no permission settings, so the vendor's own
+configuration and approval prompts apply. `yolo: true` selects the vendor's full
+bypass mode; for Codex that also disables its sandbox. See
+[Configuration](/docs/config#yolo) for the exact vendor flags.
 
 These modes govern vendor tool behavior. They do not narrow the OS user,
 network, browser, MCP, or credential boundary around the whole process tree.

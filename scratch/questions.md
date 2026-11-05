@@ -148,3 +148,13 @@ Parent scratch notes were removed from this checkout (see
   protocol as built.
 - **Check line:** no code changed since compress ran on this tree (`git status`
   clean at `63a1ab7967`), so its results stand; gate reruns the table once.
+
+## Decided during concept review, second pass — November 5, 2026 (headless)
+
+- **Nothing to change.** The handshake bound as compressed matches the README on
+  both sides and its stalled-server tests; the review advances. Recorded one
+  risk in the plan: `welcome`'s Machine reading is the handshake's only Work
+  access, so a stalled registry fails every open while `status` reports ready.
+  Not a product choice; a later slice may time-box it.
+- **Check line:** no code changed since compress (`git status` clean at
+  `b0f4de675e`); its results stand.

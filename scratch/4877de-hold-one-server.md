@@ -202,8 +202,27 @@ follows LOO-593 and this Task. The wire types already carry what it needs.
 `welcome.limits` and `capabilities` have no client consumer yet; they are the
 design's affordance for a phone or shed. No open product choice.
 
+**Second pass (same day, after the handshake-bound compress and realign).**
+Walked the normal path, a stalled server and a restart through both clients
+against the README: the bound is set once per open and cleared where each
+caller has what it opened for (`open_at` after `welcome`, `attach` on the raw
+stream after `bridged`, `ServerLink.init` before its reader starts); a stalled
+`hello` or `attach` fails in ten seconds with the answer it waited for, and
+Desktop's backoff reopens on the next request. The Swift mirror's `attach` and
+`session_owner` cases have no Desktop sender (terminals reach the owner bridge
+through the Rust relay); they stay as the mirror's whole-protocol contract
+exercised by `ServerProtocolTests`. Nothing to change; no open product choice.
+Where the remaining 38 lines land is Jack's delivery call, recorded in
+[questions.md](questions.md), not a product choice.
+
 ## Risks
 
+- **`welcome` is the handshake's only Work access.** Its Machine reading runs
+  before the server answers, while `status` never opens Work. A registry that
+  stalls fails every open with "did not welcome the connection within 10s;
+  check `lf server status`", and that probe reports ready. A later slice can
+  time-box the Machine read or move `machine` to an ordinary `read`; nothing
+  measured so far shows the stall.
 - **Head-of-line blocking** from a large reading on the shared connection:
   bounded per-connection queue; the measured workload shows none. If a Desktop
   run does, the answer is a second connection for bulk reads.

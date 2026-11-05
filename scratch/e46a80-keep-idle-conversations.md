@@ -155,7 +155,10 @@ never caught the store up once it answered. Implemented the same day:
   saved only when the write succeeds and keeps the refused one; the relay's
   one-second idle tick calls `FactWriter::catch_up`, so a yielded reading lost to
   the gap lands at the store's first answer and the Session stops reading as a
-  live turn. The relay then closes its `RecordingGap` the way the hook does:
+  live turn. The tracker logs that miss itself: headless Pi and Claude share
+  the writer and treat a propagated record error as fatal, so activity saves
+  stay swallowed there, and the relay only waits for the catch-up before
+  closing its gap. The relay closes its `RecordingGap` the way the hook does:
   `SqliteStore::close_recording_gap` (moved from `lf/commands/context.rs`) writes
   one `store-gap` observation before `recovered()`, shared by both.
 
@@ -206,4 +209,4 @@ Not runnable headless here; fixtures below stand in.
 
 ## Checks
 
-Catch-up implementation (2026-11-05): `cargo test -p loopflow --lib -- store::recording_gap:: store::sqlite::session_events::tests::a_recovered_gap lf::commands::context:: transport::lifetime:: transport::input_retry_tests:: harness::codex_connection:: harness::fact_writer::tests::a_yielded_reading harness::fact_writer::tests::an_unchanged_reading harness::task_updates::` 35 passed (both input fixtures now carry the restored-store recovery leg; the relay test closes its gap into Session history); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean. Unchanged since earlier passes: `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes` 1 passed, `cargo test -p loopflow --test integration context_block_tests::` 2 passed, the other four `transport_tests` exit fixtures 5 passed, `node --check` on both JS hooks. Gate owns the affected suites; the Demo needs the installed build and is for Jack.
+Compress of the catch-up (2026-11-05; `retain` owns the unrecorded bytes, the relay no longer logs an activity miss twice): `cargo test -p loopflow --lib -- store::recording_gap:: store::sqlite::session_events::tests::a_recovered_gap lf::commands::context:: transport::lifetime:: transport::input_retry_tests:: harness::codex_connection:: harness::fact_writer::tests::a_yielded_reading harness::fact_writer::tests::an_unchanged_reading harness::task_updates::` 35 passed (both input fixtures now carry the restored-store recovery leg; the relay test closes its gap into Session history); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean. Unchanged since earlier passes: `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes` 1 passed, `cargo test -p loopflow --test integration context_block_tests::` 2 passed, the other four `transport_tests` exit fixtures 5 passed, `node --check` on both JS hooks. Gate owns the affected suites; the Demo needs the installed build and is for Jack.

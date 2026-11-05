@@ -526,14 +526,12 @@ impl CodexConnection {
             tokio::select! {
                 _ = update_clock.tick(), if subscribed && client_open && !busy && initial_request.is_none() && update_request.is_none() => {
                     // An idle tick is also when a reading the store refused catches
-                    // up, and when a closed gap enters the Session's history.
-                    let caught_up = match history.writer.catch_up() {
-                        Ok(()) | Err(StoreError::InvalidAuthority(_)) => true,
-                        Err(error) => {
-                            store_failure.note("Session activity", &error);
-                            false
-                        }
-                    };
+                    // up (the tracker logs its own misses) and when a closed gap
+                    // enters the Session's history.
+                    let caught_up = matches!(
+                        history.writer.catch_up(),
+                        Ok(()) | Err(StoreError::InvalidAuthority(_))
+                    );
                     let pending = match &self.attachment {
                         Some(attachment) => self.store.with_session_attachment(&self.session_id, attachment,
                             || updates.pending(&self.store, &self.session_id)),

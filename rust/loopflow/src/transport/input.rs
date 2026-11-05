@@ -22,8 +22,8 @@ pub(super) struct PendingInput {
     busy_since: Option<Instant>,
     failure: RecordingGap,
     /// Bytes the provider has and the store does not. They go ahead of the next
-    /// record and, while nothing is typed, are offered again at the lifetime
-    /// policy's cadence, so a quiet draft becomes known when the store answers.
+    /// record and, while nothing is typed, are offered again at `replay_at`, the
+    /// lifetime policy's cadence, so a quiet draft is known when the store answers.
     unrecorded: Vec<u8>,
     replay_at: Option<Instant>,
 }
@@ -71,33 +71,17 @@ impl PendingInput {
     pub fn forward(&mut self, input: &mut impl Write, owner: &LfProcessId, terminal: bool) {
         let now = Instant::now();
         if self.is_empty() {
-            if terminal && !self.unrecorded.is_empty() && self.replay_at.is_none_or(|at| at <= now)
-            {
-                self.replay_at = match self.retain(owner) {
-                    Retained::Recorded => None,
-                    Retained::Busy | Retained::Failed => Some(now + super::lifetime::POLL),
-                };
+            if terminal && self.replay_at.is_some_and(|at| at <= now) {
+                self.retain(owner);
             }
             return;
         }
         if self.retry_at.is_some_and(|at| now < at) {
             return;
         }
-        if terminal && self.recorded < self.bytes.len() {
-            match self.retain(owner) {
-                Retained::Recorded => {}
-                Retained::Busy => {
-                    self.retry_at = Some(now + Duration::from_millis(100));
-                    return;
-                }
-                Retained::Failed => {
-                    let fresh = &self.bytes.make_contiguous()[self.recorded..];
-                    let over = (self.unrecorded.len() + fresh.len()).saturating_sub(super::LIMIT);
-                    self.unrecorded.drain(..over.min(self.unrecorded.len()));
-                    self.unrecorded.extend(fresh);
-                    self.replay_at = Some(now + super::lifetime::POLL);
-                }
-            }
+        if terminal && self.recorded < self.bytes.len() && self.retain(owner) == Retained::Busy {
+            self.retry_at = Some(now + Duration::from_millis(100));
+            return;
         }
         self.retry_at = None;
         self.recorded = self.bytes.len();
@@ -114,32 +98,27 @@ impl PendingInput {
         }
     }
 
-    /// Offer the store every byte it has not recorded: the ones already
-    /// delivered, then the queued ones past `recorded`.
+    /// Offer the store every byte it has not recorded: the delivered ones, then
+    /// the queued ones past `recorded`. A failed offer moves the queued bytes to
+    /// the delivered side; they go to the provider now and to the store later.
     fn retain(&mut self, owner: &LfProcessId) -> Retained {
         let fresh = &self.bytes.make_contiguous()[self.recorded..];
-        let replay;
-        let bytes = if self.unrecorded.is_empty() {
-            fresh
-        } else {
-            replay = [self.unrecorded.as_slice(), fresh].concat();
-            &replay
-        };
-        match crate::journal::process_ledger()
-            .and_then(|store| store.try_record_owner_input(owner, bytes))
+        let offered = [self.unrecorded.as_slice(), fresh].concat();
+        let retained = match crate::journal::process_ledger()
+            .and_then(|store| store.try_record_owner_input(owner, &offered))
         {
             Ok(true) => {
-                self.unrecorded.clear();
-                self.replay_at = None;
                 self.busy_since = None;
                 self.failure.recovered();
                 Retained::Recorded
             }
+            Ok(false)
+                if self.busy_since.get_or_insert_with(Instant::now).elapsed()
+                    < HOOK_BUSY_TIMEOUT =>
+            {
+                Retained::Busy
+            }
             Ok(false) => {
-                let since = *self.busy_since.get_or_insert_with(Instant::now);
-                if since.elapsed() < HOOK_BUSY_TIMEOUT {
-                    return Retained::Busy;
-                }
                 self.failure.note(
                     "terminal input, delivered unrecorded",
                     &format!("store busy past the {HOOK_BUSY_TIMEOUT:?} hook budget"),
@@ -151,7 +130,20 @@ impl PendingInput {
                     .note("terminal input, delivered unrecorded", &error);
                 Retained::Failed
             }
+        };
+        match retained {
+            Retained::Recorded => self.unrecorded.clear(),
+            Retained::Busy => {}
+            Retained::Failed => {
+                // Both sides are within LIMIT, so the overflow fits in the old bytes.
+                let over = (self.unrecorded.len() + fresh.len()).saturating_sub(super::LIMIT);
+                self.unrecorded.drain(..over);
+                self.unrecorded.extend(fresh);
+            }
         }
+        self.replay_at =
+            (!self.unrecorded.is_empty()).then(|| Instant::now() + super::lifetime::POLL);
+        retained
     }
 
     pub fn native_ended(&mut self, owner: &LfProcessId) {

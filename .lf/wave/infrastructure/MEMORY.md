@@ -162,6 +162,11 @@ Task 430c74 (Jack Heart, 2026-11-05): lf is a session manager beside the harness
 never in its byte path. Codex 0.166.0 app-server fans every notification and
 approval to every subscriber, so a side observer records while the TUI talks to
 the server directly; a thread has no rollout to resume until a turn or `thread/name/set`.
+Any initialized client gets `thread/started` for threads others start or fork
+(`parentThreadId` null; `forkedFromId` on a fork; title writer `ephemeral`), so
+the observer follows `/new` and `/fork` as Claude's `/clear` is followed.
+Limit: `codex --remote` ignores `-c` for its own `thread/start`; person-started
+threads run without lf's instructions and hooks until Codex offers per-thread config.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 

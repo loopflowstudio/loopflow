@@ -1,7 +1,7 @@
 # Codex Sessions talk to app-server directly (430c74)
 
-Status: implemented, compressed, synced onto main through #1826, realigned;
-thread following implemented and compressed (no cuts), 2026-11-05; awaiting gate.
+Status: implemented, compressed, synced onto main through #1826, thread following
+implemented and compressed (no cuts), realigned 2026-11-05; awaiting gate.
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -97,13 +97,12 @@ Decided 2026-11-05: retired `--public-connect`. Its headless-to-terminal handoff
 refused by `lf resume` since #1767, and `a_moved_attachment_ends_only_its_own_client`
 covers the observer's half.
 
-Checks: real Codex 0.166.0 `codex_terminal.py` plain and `--transport-failure` and the
-demo below passed before compress; after merging main, `codex_connect.py --launch
---graph-decision-retry replace` passed. Two real-Codex fixtures fail for reasons that
-predate this Task; see scratch/questions.md.
-Thread following: `cargo test -p loopflow --lib harness::codex_connection` 6 passed;
-real Codex 0.166.0 `codex_terminal.py --new-thread` passed plain and wrapped.
-Realign after syncing #1826: `cargo test -p loopflow --lib -- harness::codex_connection only_provider_side_commands_are_hidden` 6 passed; gate owns the rest.
+Checks: real Codex 0.166.0 `codex_terminal.py` plain, `--transport-failure` and
+`--new-thread` (plain and wrapped) passed, as did the demo below and `codex_connect.py
+--launch --graph-decision-retry replace` after merging main. Two real-Codex fixtures
+fail for reasons that predate this Task; see scratch/questions.md.
+Realign 2026-11-05: `cargo test -p loopflow --lib -- harness::codex_connection` 6 passed,
+`cargo fmt --check` clean; gate owns the affected suites.
 
 ## Demo
 

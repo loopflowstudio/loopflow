@@ -928,22 +928,21 @@ Transport history: `324a0f6dc45f43b608408b2b4a0f9403c236da20:.lf/wave/product/ME
 ## Native iOS boundary (LOO-718, 2026-11-03)
 
 Jack Heart selected open Tasks → existing Session terminal, Desktop styling and
-Paste / New line / keyboard visibility. No Wave view, shell panes or inspectors.
-He authorized native implementation alongside LOO-593 through interactive demo,
+Paste / New line / keyboard visibility; no Wave view, shells or inspectors.
+Jack authorized native implementation alongside LOO-593 through interactive demo,
 without Auto-Ship. Describe-first creation follows recoverable shared create/start.
 
-Pinned SwiftTerm and shared Work DTOs support fixture input proof, not device or
-live acceptance. Ghostty comparison covered source/packaging only. Native
-approval/Stop requires trustworthy provider state and bindings, never screen text.
+Pinned SwiftTerm and shared Work DTOs prove fixture input, not device or live
+acceptance. Native approval/Stop requires trustworthy provider state and
+bindings, never screen text.
 
-Recovery review exposed a presentation defect: mapping attachment errors to
-unavailable hid Reconnect. Retry now survives repeated failures in the selected
-screen and restores the same Session as an observer. Viewing grants neither input
+Mapping attachment errors to unavailable hid Reconnect; Retry survives repeated
+failures and restores the same Session as an observer. Viewing grants neither input
 nor geometry; accepted-then-failed text and submission never replay. Missing,
 ended and mismatched Sessions retain their explanations. LOO-593 owns permanent
 error classification, the Machine codec and owner bridge; fixture readings prove
 neither server admission nor terminal framing. Never proxy the same-user socket
-through Tailscale. Carrier/pairing, takeover and hosting remain open; physical
+over Tailscale. Carrier/pairing remains open; physical
 keyboard, IME/dictation and VoiceOver remain device-review obligations.
 
 ## Performance — launch renders before any read (2026-10-04)

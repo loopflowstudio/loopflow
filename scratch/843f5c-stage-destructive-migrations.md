@@ -187,6 +187,34 @@ No open product choice. The `STAGING_DAYS` hard fail and `-- exports:` as a
 declaration stay as recorded in `scratch/questions.md`; Jack's steer said "at
 least 30 days", which the check enforces.
 
+## Concept review, third pass (2026-11-05, headless)
+
+Read against the code, not the earlier passes. CI runs `check_migrations.py`
+with `LOOPFLOW_REQUIRE_ORIGIN_MAIN=1` over full history (`ci.yml`). An install
+excludes itself from `rollover::inventory()` by having no Process row until the
+command returns; at settle the launch target has moved, so a prior-build process
+is superseded and keeps the clone. The concepts a person meets are unchanged.
+
+Two boundaries of the measurement, stated so a later reader does not take the
+check for more than it is. Neither changes code; MIGRATIONS.md already lists
+exactly what is measured.
+
+- `-- expand:` is the author's declaration of the cutover. The check measures
+  that the dropped member existed before that step and that the step has been on
+  `origin/main` for the window; it cannot see when code stopped reading a member,
+  so a contract naming an unrelated older slug passes. PR review carries that, as
+  it carries `-- exports:`.
+- Writer breaks are measured where `PRAGMA` exposes them: a tightened `NOT NULL`,
+  a required column without a default, a reachable unique index. A tightened
+  `CHECK` or a `RAISE` trigger passes, which is Jack's "additive for readers" rule
+  as stated; `wave_removal`'s CHECK change relaxed.
+
+Cosmetic, left alone: `report_after_promote` reads the inventory again after
+settlement, so a process that exits between the two reads prints the clone as
+"kept while they run" with no "still running" line above it.
+
+Nothing to change and no open product choice. Gate next.
+
 ## Remaining
 
 - Gate runs the affected suites. The install integration suites

@@ -70,3 +70,22 @@ prefetched contexts, including no saved history, then return to existing Task
 conversations. Show that selection reveals an already started Session, and that
 no operator/Graph work launched. Continue in LOO-672/PR #1816 through publication
 and demo; Jack's positive Task feedback is not merge/install approval.
+
+## Operator correction after repeated review loops — November 5
+
+Jack Heart asked “what is so hard here” and said this seems straightforward.
+Inspection of the running Graph found the core repo/Wave auto-opening implemented
+in its first pass (`404b3757a5`), followed by separate full loops for owner/finished
+Task display, shared placeholders, and tile Retry routing. The fifth pass is now
+one routing condition and its destination test. Native repo/Wave startup proof
+has still been carried forward rather than performed.
+
+Operator direction: finish the current concrete fix and its focused check; make
+fresh rendered repo/Wave/Task startup proof the next priority. Prepare a candidate
+with a Wave, observe live providers before selection and no Graph/operator work,
+refresh the demo page and existing PR, and return to demo through the authored
+steps. Do not expand subsequent review into unrelated simplification or cosmetic
+consistency. Another iteration needs a reproduced failure of the accepted opening,
+prefetch, ownership, Close or no-unrequested-work behavior. Do not waive genuine
+correctness failures or required checks. This is an operator correction to scope
+and verification order, not permission to ship or skip the Graph's review boundary.

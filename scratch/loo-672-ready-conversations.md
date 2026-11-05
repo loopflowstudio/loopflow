@@ -122,16 +122,14 @@ current intent, including through `openLinkedTask`. Only a refused reveal fetche
 the explicit Start offer (`RegistryQuery.startOffer`, one `--explain` read that
 offers nothing on a failed read); a failed Start shows its error with Retry on the
 workspace intent. A Dashboard tile is the same `ConversationPlaceholder` as the
-pane. A primary's Retry and a visible tile's button (while a view plan is
+pane. A primary's Retry and a visible tile's button (while a board is
 presented) re-enter the warm opener in place through
 `SessionsWorkspaceRegistry.openConversation(in:store:)`: Rust's Start after a
 refused reveal, else Retry on the workspace intent, readmitting a closed one, with
 the same Machine check and the Wave name `prefetchPrimary` left on the workspace;
-the Dashboard stays. Proposed (ninth concept review, next implement): the in-place
-route keys on a presented board, `selectedViewPlan` or `navigation.waveView`, so a
-tile on the repository page or a Wave view attaches in place too; today `inTile`
-reads `selectedViewPlan` alone, which is nil for both, and those tiles' **Retry**
-navigates into the Task. Only a selected Task's pane opens through its link, which can
+the board stays. The in-place route keys on any presented board, `selectedViewPlan`
+or `navigation.waveView`, so a tile on the repository page or a Wave view attaches in
+place too (`repositoryPageTileRetriesInPlace`). Only a selected Task's pane opens through its link, which can
 resolve the checkout its Start creates; the error overlay above panes that are
 already showing (`conversationPanes`) is the same Retry through the same opener,
 not a second route. `WorkModel.conversationIsOpening` shows “Opening conversation…”

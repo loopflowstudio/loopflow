@@ -478,6 +478,11 @@ historical fixtures for merged migration coverage. A Task's migration is edited
 in place, so test the merged frontier against the finished migration and write
 no test for a schema that existed only between two edits.
 
+Installer preview regressions assert validation and preserved files independently
+of promotion eligibility, which depends on the build's Git history. Exercise them
+with `LOOPFLOW_MIGRATION_ORDER=/dev/null` as well as the normal catalog to cover
+builds that classify slug migrations as unmerged.
+
 A source copy without Git metadata must set `LOOPFLOW_BUILD_PROVENANCE=development`
 when exercising source behavior, and `LOOPFLOW_MIGRATION_ORDER` when it carries
 slug migrations; it also cannot prove fixtures that require `git rev-parse HEAD`.

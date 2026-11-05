@@ -720,7 +720,17 @@ mod compatibility_tests {
         // The installer previews both the CLI and its bundled app helper.
         for _ in 0..2 {
             let preview = build_preview(&store);
-            assert_eq!(preview.verdict, Verdict::PromoteAndMigrate, "{preview:?}");
+            // Promotion eligibility depends on the build's Git history; preview
+            // validation must preserve preferences even for unmerged migrations.
+            assert!(
+                matches!(preview.compatibility, Compatibility::AheadPending { .. }),
+                "{preview:?}"
+            );
+            assert_eq!(
+                preview.executable_compatibility,
+                executable(),
+                "{preview:?}"
+            );
             assert_eq!(std::fs::read_to_string(&global).unwrap(), original);
             assert!(!private.exists());
             assert!(!private.with_extension("yaml.lock").exists());

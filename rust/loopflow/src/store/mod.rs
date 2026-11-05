@@ -28,6 +28,7 @@ pub mod planning_sync;
 mod pr_landings;
 mod processes;
 pub(crate) mod project_transitions;
+mod recording_gap;
 mod repositories;
 pub mod rows;
 mod sessions;
@@ -35,6 +36,7 @@ pub mod sqlite;
 mod token_crypto;
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
+pub use recording_gap::{GapSpan, RecordingGap};
 
 /// Availability of retained planning facts, independent of execution permission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

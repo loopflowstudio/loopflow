@@ -17,3 +17,8 @@
   (2026-11-05) replaced the stale "live request counts remain unproved" paragraph
   under On-demand Linear acquisition with this Task's measured counts and lessons.
   No decision or attribution changed.
+- **`--retry-creation` deleted (concept review, 2026-11-05).** `lf task sync
+  ISSUE` is the person's explicit look and re-sends an absent creation with its
+  saved id; the window applies to passes only. The Task's acceptance names the
+  flag, but its requirement (send or name the blocked step) is met by the plain
+  command, which `lf task create` already points people at.

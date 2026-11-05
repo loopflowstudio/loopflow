@@ -91,9 +91,48 @@ Wave memory and touched `lf/mod.rs`) without conflicts; `cargo check -p loopflow
 --all-targets` passes on the merge. Realign found code, README, docs and plan in
 agreement; the Wave memory lesson survived main's curation.
 
+## Concept review (2026-11-05, headless)
+
+Accepted experience, now implemented: creating a Task reaches Linear inside its
+own deadline; a creation that timed out is looked for on the next pass and
+re-sent with its saved id when absent; passes spend nothing on exports they
+looked at inside the window. Observe-before-create and the saved id are kept.
+
+**Design change: `lf task sync ISSUE` is the explicit look; `--retry-creation`
+goes.** Evidence: `lf task create` already answers "Saved locally; pending Linear
+sync. Retry with `lf task sync <id>`" (`bin/lf.rs`), and docs/work.md says
+"`lf task sync LOO-12` retries one Task". On this branch that same command can
+answer "looked 40s ago, next look in 560s (`--retry-creation` looks now)": the
+product sends the person to retype its own hint with a flag. Once a look that
+finds nothing re-sends the creation itself, "retry creation" is no longer an
+action a person takes; the flag's only residue is skipping a wait the person
+never chose. No skill, Graph or Desktop path runs `lf task sync`
+(grep over builtins, swift, .lf/graphs), so forcing the look there cannot
+restart the drain; the window stays on passes, which are the automatic callers.
+The Task's acceptance line for `--retry-creation` ("sends the create or names
+the blocked step") is met by `lf task sync` itself.
+
+Implement direction:
+- `export(store, repo, work, force)` keeps `force`; `sync_export` passes false
+  (passes), and `lf task sync` calls it with true for the Task and its Project.
+  Delete `retry_export` and the `retry_creation` field/flag in `lf/mod.rs`,
+  `bin/lf.rs` and `task_sync`. `--retry-updates` stays: uncertain field writes
+  are still not retried automatically.
+- The in-window refusal keeps its "looked Ns ago, next look in Ms" text for
+  `lf task status`/logs but no longer names a flag.
+- docs/work.md "Sync" paragraph, `ops/README.md` table and policy, and the test
+  `uncertain_creation_is_resent_once_per_window_and_on_explicit_retry` follow
+  (explicit = plain `lf task sync`).
+
+Kept as recorded assumptions, not blocking: the ten-minute healthy window and
+auto-retry for Projects (`scratch/questions.md`). Vocabulary split between
+`observe`/`export_observed_at` in code and "look" in user text is noted, not
+worth a loop. Next proof: the existing fixture test with `lf task sync` alone
+re-sending inside the window, then the demo step below.
+
 ## Remaining (demo step)
 
-- `lf install` the branch, then `lf task sync <id> --retry-creation` for the 19
+- `lf install` the branch, then `lf task sync <id>` for the 19
   listed Tasks (12 loopflow, 6 etude-studio, 1 manabot) or let the drain run;
   record each identifier in the PR. Installed lf 0.15.1 is still draining: the
   request log for the hour before 2026-11-05 07:55Z shows ~7,000 sent, ~1,200

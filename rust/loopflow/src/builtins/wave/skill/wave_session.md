@@ -24,7 +24,7 @@ is the whole method; this section says when to apply it.
 
 ## Between turns
 
-You act only during a turn; nothing schedules the next one. Don't promise to
+You act only during a turn; nothing schedules your next one. Don't promise to
 watch, check back or follow up.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with

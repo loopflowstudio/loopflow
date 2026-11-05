@@ -2227,7 +2227,7 @@ mod tests {
         );
         let chat = Surface::Chat.instructions();
         assert!(chat.contains("live chat channel"));
-        assert!(chat.contains("Never narrate your internal machinery"));
+        assert!(chat.contains("Don't narrate how you work"));
         assert_ne!(chat, Surface::Headless.instructions());
         assert_ne!(chat, Surface::Cli.instructions());
     }

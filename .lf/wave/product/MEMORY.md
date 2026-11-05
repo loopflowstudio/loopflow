@@ -959,8 +959,7 @@ Retired Ask/Ready/Complete and LOO-491 evidence: `a32c385044`, this heading.
 Jack Heart's November 4 LOO-672 approval: warm unfinished Tasks, bottom-on-return,
 explicit **Take back** over the last screen; no Fork button or shared input, CLI
 fork remains. Selected-first admission honors Close;
-saved display grants no retention. Eight conversations/two preparations remain
-provisional. Visible/protected work survives; completed departure releases
+saved display grants no retention. Eight warm/two preparations stay provisional. Visible/protected work survives; completed departure releases
 through 717.
 
 Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
@@ -970,8 +969,8 @@ Tasks, owned or not (opening claims nothing), and the repository and Wave primar
 create their Session and start or resume the provider during load, before
 selection; primaries stay warm beside the Task bound. An unstarted Task has no
 checkout: its pane offers Start, since placing one starts the Task. One placeholder
-and one Retry serve every Work; a finished Task shows its record until a reveal
-presents its conversation, whoever owns it. Any primary's first turn without a request reads
+and one opener serve every Work, pane or Dashboard tile; a finished Task shows its
+record until a reveal presents its conversation, whoever owns it. Any primary's first turn without a request reads
 and reports, launching no Graph or operator; each start spends one provider turn. Start keeps non-replacing intent through argv, execution and claim; only Take back
 replaces input; Close fences late results. A consumed first launch with no history
 costs one Try again. `.hidden()` panes never mount, so prepared Sessions start their terminal from the

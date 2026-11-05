@@ -36,7 +36,7 @@ first-thread, controlled-elsewhere and consumed-launch refusals. The queue there
 checks a primary's Machine only, not its checkout, against the workspace location.
 The selected-state pane shows opening, the conversation, or a failure with
 **Retry**; one placeholder serves every Work, and `WorkModel.openConversation(in:store:)`
-routes its button by kind. After Close the pane reads **Conversation not open** with
+routes its button by kind and place. After Close the pane reads **Conversation not open** with
 the same button labelled **Open conversation**; a deliberate reselection reopens without it.
 Rust `first_turn` has one
 `PRIMARY_MESSAGE` for every scope: read, report, change no Work, launch no Graph,
@@ -128,7 +128,9 @@ presented) re-enter the warm opener in place through
 refused reveal, else Retry on the workspace intent, readmitting a closed one, with
 the same Machine check and the Wave name `prefetchPrimary` left on the workspace;
 the Dashboard stays. Only a selected Task's pane opens through its link, which can
-resolve the checkout its Start creates. `WorkModel.conversationIsOpening` shows “Opening conversation…”
+resolve the checkout its Start creates; the error overlay above panes that are
+already showing (`conversationPanes`) is the same Retry through the same opener,
+not a second route. `WorkModel.conversationIsOpening` shows “Opening conversation…”
 for an eligible working Task queued behind the slots or its Sessions read.
 `confirmMachine` replays Sessions so a quiet fresh repository opens its Tasks.
 Warm intent (recent and closed keys) persists per Machine and repository in
@@ -206,8 +208,8 @@ Warm slots are not filtered by person: a teammate's owned Task on an unreachable
 Machine fails quietly and occupies one. Desktop has no local person identity to
 compare. Acceptable while Jack is the only owner; revisit before shared repositories.
 
-Sync, November 5 (re-checked at realign against `27dbe31b69`; the one commit since
-`384505b120`, #1827, touches migration CI and `lf install` only): the stack parent's
+Sync, November 5 (re-checked at both realigns against `27dbe31b69`, unmoved since;
+the one commit after `384505b120`, #1827, touches migration CI and `lf install` only): the stack parent's
 tip is already contained and origin/main is not merged; the parent (#1811)
 integrates first. A trial merge of origin/main conflicts in three parent files (`transport.rs`, `transport/lifetime.rs`,
 `tests/README.md`) and two of this branch's: a comment line in `bin/lf.rs` and the
@@ -348,4 +350,6 @@ change; origin/main moved to `27dbe31b69` with the same five conflicting files.
 Compress, November 5 (eighth-review tile direction): Swift-only; the primary
 Retry joins the registry opener and `openPrimaryConversation` is deleted;
 `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkDestinationTests|WorkCacheTests|DashboardWorkspaceTests|WorkspacePanesTests|WorkspaceRetentionTests|WarmPaneMountTests|WorkCLISubscriptionTests'`
-181 passed in 8 suites; Rust unchanged, no rerun.
+181 passed in 8 suites; Rust unchanged, no rerun. Realign after it: inspection only
+(shared placeholder in tile and pane, both tile tests present, deleted identifiers
+absent under `swift/`, PR head and origin/main unmoved); that result reused.

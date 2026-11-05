@@ -162,6 +162,7 @@ fn pin_account_home(
             Some(account.clone()),
             None,
             isolate,
+            None,
         )?;
         if let Some(route) = route {
             route.pin_session_blocking(Some(session.agent_session))?;

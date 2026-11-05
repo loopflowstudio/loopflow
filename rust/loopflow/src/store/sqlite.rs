@@ -441,6 +441,8 @@ fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<A
         plan: row.get(5)?,
         observed_at: row.get(6)?,
         source: row.get(7)?,
+        model: row.get(8)?,
+        limited_until: row.get(9)?,
     }))
 }
 
@@ -1308,14 +1310,16 @@ impl SqliteStore {
         for window in windows {
             transaction.execute(
                 "INSERT INTO provider_account_limits
-                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(provider, account_id, window) DO UPDATE SET
                      used_percent = excluded.used_percent,
                      resets_at = excluded.resets_at,
                      plan = excluded.plan,
                      observed_at = excluded.observed_at,
-                     source = excluded.source",
+                     source = excluded.source,
+                     model = excluded.model,
+                     limited_until = excluded.limited_until",
                 params![
                     provider,
                     account_id.as_str(),
@@ -1325,6 +1329,8 @@ impl SqliteStore {
                     window.plan,
                     now,
                     source,
+                    window.model,
+                    window.limited_until,
                 ],
             )?;
         }
@@ -1338,7 +1344,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::store::AccountLimitRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
              FROM provider_account_limits
              WHERE ?1 IS NULL OR provider = ?1
              ORDER BY provider, account_id, window",
@@ -1697,11 +1703,14 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
+    /// The eligible candidate with the most room for `model` (`None`: a
+    /// launch whose model the provider picks, held back by every scoped limit).
     pub fn select_provider_account(
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
         agent_session: Option<&AgentSessionId>,
+        model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         if candidates.is_empty() {
             return Ok(None);
@@ -1729,7 +1738,7 @@ impl SqliteStore {
         };
         let limits = {
             let mut statement = transaction.prepare(
-                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
                  FROM provider_account_limits
                  WHERE provider = ?1
                  ORDER BY account_id, window",
@@ -1760,9 +1769,9 @@ impl SqliteStore {
                         .map_err(|error| StoreError::InvalidData(error.to_string()))
                 })
                 .transpose()?;
-            if let Some(account) = account
-                .filter(|account| crate::provider_account::account_route_eligible(account, now))
-            {
+            if let Some(account) = account.filter(|account| {
+                crate::provider_account::account_route_eligible(account, &limits, model, now)
+            }) {
                 available.push(account);
             }
         }
@@ -1776,7 +1785,12 @@ impl SqliteStore {
         let mut account = match resumed {
             Some(index) => available.remove(index),
             None => {
-                crate::provider_account::order_accounts_by_room(&mut available, &limits, now);
+                crate::provider_account::order_accounts_by_room(
+                    &mut available,
+                    &limits,
+                    model,
+                    now,
+                );
                 match available.into_iter().next() {
                     Some(selection) => selection,
                     None => {
@@ -2743,6 +2757,8 @@ mod account_observation_tests {
             used_percent: 98,
             resets_at: Some(1900000000),
             plan: Some("max".into()),
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[weekly], "stream")
@@ -2766,6 +2782,8 @@ mod account_observation_tests {
             used_percent: 2,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[session], "poll")
@@ -2789,6 +2807,8 @@ mod account_observation_tests {
             used_percent: 22,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits(

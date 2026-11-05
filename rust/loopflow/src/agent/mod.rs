@@ -420,6 +420,7 @@ fn resolve_account_route_blocking(
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
             launch.isolate,
+            launch.agent.as_deref().and_then(|agent| parse_agent(agent).1),
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),

@@ -414,12 +414,17 @@ impl Harness for ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
+        let model = config
+            .agent
+            .as_deref()
+            .and_then(|agent| crate::config::parse_agent(agent).1);
         let account_route = resolve_provider_account_exact(
             Provider::Claude,
             requested_session.as_ref(),
             self.requested_account_id.as_ref(),
             crate::work::wave::context::ambient_wave_id().as_ref(),
             config.isolate,
+            model.as_deref(),
         )
         .await?;
         self.account_route = account_route;

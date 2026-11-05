@@ -357,8 +357,10 @@ pub(crate) mod tests {
             plan: Some("pro".into()),
             observed_at: 99,
             source: "poll".into(),
+            model: None,
+            limited_until: None,
         };
-        order_accounts_by_room(&mut accounts, &[limit], 100);
+        order_accounts_by_room(&mut accounts, &[limit], None, 100);
         assert_eq!(accounts, vec![pro, plus]);
     }
 }

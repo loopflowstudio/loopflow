@@ -90,6 +90,7 @@ async fn show_routes(
                 provider.as_str(),
                 &account.account_id,
                 &limits,
+                None,
                 now_unix(),
             )
             .map(|limit| format!("{} {}% used", limit.window, limit.used_percent));

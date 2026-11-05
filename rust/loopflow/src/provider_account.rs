@@ -44,11 +44,13 @@ pub(crate) fn tightest_window<'a>(
     provider: &str,
     account_id: &ProviderAccountId,
     limits: &'a [AccountLimitRow],
+    model: Option<&str>,
     now: i64,
 ) -> Option<&'a AccountLimitRow> {
     limits
         .iter()
         .filter(|limit| limit.provider == provider && limit.account_id == *account_id)
+        .filter(|limit| limit_affects(limit.model.as_deref(), model))
         .filter(|limit| limit.resets_at.is_some_and(|reset| reset > now))
         .max_by(|left, right| {
             left.used_percent
@@ -57,39 +59,86 @@ pub(crate) fn tightest_window<'a>(
         })
 }
 
-pub(crate) fn account_route_eligible(account: &ProviderAccount, now: i64) -> bool {
+/// Whether a limit the provider scoped to `scope` holds back a launch of
+/// `model`. A limit on every model holds everything back; a scoped one holds
+/// back that model and any launch whose model the provider would pick itself.
+pub(crate) fn limit_affects(scope: Option<&str>, model: Option<&str>) -> bool {
+    match (scope, model) {
+        (None, _) | (Some(_), None) => true,
+        (Some(scope), Some(model)) => model
+            .to_ascii_lowercase()
+            .contains(&scope.to_ascii_lowercase()),
+    }
+}
+
+/// When the account can next take a launch of `model`: the end of its
+/// cooldown or of a scoped window still holding that model back. `None`: now.
+pub(crate) fn account_held_until(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> Option<i64> {
+    let scoped = limits
+        .iter()
+        .filter(|limit| {
+            limit.provider == account.provider && limit.account_id == account.account_id
+        })
+        .filter(|limit| limit_affects(limit.model.as_deref(), model))
+        .filter_map(|limit| limit.limited_until);
+    account
+        .cooldown_until
+        .into_iter()
+        .chain(scoped)
+        .filter(|until| *until > now)
+        .max()
+}
+
+pub(crate) fn account_route_eligible(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> bool {
     let today = time::OffsetDateTime::from_unix_timestamp(now)
         .expect("current timestamp is valid")
         .date();
     account.eligible_for_automatic_routing(today)
-        && account.cooldown_until.is_none_or(|until| until <= now)
+        && account_held_until(account, limits, model, now).is_none()
 }
 
-/// When the first of `accounts` still cooling at `now` frees up.
-fn earliest_cooldown_end<'a>(
+/// When the first of `accounts` held back at `now` can take `model` again.
+fn earliest_release<'a>(
     accounts: impl Iterator<Item = &'a ProviderAccount>,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
     now: i64,
 ) -> Option<i64> {
     accounts
-        .filter_map(|account| account.cooldown_until)
-        .filter(|until| *until > now)
+        .filter_map(|account| account_held_until(account, limits, model, now))
         .min()
 }
 
-/// Stable sort: larger plans lead, then the account with the most room;
-/// declared route order breaks ties.
+/// Stable sort: larger plans lead, then the account with the most room for
+/// `model`; declared route order breaks ties.
 pub(crate) fn order_accounts_by_room(
     accounts: &mut [ProviderAccount],
     limits: &[AccountLimitRow],
+    model: Option<&str>,
     now: i64,
 ) {
-    accounts.sort_by_key(|account| room_rank(account, limits, now));
+    accounts.sort_by_key(|account| room_rank(account, limits, model, now));
 }
 
 /// Plan preference, then the tightest window's use. A window that has reset
 /// leaves its account full room.
-fn room_rank(account: &ProviderAccount, limits: &[AccountLimitRow], now: i64) -> (u8, u8) {
-    let used_percent = tightest_window(&account.provider, &account.account_id, limits, now)
+fn room_rank(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> (u8, u8) {
+    let used_percent = tightest_window(&account.provider, &account.account_id, limits, model, now)
         .map_or(0, |limit| limit.used_percent);
     (plan_preference(account), used_percent)
 }
@@ -145,6 +194,9 @@ pub(crate) struct RateLimitSignal {
     /// Per-window subscription state carried by the provider event, persisted
     /// so cached auth inspection can show capacity without a fresh poll.
     pub windows: Vec<crate::store::AccountLimitWindow>,
+    /// The one model the limit applies to, as the provider scopes it; `None`
+    /// limits the whole account.
+    pub model: Option<String>,
 }
 
 impl RateLimitSignal {
@@ -156,6 +208,7 @@ impl RateLimitSignal {
             limited: true,
             reason,
             windows: Vec::new(),
+            model: None,
         }
     }
 }
@@ -608,23 +661,37 @@ async fn record_rate_limit_signal(
             .max(now)
             + RESET_GRACE_SECS
     });
+    // A limit on one model holds back only that model's window; the account
+    // itself cools only when every model is limited.
+    let scoped = signal.model.is_some();
     store
         .record_provider_account_health(
             provider.as_str(),
             account_id,
             signal.utilization_percent,
-            cooldown_until,
+            cooldown_until.filter(|_| !scoped),
             signal.limited.then_some(signal.reason.as_str()),
         )
         .await?;
-    if !signal.windows.is_empty() {
+    let mut windows = signal.windows.clone();
+    if scoped && signal.limited && windows.is_empty() {
+        windows.push(crate::store::AccountLimitWindow {
+            window: signal.reason.clone(),
+            used_percent: 100,
+            resets_at: signal.resets_at,
+            plan: None,
+            model: signal.model.clone(),
+            limited_until: None,
+        });
+    }
+    for window in &mut windows {
+        if signal.limited && window.model == signal.model {
+            window.limited_until = cooldown_until;
+        }
+    }
+    if !windows.is_empty() {
         store
-            .upsert_provider_account_limits(
-                provider.as_str(),
-                account_id,
-                &signal.windows,
-                "stream",
-            )
+            .upsert_provider_account_limits(provider.as_str(), account_id, &windows, "stream")
             .await?;
     }
     Ok(())
@@ -808,7 +875,7 @@ pub(crate) async fn resolve_provider_account(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact(provider, agent_session, None, None, None).await
+    resolve_provider_account_exact(provider, agent_session, None, None, None, None).await
 }
 
 /// Native Claude reported a limit through `StopFailure`, on stdin. Its stream is
@@ -870,7 +937,7 @@ async fn record_native_limit(
         return Ok(());
     }
     let wave = crate::work::wave::context::ambient_wave_id();
-    match select_route(provider, None, None, wave.as_ref(), Some(false)).await {
+    match select_route(provider, None, None, wave.as_ref(), Some(false), None).await {
         Ok(Some(route)) => {
             activation::activate(
                 &store,
@@ -922,20 +989,32 @@ pub(crate) async fn resolve_provider_account_exact(
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
     isolate: Option<bool>,
+    model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let route = select_route(provider, agent_session, exact_account_id, wave_id, isolate).await?;
+    let route = select_route(
+        provider,
+        agent_session,
+        exact_account_id,
+        wave_id,
+        isolate,
+        model,
+    )
+    .await?;
     if let (Some(route), Some(agent_session)) = (&route, agent_session) {
         route.adopt(agent_session).await?;
     }
     Ok(route)
 }
 
+/// `model` is the launch's, when it names one; a scoped limit on another
+/// model leaves an account eligible for this launch.
 async fn select_route(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
     isolate: Option<bool>,
+    model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
@@ -963,6 +1042,7 @@ async fn select_route(
             wave_id,
             store,
             isolated,
+            model,
         )
         .await;
     }
@@ -1037,22 +1117,26 @@ async fn select_route(
     }
     let selection = if isolated {
         store
-            .select_provider_account(provider, &eligible, agent_session)
+            .select_provider_account(provider, &eligible, agent_session, model)
             .await?
     } else {
-        select_shared_account(&store, provider, &eligible).await?
+        select_shared_account(&store, provider, &eligible, model).await?
     };
     let Some(selection) = selection else {
         let accounts = store
             .list_provider_accounts(Some(provider.as_str()))
             .await?;
+        let limits = store
+            .provider_account_limits(Some(provider.as_str()))
+            .await?;
+        let now = now_unix();
         let reasons = candidates
             .iter()
             .map(|account_id| {
                 accounts
                     .iter()
                     .find(|account| account.account_id == *account_id)
-                    .map(account_unavailable_reason)
+                    .map(|account| account_unavailable_reason(account, &limits, model, now))
                     .unwrap_or_else(|| format!("'{account_id}' missing"))
             })
             .collect::<Vec<_>>()
@@ -1065,7 +1149,7 @@ async fn select_route(
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: reasons,
-            retry_at: earliest_cooldown_end(cooling, now_unix()),
+            retry_at: earliest_release(cooling, &limits, model, now),
         });
     };
     let account_id = selection.account.account_id.clone();
@@ -1108,6 +1192,7 @@ async fn select_shared_account(
     store: &SharedStore,
     provider: Provider,
     eligible: &[ProviderAccountId],
+    model: Option<&str>,
 ) -> Result<Option<crate::store::ProviderAccountSelection>, ProviderAccountError> {
     let native = activation::native_home(provider, None);
     let active = activation::observe_active_account(store, provider, &native).await?;
@@ -1117,7 +1202,7 @@ async fn select_shared_account(
         ordered.insert(0, active);
     }
     Ok(store
-        .select_provider_account(provider, &ordered, None)
+        .select_provider_account(provider, &ordered, None, model)
         .await?)
 }
 
@@ -1128,6 +1213,7 @@ async fn resolve_selected_provider_account(
     wave_id: Option<&WaveId>,
     local_store: Option<SharedStore>,
     isolated: bool,
+    model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let repo_id = current_repo_id()?;
     let Some(mut candidates) = ordered_selected_candidates(
@@ -1138,6 +1224,7 @@ async fn resolve_selected_provider_account(
         wave_id,
         local_store.as_ref(),
         true,
+        model,
     )
     .await?
     else {
@@ -1154,8 +1241,13 @@ async fn resolve_selected_provider_account(
             candidates.insert(0, active);
         }
     }
-    let retry_at = earliest_cooldown_end(
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
+    let retry_at = earliest_release(
         candidates.iter().map(|(candidate, _)| &candidate.account),
+        &limits,
+        model,
         now_unix(),
     );
     for (candidate, explicit) in candidates {
@@ -1166,6 +1258,7 @@ async fn resolve_selected_provider_account(
                     provider,
                     std::slice::from_ref(&candidate.account.account_id),
                     agent_session,
+                    model,
                 )
                 .await?
                 .is_none()
@@ -1231,6 +1324,7 @@ async fn ordered_selected_candidates(
     wave_id: Option<&WaveId>,
     local_store: Option<&SharedStore>,
     verify_identity: bool,
+    model: Option<&str>,
 ) -> Result<Option<Vec<(AccountCandidate, bool)>>, ProviderAccountError> {
     let mut catalog = match &local_store {
         Some(store) => store.list_provider_accounts(None).await?,
@@ -1238,11 +1332,12 @@ async fn ordered_selected_candidates(
     };
     let mut candidates = Vec::new();
     let mut local_route = Vec::new();
+    let mut limits = Vec::new();
     if let Some(store) = &local_store {
         local_route = provider_route_account_ids(store, repo_id, wave_id, provider)
             .await?
             .unwrap_or_default();
-        let limits = store
+        limits = store
             .provider_account_limits(Some(provider.as_str()))
             .await?;
         let now = now_unix();
@@ -1270,7 +1365,7 @@ async fn ordered_selected_candidates(
             candidates.push(AccountCandidate {
                 credential_available: account.credential_state == CredentialState::Connected
                     && identity_matches,
-                rank: room_rank(account, &limits, now),
+                rank: room_rank(account, &limits, model, now),
                 account: account.clone(),
                 home,
             });
@@ -1364,7 +1459,7 @@ async fn ordered_selected_candidates(
             let candidate = &candidates[*index];
             let explicit = position < preferred_count;
             (candidate.credential_available
-                && (explicit || account_route_eligible(&candidate.account, now)))
+                && (explicit || account_route_eligible(&candidate.account, &limits, model, now)))
             .then(|| (candidate.clone(), explicit))
         })
         .collect::<Vec<_>>();
@@ -1378,7 +1473,12 @@ async fn ordered_selected_candidates(
                         "'{}' does not match its stored login",
                         account_login(&candidates[*index].account)
                     ),
-                    _ => account_unavailable_reason(&candidates[*index].account),
+                    _ => account_unavailable_reason(
+                        &candidates[*index].account,
+                        &limits,
+                        model,
+                        now_unix(),
+                    ),
                 })
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -1394,8 +1494,12 @@ fn push_candidate(order: &mut Vec<usize>, index: usize) {
     }
 }
 
-fn account_unavailable_reason(account: &ProviderAccount) -> String {
-    let now = now_unix();
+fn account_unavailable_reason(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> String {
     if account.credential_state != CredentialState::Connected {
         return format!("'{}' credential is missing", account_login(account));
     }
@@ -1407,10 +1511,16 @@ fn account_unavailable_reason(account: &ProviderAccount) -> String {
             routing.as_str()
         );
     }
-    if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
+    if let Some(until) = account_held_until(account, limits, model, now) {
         return format!(
-            "'{}' cooling{}",
+            "'{}' cooling{}{}",
             account_login(account),
+            match model {
+                Some(model) if account.cooldown_until.is_none_or(|cooling| cooling <= now) => {
+                    format!(" for {model}")
+                }
+                _ => String::new(),
+            },
             format_reset_time(until)
         );
     }
@@ -1475,7 +1585,7 @@ pub(crate) async fn inspect_provider_route(
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
         return Ok(
-            ordered_selected_candidates(provider, None, None, repo_id, None, store, false)
+            ordered_selected_candidates(provider, None, None, repo_id, None, store, false, None)
                 .await?
                 .map(|candidates| {
                     candidates
@@ -1495,10 +1605,13 @@ pub(crate) async fn inspect_provider_route(
         .list_provider_accounts(Some(provider.as_str()))
         .await?;
     let now = now_unix();
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
     let mut available = ids
         .iter()
         .filter_map(|id| accounts.iter().find(|a| a.account_id == *id))
-        .filter(|account| account_route_eligible(account, now))
+        .filter(|account| account_route_eligible(account, &limits, None, now))
         .filter(
             |account| match identity::check_account_identity(account, &accounts) {
                 Ok(()) => true,
@@ -1510,13 +1623,7 @@ pub(crate) async fn inspect_provider_route(
         )
         .cloned()
         .collect::<Vec<_>>();
-    order_accounts_by_room(
-        &mut available,
-        &store
-            .provider_account_limits(Some(provider.as_str()))
-            .await?,
-        now,
-    );
+    order_accounts_by_room(&mut available, &limits, None, now);
     Ok(Some(available))
 }
 
@@ -1622,6 +1729,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
     exact_account_id: Option<ProviderAccountId>,
     wave_id: Option<WaveId>,
     isolate: Option<bool>,
+    model: Option<String>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
         runtime.block_on(resolve_provider_account_exact(
@@ -1630,6 +1738,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
             exact_account_id.as_ref(),
             wave_id.as_ref(),
             isolate,
+            model.as_deref(),
         ))
     })
 }
@@ -2097,7 +2206,10 @@ mod tests {
                     used_percent: 100,
                     resets_at: Some(now_unix() + 300),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
+                model: None,
             })
             .await
             .unwrap();
@@ -2563,6 +2675,7 @@ mod account_first_tests {
                 limited: true,
                 reason: "subscription usage limit".to_string(),
                 windows: Vec::new(),
+                model: None,
             })
             .await
             .unwrap();
@@ -2597,6 +2710,8 @@ mod account_first_tests {
                     used_percent: 95,
                     resets_at: Some(now_unix() + 3600),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "poll",
             )
@@ -2617,6 +2732,7 @@ mod account_first_tests {
                 Provider::Codex,
                 &[first.account_id, second.account_id.clone()],
                 Some(&"session".into()),
+                None,
             )
             .await
             .unwrap()
@@ -2644,6 +2760,8 @@ mod account_first_tests {
             used_percent,
             resets_at,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits(
@@ -2660,6 +2778,7 @@ mod account_first_tests {
                 Provider::Codex,
                 &[first.account_id.clone(), second.account_id.clone()],
                 None,
+                None,
             )
             .await
             .unwrap()
@@ -2670,6 +2789,7 @@ mod account_first_tests {
             .select_provider_account(
                 Provider::Codex,
                 std::slice::from_ref(&first.account_id),
+                None,
                 None,
             )
             .await
@@ -2692,6 +2812,7 @@ mod account_first_tests {
                 .select_provider_account(
                     Provider::Codex,
                     &[first.account_id.clone(), second.account_id.clone()],
+                    None,
                     None,
                 )
                 .await
@@ -3427,6 +3548,8 @@ mod account_first_tests {
                     used_percent: 99,
                     resets_at: Some(now_unix() + 3600),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "poll",
             )
@@ -3460,6 +3583,8 @@ mod account_first_tests {
                         used_percent,
                         resets_at: Some(now_unix() + 3600),
                         plan: None,
+                        model: None,
+                        limited_until: None,
                     }],
                     "poll",
                 )
@@ -3539,6 +3664,7 @@ mod account_first_tests {
             Provider::Codex,
             Some(&"conversation".into()),
             Some(&began),
+            None,
             None,
             None,
         )
@@ -3629,6 +3755,8 @@ mod account_first_tests {
                     used_percent: 95,
                     resets_at: Some(now_unix() + 3600),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "stream",
             )
@@ -3695,6 +3823,7 @@ mod account_first_tests {
             Provider::Codex,
             Some(&conversation),
             Some(&first),
+            None,
             None,
             None,
         )
@@ -3958,6 +4087,8 @@ mod inspection_tests {
                     used_percent: 95,
                     resets_at: Some(now + 1000),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "stream",
             )
@@ -4000,6 +4131,7 @@ mod inspection_tests {
                         .iter()
                         .map(|a| a.account_id.clone())
                         .collect::<Vec<_>>(),
+                    None,
                     None,
                 )
                 .await

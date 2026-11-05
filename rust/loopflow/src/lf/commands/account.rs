@@ -2011,6 +2011,8 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
                     used_percent: 17,
                     resets_at: Some(4102444800),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "stream",
             )

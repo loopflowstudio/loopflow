@@ -111,6 +111,14 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
 /// Agents Loopflow can drive; listing order grants no preference.
 const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
 
+/// Claude model families a launch can name with `claude:<family>` and a
+/// scoped Claude limit can name in its `rate_limit_type` suffix.
+pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
+
+/// The models a bare `claude` step falls through to when the one it runs
+/// hits a scoped limit, best first.
+pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
+
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";

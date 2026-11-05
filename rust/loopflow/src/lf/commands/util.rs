@@ -282,6 +282,17 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
+/// The model a native launch names (`--model opus`), when it does.
+fn native_model_argument(args: &[String]) -> Option<String> {
+    args.iter()
+        .position(|arg| arg == "--model" || arg == "-m")
+        .and_then(|index| args.get(index + 1).cloned())
+        .or_else(|| {
+            args.iter()
+                .find_map(|arg| arg.strip_prefix("--model=").map(str::to_owned))
+        })
+}
+
 fn native_provider_attachment(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -489,6 +500,7 @@ fn run_native_session(
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
                 command.isolate,
+                native_model_argument(&command.args),
             )
         })
         .transpose()

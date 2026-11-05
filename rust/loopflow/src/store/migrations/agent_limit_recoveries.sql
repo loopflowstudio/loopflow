@@ -15,3 +15,8 @@ CREATE TRIGGER store_revision_agent_limit_recoveries_update AFTER UPDATE ON agen
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='processes'; END;
 CREATE TRIGGER store_revision_agent_limit_recoveries_delete AFTER DELETE ON agent_limit_recoveries
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='processes'; END;
+
+-- A limit the provider scopes to one model (Claude's seven_day_opus) holds
+-- back only launches of that model. The window keeps the provider's own name.
+ALTER TABLE provider_account_limits ADD COLUMN model TEXT;
+ALTER TABLE provider_account_limits ADD COLUMN limited_until INTEGER;

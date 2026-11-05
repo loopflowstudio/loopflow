@@ -892,11 +892,18 @@ impl Store {
         provider: Provider,
         candidates: &[ProviderAccountId],
         agent_session: Option<&AgentSessionId>,
+        model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         let candidates = candidates.to_vec();
         let agent_session = agent_session.cloned();
+        let model = model.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(provider, &candidates, agent_session.as_ref())
+            store.select_provider_account(
+                provider,
+                &candidates,
+                agent_session.as_ref(),
+                model.as_deref(),
+            )
         })
         .await
     }
@@ -1139,6 +1146,10 @@ pub struct AccountLimitWindow {
     pub used_percent: u8,
     pub resets_at: Option<i64>,
     pub plan: Option<String>,
+    /// The one model this window limits; `None` limits every model.
+    pub model: Option<String>,
+    /// Set while the window holds launches it affects back.
+    pub limited_until: Option<i64>,
 }
 
 /// A stored window observation for one managed account.
@@ -1153,6 +1164,10 @@ pub struct AccountLimitRow {
     pub observed_at: i64,
     /// 'stream' when a running harness reported it; 'poll' when asked for.
     pub source: String,
+    /// The one model this window limits; `None` limits every model.
+    pub model: Option<String>,
+    /// Set while the window holds launches it affects back.
+    pub limited_until: Option<i64>,
 }
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {

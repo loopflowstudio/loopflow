@@ -372,12 +372,17 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(false, Ordering::Relaxed);
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
+        let model = config
+            .agent
+            .as_deref()
+            .and_then(|agent| crate::config::parse_agent(agent).1);
         let account_route = resolve_provider_account_exact(
             Provider::Codex,
             self.resume_agent_session.as_ref(),
             self.requested_account_id.as_ref(),
             crate::work::wave::context::ambient_wave_id().as_ref(),
             config.isolate,
+            model.as_deref(),
         )
         .await?;
         self.account_route = account_route;

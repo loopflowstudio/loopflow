@@ -441,15 +441,18 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
     let reason = rate_type
         .map(|rate_type| format!("{status}: {rate_type}"))
         .unwrap_or_else(|| status.to_string());
-    // The stream event carries one window at a time; name it so the stored
-    // observation lands on the same key an on-demand poll would update.
+    let model = rate_type.and_then(claude_limit_model).map(str::to_owned);
+    // The stream event carries one window at a time, named as Claude names
+    // it, so the stored observation lands on the key a poll would update.
     let windows = utilization_percent
         .map(|used_percent| {
             vec![crate::store::AccountLimitWindow {
-                window: claude_window_name(rate_type).to_string(),
+                window: rate_type.unwrap_or("five_hour").to_string(),
                 used_percent,
                 resets_at,
                 plan: None,
+                model: model.clone(),
+                limited_until: None,
             }]
         })
         .unwrap_or_default();
@@ -459,14 +462,18 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
         limited,
         reason,
         windows,
+        model,
     })
 }
 
-fn claude_window_name(rate_type: Option<&str>) -> &'static str {
-    match rate_type {
-        Some(kind) if kind.contains("seven") || kind.contains("week") => "weekly",
-        _ => "session",
-    }
+/// The model a Claude limit is scoped to, when its type names one lf can
+/// launch (`seven_day_opus`). Other suffixes are not models and limit the
+/// whole account.
+fn claude_limit_model(rate_type: &str) -> Option<&str> {
+    let suffix = rate_type.rsplit('_').next()?;
+    crate::config::CLAUDE_MODEL_FAMILIES
+        .contains(&suffix)
+        .then_some(suffix)
 }
 
 fn parse_reset_timestamp(value: &Value) -> Option<i64> {
@@ -1207,7 +1214,28 @@ mod tests {
         );
         assert!(signal.limited);
         assert_eq!(signal.reason, "rejected: seven_day_overage_included");
-        assert_eq!(signal.windows[0].window, "weekly");
+        assert_eq!(signal.windows[0].window, "seven_day_overage_included");
+        assert_eq!(signal.model, None);
+    }
+
+    /// A limit on one model leaves the account's other models usable.
+    #[test]
+    fn a_model_scoped_limit_names_its_model_and_keeps_claude_s_window_name() {
+        let signal = rate_limit(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day_opus","utilization":1.0,"resets_at":1900000000}}"#,
+        );
+        assert!(signal.limited);
+        assert_eq!(signal.model.as_deref(), Some("opus"));
+        assert_eq!(signal.windows[0].window, "seven_day_opus");
+        assert_eq!(signal.windows[0].model.as_deref(), Some("opus"));
+        // Suffixes that are not models limit every model.
+        for kind in ["seven_day_oauth_apps", "seven_day_omelette", "five_hour"] {
+            let signal = rate_limit(&format!(
+                r#"{{"type":"rate_limit_event","rate_limit_info":{{"status":"rejected","rate_limit_type":"{kind}","utilization":1.0}}}}"#
+            ));
+            assert_eq!(signal.model, None, "{kind}");
+            assert_eq!(signal.windows[0].window, kind);
+        }
     }
 
     #[test]

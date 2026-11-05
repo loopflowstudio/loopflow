@@ -211,10 +211,13 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
             let scope = limit
                 .pointer("/scope/model/display_name")
                 .and_then(Value::as_str);
-            let window = match (group, scope) {
-                ("session", _) => "session".to_string(),
-                ("weekly", None) => "weekly".to_string(),
-                ("weekly", Some(model)) => format!("weekly:{}", model.to_lowercase()),
+            // Named as Claude's stream names its `rate_limit_type`, so a poll
+            // and a running Claude update the same window.
+            let model = scope.map(str::to_lowercase);
+            let window = match (group, &model) {
+                ("session", _) => "five_hour".to_string(),
+                ("weekly", None) => "seven_day".to_string(),
+                ("weekly", Some(model)) => format!("seven_day_{model}"),
                 (other, _) => other.to_string(),
             };
             Some(AccountLimitWindow {
@@ -226,6 +229,8 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
                     .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
                     .map(|value| value.unix_timestamp()),
                 plan: None,
+                model,
+                limited_until: None,
             })
         })
         .collect()
@@ -569,6 +574,8 @@ fn codex_windows(
                 used_percent,
                 resets_at: value.get("resetsAt").and_then(Value::as_i64),
                 plan: plan.map(str::to_string),
+                model: None,
+                limited_until: None,
             })
         })
         .collect()
@@ -594,12 +601,14 @@ mod tests {
         });
         let windows = claude_windows(&body);
         assert_eq!(windows.len(), 3);
-        assert_eq!(windows[0].window, "session");
+        assert_eq!(windows[0].window, "five_hour");
         assert_eq!(windows[0].used_percent, 22);
         assert!(windows[0].resets_at.is_some());
         assert_eq!(windows[0].plan, None);
-        assert_eq!(windows[1].window, "weekly");
-        assert_eq!(windows[2].window, "weekly:fable");
+        assert_eq!(windows[0].model, None);
+        assert_eq!(windows[1].window, "seven_day");
+        assert_eq!(windows[2].window, "seven_day_fable");
+        assert_eq!(windows[2].model.as_deref(), Some("fable"));
         assert_eq!(windows[2].used_percent, 11);
     }
 

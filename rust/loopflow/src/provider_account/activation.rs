@@ -252,7 +252,20 @@ fn write_login(
     let credential = String::from_utf8(credential.to_vec())
         .map_err(|_| ProviderAccountError::Filesystem("Claude login is not UTF-8".into()))?;
     crate::provider_auth::write_claude_login(home, &SecretString::new(credential))
-        .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))
+        .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))?;
+    touch_claude_credentials_marker(home)
+}
+
+/// A running Claude re-reads its Keychain login only when `.credentials.json`
+/// in its home changes or is absent. Bringing that file's time forward after a
+/// switch makes every open Claude pick the new login up on its next request.
+fn touch_claude_credentials_marker(home: &Path) -> Result<(), ProviderAccountError> {
+    let marker = home.join(".credentials.json");
+    let Ok(file) = fs::OpenOptions::new().append(true).open(&marker) else {
+        return Ok(());
+    };
+    file.set_modified(std::time::SystemTime::now())
+        .map_err(|error| ProviderAccountError::Filesystem(format!("touch {}: {error}", marker.display())))
 }
 
 /// Whether a stored profile holds a login worth installing.

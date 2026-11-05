@@ -3327,6 +3327,7 @@ pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
         DesktopCommand::Hide { .. }
             | DesktopCommand::Show { .. }
             | DesktopCommand::Move { .. }
+            | DesktopCommand::Resize { .. }
             | DesktopCommand::Do { .. }
     ) {
         return false;

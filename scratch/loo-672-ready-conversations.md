@@ -51,8 +51,8 @@ keeps it, and no operator pass or Graph launched (`loo-672-demo.md`, required
 demonstration). `prepare-redemo.py` needs a Wave in the loaded repository for that
 case. `demo.html` and PR #1816's body still describe the Task-only scope, and the
 PR head (`eae0d31694`) predates the primaries change, the sixth-review
-implications and the seventh-review residue; publication carries the nine commits
-through `6c0d41fa85`.
+implications, the seventh-review residue and the eighth-review tile direction;
+publication carries every commit since.
 
 ## Accepted outcome and constraints
 
@@ -182,6 +182,13 @@ reconciliation and conversation lookup agree.
   November 5 (seventh concept review). A Task's panes follow its state and the
   person's choice, never its owner; a finished Task shows its record until a reveal
   presents its conversation.
+- `DashboardConversationOffer` and `attachTaskConversation`, the Dashboard tile's
+  own placeholder ("No conversation open", a button always labelled **Open
+  conversation**) and third opener: proposed November 5 (eighth concept review).
+  The tile shows the shared placeholder and `ConversationOpenButton`; its one
+  difference, attaching in place without leaving the Dashboard, is where the
+  button routes, not a second view. The warm queue's `openWarmConversation(in:)`
+  is already that in-place opener with refusal handling.
 - Preserve explicit Start as recovery outside eligible working Task navigation;
   preserve Rust's Start/Reveal/Take back intents, Close and late-result fences,
   selected-first scheduling, input claims and LOO-717 retention. No new launch,
@@ -271,6 +278,36 @@ unstarted Task's pane is `TaskStartOffer` and never renders them; they and the
 `prefetch-15` tests stay as that recovery. No new product choice: the four demo
 questions of the fifth pass stand; the finished-Task case joins the demo list in
 `loo-672-demo.md` as a one-selection check.
+
+Concept review, November 5 (eighth pass, against the seventh-review residue): the
+experience and its five concepts hold, `showsTerminals` reads state and choice
+only, the two finished-Task tests exist and `SessionOpenIntent` is one type from
+`SessionConnectionArgs::intent` through `open_without_replacing`. One placeholder
+is still two: the Dashboard tile renders `DashboardConversationOffer`, "No
+conversation open" with a button always labelled **Open conversation**, whose
+action `attachTaskConversation` prepares the Task's intent and places the record
+but handles no refusal. The selected pane for the same Task renders "Conversation
+not open" or "Conversation failed to open" with `ConversationOpenButton`, labelled
+by Rust's Start after a refused reveal, **Retry** after a failure, else Open. So a
+working tile whose opening failed says **Open conversation** where the pane says
+**Retry**, and a finished tile without history reveals, is refused with "No
+existing conversation; start one explicitly", shows that sentence as its note and
+offers the same button again: its own text names a recovery the tile cannot
+reach, while the pane fetches `startOffer` and labels the button with it. Who
+chose the view says nothing about what the state is. Settled by the sixth pass's
+"one placeholder serves every Work" and the accepted "preserve explicit Start as
+recovery": next implement direction, no new product choice. The tile shows the
+same placeholder, note and button as the pane; what differs is only that a tile's
+action stays in place, the Dashboard rule `dashboardTileOpensConversationInPlace`
+protects. `openConversation(in:store:)` for a Task workspace that is a visible
+tile and not the selected Work clears its error and re-enters the warm opener for
+that key (`openWarmConversation(in:)` already validates location, fetches Rust's
+Start on a refused reveal and presents the record without navigating); the two
+tile views and `attachTaskConversation` are deleted. Tests: the two tile tests
+move to the shared `open-conversation` identifier and Retry label, plus one case
+where a finished tile without history shows Rust's Start label after its refused
+reveal. Open choices unchanged: the five demo questions stand as recorded
+defaults.
 
 ## Verification
 

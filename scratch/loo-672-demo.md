@@ -18,7 +18,10 @@ for the next demo: a started Task nobody owns opens on load like any other, with
 Claim/Start gate; an unstarted Task's pane offers Start and no conversation gate;
 Task, Wave and repository panes show the same placeholder when a conversation is
 not open; selecting a completed Task you own with no history shows its record,
-never a Start or Open placeholder, and its history appears in panes once revealed.
+never a Start or Open placeholder, and its history appears in panes once revealed;
+a Dashboard tile whose Task conversation failed to open reads the same as the
+pane, **Retry** on the failure and Rust's Start label after a refused reveal, once
+the eighth-review tile direction lands.
 
 ## Current open candidate — November 5
 

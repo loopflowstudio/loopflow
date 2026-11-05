@@ -3,14 +3,13 @@
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
 //! and version, and flags the ones a launch through the entry no longer runs
-//! (`installation::superseded`, the judgement owners and `lf resume` share) or
-//! that can't open the store any more. A superseded owner ends itself once its
-//! Sessions hold no work or input and `lf resume` reopens them on the installed lf;
-//! rollover does that for every superseded owner at once, including owners that
-//! predate the policy: an idle owner with saved provider history is ended the
-//! way its lifetime policy ends it, and each of its Sessions resumes on the
+//! (`installation::superseded`, the judgement `lf resume` shares) or that can't
+//! open the store any more. A superseded owner keeps serving on its own; `lf
+//! resume` reopens one Session on the installed lf when a person asks, and
+//! rollover does that for every superseded owner at once: an idle owner with
+//! saved provider history is ended and each of its Sessions resumes on the
 //! selected lf. The sweep signals owners directly, so existing viewers may
-//! need to reopen; the lifetime policy itself sends the successor command.
+//! need to reopen.
 //! An owner holding a turn, draft or pending request stays, answering or not:
 //! saved history cannot restore its native editor. A Graph runner isn't
 //! stopped: each step resolves the installed entry when it launches, so its next

@@ -34,7 +34,7 @@ final class OwnerStreamTests: XCTestCase {
 
     func testGapsAndOversizedFramesRequireReconnect() throws {
         var stream = try observed()
-        let gap = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"control\",\"held\":false,\"notice\":null,\"successor\":null}\u{1b}\\".utf8)
+        let gap = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"control\",\"held\":false,\"notice\":null}\u{1b}\\".utf8)
         XCTAssertThrowsError(try stream.receive(OwnerStream.frame(tag: 3, body: gap)))
         var oversized = OwnerStream()
         XCTAssertThrowsError(try oversized.receive(Data([3, 0, 64, 0, 1])))
@@ -74,7 +74,7 @@ final class OwnerStreamTests: XCTestCase {
         XCTAssertTrue(input)
         XCTAssertTrue(geometry)
         XCTAssertTrue(stream.ready)
-        let lost = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"control\",\"held\":false,\"notice\":null,\"successor\":null}\u{1b}\\".utf8)
+        let lost = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"control\",\"held\":false,\"notice\":null}\u{1b}\\".utf8)
         _ = try stream.receive(OwnerStream.frame(tag: 3, body: lost))
         XCTAssertFalse(stream.inputControl)
         XCTAssertTrue(stream.geometryControl, "Input and geometry are distinct claims")

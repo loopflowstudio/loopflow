@@ -113,13 +113,9 @@ struct OwnerStream {
             guard !held || id == viewer else { throw RegistryQueryError("Session geometry belongs to another viewer") }
             geometryControl = held
             if ready { events.append(.control(input: inputControl, geometry: held)) }
-        case .control(let held, let notice, let successor):
+        case .control(let held):
             inputControl = held
             if ready { events.append(.control(input: held, geometry: geometryControl)) }
-            if successor != nil {
-                ended = true
-                events.append(.disconnected(notice ?? "The Session owner changed; reconnect to its recorded owner"))
-            }
         case .childExited:
             ended = true
             inputControl = false
@@ -194,12 +190,12 @@ private struct OwnerEvent: Decodable {
         case theme(JSONValue)
         case programStatus(ProgramStatusRecords)
         case owner(viewer: String?, name: String?, held: Bool)
-        case control(held: Bool, notice: String?, successor: [String]?)
+        case control(held: Bool)
         case childExited(UInt8), detached, hint(String), returnToSession(String)
     }
     let sequence: UInt64
     let value: Value
-    enum Keys: String, CodingKey { case seq, type, rows, cols, theme, viewer, name, held, notice, successor, code, text, detach, status }
+    enum Keys: String, CodingKey { case seq, type, rows, cols, theme, viewer, name, held, code, text, detach, status }
 
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -209,7 +205,7 @@ private struct OwnerEvent: Decodable {
         case "theme": value = .theme(try box.decode(JSONValue.self, forKey: .theme))
         case "program_status": value = .programStatus(try box.decode(ProgramStatusRecords.self, forKey: .status))
         case "owner": value = .owner(viewer: try box.decodeIfPresent(String.self, forKey: .viewer), name: try box.decodeIfPresent(String.self, forKey: .name), held: try box.decode(Bool.self, forKey: .held))
-        case "control": value = .control(held: try box.decode(Bool.self, forKey: .held), notice: try box.decodeIfPresent(String.self, forKey: .notice), successor: try box.decodeIfPresent([String].self, forKey: .successor))
+        case "control": value = .control(held: try box.decode(Bool.self, forKey: .held))
         case "child_exited": value = .childExited(try box.decode(UInt8.self, forKey: .code))
         case "detached": value = .detached
         case "hint": value = .hint(try box.decode(String.self, forKey: .text))

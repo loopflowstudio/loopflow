@@ -383,8 +383,8 @@ CLI; main-Machine dispatch ignores inherited `LF_BIN` selections. The caller's
 Machine selection and Session attribution stay intact. Installation quits and
 reopens a running Desktop. It does not restart other processes or wait for their
 exit; they may continue or fail naturally. A Session owner on a superseded lf
-ends itself once its Sessions hold no work or input, and `lf monitor rollover`
-moves every eligible owner at once. Clients and hooks launched before this
+keeps serving: `lf resume` moves one Session onto the installed lf, and `lf
+monitor rollover` moves every eligible owner at once. Clients and hooks launched before this
 behavior may retain their old executable paths.
 
 Private-Home development and tests retain explicit `LF_BIN` selection. Store

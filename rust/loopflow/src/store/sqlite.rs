@@ -78,6 +78,10 @@ pub(crate) use task_work::TaskShipping;
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// A provider hook at a turn or tool boundary waits this long for a locked
+/// store, then treats it as unavailable: a busy install never stalls a turn.
+pub(crate) const HOOK_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Bytes of write-ahead log kept on disk after a checkpoint resets it.
 const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 
@@ -101,8 +105,12 @@ fn unapplied_message(path: &Path, pending: &str) -> String {
     }
 }
 
-fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult<()> {
-    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+fn configure_write_connection(
+    conn: &mut Connection,
+    path: &Path,
+    busy: Duration,
+) -> StoreResult<()> {
+    conn.busy_timeout(busy)?;
     // A deferred transaction that reads, then writes after another process
     // committed, fails at once with SQLITE_BUSY_SNAPSHOT: the busy handler
     // never runs. Taking the write lock at BEGIN makes it wait instead.
@@ -500,7 +508,18 @@ impl SqliteStore {
     /// shared frontier is the promotion boundary's job — see
     /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden)
+        Self::open(
+            path,
+            super::FrontierAdvance::Forbidden,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
+    }
+
+    /// Open for a provider hook at a turn or tool boundary. It waits at most
+    /// [`HOOK_BUSY_TIMEOUT`] for a locked store; the caller treats any error as
+    /// a recording gap and lets the turn continue.
+    pub(crate) fn open_for_hook(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Forbidden, HOOK_BUSY_TIMEOUT)
     }
 
     /// Revalidate a connection after a child executable may have upgraded it.
@@ -513,7 +532,11 @@ impl SqliteStore {
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Authorized)
+        Self::open(
+            path,
+            super::FrontierAdvance::Authorized,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
     }
 
     /// Open a hermetic, fully-migrated store at `path`: this build's whole
@@ -531,21 +554,26 @@ impl SqliteStore {
         }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migrations::apply_sqlite(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
-        Self::open_with(path, &super::machine_home_dir(), advance)
+    fn open(path: &Path, advance: super::FrontierAdvance, busy: Duration) -> StoreResult<Self> {
+        Self::open_with(path, &super::machine_home_dir(), advance, busy)
     }
 
     /// Open resolving the migration decision against an explicit machine home.
     /// Production opens pass the real one through [`Self::open`]; the
     /// same-module shared-frontier regressions pass a temp home.
-    fn open_with(path: &Path, home: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+    fn open_with(
+        path: &Path,
+        home: &Path,
+        advance: super::FrontierAdvance,
+        busy: Duration,
+    ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
@@ -579,7 +607,7 @@ impl SqliteStore {
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, busy)?;
 
         if shared_database && !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
@@ -2121,7 +2149,7 @@ mod frontier_tests {
         home: &Path,
         advance: FrontierAdvance,
     ) -> crate::store::StoreResult<SqliteStore> {
-        SqliteStore::open_with(path, home, advance)
+        SqliteStore::open_with(path, home, advance, super::SQLITE_WRITE_BUSY_TIMEOUT)
     }
 
     fn frontier(path: &Path) -> Option<String> {
@@ -2485,14 +2513,14 @@ mod frontier_tests {
 
 #[cfg(test)]
 mod wal_tests {
-    use super::{configure_write_connection, WAL_SIZE_LIMIT_BYTES};
+    use super::{configure_write_connection, SQLITE_WRITE_BUSY_TIMEOUT, WAL_SIZE_LIMIT_BYTES};
 
     #[test]
     fn a_burst_does_not_leave_its_wal_on_disk() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let mut conn = rusqlite::Connection::open(&path).unwrap();
-        configure_write_connection(&mut conn, &path).unwrap();
+        configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
         conn.execute_batch("CREATE TABLE history (payload BLOB)")
             .unwrap();
         let wal = directory.path().join("loopflow.db-wal");
@@ -2516,7 +2544,7 @@ mod wal_tests {
         let path = directory.path().join("loopflow.db");
         let open = || {
             let mut conn = rusqlite::Connection::open(&path).unwrap();
-            configure_write_connection(&mut conn, &path).unwrap();
+            configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
             conn
         };
         let mut first = open();

@@ -72,6 +72,19 @@ Confirm every demo owner has exited before removing the exact runtime directory:
 `rm -rf /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime`. Never delete the durable root. If any input
 is given up or any owner survives, retain runtime and owners and document it.
 
+## Headless demo decision — November 5, after the gate
+
+No one was present; this pass stood in for Jack Heart. Since the accepted native
+re-demo (`990fab54d3`, “ok lg2m ship it”) the branch changed only the warm Task
+bound (8 → 16, Jack's request, `0426d19ae9`) and a test fixture trusting its
+folder (`457a45cd68`). Neither changes what Jack observed: the bound is a constant
+whose retention and prefetch tests derive from it (focused Desktop filter 182
+passed; full Desktop 724 passed), and the fixture fix restored `transport_tests`
+60/60. No new native run was made; the accepted experience stands. Decision:
+advance. Open: Wave memory still says “Eight warm” (realign), and the unmeasured
+cases above (drafts, restart, Rex, cold return, twenty-Task memory) remain
+unproven, as disclosed when shipping was authorized.
+
 Current runbook: `scratch/demo.html`. Earlier results below are historical.
 
 

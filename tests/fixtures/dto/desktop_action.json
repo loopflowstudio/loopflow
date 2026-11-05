@@ -328,7 +328,13 @@
       "name": "files",
       "title": "Show Files",
       "scope": "pane",
-      "arguments": [],
+      "arguments": [
+        {
+          "name": "path",
+          "kind": "string",
+          "required": false
+        }
+      ],
       "keys": []
     },
     {

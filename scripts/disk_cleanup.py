@@ -233,7 +233,6 @@ class Cleaner:
         selection = ["-p", ",".join(map(str, sorted(pids)))] if pids else ["-ax"]
         output = self._command(
             ["ps", *selection, "-o", "pid=,ppid=,uid=,lstart=,stat=,comm="],
-            timeout=10,
             allowed=(0, 1) if pids else (0,),
         )
         processes = {}
@@ -252,7 +251,7 @@ class Cleaner:
     def _activity(self) -> Activity:
         try:
             processes = self._processes()
-            output = self._command(["lsof", "-nP", "-Fpcfn"], timeout=30)
+            output = self._command(["lsof", "-nP", "-Fpcfn"])
             files = []
             descriptor = ""
             resolved: dict[str, Path] = {}
@@ -1248,7 +1247,9 @@ def _schedule(action: str, chrome_copies: bool = False) -> int:
             ],
             "WorkingDirectory": str(main),
             "StartCalendarInterval": {"Minute": 17},
-            "ProcessType": "Background",
+            # Darwin-background throttling can starve ps/lsof past their safety
+            # deadlines under build load. Standard retains light resource limits.
+            "ProcessType": "Standard",
             "StandardOutPath": str(log),
             "StandardErrorPath": str(log),
         }

@@ -1084,6 +1084,16 @@ async fn task_workspace_context_covers_committed_staged_unstaged_and_untracked_b
     assert!(context.contains("Patch omitted"));
     assert!(!context.contains("content_sha256"));
     assert!(crate::prompt::count_tokens(&context) < 5_000);
+
+    // A stale comparison must not prevent an agent from recovering saved work.
+    task.base_commit = "0000000000000000000000000000000000000001".into();
+    let recovery = super::task_workspace_context(&task).unwrap();
+    assert!(recovery.contains("comparison base"));
+    assert!(recovery.contains("unavailable"));
+    assert_eq!(
+        std::fs::read_to_string(repository.path().join("tracked.txt")).unwrap(),
+        "unstaged bytes\n"
+    );
 }
 
 #[tokio::test]

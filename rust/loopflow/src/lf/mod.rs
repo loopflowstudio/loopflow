@@ -1955,7 +1955,7 @@ pub struct SyncArgs {
     /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to sync onto
+    /// Branch to sync onto; naming the default branch detaches a stacked Task
     pub onto: Option<String>,
 }
 

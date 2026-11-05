@@ -379,7 +379,9 @@ fn _validate_executable_steps(steps: &[crate::graph::ConcreteStep]) -> Result<()
 /// run on. A migration may repair a persisted graph name, so checking the
 /// pre-migration rows would reject the candidate the migration makes valid:
 /// a pending frontier is migrated in a private snapshot, never the live
-/// database. An exact frontier has nothing to apply, so it is read in place —
+/// database. Preference-file cutovers wait for real promotion; copied rows can
+/// still refer to live checkout paths. An exact frontier has nothing to apply,
+/// so it is read in place —
 /// copying a multi-gigabyte store on every preflight outlived callers'
 /// deadlines and stranded the partial copies in the temporary directory.
 fn _read_executable_compatibility(
@@ -426,7 +428,7 @@ fn _read_executable_compatibility(
             }
         }
     };
-    if let Err(error) = migrations::apply_sqlite(&connection) {
+    if let Err(error) = migrations::apply_sqlite_preview(&connection) {
         return ExecutableCompatibility::Unreadable {
             reason: format!("apply candidate migrations to validation store: {error}"),
         };
@@ -685,6 +687,72 @@ mod compatibility_tests {
             Compatibility::AheadPending { applied_frontier, .. }
                 if applied_frontier == "(uninitialized)"
         ));
+    }
+
+    #[test]
+    fn repeated_previews_leave_settings_for_the_real_promotion() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let store = home.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&store).unwrap();
+        crate::store::migrations::apply_before_migration(&conn, "settings_authority");
+        conn.execute_batch(include_str!(
+            "../../../tests/fixtures/migrations/settings_authority_released.sql"
+        ))
+        .unwrap();
+        conn.execute(
+            "UPDATE repository_plans SET repo=?1",
+            [repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO scope_settings(scope_kind,scope_id,key,value,set_at) VALUES
+             ('global','','agent','codex',3),
+             ('repository','repo_00000000000040008000000000000001','agent','claude',4);",
+        )
+        .unwrap();
+        let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
+        let global = home.path().join("config.yaml");
+        let private = crate::config::files::private_path(repo.path()).unwrap();
+        let original = "# personal\nchrome: false\n";
+        std::fs::write(&global, original).unwrap();
+
+        // The installer previews both the CLI and its bundled app helper.
+        for _ in 0..2 {
+            let preview = build_preview(&store);
+            // Promotion eligibility depends on the build's Git history; preview
+            // validation must preserve preferences even for unmerged migrations.
+            assert!(
+                matches!(preview.compatibility, Compatibility::AheadPending { .. }),
+                "{preview:?}"
+            );
+            assert_eq!(
+                preview.executable_compatibility,
+                executable(),
+                "{preview:?}"
+            );
+            assert_eq!(std::fs::read_to_string(&global).unwrap(), original);
+            assert!(!private.exists());
+            assert!(!private.with_extension("yaml.lock").exists());
+            assert!(!home.path().join("settings-cutover.json").exists());
+            assert_eq!(
+                crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
+                frontier
+            );
+        }
+
+        crate::store::migrations::apply_sqlite(&conn).unwrap();
+        let personal = crate::config::files::read(&global).unwrap();
+        assert_eq!(personal["agent"], "codex");
+        assert_eq!(personal["chrome"], false);
+        assert!(std::fs::read_to_string(&global)
+            .unwrap()
+            .contains("# personal"));
+        assert_eq!(
+            crate::config::files::read(&private).unwrap()["agent"],
+            "claude"
+        );
+        assert!(home.path().join("settings-cutover.json").exists());
     }
 
     #[test]

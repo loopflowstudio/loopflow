@@ -202,3 +202,38 @@ public struct ServerConnectedClient: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case id, client, requests, connectedAt = "connected_at" }
 }
+
+/// One thing a person is waited on for, as `session.asks` reads it. Mirrors
+/// `engine::session::Ask`.
+public struct SessionAsk: Decodable, Equatable, Sendable {
+    /// Where an ask was read from.
+    public enum Source: String, Decodable, Sendable {
+        /// The terminal's validated Program Status.
+        case report
+        /// The provider's own stream.
+        case provider
+        /// The Task stands at an interactive step of its graph.
+        case step
+    }
+
+    /// The conversation an answer goes to; nil for a Task at a step with none.
+    public let session: String?
+    /// The Session's name, or the Task's title for a step.
+    public let name: String
+    public let task: String?
+    public let agent: String?
+    /// Unix seconds.
+    public let since: Int64?
+    /// What is asked, as far as Loopflow sees it; nil when it has no text.
+    public let question: String?
+    public let kind: ProgramStatusKind?
+    public let source: Source
+}
+
+/// What `session.answer` delivered. Mirrors `engine::session::Answered`.
+public struct SessionAnswered: Decodable, Equatable, Sendable {
+    public let session: String
+    /// Bytes of text the owner took, the submitting key not counted.
+    public let bytes: Int
+    public let submitted: Bool
+}

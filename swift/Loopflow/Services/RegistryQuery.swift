@@ -70,6 +70,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// The Task now and whether it reached `until` (`submitted` or
     /// `terminal`); subscribed, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
+    /// What agents on this Machine wait on a person for; subscribed, the
+    /// whole list whenever it may change.
+    case sessionAsks
 
     /// Rows in one `sessionPage`.
     static let sessionPageLimit = 100
@@ -152,6 +155,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["doctor", "--json"]
         case .taskWait(let issue, let until):
             return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
+        case .sessionAsks:
+            return ["session", "asks", "--json"]
         }
     }
 
@@ -224,6 +229,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .retention: TaggedFields("history.retention")
         case .doctor: TaggedFields("machine.doctor")
         case .taskWait(let issue, let until): TaggedFields("task.wait", ["issue": issue, "until": until])
+        case .sessionAsks: TaggedFields("session.asks")
         }
     }
 
@@ -253,6 +259,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     case sessionRename(directory: String, id: String, name: String)
+    /// Type `text` into the Session's terminal through its owner, Enter after
+    /// with `submit`; refused while another viewer holds its input.
+    case sessionAnswer(session: String, text: String, submit: Bool)
     /// With `preview`, the Task a bind would assign, assigning nothing.
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
     /// The repository's conversation when it names no Session, Task or Wave.
@@ -294,6 +303,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskSave(_, let issue, let path, let revision, _):
             ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
+        case .sessionAnswer(let session, let text, let submit):
+            ["session", "answer", session, text] + (submit ? ["--submit"] : []) + ["--json"]
         case .sessionBind(_, let id, let task, let preview):
             ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent):
@@ -397,6 +408,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                        "revision": revision, "content": content])
         case .sessionRename(let directory, let id, let name):
             TaggedFields("session.rename", ["directory": directory, "id": id, "name": name])
+        case .sessionAnswer(let session, let text, let submit):
+            TaggedFields("session.answer", ["session": session, "text": text, "submit": submit])
         case .sessionBind(let directory, let id, let task, let preview):
             TaggedFields("session.bind", ["directory": directory, "id": id, "task": task, "preview": preview])
         case .sessionResume(let directory, let id, let task, let wave, let agent):

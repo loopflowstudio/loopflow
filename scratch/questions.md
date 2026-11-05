@@ -23,3 +23,10 @@ move, while retaining Ghostty's separate native rendering bindings. This is a
 recommendation for the existing server cutover, not authorization to duplicate it
 inside LOO-582. This Task's continuity repair changed no FFI boundary and remains
 at demo review. No Graph or separate Task was launched for this question.
+
+## Conversation scope — November 4, 2026
+
+Jack Heart returned this conversation to LOO-582 after the server migration
+discussion and contribution to existing LOO-593. Continue discussing creation
+and binding here. LOO-593 retains its own checkout, Graph and publication;
+its progress or acceptance does not approve LOO-582's demo or shipping.

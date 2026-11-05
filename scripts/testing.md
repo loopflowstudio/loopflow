@@ -53,9 +53,10 @@ and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
-After building the candidate, set `LF_BIN` to its absolute path for the gate or
-website command when the installed CLI differs; otherwise the docs check reads
-the installed build's command tree.
+After building the candidate, prepend its directory to `PATH` for the gate or
+website command when the installed CLI differs: `PATH="$PWD/target/debug:$PATH"`.
+The network boundary clears inherited `LF_*`, including `LF_BIN`; PATH keeps
+the docs check on the candidate's command tree inside that boundary.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
 (`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
 unless the diff reaches them; together they exceed the 1200 s Rust budget, and

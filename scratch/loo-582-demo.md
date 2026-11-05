@@ -1,5 +1,48 @@
 # LOO-582 configured demo — November 4, 2026
 
+## Decision pass 1 — advance, November 4, 2026
+
+Jack Heart explicitly requested “ok ship it” for LOO-582 after returning the
+conversation to this Task. The supplied steering comment
+`84b7e12d-fd5e-4dc2-aede-581b290a8cf8` authorizes final validation, landing PR
+#1807 and post-merge verification. This supersedes the earlier stop-at-demo
+boundary and the historical statements below that shipping lacked approval.
+It does not attribute the operator's native observations to Jack.
+
+The preceding pass intended to repair Desktop losing the visible conversation
+when creation or binding changed its Work address. Its configured Codex/Desktop
+replay demonstrated retained unsent drafts, successful subsequent submission,
+remembered markers and unchanged Session, process, terminal and provider-thread
+identities. The repair is committed in `e0a6fe7911`; current HEAD `ba61cbb29c`
+differs from it only in scratch notes. This is concrete progress from the retained
+location-unavailable failure, with no implementation gap requiring another pass.
+
+This headless decision revalidated the saved JSON receipts under
+`/Users/jack/.lf/demos/loo582-0bubfe_n` rather than restarting the successful native
+replay. Creation before/after preserves cwd and workspace and selects the Task
+primary. Bind and retry preserve identities, select the same destination cwd
+immediately and remain primary. Both histories retain exactly one unchanged
+native thread and contain a subsequent output recalling their marker and source
+`pwd`. The source file's current SHA-256 still matches `repair-file-before.json`;
+all six successful screenshots and the original failure screenshot remain present.
+All receipt assertions passed. This is a review of recorded real-path execution,
+not a claim of a new live UI run on this headless surface.
+
+Decision: **advance**. Jack's explicit approval and accepted immediate-directory
+contract support proceeding; the running provider retaining its original OS cwd
+is an accepted limit, not a repair request. No product question or agreed design
+change remains. Warp remains unverified. The combined affected-suite gate and
+disposable installation upgrade are still required before landing, followed by
+post-merge verification. Those belong to subsequent authored steps; this decision
+neither restarts a Graph nor claims Task completion.
+
+Current design: [loo-582.md](loo-582.md). Review page: [demo.html](demo.html).
+The evidence paths and native replay account below remain the proof. The current
+Task status read reported PR #1807 open and a running Graph from demo; it was
+left running. No background process was started by this decision pass.
+
+## Recorded native replay (before shipping approval)
+
 ## Current result: creation and binding preserve the live chat
 
 Operator observations, not Jack Heart's acceptance or shipping approval.
@@ -127,7 +170,7 @@ Jack subsequently supplied a screenshot showing **Session location unavailable**
 with the same layout error. The operator confirmed that state in the Live app
 and began a targeted repair. `desktop-location-unavailable.png` preserves it.
 
-## Recommended implementation and proof
+## Superseded repair direction and proof
 
 Keep the existing attached terminal when the selected Session changes from
 repository work to Task work. Reconcile pane ownership and saved layout with the
@@ -149,7 +192,7 @@ No Graph was restarted or shipping armed. Fresh status still reports `code` at
 `demo`, PR #1807 open; no associated live Graph was observed. This is a failed
 demo with concrete repair direction, not completion of the Task.
 
-## Current evidence
+## Original failure evidence
 
 Persistent private root: `/Users/jack/.lf/demos/loo582-0bubfe_n`.
 Session: `653ba926994840c8aa29b9a9105ed20c`.

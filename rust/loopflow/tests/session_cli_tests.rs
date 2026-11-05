@@ -303,6 +303,11 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             r#"{"ses_resume-proof":[]}"#,
         )
         .unwrap();
+        std::fs::write(
+            home.path().join("native-locations.json"),
+            serde_json::json!({"ses_resume-proof": home.path()}).to_string(),
+        )
+        .unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let provider = bin.join("opencode");

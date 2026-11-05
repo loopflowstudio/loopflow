@@ -20,6 +20,12 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     if let SessionCommand::List(args) = command {
         return list_sessions(args, Shape::Tasks);
     }
+    if let SessionCommand::Usage(args) = command {
+        return super::history::usage(args);
+    }
+    if let SessionCommand::Retention { json } = command {
+        return super::history_transcript::retention(*json);
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
         command,
@@ -149,7 +155,9 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List(_) => unreachable!("lists return before any runtime"),
+        SessionCommand::List(_) | SessionCommand::Usage(_) | SessionCommand::Retention { .. } => {
+            unreachable!("reads return before any runtime")
+        }
         SessionCommand::Resume {
             id,
             connection,

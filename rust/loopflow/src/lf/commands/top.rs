@@ -376,7 +376,16 @@ pub(crate) fn command_label(command: Option<&str>, kind: crate::process::Process
         return "lf".to_string();
     };
     let grouped = [
-        "machine", "ops", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
+        "machine",
+        "repository",
+        "repo",
+        "pm",
+        "pr",
+        "project",
+        "radio",
+        "task",
+        "wave",
+        "work",
     ];
     let operation = grouped
         .contains(&command.as_str())

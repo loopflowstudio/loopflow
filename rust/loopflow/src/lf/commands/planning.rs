@@ -7,13 +7,14 @@ use anyhow::{anyhow, Result};
 use crate::lf::PlanningCommand;
 use crate::store::Store;
 
-pub fn run(cmd: &PlanningCommand) -> Result<()> {
+/// `lf repository planning [key|journal]`; bare, the planning status.
+pub fn run(cmd: Option<&PlanningCommand>, json: bool, watch: bool) -> Result<()> {
     let repo = status_repository(&std::env::current_dir()?)?;
-    if let PlanningCommand::Status { watch: true, .. } = cmd {
+    if cmd.is_none() && watch {
         return watch_status(&repo, super::watch::Transport::Stdio).map(drop);
     }
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async(&repo, cmd))
+    runtime.block_on(run_async(&repo, cmd, json))
 }
 
 /// The repository whose planning `directory` reads. A Work folder without Git
@@ -74,11 +75,11 @@ async fn open_store() -> Result<Store> {
         })
 }
 
-async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
+async fn run_async(repo: &Path, cmd: Option<&PlanningCommand>, status_json: bool) -> Result<()> {
     let store = open_store().await?;
     let repo_key = repo.to_string_lossy();
     match cmd {
-        PlanningCommand::Key { new, recover } => {
+        Some(PlanningCommand::Key { new, recover }) => {
             let saved = store.planning_user_key().await?;
             let key = match (recover, saved, new) {
                 (Some(key), _, _) => key.clone(),
@@ -93,8 +94,8 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
             }
             println!("{key}");
         }
-        PlanningCommand::Status { json, .. } => print_status(&store, &repo_key, *json).await?,
-        PlanningCommand::Journal { json } => print_journal(&store, &repo_key, *json).await?,
+        None => print_status(&store, &repo_key, status_json).await?,
+        Some(PlanningCommand::Journal { json }) => print_journal(&store, &repo_key, *json).await?,
     }
     Ok(())
 }

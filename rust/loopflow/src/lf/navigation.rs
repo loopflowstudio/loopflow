@@ -51,7 +51,7 @@ pub fn resolve_child(
             "resume" => Some("session"),
             "comment" => Some("task"),
             // `lf release` stays the release command.
-            "sync" | "release" => Some("ops"),
+            "release" => Some("repository"),
             // `lf set` and `lf unset` stay the everyday spelling of `config set|unset`.
             "set" | "unset" => Some("config"),
             _ => None,
@@ -387,6 +387,9 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
 }
 
 pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Command, Vec<String>)> {
+    // `lf help <old path>` explains the command it moved to.
+    let words = super::aliases::rewrite(path);
+    let path = words.as_slice();
     let mut current = tree;
     let mut canonical = Vec::new();
     for name in path {
@@ -483,7 +486,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             ));
         }
         output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>, --cwd <path>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> selects this invocation and its Graph steps; unrelated child work keeps its own preferences\n");
-        output.push_str("\nOmit owners when a command is unique: lf land → lf ops pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
         return Ok(output);
     }
     let definition = match path {

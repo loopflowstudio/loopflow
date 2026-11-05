@@ -236,10 +236,10 @@ there for later use.
 
 ```bash
 lf config catalog --json
-lf config show --skill implement           # compact table of authored preferences
-lf config show --skill implement --explain # candidates, files, and winning reasons
-lf config show --skill implement --all     # include built-in defaults
-lf config show --graph release --step write-code --json
+lf config settings --skill implement           # compact table of authored preferences
+lf config settings --skill implement --explain # candidates, files, and winning reasons
+lf config settings --skill implement --all     # include built-in defaults
+lf config settings --graph release --step write-code --json
 lf context --json
 ```
 
@@ -1037,8 +1037,8 @@ general settings. Duplicate IDs within one definition are invalid.
 ```bash
 lf set --global skills.implement.default_agent codex
 lf set graphs.release.steps.write-code.agent claude
-lf config show --graph release --step write-code --json
-lf config show --graph outer --json
+lf config settings --graph release --step write-code --json
+lf config settings --graph outer --json
 ```
 
 Whole-Graph inspection includes composed steps and routers. Targeting

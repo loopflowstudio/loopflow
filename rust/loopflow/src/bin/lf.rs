@@ -769,6 +769,34 @@ fn print_task_control(
     Ok(())
 }
 
+fn dispatch_repository(
+    cmd: &loopflow::lf::RepositoryCommand,
+    args: &[String],
+) -> anyhow::Result<()> {
+    use loopflow::lf::RepositoryCommand;
+    match cmd {
+        RepositoryCommand::Planning { cmd, json, watch } => in_directory_runtime(args, |_| {
+            loopflow::lf::commands::planning::run(cmd.as_ref(), *json, *watch)
+        }),
+        RepositoryCommand::Path => in_directory_runtime(args, |_| {
+            loopflow::lf::commands::work_route::identity(None, None, true, false)
+        }),
+        RepositoryCommand::Release { cmd } => {
+            in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
+        }
+        RepositoryCommand::Ci {
+            since,
+            wave,
+            repo,
+            json,
+        } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
+        RepositoryCommand::People { json } => loopflow::lf::commands::people::run(*json),
+        RepositoryCommand::Tokens { json, days } => {
+            loopflow::lf::commands::tokens::run(*json, *days)
+        }
+    }
+}
+
 fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     match cmd {
         OpsCommand::Account {
@@ -780,17 +808,6 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
         } => {
             loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
         }
-        OpsCommand::Release { cmd } => {
-            in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
-        }
-        OpsCommand::Ci {
-            since,
-            wave,
-            repo,
-            json,
-        } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
-        OpsCommand::People { json } => loopflow::lf::commands::people::run(*json),
-        OpsCommand::Tokens { json, days } => loopflow::lf::commands::tokens::run(*json, *days),
         OpsCommand::Server { cmd } => loopflow::lf::commands::server::run(cmd),
         OpsCommand::Machine { cmd } => loopflow::lf::commands::machine::run(cmd, cli.batch),
         OpsCommand::Pr { cmd } => in_repo_runtime(args, |_| {
@@ -889,7 +906,9 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             team_name.as_deref(),
         ),
         WaveCommand::Reteam { apply } => loopflow::lf::commands::ops::reteam(repo, *apply),
-        WaveCommand::Add { .. } => unreachable!("shared mutation dispatch precedes this command"),
+        WaveCommand::Create { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
+        }
         WaveCommand::Remove {
             wave,
             preview,
@@ -1274,7 +1293,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Edit { .. } | TaskCommand::Move { .. } => {
+        TaskCommand::Update { .. } | TaskCommand::Move { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Comment {
@@ -1725,11 +1744,10 @@ fn run() -> anyhow::Result<()> {
                 Commands::Task { .. }
                     | Commands::Ship { .. }
                     | Commands::Wave { .. }
-                    | Commands::Ops {
-                        cmd: OpsCommand::Release { .. } | OpsCommand::Ci { .. }
-                    }
-                    | Commands::Config {
-                        cmd: loopflow::lf::ConfigCommand::Planning { .. }
+                    | Commands::Repository {
+                        cmd: loopflow::lf::RepositoryCommand::Release { .. }
+                            | loopflow::lf::RepositoryCommand::Ci { .. }
+                            | loopflow::lf::RepositoryCommand::Planning { .. }
                     }
                     | Commands::ContextBlock {
                         moment: ContextMoment::Start
@@ -1843,23 +1861,20 @@ fn run() -> anyhow::Result<()> {
 
     // Machine diagnosis must reach incompatible or uninitialized Machines without
     // ordinary admission creating or migrating the database first.
-    if let Some(Commands::Self_ {
+    if let Some(Commands::Ops(OpsCommand::Machine {
         cmd:
-            loopflow::lf::SelfCommand::Doctor {
+            loopflow::lf::MachineCommand::Doctor {
                 json,
                 planning: false,
             },
-    }) = &cli.command
+    })) = &cli.command
     {
         journal::observe_process(&args);
         return loopflow::lf::commands::doctor::run(*json);
     }
 
     // Availability and bootstrap are observational; no Work admission or repair.
-    if let Some(Commands::Ops {
-        cmd: OpsCommand::Server { cmd },
-    }) = &cli.command
-    {
+    if let Some(Commands::Ops(OpsCommand::Server { cmd })) = &cli.command {
         return loopflow::lf::commands::server::run(cmd);
     }
 
@@ -2120,7 +2135,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         Some(Commands::Task {
             cmd:
-                TaskCommand::Edit {
+                TaskCommand::Update {
                     title,
                     notes,
                     rank,
@@ -2759,19 +2774,15 @@ fn execute_command(
             loopflow::lf::ConfigCommand::Repository {
                 bind,
                 relocate,
-                path,
                 json,
             } => in_directory_runtime(args, |_| {
                 loopflow::lf::commands::work_route::identity(
                     bind.as_ref(),
                     relocate.as_ref(),
-                    *path,
+                    false,
                     *json,
                 )
             }),
-            loopflow::lf::ConfigCommand::Planning { cmd } => {
-                in_directory_runtime(args, |_| loopflow::lf::commands::planning::run(cmd))
-            }
         },
         // Neither Pi callback reads hook JSON; a tool group's stdin is the command's.
         Some(Commands::ContextBlock {
@@ -2794,7 +2805,18 @@ fn execute_command(
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
-        Some(Commands::Ops { cmd }) => dispatch_ops(cmd, cli, args),
+        Some(Commands::Ops(OpsCommand::Machine {
+            cmd: loopflow::lf::MachineCommand::Doctor { json, planning },
+        })) => {
+            if *planning {
+                let repo = loopflow::repo::working_directory()?;
+                loopflow::lf::commands::ops::sync_planning(&repo, None, true, true, *json)
+            } else {
+                loopflow::lf::commands::doctor::run(*json)
+            }
+        }
+        Some(Commands::Ops(cmd)) => dispatch_ops(cmd, cli, args),
+        Some(Commands::Repository { cmd }) => dispatch_repository(cmd, args),
         Some(Commands::Self_ {
             cmd:
                 loopflow::lf::SelfCommand::SyncSkills {
@@ -2906,16 +2928,6 @@ fn execute_command(
         }
         Some(Commands::Context { json, wave, task }) => {
             loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())
-        }
-        Some(Commands::Self_ {
-            cmd: loopflow::lf::SelfCommand::Doctor { json, planning },
-        }) => {
-            if *planning {
-                let repo = loopflow::repo::working_directory()?;
-                loopflow::lf::commands::ops::sync_planning(&repo, None, true, true, *json)
-            } else {
-                loopflow::lf::commands::doctor::run(*json)
-            }
         }
         Some(Commands::List { .. } | Commands::Help { .. }) => {
             unreachable!("inspection returned before execution")
@@ -3383,7 +3395,7 @@ mod tests {
             .to_vec();
         assert_eq!(
             reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap()),
-            vec!["lf", "--wave", "goals", "ops", "commit", "-m", "ship it"]
+            vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
         );
     }
 
@@ -3429,26 +3441,24 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "ops", "pr", "--strict", "submit"]
+        let args: Vec<String> = ["lf", "pr", "--strict", "submit"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "ops", "pr", "submit", "--strict"]);
+        assert_eq!(reordered, vec!["lf", "pr", "submit", "--strict"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Ops {
-                cmd: OpsCommand::Pr {
-                    cmd: Some(PrCommand::Submit { strict: true, .. })
-                }
-            })
+            Some(Commands::Ops(OpsCommand::Pr {
+                cmd: Some(PrCommand::Submit { strict: true, .. })
+            }))
         ));
 
-        let args: Vec<String> = ["lf", "ops", "wt", "--force", "delete", "old-tree"]
+        let args: Vec<String> = ["lf", "wt", "--force", "delete", "old-tree"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "ops", "wt", "delete", "--force", "old-tree"]
+            vec!["lf", "wt", "delete", "--force", "old-tree"]
         );
     }
 

@@ -45,7 +45,7 @@ whether or not a Graph process is alive now. Compare its `person` with
 - **Yours:** the owner's person is you, or the owner names no person. Give
   every unfinished Task you own exactly one disposition, with its evidence:
   the first row below that fits. A Task you own whose `runtime.owner.machine`
-  is not this Machine (`lf id`) has unknown liveness here: operate that one
+  is not this Machine (`lf machine self`) has unknown liveness here: operate that one
   Task on its Machine with `lf --machine <machine> task-operate <issue>` and
   file its returned disposition under the matching heading in Finish, or
   report it unknown and name the Machine. Never `lf task run`, recover or

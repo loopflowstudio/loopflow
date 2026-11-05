@@ -163,10 +163,12 @@ impl Command {
             self.command = "history".into();
         }
         let owner = match self.command.as_str() {
-            "doctor" | "install" => Some("self"),
+            "doctor" => Some("machine"),
+            "install" => Some("self"),
             "ps" | "top" => Some("monitor"),
-            "usage" | "replay" => Some("history"),
-            "release" | "ci" | "tokens" => Some("ops"),
+            "usage" => Some("session"),
+            "replay" => Some("history"),
+            "release" | "ci" | "tokens" => Some("repository"),
             _ => None,
         };
         if let Some(owner) = owner {

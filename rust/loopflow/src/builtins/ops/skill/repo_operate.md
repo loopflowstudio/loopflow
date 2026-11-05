@@ -167,7 +167,7 @@ Wave operator reads its logs.
 A Task is owned by a person on a Machine, or unowned. Each person picks their own
 Machine for a Wave's or the repository's new Tasks with `lf --wave <wave> set machine <machine>`
 or `lf --repo <repo> set machine <machine>`, never committed; unset means the Machine running
-the command. This pass changes no Task's owner or Machine. Use `lf id`, then
+the command. This pass changes no Task's owner or Machine. Use `lf machine self`, then
 `lf --wave <wave> wave-operate` locally or
 `lf --machine <machine-id> --wave <wave> wave-operate` on the Wave's Machine.
 `lf --machine` runs the target's `lf`; its SSH route may change without moving

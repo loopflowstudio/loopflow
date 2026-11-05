@@ -303,7 +303,7 @@ impl Read {
             }
             Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
             Self::Waves => words(&["wave", "list", "--all", "--json"]),
-            Self::MachineId => words(&["machine", "id", "--json"]),
+            Self::MachineId => words(&["machine", "self", "--json"]),
             Self::Portfolio => words(&["portfolio", "--json"]),
             Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
             Self::ConfigGet { destination, key } => {
@@ -319,7 +319,7 @@ impl Read {
                 graph,
                 step,
             } => {
-                let mut argv = at(directory, &["config", "show", "--json"]);
+                let mut argv = at(directory, &["config", "settings", "--json"]);
                 argv.extend(optional("--wave", wave.as_ref()));
                 argv.extend(optional("--skill", skill.as_ref()));
                 argv.extend(optional("--graph", graph.as_ref()));
@@ -328,7 +328,7 @@ impl Read {
             }
             // `desktop layout` always prints JSON.
             Self::PaneLayout { directory, work } => at(directory, &["desktop", "layout", work]),
-            Self::People { directory } => at(directory, &["ops", "people", "--json"]),
+            Self::People { directory } => at(directory, &["repository", "people", "--json"]),
             Self::Graphs { directory } => at(directory, &["graph", "list", "--json"]),
             Self::ViewPlan {
                 directory,
@@ -359,7 +359,7 @@ impl Read {
                 project,
                 task,
             } => {
-                let mut argv = words(&["usage", "--days", &days.to_string()]);
+                let mut argv = words(&["session", "usage", "--days", &days.to_string()]);
                 argv.extend(optional("--wave", wave.as_ref()));
                 argv.extend(optional("--project", project.as_ref()));
                 argv.extend(optional("--task", task.as_ref()));
@@ -367,6 +367,7 @@ impl Read {
                 argv
             }
             Self::TaskContext { task } => words(&[
+                "session",
                 "usage",
                 "--days",
                 "0",
@@ -410,16 +411,12 @@ impl Read {
                 argv
             }
             Self::PlanningStatus { directory } => {
-                at(directory, &["config", "planning", "status", "--json"])
+                at(directory, &["repository", "planning", "--json"])
             }
             Self::WorkLink { directory, url } => at(directory, &["open", url, "--link", "--json"]),
-            Self::RepositoryPath { id } => words(&[
-                "--repository",
-                &id.to_string(),
-                "config",
-                "repository",
-                "--path",
-            ]),
+            Self::RepositoryPath { id } => {
+                words(&["--repository", &id.to_string(), "repository", "path"])
+            }
             Self::WaveGraph { directory, wave } => {
                 let mut argv = at(directory, &["wave", "graph", "show"]);
                 argv.push(wave.clone().unwrap_or_else(|| "--no-wave".into()));
@@ -427,12 +424,12 @@ impl Read {
                 argv
             }
             Self::Tokens { directory, days } => {
-                let mut argv = at(directory, &["ops", "tokens", "--json"]);
+                let mut argv = at(directory, &["repository", "tokens", "--json"]);
                 argv.extend(optional("--days", *days));
                 argv
             }
-            Self::Retention => words(&["history", "retention", "--json"]),
-            Self::Doctor => words(&["doctor", "--json"]),
+            Self::Retention => words(&["session", "retention", "--json"]),
+            Self::Doctor => words(&["machine", "doctor", "--json"]),
             Self::TaskWait { issue, until } => {
                 let until = match until {
                     crate::ops::task::TaskWaitUntil::Open => "submitted",

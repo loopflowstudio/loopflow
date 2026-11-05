@@ -32,12 +32,12 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Complete { .. }
                 | TaskCommand::Save { .. }
                 | TaskCommand::Abandon { .. }
-                | TaskCommand::Edit { .. }
+                | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
         ),
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
-            WaveCommand::Add { .. }
+            WaveCommand::Create { .. }
                 | WaveCommand::Status {
                     sync: true,
                     watch: false,
@@ -253,7 +253,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             }
             Ok(())
         }
-        TaskCommand::Edit {
+        TaskCommand::Update {
             issue,
             title,
             notes,
@@ -294,7 +294,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
 
 fn wave(repo: &Path, command: &WaveCommand, io: &mut CommandIo<'_>) -> Result<()> {
     match command {
-        WaveCommand::Add {
+        WaveCommand::Create {
             wave,
             objective,
             json,

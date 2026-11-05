@@ -96,7 +96,7 @@ struct TaskHistoryProofTests {
         await source.reply("W2-131", with: .history(["run_a1", "run_a2"]))
         try find("task-history-toggle").button().tap()
         try await waitFor { (try? find("task-history-input-run_a2:12")) != nil && !model.sessionHistory.inFlight.contains("issue-review") }
-        #expect(await source.reads == [["usage", "--days", "0", "--task", "W2-131", "--json"]])
+        #expect(await source.reads == [["session", "usage", "--days", "0", "--task", "W2-131", "--json"]])
         #expect(try label("task-history-toggle") == "Session history, expanded")
         _ = try find("task-history-input-run_a1:12")
         #expect((try? find("task-history-input-run_a2:12").find(text: "Unknown")) != nil)
@@ -217,9 +217,9 @@ private actor HistorySource {
         case ("graph", "list"): return "[]"
         case ("task", "comment"):
             return #"{"identifier":"fixture","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
-        case ("usage", "--days"):
+        case ("session", "usage"):
             reads.append(args)
-            let task = args[4]
+            let task = args[5]
             let ids: [String]
             switch replies[task] {
             case .history(let chosen): ids = chosen

@@ -91,7 +91,7 @@ mod tests {
         "planning_peer_observed",
         "project_binding_imports",
         "blob_tokens",
-        // Desktop reads GitHub people once per repository through `lf ops people`.
+        // Desktop reads GitHub people once per repository through `lf repository people`.
         "github_people",
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",

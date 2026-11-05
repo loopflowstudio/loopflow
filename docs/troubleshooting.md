@@ -154,7 +154,7 @@ lf account connect claude
 
 With no agent preference configured, lf uses the sole installed harness. If more
 than one is installed, choose with `lf set --global default_agent claude` or pass
-`-a claude` for one command. `lf config show --explain` shows the selection.
+`-a claude` for one command. `lf config settings --explain` shows the selection.
 
 ## Context too large
 
@@ -234,7 +234,7 @@ references, and compacts the store; a dry run changes none of it. A
 missing PID, a completed Task or an old Session does not prove the agent
 exited: unresolved records keep protecting their checkouts.
 
-When `lf self doctor` fails `lineage` and says `lf monitor prune` repairs the
+When `lf machine doctor` fails `lineage` and says `lf monitor prune` repairs the
 parents, an AgentProcess points at an lf process that was never recorded:
 
 ```bash

@@ -98,17 +98,17 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .waves:
             return ["wave", "list", "--all", "--json"]
         case .machineId:
-            return ["machine", "id", "--json"]
+            return ["machine", "self", "--json"]
         case .portfolio:
             return ["portfolio", "--json"]
         case .settings(_, let wave, let skill, let graph, let step):
-            return ["config", "show", "--json"] + (wave.map { ["--wave", $0] } ?? [])
+            return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
                 + (step.map { ["--step", $0] } ?? [])
         case .paneLayout(_, let work):
             return ["desktop", "layout", work]
         case .people:
-            return ["ops", "people", "--json"]
+            return ["repository", "people", "--json"]
         case .graphs:
             return ["graph", "list", "--json"]
         case .viewPlan(_, let expression):
@@ -118,9 +118,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .graphProcess(let id):
             return ["graph", "show", id, "--processes", "--json"]
         case .usage(let days, let wave, let project, let task):
-            return ["usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
+            return ["session", "usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
-            return ["usage", "--days", "0", "--task", task, "--context", "--json"]
+            return ["session", "usage", "--days", "0", "--task", task, "--context", "--json"]
         case .waveDetail(_, let wave):
             return ["desktop", "wave", wave, "--json"]
         case .closedTasks(_, let wave, let after):
@@ -134,22 +134,22 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["desktop", "plan"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
                 + (all ? ["--all"] : []) + ["--json"]
         case .planningStatus:
-            return ["config", "planning", "status", "--json"]
+            return ["repository", "planning", "--json"]
         case .workLink(_, let url):
             return ["open", url, "--link", "--json"]
         case .repositoryPath(let id):
-            return ["--repository", id, "config", "repository", "--path"]
+            return ["--repository", id, "repository", "path"]
         case .waveGraph(_, let wave):
             return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
         case .sessionPage(_, let headless, let after):
             return ["desktop", "sessions", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
                 + ["--limit", String(Self.sessionPageLimit)] + (after.map { ["--after", $0] } ?? [])
         case .tokens(_, let days):
-            return ["ops", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
+            return ["repository", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
         case .retention:
-            return ["history", "retention", "--json"]
+            return ["session", "retention", "--json"]
         case .doctor:
-            return ["doctor", "--json"]
+            return ["machine", "doctor", "--json"]
         case .taskWait(let issue, let until):
             return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
         }

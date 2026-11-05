@@ -1141,18 +1141,15 @@ impl SkillExecutor for &RunningGraph<'_> {
             .and_then(Cli::try_parse_from)
             .ok();
         let handoff_checkout = match parsed.and_then(|cli| cli.command) {
-            Some(Commands::Ops {
+            Some(Commands::Ops(crate::lf::OpsCommand::Pr {
                 cmd:
-                    crate::lf::OpsCommand::Pr {
-                        cmd:
-                            Some(PrCommand::Land {
-                                local: false,
-                                wait_and_fix: false,
-                                worktree,
-                                ..
-                            }),
-                    },
-            }) => Some(crate::ops::land::resolve_repos(self.cwd, worktree.as_deref())?.0),
+                    Some(PrCommand::Land {
+                        local: false,
+                        wait_and_fix: false,
+                        worktree,
+                        ..
+                    }),
+            })) => Some(crate::ops::land::resolve_repos(self.cwd, worktree.as_deref())?.0),
             _ => None,
         };
         let args: Vec<String> = argv.into_iter().skip(1).collect();

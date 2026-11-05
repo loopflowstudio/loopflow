@@ -45,7 +45,7 @@ lf history show <id> --final              # what the agent concluded
 lf history show <id> --context            # what its input was made of
 lf history show <id> --transcript         # the conversation, as its providers kept it
 lf history search "cleanupPeriodDays" --since 30d   # text across recent conversations
-lf history retention                      # what providers still keep, and what goes next
+lf session retention                      # what providers still keep, and what goes next
 ```
 
 `lf history` orders what Sessions did — input captured, provider turns, recorded
@@ -116,7 +116,7 @@ Each check reports ok, warn or fail with its detail. `--json` returns the same a
 | `lf history [--task\|--wave\|--project]` | What Sessions did, newest first |
 | `lf history list` | Recorded commands; filter by Task, Wave, parent, caller, text, outcome |
 | `lf history show ID` | One process or Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
-| `lf history search TEXT` / `lf history retention` | Find text in recent conversations / what providers still keep |
+| `lf history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
 | `lf ps`, `lf top` | Live process trees |
 | `lf monitor prune` | Remove dead receipts, orphaned providers and finished Process rows |

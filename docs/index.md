@@ -36,7 +36,7 @@ Each Task has:
 ```bash
 lf comment <ID> "keep the retry budget at 3"   # reaches the next step, in its context
 lf task status <ID>                            # where it is in its workflow, and what it needs from you
-lf history usage --task <ID>                   # what it cost
+lf session usage --task <ID>                   # what it cost
 lf land --wait-and-fix                         # merge when checks pass; fix them if not
 ```
 

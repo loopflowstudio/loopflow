@@ -257,3 +257,55 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   `wave_start-chapter`, `review-chapter`, `split-wave` and `init` skills still
   describe `lf wave new-chapter`; they need Jack's call on what chapter
   planning becomes before they are rewritten.
+- **`ops` dissolved by flattening.** `OpsCommand` stays as the Rust enum for
+  the root delivery and environment nouns (`pr`, `commit`, `sync`, `wt`,
+  `server`, `machine`, `account`), flattened into the root; `release`, `ci`,
+  `people` and `tokens` moved to `lf repository` beside `planning` (from `lf
+  config planning`; bare `lf repository planning` is the status) and `path`
+  (from `lf config repository --path`). `checkout.*`, `pr.*`, `account.*` and
+  `skill.*` keep their root CLI spellings and have no engine functions yet;
+  the server README marks them "CLI only, engine pending".
+- **Old spellings.** `lf/aliases.rs` is one table of old command path (plus
+  any old flag words) to canonical path, consulted once by
+  `navigation::normalize_args`, which re-normalizes the rewritten argv. It
+  covers `lf ops …`, `config show`, `config planning [status]`, `config
+  repository --path`, `task edit`, `wave add`, `machine id`, `history usage`,
+  `history retention` and `self doctor`. Tests that parse with
+  `Cli::try_parse_from` bypass it and use canonical paths. `lf auth` was
+  already retired before this branch (`account_has_one_owner_without_
+  predecessor_aliases`), so no alias was added for it.
+- **Not moved in this pass** (the server README's table says "pending" on
+  each): `task show` (`desktop task`), `task list --closed` (`desktop done`),
+  `session list` (`desktop sessions`), `wave planning` (`desktop wave`),
+  `planning list` (`desktop plan`), `desktop view list|show` (`desktop plans`,
+  `desktop view --plan`), `desktop dashboard …`, `desktop portfolio`, `process
+  list|top` (`monitor ps|top`), `session history` (`lf history`), `task
+  changes|context|runs|hold|steer|report`, `wave sync` and the
+  `wave.planning.bind|connect|reteam` group. Four of them are not renames:
+  `session list`, `task list`, `wave status` and `wave show` print
+  `Shape::Tasks` rows (`TaskRow`, `SessionRow`) that skills and agents read,
+  while the served reads print `Shape::Desktop` records. Folding a `desktop`
+  read into its canonical command means choosing one result type per
+  operation, which is step 4's engine work; doing it here would change what
+  every skill's `--json` parsing sees. `task.steer` as a proxy to
+  `session.steer` changes delivery (a Task-thread steer reaches the Task's
+  Sessions through hooks; a Session steer reaches one Session) and needs Jack's
+  call on whether a Task steer still lands in the Linear thread.
+- **`graph.run` names two things.** The read `graph.run {id}` is one Graph
+  that ran (`lf graph show <id> --processes`), while decision 3 makes
+  `graph.run` the operation `task.run` delegates to, and a hidden internal
+  `lf graph run` already carries a Task's Graph. The read probably becomes
+  `process.get` (a Graph is one lf process); left as is until step 4.
+- **`work.resolve`'s CLI.** `lf work` runs the builtin `work` skill, so a `work`
+  CLI noun would shadow it; `lf open <url> --link` stays the spelling.
+- **Config keys.** The catalogue already models planning as one tagged
+  `planning` key (`planning.provider`, `planning.team` for Linear, Asana and
+  Notion alike), and `config::fold_linear_team` reads the released
+  `linear.team` (LOO-560 removes it). Decision 5's canonical paths on the
+  primitive (`repository.planning.provider`, `repository.planning.linear.team`,
+  `skill.<name>.agent`, `wave.graph`) with unique-trailing-path shorthand on
+  read are not implemented: they change the catalogue's key set, every
+  `settings::preference_path` caller and the files writers produce, and need
+  their own pass with the catalogue tests. `skills:`, `exclude:` (folded into
+  `context.exclude` by `normalize_context`, Task 807ef7) and `release:` are
+  left as they are; `release` and `skills` are already catalogue entries.

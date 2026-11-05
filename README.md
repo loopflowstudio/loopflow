@@ -36,7 +36,7 @@ Each Task has:
 ```bash
 lf comment <ID> "keep the retry budget at 3"   # reaches the next step, in its context
 lf task status <ID>                            # where it is in its workflow, and what it needs from you
-lf history usage --task <ID>                   # what it cost
+lf session usage --task <ID>                   # what it cost
 lf land --wait-and-fix                         # merge when checks pass; fix them if not
 ```
 
@@ -116,7 +116,7 @@ You want to do something; here's how through `lf`.
 | run on your own machine over SSH | `lf --machine mini -b task run <ID>` |
 | rent a machine from Daytona, Modal, RunPod or AWS for one Task and give it back after | `lf task run <ID> --rent <template>` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
-| see what agents cost, by Task, Wave or week | `lf history usage --weekly` |
+| see what agents cost, by Task, Wave or week | `lf session usage --weekly` |
 | see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf history linear` |
 | open work in Desktop, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
 | plan in Git with no tracker, or in Linear | `lf task list` |

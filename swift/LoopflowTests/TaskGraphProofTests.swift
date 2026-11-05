@@ -218,7 +218,7 @@ struct TaskGraphTests {
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
             case ("desktop", "sessions"): return try await reader.inventory()
             case ("desktop", "plan"): return roadmapJSON
-            case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
+            case ("machine", "self"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
         }

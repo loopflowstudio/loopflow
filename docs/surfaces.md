@@ -132,7 +132,7 @@ lf task status LOO-12 --watch --json      # one Task with its conversations, Gra
 lf session list --watch --json            # conversations, with which ones are available for you
 lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
 lf ps --watch --json                      # live lf call trees
-lf planning status --watch --json         # planning sync; keeps it exchanged while it runs
+lf repository planning --watch --json         # planning sync; keeps it exchanged while it runs
 lf desktop plans --watch --json           # every plan a repository window shows
 ```
 

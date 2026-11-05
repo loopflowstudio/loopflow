@@ -60,7 +60,7 @@ The later operator transfers it with `lf checkout <child> --stack-on <parent>
 
 From the destination repository, file with `lf task create --wave <owner>` without
 `--run`. Supply the title and complete brief through `--title` and stdin or
-`--notes`; use `lf task edit` for refinements to a confirmed Task.
+`--notes`; use `lf task update` for refinements to a confirmed Task.
 Return each actual Task as one readable link from
 `lf --task <issue> open --link --format markdown` (`[ID · title](loopflow://…)`),
 with its repository and owning Wave; keep the provider issue link separate.
@@ -72,7 +72,7 @@ leave an explicit unfiled brief in the conversation. Report provider failures
 honestly. After an uncertain write, reconcile with `lf wave status <wave> --json`
 in that destination. Every explicit create makes a distinct Task, even with
 identical input; only internal synchronization retries reuse the saved identity.
-Recover the created Task's identity and refine it with `lf task edit`. If the
+Recover the created Task's identity and refine it with `lf task update`. If the
 write remains uncertain, report it rather than issuing another create.
 Report each Task separately. Preserve successful filings when
 another fails; never recreate the batch or substitute the launch repository.

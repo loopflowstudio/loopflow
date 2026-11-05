@@ -753,7 +753,7 @@ The repository-wide gate is `uv run python scripts/test.py --all`.
 lf desktop plan --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
 lf desktop task LOO-1 --json --watch       # the shown Task: work, Graphs, comments
 lf desktop sessions --json --watch         # the repository's Sessions as Desktop lists them
-lf planning status --json --watch          # stored sync receipts
+lf repository planning --json --watch          # stored sync receipts
 ```
 
 A window observes these reads through `RegistryQuery.watchWork()`, one server

@@ -39,7 +39,7 @@ struct RegistryQueryTests {
     @Test("Settings inspection retains skill and authored occurrence selectors")
     func settingsInspection() throws {
         let read = ServedRead.settings(directory: "/r", wave: nil, skill: nil, graph: "release", step: "write-code")
-        #expect(read.argv == ["config", "show", "--json", "--graph", "release", "--step", "write-code"])
+        #expect(read.argv == ["config", "settings", "--json", "--graph", "release", "--step", "write-code"])
         let data = try JSONEncoder().encode(read)
         let value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(value["kind"] as? String == "config.settings")
@@ -638,7 +638,7 @@ struct RegistryQueryTests {
 """
         let query = RegistryQuery { args, _ in
             #expect(args == [
-                "usage", "--days", "7",
+                "session", "usage", "--days", "7",
                 "--wave", "product", "--project", "sessions", "--task", "LOO-265", "--json",
             ])
             return json
@@ -671,7 +671,7 @@ struct RegistryQueryTests {
         }
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["doctor", "--json"])
+            #expect(args == ["machine", "doctor", "--json"])
             return json
         }
 

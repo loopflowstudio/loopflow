@@ -228,11 +228,9 @@ impl Cli {
     pub fn merges(&self) -> bool {
         matches!(
             &self.command,
-            Some(Commands::Ops {
-                cmd: OpsCommand::Pr {
-                    cmd: Some(PrCommand::Land { .. } | PrCommand::Arm { .. })
-                }
-            })
+            Some(Commands::Ops(OpsCommand::Pr {
+                cmd: Some(PrCommand::Land { .. } | PrCommand::Arm { .. })
+            }))
         )
     }
 
@@ -258,7 +256,7 @@ impl Cli {
                     ..
                 }
             ),
-            Some(Commands::Ops { cmd }) => match cmd {
+            Some(Commands::Ops(cmd)) => match cmd {
                 OpsCommand::Commit { message, .. } => message.is_none(),
                 OpsCommand::Sync(args) => !args.plan && !args.abort && !args.manual,
                 OpsCommand::Pr { cmd } => matches!(
@@ -271,14 +269,16 @@ impl Cli {
                             | PrCommand::Land { .. }
                     )
                 ),
-                OpsCommand::Release { cmd } => matches!(
-                    cmd,
-                    ReleaseCommand::Run { .. }
-                        | ReleaseCommand::Bump { .. }
-                        | ReleaseCommand::Notes { .. }
-                ),
                 _ => false,
             },
+            Some(Commands::Repository {
+                cmd: RepositoryCommand::Release { cmd },
+            }) => matches!(
+                cmd,
+                ReleaseCommand::Run { .. }
+                    | ReleaseCommand::Bump { .. }
+                    | ReleaseCommand::Notes { .. }
+            ),
             Some(_) => false,
         }
     }
@@ -339,16 +339,13 @@ impl Cli {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
         }
-        if let Some(Commands::Ops {
-            cmd:
-                OpsCommand::Account {
-                    cmd,
-                    provider,
-                    cached,
-                    details,
-                    json,
-                },
-        }) = &self.command
+        if let Some(Commands::Ops(OpsCommand::Account {
+            cmd,
+            provider,
+            cached,
+            details,
+            json,
+        })) = &self.command
         {
             if let Some(misuse) =
                 AccountCommand::misuse(cmd.as_ref(), *provider, *cached || *details || *json)
@@ -552,11 +549,13 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<commands::monitor::MonitorCommand>,
     },
-    /// Software delivery and the environment work runs in: PRs, CI, releases,
-    /// commits, worktrees, Machines and provider accounts
-    Ops {
+    #[command(flatten)]
+    Ops(OpsCommand),
+    /// This repository: where it exchanges planning, its releases, CI, people
+    /// and size, and its checkout on this Machine
+    Repository {
         #[command(subcommand)]
-        cmd: OpsCommand,
+        cmd: RepositoryCommand,
     },
     /// Read and declare Loopflow settings
     Config {
@@ -637,33 +636,14 @@ pub enum Commands {
     External(Vec<String>),
 }
 
-/// Software delivery and the environment work runs in.
+/// Root nouns for delivery and the environment work runs in: PRs, commits,
+/// syncs, worktrees, the server, Machines and accounts. Flattened into the root.
 #[derive(Subcommand, Debug)]
 pub enum OpsCommand {
     /// Pull request lifecycle
     Pr {
         #[command(subcommand)]
         cmd: Option<PrCommand>,
-    },
-    /// Release operations (run, check, notes, bump, tag, status, issues, regress, promote)
-    Release {
-        #[command(subcommand)]
-        cmd: ReleaseCommand,
-    },
-    /// Show how failed CI is detected, repaired, and landed across this Machine
-    Ci {
-        /// Relative window (7d, 24h, 30m) or RFC3339 start
-        #[arg(long, default_value = "7d")]
-        since: String,
-        /// Scope to one Wave
-        #[arg(long)]
-        wave: Option<String>,
-        /// Scope to one GitHub owner/repo
-        #[arg(long)]
-        repo: Option<String>,
-        /// Emit the complete incident report as JSON
-        #[arg(long)]
-        json: bool,
     },
     /// Commit changes
     Commit {
@@ -695,20 +675,6 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
-    /// List the people who own this repository's Tasks, with their GitHub identity
-    People {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Measure this codebase: lines and tokens per directory (tracked files only)
-    Tokens {
-        /// Emit as JSON
-        #[arg(long)]
-        json: bool,
-        /// Walk git history instead: the codebase's size on each day it changed
-        #[arg(long, value_name = "DAYS")]
-        days: Option<u32>,
-    },
     /// Refresh account access and capacity, or manage logins and routing
     Account {
         #[command(subcommand)]
@@ -724,6 +690,60 @@ pub enum OpsCommand {
         /// Emit the account overview as one JSON document
         #[arg(long)]
         json: bool,
+    },
+}
+
+/// `repository.*`: one repository's planning exchange, releases, CI, people,
+/// size and checkout.
+#[derive(Subcommand, Debug)]
+pub enum RepositoryCommand {
+    /// Where this repository exchanges planning: selection, retained imports and
+    /// held records, without contacting Git
+    #[command(args_conflicts_with_subcommands = true)]
+    Planning {
+        #[command(subcommand)]
+        cmd: Option<PlanningCommand>,
+        #[arg(long)]
+        json: bool,
+        /// Print a JSON line now and each time the status changes, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
+    },
+    /// Print the selected repository's checkout on this Machine
+    Path,
+    /// Release operations (run, check, notes, bump, tag, status, issues, regress, promote)
+    Release {
+        #[command(subcommand)]
+        cmd: ReleaseCommand,
+    },
+    /// Show how failed CI is detected, repaired, and landed across this Machine
+    Ci {
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Scope to one Wave
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one GitHub owner/repo
+        #[arg(long)]
+        repo: Option<String>,
+        /// Emit the complete incident report as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the people who own this repository's Tasks, with their GitHub identity
+    People {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Measure this codebase: lines and tokens per directory (tracked files only)
+    Tokens {
+        /// Emit as JSON
+        #[arg(long)]
+        json: bool,
+        /// Walk git history instead: the codebase's size on each day it changed
+        #[arg(long, value_name = "DAYS")]
+        days: Option<u32>,
     },
 }
 
@@ -1101,7 +1121,8 @@ impl Commands {
             Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Desktop { cmd } => cmd.changes_work(),
             Self::Monitor { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
-            Self::Ops { cmd } => cmd.changes_work(),
+            Self::Ops(cmd) => cmd.changes_work(),
+            Self::Repository { cmd } => cmd.changes_work(),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
             Self::Portfolio { cmd, .. } => cmd.is_some(),
@@ -1142,7 +1163,7 @@ impl TaskCommand {
             | Self::Save { .. }
             | Self::Abandon { .. }
             | Self::Delete { .. }
-            | Self::Edit { .. }
+            | Self::Update { .. }
             | Self::Move { .. }
             | Self::Interrupt { .. } => true,
         }
@@ -1156,7 +1177,7 @@ impl WaveCommand {
             Self::Status { sync, .. } => *sync,
             Self::Remove { preview, .. } => !preview,
             Self::EditPlan { .. }
-            | Self::Add { .. }
+            | Self::Create { .. }
             | Self::BindProject { .. }
             | Self::Rename { .. }
             | Self::UpdatePlan { .. }
@@ -1169,7 +1190,11 @@ impl WaveCommand {
 impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
+            Self::ObserveStatus { .. }
+            | Self::History { .. }
+            | Self::List { .. }
+            | Self::Usage(_)
+            | Self::Retention { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
@@ -1259,17 +1284,27 @@ impl DesktopCommand {
     }
 }
 
+impl RepositoryCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Planning { cmd, .. } => match cmd {
+                Some(PlanningCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(PlanningCommand::Journal { .. }) | None => false,
+            },
+            Self::Release { cmd } => cmd.changes_work(),
+            Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
+        }
+    }
+}
+
 impl OpsCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
-            Self::Release { cmd } => cmd.changes_work(),
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Server { .. } | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => {
-                false
-            }
+            Self::Server { .. } => false,
             Self::Commit { .. } | Self::Sync(_) => true,
         }
     }
@@ -1345,7 +1380,9 @@ pub enum ServerCommand {
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
+            Self::Self_ { .. } | Self::Doctor { .. } | Self::List { .. } | Self::Status { .. } => {
+                false
+            }
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
                 MachineCredentialCommand::Receive => true,
@@ -1387,10 +1424,6 @@ impl ConfigCommand {
             Self::Migrate { accept } => *accept,
             Self::Retained { replace, keep } => *replace || *keep,
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
-            Self::Planning { cmd } => match cmd {
-                PlanningCommand::Key { new, recover } => *new || recover.is_some(),
-                PlanningCommand::Status { .. } | PlanningCommand::Journal { .. } => false,
-            },
         }
     }
 }
@@ -1398,7 +1431,6 @@ impl ConfigCommand {
 impl SelfCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
                 Some(
                     InstallCommand::Server
@@ -1691,6 +1723,13 @@ pub enum SessionCommand {
     },
     /// List Sessions
     List(SessionListArgs),
+    /// Show direct provider-authored usage from recorded Session inputs
+    Usage(commands::history::UsageArgs),
+    /// Show how much Session history providers still keep, and what they remove next
+    Retention {
+        #[arg(long)]
+        json: bool,
+    },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
         after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
@@ -1810,9 +1849,9 @@ pub enum WaveCommand {
         description: Option<String>,
     },
 
-    /// Add a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
-    /// and start its first chapter. Adding an existing Wave changes nothing.
-    Add {
+    /// Create a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
+    /// and start its first chapter. Creating an existing Wave changes nothing.
+    Create {
         wave: String,
         /// Objective text for the new Wave's GOAL.md
         #[arg(long)]
@@ -2200,8 +2239,8 @@ until `lf ship`."
     },
     /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
     Delete { issue: String },
-    /// Edit a Task's title or notes, before or after placement
-    Edit {
+    /// Update a Task's title or notes, before or after placement
+    Update {
         issue: String,
         #[arg(long)]
         title: Option<String>,
@@ -2292,7 +2331,7 @@ impl TaskCommand {
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
             | Self::Delete { issue }
-            | Self::Edit { issue, .. }
+            | Self::Update { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -2320,7 +2359,7 @@ impl TaskCommand {
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
             | Self::Delete { issue }
-            | Self::Edit { issue, .. }
+            | Self::Update { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -2534,14 +2573,6 @@ pub enum PlanningCommand {
         #[arg(long, value_name = "UUID")]
         recover: Option<String>,
     },
-    /// Show selection, retained imports and held records without contacting Git
-    Status {
-        #[arg(long)]
-        json: bool,
-        /// Print a JSON line now and each time the status changes, until stdin closes
-        #[arg(long, requires = "json")]
-        watch: bool,
-    },
     /// Show each destination's retained changes, including losing values, without contacting Git
     Journal {
         #[arg(long)]
@@ -2552,15 +2583,6 @@ pub enum PlanningCommand {
 /// Manage the installed artifacts and exported skills.
 #[derive(Debug, Subcommand)]
 pub enum SelfCommand {
-    /// Diagnose installation, storage and Process integrity
-    Doctor {
-        /// Diagnose repository planning without changing it
-        #[arg(long)]
-        planning: bool,
-        /// Emit the audit as JSON
-        #[arg(long)]
-        json: bool,
-    },
     /// Install the newest Loopflow on your stream from any directory
     #[command(
         after_help = "Without a stream flag, follows the stream recorded in ~/.lf/config.yaml \
@@ -2692,16 +2714,8 @@ pub enum ConfigCommand {
         /// Reconnect retained Work after a move predating its Git locator
         #[arg(long, conflicts_with = "bind")]
         relocate: Option<crate::durable::RepositoryId>,
-        /// Print the selected repository's current local directory
-        #[arg(long, conflicts_with = "json")]
-        path: bool,
         #[arg(long)]
         json: bool,
-    },
-    /// Inspect planning synchronization and personal identity
-    Planning {
-        #[command(subcommand)]
-        cmd: PlanningCommand,
     },
 }
 
@@ -2725,8 +2739,18 @@ pub enum MachineCommand {
     /// Name this Machine for teammates, or `off` to make it private again.
     /// A private Machine's ownership entries carry only its id.
     Public { name: String },
+    /// Diagnose installation, storage and Process integrity
+    Doctor {
+        /// Diagnose repository planning without changing it
+        #[arg(long)]
+        planning: bool,
+        /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Print this machine's stable local Machine identity.
-    Id {
+    #[command(name = "self")]
+    Self_ {
         #[arg(long)]
         json: bool,
     },
@@ -3206,12 +3230,12 @@ mod tests {
         }
         assert!(command.find_subcommand("op").is_none());
         let literal = crate::lf::navigation::normalize_args(
-            ["lf", "ops", "wt", "create", "csv-export"]
+            ["lf", "wt", "create", "csv-export"]
                 .map(String::from)
                 .to_vec(),
         )
         .unwrap();
-        assert_eq!(literal, ["lf", "ops", "wt", "create", "csv-export"]);
+        assert_eq!(literal, ["lf", "wt", "create", "csv-export"]);
         assert!(Cli::try_parse_from(literal).is_ok());
         assert!(command
             .find_subcommand("task")
@@ -3240,25 +3264,7 @@ mod tests {
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
-            vec!["lf", "ops", "pr", "checks"],
-            vec![
-                "lf",
-                "wave",
-                "new-chapter",
-                "--all",
-                "October",
-                "--plan",
-                "p.json",
-            ],
-            vec![
-                "lf",
-                "wave",
-                "new-chapter",
-                "product",
-                "October",
-                "--plan",
-                "p.json",
-            ],
+            vec!["lf", "pr", "checks"],
             vec!["lf", "session", "steer", "keep attribution"],
             vec![
                 "lf",
@@ -3271,10 +3277,12 @@ mod tests {
             vec!["lf", "session", "steer", "session_1", "keep attribution"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
             vec!["lf", "task", "move", "LOO-1", "--machine", "mini"],
-            vec!["lf", "--wave", "product", "config", "set", "machine", "mini"],
+            vec![
+                "lf", "--wave", "product", "config", "set", "machine", "mini",
+            ],
             vec!["lf", "config", "unset", "account.claude", "--global"],
             vec!["lf", "discord", "serve", "product"],
-            vec!["lf", "self", "doctor", "--planning", "--json"],
+            vec!["lf", "machine", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
@@ -3290,7 +3298,7 @@ mod tests {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "wt", "list", "--full"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "list", "--full"]).is_err());
     }
 
     #[test]
@@ -3309,19 +3317,17 @@ mod tests {
             ["lf", "server", "status"].map(str::to_owned).to_vec(),
         )
         .unwrap();
-        assert_eq!(args, ["lf", "ops", "server", "status"]);
+        assert_eq!(args, ["lf", "server", "status"]);
         let command = Cli::try_parse_from(args).unwrap().command.unwrap();
         assert!(!command.changes_work());
         assert!(matches!(
             command,
-            Commands::Ops {
-                cmd: OpsCommand::Server {
-                    cmd: ServerCommand::Status
-                }
-            }
+            Commands::Ops(OpsCommand::Server {
+                cmd: ServerCommand::Status
+            })
         ));
-        assert!(Cli::try_parse_from(["lf", "ops", "machine", "service", "run"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "server", "ensure"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "machine", "service", "run"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "server", "ensure"]).is_err());
         let tree = crate::lf::navigation::command_tree();
         let install = tree
             .find_subcommand("self")
@@ -3334,7 +3340,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(remote.1, ["ops", "server", "status"]);
+        assert_eq!(remote.1, ["server", "status"]);
     }
 
     #[test]
@@ -3365,7 +3371,7 @@ mod tests {
                 }
             })
         ));
-        assert!(Cli::try_parse_from(["lf", "ops", "machine", "install"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "machine", "install"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "schedule"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
@@ -3402,9 +3408,9 @@ mod tests {
             })
         ));
         assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "pr", "checks", "--logs"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "ops", "machine", "probe", "product"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "wt", "ci"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "pr", "checks", "--logs"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "machine", "probe", "product"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "ci"]).is_err());
     }
 
     #[test]
@@ -3448,7 +3454,7 @@ mod tests {
     fn ci_report_accepts_machine_wide_filters() {
         let cli = Cli::try_parse_from([
             "lf",
-            "ops",
+            "repository",
             "ci",
             "--since",
             "24h",
@@ -3461,12 +3467,14 @@ mod tests {
         .expect("parse CI report");
         assert!(matches!(
             cli.command,
-            Some(Commands::Ops { cmd: OpsCommand::Ci {
-                since,
-                wave: Some(wave),
-                repo: Some(repo),
-                json: true,
-            } }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
+            Some(Commands::Repository {
+                cmd: RepositoryCommand::Ci {
+                    since,
+                    wave: Some(wave),
+                    repo: Some(repo),
+                    json: true,
+                },
+            }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
         ));
     }
 
@@ -3544,21 +3552,14 @@ mod tests {
 
     #[test]
     fn account_use_takes_its_provider_before_the_verb() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "ops",
-            "account",
-            "codex",
-            "use",
-            "jack@loopflow.studio",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["lf", "account", "codex", "use", "jack@loopflow.studio"]).unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
+            matches!(cli.command, Some(Commands::Ops(OpsCommand::Account {
             cmd: Some(AccountCommand::Use { email }),
             provider: Some(crate::provider_auth::Provider::Codex),
             ..
-        } }) if email == "jack@loopflow.studio")
+        })) if email == "jack@loopflow.studio")
         );
     }
 
@@ -3566,7 +3567,6 @@ mod tests {
     fn auth_set_accepts_ordered_service_profiles() {
         let cli = Cli::try_parse_from([
             "lf",
-            "ops",
             "account",
             "set",
             "linear",
@@ -3577,13 +3577,12 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
+            matches!(cli.command, Some(Commands::Ops(OpsCommand::Account {
             cmd: Some(AccountCommand::Set { email: None, chrome_profile, .. }), ..
-        } }) if chrome_profile == ["Work", "Personal"])
+        })) if chrome_profile == ["Work", "Personal"])
         );
         assert!(
-            Cli::try_parse_from(["lf", "ops", "account", "set", "linear", "--clear-cooldown"])
-                .is_err()
+            Cli::try_parse_from(["lf", "account", "set", "linear", "--clear-cooldown"]).is_err()
         );
     }
 
@@ -3591,7 +3590,6 @@ mod tests {
     fn auth_connect_addresses_an_account_and_optional_bootstrap_venue() {
         let cli = Cli::try_parse_from([
             "lf",
-            "ops",
             "account",
             "connect",
             "claude",
@@ -3604,14 +3602,14 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Ops { cmd: OpsCommand::Account {
+            Some(Commands::Ops(OpsCommand::Account {
                 cmd: Some(AccountCommand::Connect {
                     provider,
                     email: Some(email),
                     chrome_profile: Some(chrome_profile),
                     ..
                 }), ..
-            } }) if provider == "claude"
+            })) if provider == "claude"
                 && email == "operator@"
                 && chrome_profile == "Profile 9"
         ));
@@ -3621,7 +3619,6 @@ mod tests {
     fn service_auth_accepts_a_remembered_chrome_profile() {
         let cli = Cli::try_parse_from([
             "lf",
-            "ops",
             "account",
             "connect",
             "linear",
@@ -3630,9 +3627,9 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account { cmd: Some(AccountCommand::Connect {
+            matches!(cli.command, Some(Commands::Ops(OpsCommand::Account { cmd: Some(AccountCommand::Connect {
             provider, email: None, chrome_profile: Some(profile), ..
-        }), .. } }) if provider == "linear" && profile == "Work")
+        }), .. })) if provider == "linear" && profile == "Work")
         );
     }
 
@@ -3640,7 +3637,6 @@ mod tests {
     fn auth_connect_sources_are_exclusive() {
         assert!(Cli::try_parse_from([
             "lf",
-            "ops",
             "account",
             "connect",
             "claude",
@@ -3648,15 +3644,13 @@ mod tests {
             "--import"
         ])
         .is_ok());
-        assert!(
-            Cli::try_parse_from(["lf", "ops", "account", "connect", "codex", "--api-key"]).is_ok()
-        );
+        assert!(Cli::try_parse_from(["lf", "account", "connect", "codex", "--api-key"]).is_ok());
         for flags in [
             vec!["--import", "--api-key"],
             vec!["--import", "--chrome-profile", "Work"],
         ] {
             assert!(Cli::try_parse_from(
-                ["lf", "ops", "account", "connect", "claude", "a@example.com"]
+                ["lf", "account", "connect", "claude", "a@example.com"]
                     .into_iter()
                     .chain(flags)
             )
@@ -3668,7 +3662,6 @@ mod tests {
     fn auth_set_accepts_provider_specific_billing_and_routing_state() {
         let cli = Cli::try_parse_from([
             "lf",
-            "ops",
             "account",
             "set",
             "codex",
@@ -3687,7 +3680,7 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Ops { cmd: OpsCommand::Account {
+            Some(Commands::Ops(OpsCommand::Account {
                 cmd: Some(AccountCommand::Set {
                     provider,
                     email: Some(email),
@@ -3699,7 +3692,7 @@ mod tests {
                     clear_paid_through: false,
                     ..
                 }), ..
-            } }) if provider == "codex"
+            })) if provider == "codex"
                 && email == "loopflow-eng@"
                 && login_email == "engineering@example.com"
                 && routing == "automatic"
@@ -3808,27 +3801,23 @@ mod tests {
 
     #[test]
     fn landing_wait_and_fix_is_explicit_and_serial_dispositions_are_rejected() {
-        let land = Cli::try_parse_from(["lf", "ops", "pr", "land", "--wait-and-fix"])
+        let land = Cli::try_parse_from(["lf", "pr", "land", "--wait-and-fix"])
             .expect("parse waited landing");
         assert!(matches!(
             land.command,
-            Some(Commands::Ops {
-                cmd: OpsCommand::Pr {
-                    cmd: Some(PrCommand::Land {
-                        wait_and_fix: true,
-                        ..
-                    })
-                }
-            })
+            Some(Commands::Ops(OpsCommand::Pr {
+                cmd: Some(PrCommand::Land {
+                    wait_and_fix: true,
+                    ..
+                })
+            }))
         ));
-        assert!(Cli::try_parse_from(["lf", "ops", "pr", "land", "--wait"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "pr", "land", "--wait"]).is_err());
         for command in ["land", "arm", "submit"] {
-            assert!(Cli::try_parse_from(["lf", "ops", "pr", command, "-c"]).is_err());
-            assert!(
-                Cli::try_parse_from(["lf", "ops", "pr", command, "--next", "follow-up"]).is_err()
-            );
+            assert!(Cli::try_parse_from(["lf", "pr", command, "-c"]).is_err());
+            assert!(Cli::try_parse_from(["lf", "pr", command, "--next", "follow-up"]).is_err());
         }
-        assert!(Cli::try_parse_from(["lf", "ops", "pr", "next"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "pr", "next"]).is_err());
     }
 
     #[test]
@@ -3936,7 +3925,7 @@ mod tests {
             })
         ));
         assert!(
-            Cli::try_parse_from(["lf", "task", "edit", "INF-123", "--notes", "revised"]).is_ok()
+            Cli::try_parse_from(["lf", "task", "update", "INF-123", "--notes", "revised"]).is_ok()
         );
         for removed in ["update", "comments"] {
             assert!(matches!(
@@ -4069,30 +4058,30 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "ops", "wt", "create", "child", "--stack"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "wt", "create", "child", "--child"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "wt", "up"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "wt", "down"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "pr", "stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "pr", "stack"]).is_err());
     }
 
     #[test]
     fn sync_manual_recovery_modes_are_explicit_and_exclusive() {
-        let manual = Cli::try_parse_from(["lf", "ops", "sync", "--manual", "origin/main"])
+        let manual = Cli::try_parse_from(["lf", "sync", "--manual", "origin/main"])
             .expect("parse manual sync");
         assert!(matches!(
             manual.command,
-            Some(Commands::Ops { cmd: OpsCommand::Sync(SyncArgs {
+            Some(Commands::Ops(OpsCommand::Sync(SyncArgs {
                 manual: true,
                 continue_sync: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
-            }) }) if onto == "origin/main"
+            }))) if onto == "origin/main"
         ));
 
-        assert!(Cli::try_parse_from(["lf", "ops", "sync", "--continue", "--abort"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "ops", "sync", "--plan", "--manual"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sync", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sync", "--plan", "--manual"]).is_err());
     }
 
     #[test]

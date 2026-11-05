@@ -218,9 +218,9 @@ Comments retain identity and authorship. Incoming planning completion changes on
 the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
-`PlanningSyncStatus` presents local Linear delivery evidence; `lf planning status`
+`PlanningSyncStatus` presents local Linear delivery evidence; `lf repository planning`
 presents Git acquisition/publication receipts and held projections. The retained
-mutation journal grows with every edit, so `lf planning journal` reads it on
+mutation journal grows with every edit, so `lf repository planning journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
@@ -274,7 +274,7 @@ The documented unconditional-update race remains a protocol limit.
 
 ```bash
 lf wave bind-project product <project-uuid> --json
-lf wave add product --json
+lf wave create product --json
 ```
 
 Validate one existing Project and select its accepted local record on the Wave's

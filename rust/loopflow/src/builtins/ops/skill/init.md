@@ -51,7 +51,7 @@ lf --version
 lf account --cached          # cached; no provider request
 lf account --json            # inspect accepted managed evidence
 lf account route
-lf id --json
+lf machine self --json
 lf wave list --json
 command -v claude
 command -v codex
@@ -63,7 +63,7 @@ find .lf/wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 
 Do not reconstruct distributed state from processes, worktrees, or provider
 web pages. `lf wave list`, `lf wave status`, and `lf wave show` are the shared read surfaces.
-If `lf id` says the local store is not initialized, record that plainly
+If `lf machine self` says the local store is not initialized, record that plainly
 and continue; do not invent a Machine identity.
 
 Present one compact topology:
@@ -203,7 +203,7 @@ repository binding changes only through the repository-wide migration.
 Ask for one outcome and a short name. Add it:
 
 ```bash
-lf wave add <name> --objective "<outcome>"
+lf wave create <name> --objective "<outcome>"
 ```
 
 This registers the Wave, starts its first chapter, and commits
@@ -320,7 +320,7 @@ Run the smallest checks that prove the selected path:
 lf account --cached          # cached; no provider request
 lf account --json            # inspect accepted managed evidence
 lf account route
-lf id --json
+lf machine self --json
 lf wave list --json
 ```
 

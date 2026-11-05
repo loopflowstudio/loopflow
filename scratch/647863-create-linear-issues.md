@@ -136,8 +136,20 @@ third compress pass (13 tests, 108 s).
 Kept as recorded assumptions, not blocking: the ten-minute healthy window and
 auto-retry for Projects (`scratch/questions.md`). Vocabulary split between
 `observe`/`export_observed_at` in code and "look" in user text is noted, not
-worth a loop. Next proof: the existing fixture test with `lf task sync` alone
-re-sending inside the window, then the demo step below.
+worth a loop.
+
+Second pass (2026-11-05, on b89dee04fd, after implement/compress/realign): the
+code, README and docs/work.md say the same three things as the accepted design
+(a pass waits out the window, `lf task sync` looks now, a look that finds nothing
+re-sends the saved id). Recovery checked against the fixture: a re-send that
+Linear refuses as a duplicate returns that refusal from `lf task sync`, keeps the
+creation attempted, and the next look binds the existing issue; nothing is
+created twice (`uncertain_creation_is_resent_once_per_window_and_on_task_sync`).
+The refusal reaches the person as Linear's own "already exists" text, which is
+truthful and self-resolving; rewording it is not worth a loop. `--retry-updates`
+stays asymmetric with creations because field writes were outside this Task's
+scope, not because of a new decision. No design change and no open product
+choice; the step advances to the demo.
 
 ## Remaining (demo step)
 

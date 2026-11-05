@@ -400,3 +400,4 @@ libghostty crash at test 402. The runner's later passes stopped on syspolicyd
 pressure from other worktrees, so these ran directly. Wave memory line "Eight warm"
 needs realign.
 Gate rerun, November 5 (after `9c5c4eb3b3`): no source change since the gate above (scratch only); results reused, no checks rerun.
+Gate rerun, November 5 (after `dff7883728`): source unchanged since `0426d19ae9` (scratch only); results reused, no checks rerun.

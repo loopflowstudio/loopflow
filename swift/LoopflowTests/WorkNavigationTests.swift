@@ -373,22 +373,20 @@ struct WorkNavigationTests {
             if args.first == "--repo" { await gate.wait() }
             return json
         })
-        let first = Task { await entry.openPrimaryConversation(store: store, registry: registry) }
+        let first = Task { await registry.openConversation(in: entry, store: store) }
         await gate.started()
         let otherKey = WorkWorkspaceKey(repository: "repo", kind: .task, id: "other")
         let other = registry.open(otherKey, title: "Other", location: record.workspace?.identity)
         let otherLayout = other.multiplexer.layout
-        await entry.openPrimaryConversation(store: store, registry: registry)
+        await registry.openConversation(in: entry, store: store)
         await gate.release()
         await first.value
         let pane = try #require(entry.multiplexer.pane(forSessionId: record.id))
         #expect(registry.selectedWork == otherKey)
         #expect(other.multiplexer.layout == otherLayout)
         #expect(entry.presentation.selectedSessionId == record.id)
-        let second = Task { await entry.openPrimaryConversation(store: store, registry: registry) }
-        await gate.started()
-        await gate.release()
-        await second.value
+        // Retry on an attached conversation selects it again in the same pane.
+        await registry.openConversation(in: entry, store: store)
         #expect(entry.multiplexer.pane(forSessionId: record.id)?.id == pane.id)
         #expect(entry.conversationError == nil)
         let model = WorkModel(query: store.query, repoPath: "/src/loopflow")

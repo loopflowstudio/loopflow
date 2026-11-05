@@ -776,31 +776,34 @@ final class WorkModel {
     }
 
     /// The placeholder's one action for any Work whose conversation is not open
-    /// here: a Task's explicit Start after a refused reveal, a failed opening's
-    /// Retry on the workspace intent, or a reveal; a primary prepares in place.
-    /// A Dashboard tile's Task also opens in place, through the warm opener, so
-    /// the Dashboard stays. Automatic opening runs through the warm queue.
+    /// here. A primary, or a Task shown in a Dashboard tile, opens in place through
+    /// the warm opener: Rust's Start after a refused reveal, else Retry on the
+    /// workspace intent. A selected Task's pane opens through its link, which can
+    /// resolve the checkout its Start creates. Automatic opening runs through the
+    /// warm queue.
     func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
-        switch workspace.key.kind {
-        case .task where selectedViewPlan != nil && workspaceRegistry?.visibleWork.contains(workspace.key) == true:
-            if let task = task(id: workspace.key.id)?.task, workspace.location == nil {
-                workspace.location = taskWorkspaceIdentity(task)
+        let key = workspace.key
+        let inTile = selectedViewPlan != nil && workspaceRegistry?.visibleWork.contains(key) == true
+        guard key.kind == .task, !inTile else {
+            guard let registry = workspaceRegistry else { return }
+            switch key.kind {
+            case .task:
+                if workspace.location == nil, let task = task(id: key.id)?.task { workspace.location = taskWorkspaceIdentity(task) }
+            case .wave:
+                if workspace.wave == nil { workspace.wave = wave(id: key.id)?.wave.name }
+            case .repository: break
             }
-            await workspaceRegistry?.openConversation(in: workspace, store: store)
-        case .task:
-            if workspace.conversationStart != nil, let found = task(id: workspace.key.id) {
-                let remote = workspace.location?.machineId != workspace.localMachineId
-                let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo,
-                                    machine: remote ? workspace.location?.machineId : nil,
-                                    repository: remote ? workspace.key.repository : nil, conversation: true)
-                await openTaskLink(link, expectedTaskID: found.task.id, intent: .start)
-            } else {
-                await openTaskConversation(workspace.key.id, intent: workspace.conversationError != nil ? workspace.conversationIntent : nil)
-            }
-        case .repository, .wave:
-            guard let workspaceRegistry else { return }
-            if workspace.key.kind == .wave, workspace.wave == nil { workspace.wave = wave(id: workspace.key.id)?.wave.name }
-            await workspace.openPrimaryConversation(store: store, registry: workspaceRegistry)
+            await registry.openConversation(in: workspace, store: store)
+            return
+        }
+        if workspace.conversationStart != nil, let found = task(id: key.id) {
+            let remote = workspace.location?.machineId != workspace.localMachineId
+            let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo,
+                                machine: remote ? workspace.location?.machineId : nil,
+                                repository: remote ? key.repository : nil, conversation: true)
+            await openTaskLink(link, expectedTaskID: found.task.id, intent: .start)
+        } else {
+            await openTaskConversation(key.id, intent: workspace.conversationError != nil ? workspace.conversationIntent : nil)
         }
     }
 

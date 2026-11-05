@@ -129,5 +129,7 @@ Implementation assumptions, November 5 (eighth-review tile direction):
   selected Work, so that reading would have left the Dashboard. An entered tile
   (`.entered`) keeps the pane's navigating Retry.
 - The primary tile's "No primary Session" text, which offered nothing, also became
-  the shared placeholder; its button prepares the primary in place through
-  `openPrimaryConversation`, the same route as the primary's selected pane.
+  the shared placeholder; its button prepares the primary in place through the
+  registry's `openConversation(in:store:)`, the one opener behind automatic
+  opening, the tile and the primary's selected pane (compress removed the
+  workspace's own `openPrimaryConversation`, which skipped the Machine check).

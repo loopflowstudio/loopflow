@@ -133,18 +133,6 @@ final class SessionsWorkspace {
         do { try await open() } catch { if !Task.isCancelled { conversationError = error.localizedDescription } }
     }
 
-    /// Populate this retained Work even if navigation changes while lf prepares it.
-    /// Automatic opening runs through the registry's warm queue; this is Retry.
-    func openPrimaryConversation(store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
-        await openConversation {
-            let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
-            store.reconcile([record])
-            store.adoptPreparation(record, intent: conversationIntent)
-            registry.presentSession(record, in: self)
-            await store.select(record.id, intent: conversationIntent)
-        }
-    }
-
     /// Whether a pane shows a Session the store holds. A saved layout can name a
     /// headless Run or an aged-out Session the store doesn't hold, and that pane
     /// renders as "Conversation not open".
@@ -706,10 +694,11 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    /// The placeholder's explicit action for a Work shown in place, such as a
-    /// Dashboard tile: Rust's Start after a refused reveal, else Retry on the
-    /// workspace intent. The same opener as automatic opening, so a refusal lands
-    /// the same offer or error here, and a deliberate press readmits a closed one.
+    /// The placeholder's explicit action for a Work shown in place, a primary's
+    /// pane or a Dashboard tile: Rust's Start after a refused reveal, else Retry
+    /// on the workspace intent. The same opener as automatic opening, so a refusal
+    /// lands the same offer or error here, and a deliberate press readmits a
+    /// closed one.
     func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
         let key = workspace.key
         guard openings[key] == nil, !workspace.openingConversation else { return }

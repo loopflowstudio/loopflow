@@ -121,13 +121,14 @@ superseded refusal records neither error nor offer and the queue retries with th
 current intent, including through `openLinkedTask`. Only a refused reveal fetches
 the explicit Start offer (`RegistryQuery.startOffer`, one `--explain` read that
 offers nothing on a failed read); a failed Start shows its error with Retry on the
-workspace intent. A primary's Retry (`SessionsWorkspace.openPrimaryConversation`)
-reads the Wave name `prefetchPrimary` left on the workspace. A Dashboard tile is
-the same `ConversationPlaceholder` as the pane; while a view plan is presented and
-the tile is visible, its button re-enters the warm opener in place
-(`SessionsWorkspaceRegistry.openConversation(in:store:)`: Rust's Start after a
-refused reveal, else Retry on the workspace intent, readmitting a closed tile),
-so the Dashboard stays. `WorkModel.conversationIsOpening` shows “Opening conversation…”
+workspace intent. A Dashboard tile is the same `ConversationPlaceholder` as the
+pane. A primary's Retry and a visible tile's button (while a view plan is
+presented) re-enter the warm opener in place through
+`SessionsWorkspaceRegistry.openConversation(in:store:)`: Rust's Start after a
+refused reveal, else Retry on the workspace intent, readmitting a closed one, with
+the same Machine check and the Wave name `prefetchPrimary` left on the workspace;
+the Dashboard stays. Only a selected Task's pane opens through its link, which can
+resolve the checkout its Start creates. `WorkModel.conversationIsOpening` shows “Opening conversation…”
 for an eligible working Task queued behind the slots or its Sessions read.
 `confirmMachine` replays Sessions so a quiet fresh repository opens its Tasks.
 Warm intent (recent and closed keys) persists per Machine and repository in
@@ -191,7 +192,9 @@ reconciliation and conversation lookup agree.
   conversation**), the primary tile's actionless "No primary Session" fallback and
   `SessionPaneView.emptyWorkspace`: deleted November 5 (eighth concept review).
   One `ConversationPlaceholder` serves pane and tile; attaching in place is where
-  the button routes, not a second view.
+  the button routes, not a second view. `SessionsWorkspace.openPrimaryConversation`,
+  the primary Retry's own opener without the Machine check: deleted the same day
+  for the registry opener.
 - Preserve explicit Start as recovery outside eligible working Task navigation;
   preserve Rust's Start/Reveal/Take back intents, Close and late-result fences,
   selected-first scheduling, input claims and LOO-717 retention. No new launch,
@@ -311,73 +314,38 @@ five demo questions stand as recorded defaults.
 
 ## Verification
 
-November 5 primaries: `cargo test -p loopflow --lib ops::human_session::` and
-`scripts/test_desktop.sh --filter 'WorkCacheTests|WorkspaceRetentionTests|WorkspacePanesTests|WorkNavigationTests|WorkCLISubscriptionTests'`
-New cases: primaries open on load beside the
-Task bound before selection; a queued primary shows opening and a failed one Retry,
-never an Open gate; primaries stay warm and Close releases until a deliberate
-visit; the real-CLI load prepares the repository primary with no agent process.
+Primaries (November 5): `cargo test -p loopflow --lib ops::human_session::` and
+`scripts/test_desktop.sh --filter 'WorkCacheTests|WorkspaceRetentionTests|WorkspacePanesTests|WorkNavigationTests|WorkCLISubscriptionTests'`.
+Cases: primaries open on load beside the Task bound before selection; a queued
+primary shows opening and a failed one Retry, never an Open gate; primaries stay
+warm and Close releases until a deliberate visit; the real-CLI load prepares the
+repository primary with no agent process.
 
 Focused checks cover automatic working Task preparation for absent and prepared
-Sessions, identity across refresh and selection, bounded fresh-load prefetch
-excluding unassigned Tasks, unavailable-to-Start transition, visible tiles past the
-warm limit, superseded refusals through the queue and a link, Close, elsewhere
-ownership, consumed-input refusal and its **Try again**, an unmounted start and a
-runtimeless store that only prepares (`WarmPaneMountTests`). Headless model and CLI
-checks stand in for preparation, not native rendering or input acceptance; the
-rendered proof and remaining demo work are in `loo-672-demo.md`. Gate owns
-affected suites and static analysis.
+Sessions, identity across refresh and selection, bounded fresh-load prefetch,
+unavailable-to-Start transition, visible tiles past the warm limit, superseded
+refusals through the queue and a link, Close, elsewhere ownership, consumed-input
+refusal and its **Try again**, an unmounted start and a runtimeless store that
+only prepares (`WarmPaneMountTests`), a finished unowned Task revealing into panes
+and a finished owned Task without history showing its record
+(`WorkspacePanesTests`), a failed tile saying **Retry** and attaching in place and
+a finished tile offering Rust's Start after a refused reveal
+(`WorkDestinationTests`). Headless model and CLI checks stand in for preparation,
+not native rendering or input acceptance; the rendered proof and remaining demo
+work are in `loo-672-demo.md`. Gate owns affected suites and static analysis.
 
-Checks: November 4 `cargo test -p loopflow --lib ops::human_session::` 37 passed;
-clippy and the 714-test Desktop suite passed before publication. November 5
-`scripts/test_desktop.sh --filter 'WorkspaceRetentionTests|WarmPaneMountTests|WorkCacheTests'`
-43 passed after the tile-retention fix. Compress, November 5: Swift-only edits;
-`scripts/test_desktop.sh --filter 'WorkDestinationTests|SessionsStoreTests|WorkspaceRetentionTests|WorkCacheTests|WorkspacePanesTests|WorkSurfaceTests|SessionsPolishTests|DTOFixtureTests'`
-203 passed in 8 suites; Rust unchanged, no rerun. Realign, November 5: plan claims
-checked against the tree by inspection (intent, warm queue, store launch, first
-turn, trust marker, shared matching, named tests all present); no code change, no
-rerun. Compress, November 5 (primaries): `cargo test -p loopflow --lib ops::human_session::`
-36 passed; `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkspaceRetentionTests|WorkspacePanesTests|WorkNavigationTests|WorkCLISubscriptionTests|WarmPaneMountTests'`
-passed after correcting three inherited expectations: the fixture's second Wave
-belongs to another repository and is never loaded, `hostUse` is Task-checkout
-presence that primaries never report, and a Wave workspace's session pane fills on
-load while its panes survive CLI mutations. Realign, November 5 (primaries): plan
-claims checked against the tree by inspection (`warmPrimaries`, `prefetchPrimary`,
-`warmWork` order, primary Start intent, Machine-only placement check, one
-`PRIMARY_MESSAGE`, the three skills' reading-pass bullet, the four new tests);
-scratch and Wave memory edits only, no rerun. Implement, November 5 (sixth-review
-implications): `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkspaceRetentionTests|WorkspacePanesTests|WorkNavigationTests|WorkCLISubscriptionTests|WarmPaneMountTests|WorkDestinationTests'`
-165 passed in 7 suites; two `WorkDestinationTests` fixtures inherited from the
-primaries change answered a primary's `session resume` with the Task's record and
-now answer only Task or named-Session resumes; Rust unchanged, no rerun. Compress, November 5 (sixth-review
-implications): Swift-only edits (one `startOffer`, `openPrimaryConversation`
-without `wave:`, `showsTerminals`, tile opener on the Task's intent, one `spin`
-wait helper in `WorkCacheTests`); same filter, 165 passed in 7 suites; Rust
-unchanged, no rerun. The rendered proof's candidate predates `83b3d64a93`'s
-shared Task matching, the primaries change and these passes. Realign, November 5
-(sixth-review implications): plan claims checked against the tree by inspection
-(`conversationIntent` is working → Start, `awaitsStart` → `TaskStartOffer`, one
-`ConversationOpenButton` and `openConversation(in:store:)`, the three retired
-identifiers and the "has not reported" copy absent from `swift/`, `rust/` and
-`builtins/`, refused-reveal tests on `prefetch-15`); origin/main still `384505b120`,
-so the recorded sync findings stand; Wave memory corrected (started unowned Tasks
-open, unstarted offer Start, one placeholder); no code change, no rerun. Implement,
-November 5 (seventh-review residue): `showsTerminals` loses its owner term, two
-`WorkspacePanesTests` cover a finished unowned Task revealing into panes and a
-finished owned Task without history showing its record; same filter, 167 passed
-in 7 suites; Rust unchanged, no rerun. Compress, November 5 (seventh-review
-residue): Rust's opening intent is one `SessionOpenIntent` end to end
-(`SessionConnectionArgs::intent`, `select_connection` and `open_without_replacing`
-take it, `flag()` owns the two flag spellings), `awaitsStart` sits beside
-`isCompleted`/`conversationIntent` in `WaveWorkMap.swift`, the warm queue stops at
-full slots; `cargo test -p loopflow --lib ops::human_session::` 36 passed,
-`lf::commands::write::` 3 passed, clippy clean; same Desktop filter plus
-`DashboardWorkspaceTests`, 180 passed in 8 suites. Realign, November 5
-(seventh-review residue): plan claims checked against the tree by inspection
-(`showsTerminals` has no owner term, the two finished-Task tests exist, one
-`SessionOpenIntent` through `human_session.rs` and `commands/session.rs`, no
-`owner_retention` use on this branch); origin/main moved to `27dbe31b69` with the
-same five conflicting files; Wave memory gains the finished-Task pane rule; no code
-change, no rerun. Implement, November 5 (eighth-review tile direction): Swift-only
-edits; same filter plus `DashboardWorkspaceTests`, 181 passed in 8 suites; Rust
-unchanged, no rerun.
+Pass history, November 4–5 (details in git): Rust `ops::human_session::` 36–37
+passed and clippy clean at every Rust-touching pass; the Desktop filter above plus
+`WarmPaneMountTests|WorkDestinationTests|DashboardWorkspaceTests` passed at each
+implement, compress and realign (165, 167, 180 and 181 tests across 7–8 suites as
+cases were added); three inherited expectations were corrected at the primaries
+compress (the fixture's second Wave belongs to another repository, `hostUse` is
+Task-checkout presence, a Wave pane fills on load) and two `WorkDestinationTests`
+fixtures answer only Task or named-Session resumes. The rendered proof's candidate
+predates `83b3d64a93`'s shared Task matching, the primaries change and these
+passes. Realigns checked plan claims against the tree by inspection with no code
+change; origin/main moved to `27dbe31b69` with the same five conflicting files.
+Compress, November 5 (eighth-review tile direction): Swift-only; the primary
+Retry joins the registry opener and `openPrimaryConversation` is deleted;
+`scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkDestinationTests|WorkCacheTests|DashboardWorkspaceTests|WorkspacePanesTests|WorkspaceRetentionTests|WarmPaneMountTests|WorkCLISubscriptionTests'`
+181 passed in 8 suites; Rust unchanged, no rerun.

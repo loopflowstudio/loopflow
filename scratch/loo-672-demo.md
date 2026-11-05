@@ -85,6 +85,8 @@ advance. Open: Wave memory still says “Eight warm” (realign), and the unmeas
 cases above (drafts, restart, Rex, cold return, twenty-Task memory) remain
 unproven, as disclosed when shipping was authorized.
 
+Headless demo, November 5 13:15 PST: no code changed since the advance above (only a gate note, `14f845fb5c`); the accepted experience and proofs stand. Decision: advance.
+
 Current runbook: `scratch/demo.html`. Earlier results below are historical.
 
 

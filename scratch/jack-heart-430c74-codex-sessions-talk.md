@@ -2,7 +2,7 @@
 
 Status: implemented, compressed, synced onto main through #1826, thread following
 implemented and compressed (no cuts), realigned 2026-11-05; concept review 2 moved lf's
-configuration onto the app-server (implemented and compressed 2026-11-05); concept review 3 found nothing to change (2026-11-05; gate next).
+configuration onto the app-server (implemented and compressed 2026-11-05); concept review 3 found nothing to change; headless demo passed at ae3f1466d4 (2026-11-05; gate next).
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -144,3 +144,14 @@ Realign 2026-11-05: code and plan agree on every point of the implement directio
 Private `LF_HOME`: start a Codex Session, move `loopflow.db` away, type, get a reply,
 run a tool, quit 0. Restore the store; `lf resume` shows history. Kill the observer
 while idle: the TUI keeps working.
+
+Demo 2026-11-05 (headless, standing in for Jack Heart; HEAD ae3f1466d4, codex-cli 0.166.0, fake
+Responses server): `scratch/codex_demo.py target/debug/lf $(which codex) ~/.lf-demos/430c74-100155`.
+1. `lf -a codex native-probe` ran a tool and answered. 2. With `loopflow.db` moved away and a
+directory in its place, a typed prompt ran its tool and answered; `/exit` returned 0 and printed
+`lf resume`. 3. Store restored: both answers recorded (the second recovered from provider history);
+`lf session resume` reopened the history. 4. Killed only the verified `__codex-observe` PID while
+idle; the next prompt still answered and `/exit` returned 0; zero live agent rows, no leftover
+processes. `codex_terminal.py --new-thread` (plain and wrapped) also passed at this HEAD.
+Durable root `~/.lf-demos/430c74-100155` (`LF_HOME` there/lf, `CODEX_HOME` there/codex) kept as
+evidence; no owners remain, nothing to tear down. Next: gate.

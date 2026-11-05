@@ -82,7 +82,9 @@ are one-way input. LOO-498 owns its native adapter.
   added in the Task's one migration; `task_host_occurrences` is gone.
 - SSH-ness comes from the relay's `SSH_CONNECTION`. A hangup under SSH (Rex tab
   closed on a remote viewer, Desktop quit, sleep/network loss) stays unknown
-  until any fresh attach to that owner or a resumed owner replaces it. Desktop
+  until any fresh attach to that owner or a resumed owner replaces it. Whether
+  remote Desktop quit should instead send a deliberate leave is an open choice
+  for Jack in loo-717-shell-lifetimes.md. Desktop
   departure and window close send Ctrl+] so they release. Cost: a remote viewer
   closed by hangup keeps a completed checkout until the Session is viewed again.
 - A dead owner that never recorded its viewers reads as unknown (no reaping).
@@ -92,9 +94,8 @@ are one-way input. LOO-498 owns its native adapter.
 - The Desktop retirement banner went with `lf task presence`; the pending
   reason stays in `task_retirements.reason` and `logs/workspace-retirement.log`.
   A Task status surface for it would be a separate change.
-- Proposed Wave memory update (not edited; read-only here): `.lf/wave/product/MEMORY.md`
-  lines ~291–296 still describe Machine/PID owner evidence, revision fences and
-  native settlement for LOO-717; replace with the Session-viewer hold above.
+- Wave memory (`.lf/wave/product/MEMORY.md`, LOO-717 section) now records the
+  Session-viewer hold (realign, Nov 5).
 
 Headless proof does not cover the real Ghostty detach timing (500 ms before
 freeing the surface) or Rex end to end; both belong to demo.

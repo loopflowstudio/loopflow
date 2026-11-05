@@ -1127,6 +1127,8 @@ panes are viewers. Switching Work, closing the window or quitting ends Desktop's
 viewers but leaves shells and agents running. Once a completed Task has no open
 viewer, its checkout and Desktop shells stay fifteen minutes, after requested
 work finishes; eligible idle agents end under the two-minute policy. Cleanup
-finishes without relaunching Desktop. Return before then to retain it again.
+of a local Task finishes without relaunching Desktop; a remote Task's viewers
+that quitting hung up stay unknown until the Session is viewed again. Return
+before then to retain it again.
 Conversation history remains; a deleted checkout is not recreated. See the
 [shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).

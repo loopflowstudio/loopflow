@@ -274,28 +274,26 @@ Capture models before records, delete replaced mechanisms, and use UPSERT when
 revision triggers matter: `INSERT OR REPLACE` skips update triggers. Focused SQL
 checks do not replace affected suites.
 
-## Native shell lifetimes (LOO-717, accepted November 3–4, 2026)
+## Native shell lifetimes (LOO-717, accepted November 3–5, 2026)
 
 Jack Heart approved building/publication through demo, not landing/installation.
-Hosts own shells/layouts and Session retention policy; lf owns shared
-retirement. LOO-498 owns Rex's adapter. No ordinary-shell relay or deleted-checkout
+Rex owns its shells/layouts; LF closes only Desktop-owned shells, never Rex's.
+LOO-498 owns Rex's adapter. No ordinary-shell relay or deleted-checkout
 restoration. Close ends Desktop shells/jobs; Hide/switch/quit preserve execution.
 Undo restores history. Nested lf preserves shell purpose.
 
 Eligible idle agents end at two minutes; completed-and-away workspaces at fifteen.
-Return cancels grace; explicit last Close skips it. Active work, drafts and pending
-requests delay cleanup without restarting elapsed grace. Uncommitted files are
-discarded; committed-ref safeguards and history survive.
+Return cancels grace. Active work, drafts and pending requests delay cleanup
+without restarting elapsed grace. Uncommitted files are discarded; committed-ref
+safeguards and history survive.
 
-Jack's November 4 choice: proven retaining-instance exit releases as away without
-relaunch. Machine/PID/start evidence, revision fences and per-instance occurrences
-protect newer retention; lease/network/client loss stays unknown. Remote verification
-needs an existing reverse Machine route. Release and native settlement are independent;
-Rex server exit cannot settle surviving jobs. Destination owners settle separately.
-Away+settled preserves grace; a lost reply cannot undo committed release.
-Only reused occurrences need persisted revisions. Evidence:
-`76750bdc55:scratch/loo-717-shell-lifetimes.md`. Installed Desktop/Rex and physical
-remote-Machine acceptance remain unproved.
+Jack's November 5 rule: an open LF viewer of a Task Session retains the checkout
+(hidden, unfocused and passive count); a shell with that cwd does not; a native tab
+left after the viewer exits is no hold. LF persists no host/occurrence identity:
+the serving owner records `processes.viewer_hold` from its own connections. A local
+drop past reconnect grace is exit; an SSH drop is unknown until a fresh attach, so
+a quit Desktop releases remote viewers only once viewed again. Agent exit is never
+viewer exit. Superseded occurrence/lease design: `b81df60579:scratch/`.
 
 ## Session and operate pairs (2026-10-05)
 

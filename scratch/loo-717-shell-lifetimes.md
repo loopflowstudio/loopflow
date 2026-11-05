@@ -50,6 +50,9 @@ completed-Task Desktop shells and checkout can retire at fifteen minutes total.
 Keep explicit-Close behavior where already accepted. A renewed viewer cancels a
 queued retirement. Confirmed Desktop process exit releases its views without an
 app relaunch (accepted option 1a); do not require the dead app to report again.
+On the built branch this holds for local Tasks. A remote Task's owner sees Desktop
+quit as an SSH hangup, indistinguishable from network loss, so it stays unknown
+until the Session is viewed again (see the open decision below).
 
 Requested final work, drafts, pending input and running Graphs still protect
 execution. Work finishing after an elapsed deadline does not start another
@@ -159,6 +162,7 @@ Check (Nov 5): focused lib `task_retirement::`, `ops::task::retirement`,
 `waited_land_retains_intent…`; Swift Workspace/WorkDestination/DTO/Ghostty input
 suites; fmt, clippy, architecture, inventory — pass. Gate owns affected suites.
 Compress (Nov 5): `transport::lifetime` lib, `transport_tests session_viewers_retain…`, clippy — pass.
+Realign (Nov 5): docs/plan reconciled, no code change, no rerun.
 
 ### Delete — do not maintain
 
@@ -204,7 +208,15 @@ Rex presence/native-settlement recipe. No new agent skill or user cleanup ritual
    and actual cleanup tests still pass. Formatting, Clippy and affected checks run
    under repository cadence; previous architecture tests must change with it.
 
-No open product choice remains from this review. Engineering must establish the
-existing viewer evidence and necessary repair, not ask Jack to choose a registry.
+## Open decision for review — remote viewer hangup
+
+Realign (Nov 5) found one tension between 1a and "unknown remote liveness". Quitting
+Desktop, or closing a Rex tab, on a remote Task's viewer hangs up its SSH relay;
+the owner cannot tell that from network loss, so the completed remote checkout is
+retained, with no expiry, until any viewer attaches again. Choices for Jack:
+(a) accept this conservative cost (current build); (b) have Desktop send a
+deliberate leave (Ctrl+]) to its remote viewers at quit, which reintroduces a
+bounded quit-time step; (c) an expiry for unknown holds, which 1a ruled out as
+lease-based release. Local Tasks are unaffected.
 Run the explicitly requested pursue Graph through publication, leaving review,
 installation, merge and Task completion separate. Do not run past the Task's demo.

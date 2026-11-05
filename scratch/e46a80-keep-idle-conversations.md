@@ -95,12 +95,13 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   and leaves.
 - Principle written where exercised: AGENTS.md harness guidance and
   `rust/loopflow/src/harness/README.md`. Wave memory (`.lf/wave/infrastructure/
-  MEMORY.md`) carries the lifetime decision under "Idle owners end" and, under
-  "Upgrade continuity", the traced 11-04 cause, the middleman rule, the one
-  `RecordingGap` concept, the `store-gap` observation and the quiet Pi/OpenCode
-  behavior; the shipped Session titles and Agent startup profiling sections
-  are trimmed to their pointers (`a5000ef889`, `3b07e13404`) to stay under the
-  16000-token budget.
+  MEMORY.md`) carries the lifetime decision and the held, re-offered draft under
+  "Idle owners end" and, under "Upgrade continuity", the traced 11-04 cause, the
+  middleman rule, the one `RecordingGap` concept, the `store-gap` observation,
+  the re-offered Codex reading and the quiet Pi/OpenCode behavior; the shipped
+  Session titles and Agent startup profiling sections are trimmed to their
+  pointers (`a5000ef889`, `3b07e13404`) and a schema-derivable Epoch note is
+  retired to stay under the 16000-token budget.
 
 ## The contract, traced through the change
 
@@ -209,4 +210,4 @@ Not runnable headless here; fixtures below stand in.
 
 ## Checks
 
-Compress of the catch-up (2026-11-05; `retain` owns the unrecorded bytes, the relay no longer logs an activity miss twice): `cargo test -p loopflow --lib -- store::recording_gap:: store::sqlite::session_events::tests::a_recovered_gap lf::commands::context:: transport::lifetime:: transport::input_retry_tests:: harness::codex_connection:: harness::fact_writer::tests::a_yielded_reading harness::fact_writer::tests::an_unchanged_reading harness::task_updates::` 35 passed (both input fixtures now carry the restored-store recovery leg; the relay test closes its gap into Session history); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean. Unchanged since earlier passes: `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes` 1 passed, `cargo test -p loopflow --test integration context_block_tests::` 2 passed, the other four `transport_tests` exit fixtures 5 passed, `node --check` on both JS hooks. Gate owns the affected suites; the Demo needs the installed build and is for Jack.
+Realign after the catch-up (2026-11-05; the review's three findings read as implemented at `input.rs::retain`, `fact_writer.rs::Activity::save`/`catch_up` and `SqliteStore::close_recording_gap`, so the plan and code agree): `cargo test -p loopflow --lib -- store::recording_gap:: store::sqlite::session_events::tests::a_recovered_gap lf::commands::context:: transport::lifetime:: transport::input_retry_tests:: harness::codex_connection:: harness::fact_writer::tests::a_yielded_reading harness::fact_writer::tests::an_unchanged_reading harness::task_updates::` 35 passed in 177 s (both input fixtures carry the restored-store recovery leg; the relay test closes its gap into Session history); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean at the compress commit, code unchanged since. Unchanged since earlier passes: `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes` 1 passed, `cargo test -p loopflow --test integration context_block_tests::` 2 passed, the other four `transport_tests` exit fixtures 5 passed, `node --check` on both JS hooks. Gate owns the affected suites; the Demo needs the installed build and is for Jack.

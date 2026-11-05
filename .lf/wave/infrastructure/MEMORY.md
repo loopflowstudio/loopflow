@@ -59,40 +59,44 @@ recency; preparation launches no provider. LOO-499 history:
 ## Idle owners end (LOO-709/e46a80, reconciled 2026-11-05)
 
 Jack Heart requires idle conversations to cost nothing. Detached settled owners
-end after `session.end_detached_after` (default 2m, configurable/off). Jack selected
-editable drafts and the same pending requests on November 3, removed bulk resume,
-and authorized delivery after checks. Single-Session resume never replays.
-LOO-498 owns workspace restoration (Rex first, Herder second); unselected open
-Rex tabs retain viewers.
+end after `session.end_detached_after` (default 2m, configurable/off). Jack
+selected editable drafts and the same pending requests on November 3, and
+removed bulk resume. Single-Session resume never replays. LOO-498 owns workspace
+restoration (Rex first, Herder second); unselected open Rex tabs retain viewers.
 
-Finished Graphs and stale unviewed status retained idle owners; store errors once
-killed the watcher and now log a gap. Use wall time and retry judgments. Fenced unyielded turns, including
-quiet Graph supervision, outrank viewed idle reports; preserve running Graphs and
-Runs. Claude records activity before context delivery; Stop needs complete task/cron
-evidence to settle watches/wakeups. Same-provider handoff carries activity to its
-new fence; replacement cannot inherit it.
+Finished Graphs and stale unviewed status retained idle owners; store errors
+once killed the watcher and now log a gap; use wall time and retry judgments.
+Fenced unyielded turns, including quiet Graph supervision, outrank viewed idle
+reports; preserve running Graphs and Runs. Claude records activity before
+context delivery; Stop needs complete task/cron evidence to settle
+watches/wakeups. Same-provider handoff carries activity to its new fence;
+replacement cannot inherit it.
 
 Queued endings are candidates: drain ready output, recheck output revisions even
-when reports are throttled, and restart quiet after new activity. Idle ending also
-checks viewer history and current viewers. Recheck input/store protection at
-consumption. LOO-705 shares that owner judgment. Jack Heart, 2026-11-05 (e46a80):
-a removed, rebuilt or superseded lf executable ends nothing; only the person
-quitting, `lf resume`, `lf monitor rollover`, the detached limit or an explicit
-end does. `installation::superseded` stays for resume, rollover and doctor.
+when reports are throttled, and restart quiet after new activity. Idle ending
+also checks viewer history and current viewers. LOO-705 shares that owner
+judgment. Jack Heart, 2026-11-05 (e46a80): a removed, rebuilt or superseded lf
+executable ends nothing; only the person quitting, `lf resume`, `lf monitor
+rollover`, the detached limit or an explicit end does.
+`installation::superseded` stays for resume, rollover and doctor.
 
-Native editors need retained owners. Record input before delivery; exact plain
-Claude text plus matching prompt-ID settlement can release it. Enter, submission
-hooks (which may reject/restore text), and Stop alone cannot. Edits/paste, ambiguous
-or later input and missing IDs retain owners until native exit; other providers
-lack this acknowledgement. This deliberately limits idle-ending coverage.
+Native editors need retained owners. Input is offered to the store before
+delivery; a store that refuses or stays locked past 1 s gets the bytes delivered
+anyway, and the owner holds the Session and re-offers them every 2 s until a
+record lands, so a quiet draft reaches `lf resume` and rollover (e46a80). Exact
+plain Claude text plus matching prompt-ID settlement can release it. Enter,
+submission hooks (which may reject/restore text), and Stop alone cannot.
+Edits/paste, ambiguous or later input and missing IDs retain owners until native
+exit; other providers lack this acknowledgement, which deliberately limits
+idle-ending coverage.
 
 LOO-710's integrated `screens/<session>.ghostsnp` writer/reader replaces `.vt`;
 save at policy and command exit. Jack selected no DTO field, expiry or deletion.
-Real Claude 2.1.317/local model fixtures preserved editable drafts and the same
-AskUserQuestion across both deadlines, then ended a settled plain submission.
-Synthetic transport fixtures prove ending ordering and quiet-supervisor survival
-through settlement. Neither proves configured/installed acceptance. Earlier
-twenty-owner teardown reopened only three; full returns remain open.
+Real Claude 2.1.317 fixtures preserved editable drafts and AskUserQuestion
+across both deadlines, then ended a settled plain submission; synthetic
+transport fixtures prove ending ordering and quiet-supervisor survival. Neither
+proves configured/installed acceptance. Earlier twenty-owner teardown reopened
+only three; full returns remain open.
 
 ## Session viewer wire (LOO-712, 2026-11-02)
 
@@ -951,22 +955,23 @@ Jack's November 4 report of reopened Sessions losing input/crashing supersedes
 liveness as recovery proof. e46a80 traced the November 4 Codex loss: `lf install`
 raised the reader floor under 177 live processes, the relay treated every store
 error as fatal and read the store before accepting reconnects; Claude, OpenCode
-and Pi survived because lf only observes them through hooks. Jack Heart's rule
+and Pi survived because lf only observes them. Jack Heart's rule
 (2026-11-05): lf is a session manager, context adder and hook interjector on top
 of a harness, never a middleman; the store records a conversation and never
 carries it. Relay, owner input, settlement and every hook are best-effort. One
 concept, `store::RecordingGap`, logs a failure once per change and once on
-recovery; hooks keep it in a `.store-gap` marker and, per Jack's steer, write one
+recovery; hooks keep it in a `.store-gap` marker and write one
 `store-gap` observation into the Session's history at the next boundary that
 succeeds, so a missed Stop reads as unknown, never as a live turn. Pi and
-OpenCode log a failed lf to their plugin log, never a toast or a line per prompt.
+OpenCode log a failed lf to their plugin log, never a toast.
 Hooks and typed input wait at most 1 s for a locked store, then deliver
-unrecorded, so an install's exclusive migration holds no keystroke. Fixtures
+unrecorded. A yielded Codex reading the store refused is re-offered on the
+relay's idle tick, so a gap never leaves a Session reading as a live turn. Fixtures
 prove the surviving relay, unrecorded input and the provider's own exit, not a
 live install; old builds need `lf resume`.
-Fixtures and interim main repair prove no corrected-build rollout. Both Machines
-need identity/store/scheduled checks and existing Sessions completing turns with
-continued interaction. Landing is insufficient.
+Fixtures and interim main repair prove no corrected-build rollout; both Machines
+need identity/store/scheduled checks and existing Sessions completing turns.
+Landing is insufficient.
 
 Jack Heart removed executable pinning after #1587 review, accepting natural
 failure and retry in the same Session/checkout; delivery stays review-only.
@@ -1040,10 +1045,9 @@ telemetry red; fresh failures join existing work.
   filenames are work: never trim them to detect an empty checkpoint. Installed
   LOO-661 recovery is unproved by fixture.
 - **Commit failures need both Git streams** (2026-10-11): retain stdout, stderr
-  and a silent failure's exit status. Scratch exclusion belongs only to persistent
-  workspaces.
+  and a silent failure's exit status.
 - **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners; `--all` excludes explicit-only `--ui-host`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas.
-- **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
+- **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the migration head.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
   ledger before ratifying history. Unmerged-migration candidates cannot promote;

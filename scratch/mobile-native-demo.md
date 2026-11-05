@@ -1,3 +1,34 @@
+# Native iOS review — November 4, 2026
+
+LOO-718 · current source dbefca7f62 · requested by Jack Heart.
+
+Jack requested seeing the demo after pausing autonomous implementation. The pause
+remains in effect. The assistant launched the installed iPhone 17 Pro Simulator
+app with `--fixture`, brought Simulator forward, and captured/inspected the Task
+list at `demo-assets/current-tasks.png`. No build or test was rerun for this review.
+
+The live offline demo supports Task selection, retained fixture Session editing,
+Session switching, Find, and app foreground/background recovery. Its client does
+not expose Task creation; New Task and repository selection are shown using the
+existing native test captures. The walkthrough distinguishes these from live
+interaction. No Machine connection, real agent or physical-phone demonstration
+is claimed by this launch.
+
+`scratch/demo.html` now presents this current walkthrough, a historical native
+screenshot for comparison, and numbered review questions. Other screenshots come
+from the November 4 native acceptance/layout runs recorded in
+[mobile-ios.md](mobile-ios.md). Live Tailscale/owner acceptance has separately
+passed against isolated test providers; the earlier record's statement that no
+backend connection exists is superseded. Physical-phone and actual-provider UX
+remain to be reviewed. Apple distribution remains LOO-721.
+
+No new visual or interaction feedback from Jack has been received. No design
+change or acceptance is inferred. Next: Jack can open Session input study, take
+the keyboard, leave a draft, switch Sessions and return, then try Find and rotation.
+Record feedback here before selecting implementation changes.
+
+## Earlier demo record
+
 # Native Task-to-Session demo
 
 LOO-718 · interactive demo · November 3, 2026 (America/Los_Angeles)

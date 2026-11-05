@@ -768,7 +768,7 @@ impl World {
         let store = self.store()?;
         let session = self
             .runtime
-            .block_on(provider_conversation::admit(&store, &id))?
+            .block_on(provider_conversation::admit(&store, &id, &cwd))?
             .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
         let session_id = session.id.to_string();
         if let Some(task) = task {

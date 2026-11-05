@@ -562,7 +562,7 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
 
 /// One exit status for every `lf desktop` command: 2 bad arguments, 3 missing or
 /// ambiguous target, 4 Desktop unreachable, otherwise 1. Clap exits 2 and Ctrl-C 130.
-fn exit_status(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn exit_status(error: anyhow::Error) -> anyhow::Error {
     use crate::work::selection::SelectionError;
     let selection = error
         .chain()
@@ -1014,20 +1014,6 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             println!("{record}");
             return Ok(());
         }
-        DesktopCommand::Query { .. }
-        | DesktopCommand::Pin { .. }
-        | DesktopCommand::Unpin { .. }
-        | DesktopCommand::Rename { .. }
-        | DesktopCommand::Layout { .. } => {
-            let saved = save_arrangement(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                command,
-                &mut std::io::stdin().lock(),
-            )?;
-            println!("{saved}");
-            return Ok(());
-        }
         DesktopCommand::View {
             expression,
             plan,
@@ -1083,20 +1069,6 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     }
     // Arguments are checked before Desktop is contacted.
     let verb = Verb::parse(command)?;
-    if let VerbKind::Action { name, args } = &verb.kind {
-        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
-            let record = edit_saved_tile(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                board,
-                tile,
-                name,
-                args,
-            )?;
-            println!("{record}");
-            return Ok(());
-        }
-    }
     require_supported()?;
     let json = cli.json || verb.target.json;
     let mut desktop = DesktopConnection::open()?;
@@ -1932,7 +1904,7 @@ fn edit_tiles(
 fn stream_events(desktop: DesktopConnection, json: bool) -> Result<()> {
     use std::io::Write;
     let mut events = desktop.events()?;
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = std::io::stdout();
     while let Some(change) = events.next(None)? {
         if json {
             writeln!(stdout, "{}", serde_json::to_string(&change)?)?;
@@ -3683,5 +3655,36 @@ mod tests {
                 "{text:?}"
             );
         }
+    }
+}
+
+pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
+    use crate::lf::DesktopCommand;
+    if matches!(
+        command,
+        DesktopCommand::Query { .. }
+            | DesktopCommand::Pin { .. }
+            | DesktopCommand::Unpin { .. }
+            | DesktopCommand::Rename { .. }
+            | DesktopCommand::Layout { save: true, .. }
+    ) {
+        return true;
+    }
+    if !matches!(
+        command,
+        DesktopCommand::Hide { .. }
+            | DesktopCommand::Show { .. }
+            | DesktopCommand::Move { .. }
+            | DesktopCommand::Do { .. }
+    ) {
+        return false;
+    }
+    match Verb::parse(command) {
+        Ok(Verb {
+            kind: VerbKind::Action { name, .. },
+            target,
+            ..
+        }) => saved_tile(&name, target.pane.as_deref()).is_some(),
+        _ => false,
     }
 }

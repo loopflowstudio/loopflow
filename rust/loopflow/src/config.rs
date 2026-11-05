@@ -79,6 +79,9 @@ pub fn participant_name() -> Result<Option<String>, LoadError> {
 /// The participant as `lf` would name them running in `directory`: an app
 /// resolves a repository's Git name from that repository, not where it stands.
 pub fn participant_name_in(directory: &Path) -> Result<Option<String>, LoadError> {
+    if crate::journal::request::active() {
+        return load_user_name(directory);
+    }
     match std::env::var(USER_NAME_ENV) {
         Ok(name) => match normalize_user_name(&name) {
             Some(name) => Ok(Some(name)),
@@ -121,7 +124,8 @@ pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
 
 pub fn yolo_override() -> bool {
-    std::env::var(YOLO_OVERRIDE_ENV).is_ok_and(|value| value == "1")
+    !crate::journal::request::active()
+        && std::env::var(YOLO_OVERRIDE_ENV).is_ok_and(|value| value == "1")
 }
 
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
@@ -133,7 +137,11 @@ thread_local! {
 pub fn agent_override() -> Option<String> {
     CALL_AGENT
         .with(|agent| agent.borrow().clone())
-        .or_else(|| std::env::var(AGENT_OVERRIDE_ENV).ok())
+        .or_else(|| {
+            (!crate::journal::request::active())
+                .then(|| std::env::var(AGENT_OVERRIDE_ENV).ok())
+                .flatten()
+        })
         .filter(|value| !value.is_empty())
 }
 

@@ -1,4 +1,5 @@
 mod os_process;
+pub(crate) mod request;
 pub(crate) use os_process::OsProcess;
 
 use std::cell::RefCell;
@@ -347,7 +348,8 @@ pub fn observe_process(command: &[String]) {
     let wait = receipt_wait();
     // Failed early observation must not be retried at exit with a longer wait.
     static ATTEMPTED: AtomicBool = AtomicBool::new(false);
-    if current_context().is_some()
+    if request::active()
+        || current_context().is_some()
         || EFFECT_FREE_READ.load(Ordering::Relaxed)
         || READ.load(Ordering::Relaxed)
         || ATTEMPTED.swap(true, Ordering::Relaxed)
@@ -393,7 +395,7 @@ pub fn with_runtime<T>(
 ) -> anyhow::Result<T> {
     // The executable owns admission and completion, even when observation
     // failed. Nested library wrappers cannot mint another Process to recover it.
-    if is_cli_process() || current_context().is_some() {
+    if request::active() || is_cli_process() || current_context().is_some() {
         return run();
     }
     run_admitted(repo_root, command, run)
@@ -439,7 +441,7 @@ const PANIC_EXIT: i32 = 101;
 
 /// Attach ordinary command observation after installation/data selection.
 pub fn admit_process(repo_root: &Path, command: &[String]) {
-    if EFFECT_FREE_READ.load(Ordering::Relaxed) {
+    if request::active() || EFFECT_FREE_READ.load(Ordering::Relaxed) {
         return;
     }
     if READ.load(Ordering::Relaxed) {
@@ -575,6 +577,10 @@ fn try_emit(
     event: LfEventType,
     fields: LfEventFields,
 ) -> Result<(), std::io::Error> {
+    if request::active() {
+        tracing::info!(target: "loopflow::server::request", ?node, ?event, ?fields, repository = %repo_root.display(), "request effect");
+        return Ok(());
+    }
     let is_process_started = matches!((node, event), (LfNode::Process, LfEventType::Started));
     let maybe_context = if is_process_started {
         ensure_process_context(repo_root, &fields)?
@@ -1149,6 +1155,9 @@ fn lock_file(_file: &File) -> Result<FileLock, std::io::Error> {
 }
 
 fn current_context() -> Option<ProcessContext> {
+    if request::active() {
+        return None;
+    }
     if is_cli_process() {
         return PROCESS_CONTEXT
             .lock()

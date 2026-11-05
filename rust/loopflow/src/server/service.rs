@@ -245,74 +245,78 @@ async fn subscribe(
 }
 
 async fn command(change: Write, id: &str, instance: &str) -> Result<Reply> {
-    let executable = crate::os_process::resolve_lf_binary()?;
-    let mut command = tokio::process::Command::new(&executable);
-    // A service has no caller Session/Task. Never lend its launcher's identity
-    // to requests, or change process-global environment while serving clients.
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("LF_") {
-            command.env_remove(key);
+    let id = id.to_owned();
+    let instance = instance.to_owned();
+    // Once admitted, a disconnected caller does not cancel or replay effects.
+    // Dropping this join releases the viewer; the worker can finish.
+    tokio::task::spawn_blocking(move || {
+        use clap::Parser;
+        let trace_id = crate::id::TraceId::default();
+        let mut target = serde_json::to_value(&change)?;
+        if let Some(fields) = target.as_object_mut() {
+            for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
+                fields.remove(field);
+            }
         }
-    }
-    let trace_id = crate::id::TraceId::default();
-    command.env("LF_TRACE_ID", trace_id.as_str());
-    command.env("LF_HOME", crate::store::lf_home_dir());
-    command.env("LF_BIN", executable);
-    command
-        .args(change.argv())
-        .current_dir(change.directory())
-        .stdin(if change.input().is_some() {
-            std::process::Stdio::piped()
-        } else {
-            std::process::Stdio::null()
+        let mut output = Vec::new();
+        let mut errors = Vec::new();
+        let result = crate::journal::request::run(&trace_id, &target, || {
+            let args: Vec<_> = std::iter::once("lf".to_owned())
+                .chain(change.argv())
+                .collect();
+            let cli = match crate::lf::Cli::try_parse_from(&args).and_then(crate::lf::Cli::checked)
+            {
+                Ok(cli) => cli,
+                Err(error) => {
+                    use std::io::Write;
+                    let stream = if error.use_stderr() {
+                        &mut errors
+                    } else {
+                        &mut output
+                    };
+                    write!(stream, "{error}")?;
+                    return Err(crate::process::CommandExit(
+                        u8::try_from(error.exit_code()).expect("Clap exit code fits a byte"),
+                    )
+                    .into());
+                }
+            };
+            anyhow::ensure!(
+                crate::lf::commands::mutation::accepts(&cli),
+                "unsupported mutation"
+            );
+            let mut input = change.input().unwrap_or_default().as_bytes();
+            crate::lf::commands::mutation::run(
+                &cli,
+                &args,
+                change.directory(),
+                &mut crate::lf::commands::mutation::CommandIo {
+                    input: &mut input,
+                    output: &mut output,
+                    error: &mut errors,
+                },
+            )
+        });
+        let code = i32::from(crate::journal::command_exit_code(&result));
+        if let Err(error) = result {
+            use std::io::Write;
+            if !error.is::<crate::process::CommandExit>() {
+                writeln!(errors, "Error: {error:?}")?;
+            }
+        }
+        tracing::info!(request = %id, %instance, code, %trace_id, "Server command finished");
+        anyhow::ensure!(
+            output.len() < MAX_FRAME / 2 && errors.len() < MAX_FRAME / 2,
+            "command output exceeded its limit"
+        );
+        Ok(Reply::Command {
+            trace_id,
+            output: String::from_utf8(output)?,
+            stderr: String::from_utf8(errors)?,
+            code,
         })
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = command.spawn()?;
-    tracing::info!(request = %id, %instance, pid = child.id(), %trace_id, "Server command started");
-    let stdout = child.stdout.take().expect("stdout is piped");
-    let stderr = child.stderr.take().expect("stderr is piped");
-    let stdin = child.stdin.take();
-    let input = async {
-        if let Some(mut stdin) = stdin {
-            stdin
-                .write_all(change.input().expect("piped input has content").as_bytes())
-                .await?;
-            stdin.shutdown().await?;
-        }
-        Ok::<_, std::io::Error>(())
-    };
-    let wait = child.wait();
-    let (output, errors, input, status) = tokio::join!(
-        read_command_output(stdout),
-        read_command_output(stderr),
-        input,
-        wait
-    );
-    let status = status?;
-    if status.success() {
-        input?;
-    }
-    tracing::info!(request = %id, %instance, code = status.code(), %trace_id, "Server command exited");
-    Ok(Reply::Command {
-        trace_id,
-        output: output?,
-        stderr: errors?,
-        code: status.code().unwrap_or(1),
     })
-}
-
-async fn read_command_output(stream: impl AsyncRead + Unpin) -> Result<String> {
-    let mut bytes = Vec::new();
-    stream
-        .take((MAX_FRAME / 2) as u64)
-        .read_to_end(&mut bytes)
-        .await?;
-    anyhow::ensure!(
-        bytes.len() < MAX_FRAME / 2,
-        "command output exceeded its limit"
-    );
-    Ok(String::from_utf8(bytes)?)
+    .await?
 }
 
 pub(super) async fn receive(reader: &mut (impl AsyncRead + Unpin)) -> Result<Vec<u8>> {

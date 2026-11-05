@@ -172,12 +172,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         SessionCommand::New { id, connection } => {
             new_thread(cli, connection, connection.target(cli, id.as_deref())?).await
         }
-        SessionCommand::Rename {
-            id,
-            name,
-            suggest,
-            json,
-        } => rename(id, name, *suggest, *json).await,
+        SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
         SessionCommand::Send { id, task, to } => {
             let store = open_shared_store().await?;
             let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
@@ -229,37 +224,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::Bind {
-            id,
-            task,
-            dry_run,
-            json,
-        } => {
-            let store = open_shared_store().await?;
-            if *dry_run {
-                let preview = crate::ops::human_session::preview_binding(&store, id, task).await?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&preview)?);
-                } else {
-                    println!(
-                        "{} → {} ({}) [{}]. Not assigned.",
-                        preview.session_id, preview.identifier, preview.title, preview.task_id
-                    );
-                }
-                return Ok(());
-            }
-            let session = crate::ops::human_session::bind(&store, id, task).await?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&session)?);
-            } else {
-                println!(
-                    "Session {} belongs to {}.",
-                    session.id,
-                    session.work_path.as_deref().unwrap_or(task)
-                );
-            }
-            Ok(())
-        }
+        SessionCommand::Bind { .. } => unreachable!("binding uses shared mutation dispatch"),
     }
 }
 
@@ -646,7 +611,9 @@ async fn select(
 ) -> anyhow::Result<String> {
     let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
     if selected.started {
-        eprintln!("Nothing to resume here; starting a new conversation.");
+        crate::journal::request::diagnostic(format_args!(
+            "Nothing to resume here; starting a new conversation."
+        ));
     }
     Ok(selected.id)
 }
@@ -662,7 +629,7 @@ async fn reopen(
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, &id, fork, launch, json).await
+    crate::ops::human_session::open(store, directory, &id, fork, launch, json).await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -736,9 +703,19 @@ async fn restarted(
     if !threaded {
         // No earlier thread to hand off from: opening starts the first one.
         if selected.started {
-            eprintln!("Nothing to restart here; starting a new conversation.");
+            crate::journal::request::diagnostic(format_args!(
+                "Nothing to restart here; starting a new conversation."
+            ));
         }
-        return crate::ops::human_session::open(store, &selected.id, false, launch, json).await;
+        return crate::ops::human_session::open(
+            store,
+            directory,
+            &selected.id,
+            false,
+            launch,
+            json,
+        )
+        .await;
     }
     let agent = crate::config::agent_override();
     let next =
@@ -776,7 +753,13 @@ fn print_opened(
     Ok(())
 }
 
-async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow::Result<()> {
+async fn rename(
+    id: &str,
+    name: &[String],
+    suggest: bool,
+    json: bool,
+    output: &mut dyn std::io::Write,
+) -> anyhow::Result<()> {
     let source = if suggest {
         SessionTitleSource::Generated
     } else {
@@ -784,14 +767,19 @@ async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow:
     };
     let session = rename_session(id, name, source).await?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&session)?);
+        writeln!(output, "{}", serde_json::to_string_pretty(&session)?)?;
     } else if suggest && session.title_source == SessionTitleSource::Human {
-        println!(
+        writeln!(
+            output,
             "Session {} keeps its human-assigned name {:?}.",
             session.id, session.title
-        );
+        )?;
     } else {
-        println!("Session {} is named {:?}.", session.id, session.title);
+        writeln!(
+            output,
+            "Session {} is named {:?}.",
+            session.id, session.title
+        )?;
     }
     Ok(())
 }
@@ -811,4 +799,92 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
             .await
             .context("open the shared Loopflow store")?,
     ))
+}
+
+pub(super) fn is_mutation(command: &SessionCommand) -> bool {
+    matches!(
+        command,
+        SessionCommand::Rename { .. }
+            | SessionCommand::Bind { .. }
+            | SessionCommand::Resume {
+                connection: SessionConnectionArgs { prepare: true, .. },
+                ..
+            }
+            | SessionCommand::New {
+                connection: SessionConnectionArgs { prepare: true, .. },
+                ..
+            }
+    )
+}
+
+pub(super) fn mutate(
+    cli: &crate::lf::Cli,
+    directory: &Path,
+    command: &SessionCommand,
+    io: &mut super::mutation::CommandIo<'_>,
+) -> anyhow::Result<()> {
+    if let SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } =
+        command
+    {
+        anyhow::ensure!(
+            connection.message.is_none(),
+            "prepared Sessions do not accept a message"
+        );
+        let session = prepared(cli, directory)?;
+        if connection.json || cli.json {
+            writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;
+        } else {
+            writeln!(
+                io.output,
+                "{}",
+                shlex::try_join(session.open_argv.iter().map(String::as_str))?
+            )?;
+        }
+        return Ok(());
+    }
+    tokio::runtime::Runtime::new()?.block_on(async {
+        match command {
+            SessionCommand::Rename {
+                id,
+                name,
+                suggest,
+                json,
+            } => rename(id, name, *suggest, *json, io.output).await,
+            SessionCommand::Bind {
+                id,
+                task,
+                dry_run,
+                json,
+            } => {
+                let store = open_shared_store().await?;
+                if *dry_run {
+                    let preview =
+                        crate::ops::human_session::preview_binding(&store, id, task).await?;
+                    if *json {
+                        writeln!(io.output, "{}", serde_json::to_string_pretty(&preview)?)?;
+                    } else {
+                        writeln!(
+                            io.output,
+                            "{} → {} ({}) [{}]. Not assigned.",
+                            preview.session_id, preview.identifier, preview.title, preview.task_id
+                        )?;
+                    }
+                    return Ok(());
+                }
+                let session = crate::ops::human_session::bind(&store, id, task).await?;
+                if *json {
+                    writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;
+                } else {
+                    writeln!(
+                        io.output,
+                        "Session {} belongs to {}.",
+                        session.id,
+                        session.work_path.as_deref().unwrap_or(task)
+                    )?;
+                }
+                Ok(())
+            }
+            _ => unreachable!("is_mutation selects Session mutations"),
+        }
+    })
 }

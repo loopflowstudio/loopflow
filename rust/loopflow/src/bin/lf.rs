@@ -11,6 +11,9 @@ use tracing_subscriber::EnvFilter;
 use loopflow::context_block::ContextMoment;
 use loopflow::definition::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
+use loopflow::lf::commands::mutation::{
+    regressed_in_arg, selected_task_repository, task_edit_update,
+};
 use loopflow::lf::{
     Cli, Commands, GraphCommand, InstallCommand, OpsCommand, SkillCommand, TaskCommand, WaveCommand,
 };
@@ -875,46 +878,8 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             })
         }
 
-        WaveCommand::NewChapter {
-            wave,
-            name,
-            plan,
-            dry_run,
-            json,
-            ..
-        } => {
-            let rotation = loopflow::ops::chapter::new_chapter(
-                repo,
-                name,
-                &std::fs::read(plan)?,
-                wave.as_deref(),
-                *dry_run,
-            )?;
-            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
-                .planning_transport()
-                .remote_name()
-                .filter(|_| !dry_run)
-            {
-                eprintln!("Saved locally; pending {provider} sync.");
-            }
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&rotation)?);
-            } else {
-                println!("Chapter {}", rotation.name);
-                for wave in rotation.waves {
-                    println!(
-                        "  {} → {} ({})",
-                        wave.wave, rotation.name, wave.successor_id
-                    );
-                    for task in wave.tasks {
-                        println!(
-                            "    {}  {:?}  {}",
-                            task.task.identifier, task.disposition, task.reason
-                        );
-                    }
-                }
-            }
-            Ok(())
+        WaveCommand::NewChapter { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         WaveCommand::Connect {
             wave,
@@ -929,21 +894,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             team_name.as_deref(),
         ),
         WaveCommand::Reteam { apply } => loopflow::lf::commands::ops::reteam(repo, *apply),
-        WaveCommand::Add {
-            wave,
-            objective,
-            json,
-        } => {
-            let added = tokio::runtime::Runtime::new()?.block_on(
-                loopflow::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
-            )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&added)?);
-            } else {
-                println!("{}", loopflow::ops::wave_lifecycle::render_added(&added));
-            }
-            Ok(())
-        }
+        WaveCommand::Add { .. } => unreachable!("shared mutation dispatch precedes this command"),
         WaveCommand::Remove {
             wave,
             preview,
@@ -1025,30 +976,13 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
 }
 
 fn read_task_draft() -> anyhow::Result<String> {
-    let limit = loopflow::ops::task::MAX_FILE_BYTES;
-    let mut bytes = Vec::new();
-    std::io::stdin()
-        .take(limit as u64 + 1)
-        .read_to_end(&mut bytes)?;
-    anyhow::ensure!(bytes.len() <= limit, "Draft exceeds 1 MB");
-    Ok(String::from_utf8(bytes)?)
+    loopflow::lf::commands::mutation::read_task_draft(&mut std::io::stdin().lock())
 }
 
 fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use loopflow::ops::task_ownership::{change, render, OwnershipChange};
-            let requested = match command {
-                TaskCommand::Claim { .. } => OwnershipChange::Claim,
-                _ => OwnershipChange::Unassign,
-            };
-            let ownership = change(repo, issue, requested)?;
-            if *json {
-                println!("{}", serde_json::to_string(&ownership)?);
-            } else {
-                println!("{}", render(&ownership));
-            }
-            Ok(())
+        TaskCommand::Claim { .. } | TaskCommand::Unassign { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
@@ -1105,15 +1039,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Reopen { issue, reason } => {
-            loopflow::ops::task::task_reopen(issue, reason.as_deref())?;
-            println!("{issue}: reopened; its Graph unchanged");
-            Ok(())
-        }
-        TaskCommand::Complete { issue, reason } => {
-            loopflow::ops::task::task_complete(repo, issue, reason.as_deref())?;
-            println!("{issue}: completed");
-            Ok(())
+        TaskCommand::Reopen { .. } | TaskCommand::Complete { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Create {
             request,
@@ -1336,29 +1263,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Save {
-            issue,
-            path,
-            revision,
-            json,
-        } => {
-            let content = read_task_draft()?;
-            let saved = loopflow::ops::task::task_save(issue, path, revision, &content)?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&saved)?);
-            } else {
-                println!("{}", saved.message);
-            }
-            Ok(())
-        }
-        TaskCommand::Abandon { issue, force, json } => {
-            let identifier = loopflow::ops::task::task_abandon(repo, issue.as_deref(), *force)?;
-            if *json {
-                println!("{}", serde_json::to_string(&identifier)?);
-            } else {
-                println!("{identifier}: canceled; PRs and branches removed");
-            }
-            Ok(())
+        TaskCommand::Save { .. } | TaskCommand::Abandon { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Sweep { apply, json } => {
             let entries = loopflow::ops::task::task_sweep(repo, *apply)?;
@@ -1396,42 +1302,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Edit {
-            issue,
-            title,
-            notes,
-            rank,
-            assignee,
-            regressed_in,
-            wave,
-        } => {
-            let result = loopflow::ops::task::task_edit(
-                repo,
-                issue,
-                wave.as_deref(),
-                task_edit_update(title, notes, *rank, assignee, regressed_in),
-            )?;
-            println!("{}: updated", result.id);
-            print_planning_sync(&result.sync);
-            Ok(())
-        }
-        TaskCommand::Move {
-            issue,
-            machine: Some(machine),
-            json,
-            ..
-        } => {
-            let ownership = loopflow::lf::commands::session_move::move_task(issue, machine)?;
-            if *json {
-                println!("{}", serde_json::to_string(&ownership)?);
-            }
-            Ok(())
-        }
-        TaskCommand::Move { issue, wave, .. } => {
-            let result = loopflow::ops::task::task_move_membership(repo, issue, wave.as_deref())?;
-            println!("{}: membership saved", result.id);
-            print_planning_sync(&result.sync);
-            Ok(())
+        TaskCommand::Edit { .. } | TaskCommand::Move { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
         TaskCommand::Comment {
             issue,
@@ -1499,29 +1371,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             print_task(&task, *json)
         }
     }
-}
-
-fn task_edit_update(
-    title: &Option<String>,
-    notes: &Option<String>,
-    rank: Option<u32>,
-    assignee: &Option<String>,
-    regressed_in: &Option<String>,
-) -> loopflow::work::task::TaskUpdate {
-    loopflow::work::task::TaskUpdate {
-        title: title.clone(),
-        description: notes.clone(),
-        rank,
-        assignee: assignee.clone().map(Some),
-        regressed_in: regressed_in_arg(regressed_in),
-    }
-}
-
-/// `0.15.3` reads as `v0.15.3`; an unreadable version reaches validation as typed.
-fn regressed_in_arg(version: &Option<String>) -> Option<String> {
-    version.as_deref().map(|version| {
-        loopflow::work::task::release_version(version).unwrap_or_else(|| version.to_string())
-    })
 }
 
 fn piped_task_report() -> anyhow::Result<Option<String>> {
@@ -2317,24 +2166,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn selected_task_repository(
-    cli: &Cli,
-    directory: &Path,
-    selector: Option<&str>,
-) -> anyhow::Result<std::path::PathBuf> {
-    let repo = loopflow::ops::task::task_repository(directory, selector)?;
-    if cli.repo.is_some() {
-        anyhow::ensure!(
-            loopflow::repository::CanonicalRepo::discover(directory)?
-                == loopflow::repository::CanonicalRepo::discover(&repo)?,
-            "Task {} does not belong to selected repository {}",
-            selector.unwrap_or("in this checkout"),
-            directory.display()
-        );
-    }
-    Ok(repo)
-}
-
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Provider hooks name the stable installed entry, which an upgrade can
     // replace under a running Session. An internal command this release no
@@ -2370,6 +2201,39 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     );
     if execution && loopflow::transport::delegate_current(cli.batch)? {
         return Ok(());
+    }
+    if loopflow::lf::commands::mutation::accepts(&cli) {
+        let directory = match cli.wt.as_deref() {
+            Some(name) => loopflow::lf::commands::ops::resolve_worktree(name)?,
+            None => std::env::current_dir()?,
+        };
+        if matches!(&cli.command, Some(Commands::Ship { stop: true, .. })) && cli.task.is_none() {
+            let resolution = loopflow::lf::commands::context::explain_in(
+                &directory,
+                cli.wave.as_deref(),
+                None,
+                None,
+                None,
+            )?;
+            cli.task = match resolution.task {
+                loopflow::ops::context::ContextFact::Bound { value, .. } => Some(value),
+                loopflow::ops::context::ContextFact::Unavailable { reason } => {
+                    anyhow::bail!(reason)
+                }
+                _ => anyhow::bail!("No Task selected; name a Task or run from its checkout"),
+            };
+        }
+        journal::admit_process(&directory, args);
+        return loopflow::lf::commands::mutation::run(
+            &cli,
+            args,
+            &directory,
+            &mut loopflow::lf::commands::mutation::CommandIo {
+                input: &mut std::io::stdin(),
+                output: &mut std::io::stdout(),
+                error: &mut std::io::stderr(),
+            },
+        );
     }
     // Display location is not execution placement. Opening reads Work here;
     // the retained Desktop owners prepare/connect only the requested view.
@@ -2584,19 +2448,12 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Ship {
         graph,
         reason,
-        stop,
+        stop: false,
         ..
     }) = &cli.command
     {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
-        if *stop {
-            print!(
-                "{}",
-                loopflow::lf::commands::ship::stop(&issue, reason.as_deref())?
-            );
-            return Ok(());
-        }
         let directory = loopflow::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
         return loopflow::lf::commands::ship::run(
@@ -2736,7 +2593,9 @@ fn execute_command(
         Some(Commands::Desktop { .. } | Commands::Open(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }
-        Some(Commands::Portfolio { cmd, json }) => loopflow::portfolio::run(cmd.as_ref(), *json),
+        Some(Commands::Portfolio { .. }) => {
+            unreachable!("shared mutation dispatch precedes this command")
+        }
         Some(Commands::Config { cmd }) => match cmd {
             loopflow::lf::ConfigCommand::User { json } => {
                 loopflow::lf::commands::config::print_user(*json)

@@ -731,6 +731,9 @@ fn work_selector(session: &LfSession) -> Option<String> {
 }
 
 pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
+    if crate::journal::request::active() {
+        return Ok(None);
+    }
     let Some(value) = std::env::var_os(PREPARED_CAPTURE_ENV) else {
         return Ok(None);
     };
@@ -749,6 +752,7 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
 /// refused; it is never taken over or resumed.
 pub(crate) async fn open(
     store: &SharedStore,
+    directory: &Path,
     session_id: &str,
     fork: bool,
     resume: bool,
@@ -759,7 +763,7 @@ pub(crate) async fn open(
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
-        None => provider_conversation::admit(store, session_id)
+        None => provider_conversation::admit(store, session_id, directory)
             .await?
             .ok_or_else(|| session_not_found(session_id))?,
     };
@@ -791,7 +795,8 @@ pub(crate) async fn open(
     let admitted;
     let session = if resume {
         let id = session.id.clone();
-        let _launch = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
+        let _launch =
+            crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
         admitted = primary::admit_workspace(store, session.clone()).await?;
         &admitted
     } else {
@@ -900,10 +905,10 @@ pub(crate) async fn open(
                 &session.id,
                 departure_here(),
             )?;
-            eprintln!(
+            crate::journal::request::diagnostic(format_args!(
                 "Stopped the {} client that had this conversation; continuing here.",
                 session.provider.as_deref().unwrap_or("provider")
-            );
+            ));
         }
         crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
     }
@@ -954,10 +959,10 @@ async fn fork(
         &next,
         crate::session_record::SessionGraphMembership::Independent,
     )?;
-    eprintln!(
+    crate::journal::request::diagnostic(format_args!(
         "Forked {} into {}; the original keeps running.",
         source.id, next.id
-    );
+    ));
     let record = surface(store, &next).await?;
     if launch {
         open_prepared(store, &next.id, json).await?;
@@ -1018,7 +1023,8 @@ fn departure_here() -> crate::process::Departure {
 async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let launch_lock =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     crate::agent_input_timing::record("launch_lock_acquired", id);
     // Resolve the current input under the launch lock, including completion
     // or replacement that happened while this opener waited.
@@ -1086,7 +1092,8 @@ pub(crate) async fn new_thread(
     json: bool,
 ) -> Result<LfSession> {
     let lock_id = id.to_string();
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let launch_lock =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
         .session(id)
         .await?
@@ -1113,11 +1120,11 @@ pub(crate) async fn new_thread(
     next.skill = None;
     next.request = Some(request);
     let next = append_input(store, next).await?;
-    eprintln!(
+    crate::journal::request::diagnostic(format_args!(
         "Started a new {} thread for {}, seeded with what the {from} thread knew.",
         next.provider.as_deref().unwrap_or("provider"),
         next.title
-    );
+    ));
     if launch {
         drop(launch_lock);
         open_prepared(store, &next.id, json).await?;
@@ -1190,7 +1197,7 @@ fn attaches(
             executable.display()
         )
     })?;
-    eprintln!(
+    crate::journal::request::diagnostic(format_args!(
         "Moved {} off {}; continuing on the installed lf.{}",
         if session.title.is_empty() {
             session.id.as_str()
@@ -1203,7 +1210,7 @@ fn attaches(
         } else {
             ""
         }
-    );
+    ));
     Ok(false)
 }
 
@@ -1398,10 +1405,10 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
             crate::store::StoreError::InvalidAuthority(reason) => anyhow!(reason),
             error => anyhow!(error),
         })?;
-    eprintln!(
+    crate::journal::request::diagnostic(format_args!(
         "Binding {} to {} ({}). Permanent.",
         session.id, task.identifier, task.title
-    );
+    ));
     surface(store, &session).await
 }
 

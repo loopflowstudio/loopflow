@@ -3078,6 +3078,22 @@ mod tests {
     }
 
     #[test]
+    fn server_request_stops_preserve_unknown_historical_attribution() {
+        let conn = open();
+        apply_before_migration(&conn, "server_request_stops");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/request_stops_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        let stop: (i64, Option<String>, Option<String>) = conn.query_row(
+            "SELECT ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person FROM tasks WHERE issue_identifier='STOP-1'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(stop, (25, None, None));
+    }
+
+    #[test]
     fn ownership_log_records_released_evidence_without_inventing_owners() {
         let conn = open();
         apply_before_migration(&conn, "task_ownership");

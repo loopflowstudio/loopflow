@@ -98,7 +98,7 @@ pub fn explain(
 }
 
 /// [`explain`] as if run in `cwd`.
-pub(crate) fn explain_in(
+pub fn explain_in(
     cwd: &std::path::Path,
     wave: Option<&str>,
     task: Option<&str>,

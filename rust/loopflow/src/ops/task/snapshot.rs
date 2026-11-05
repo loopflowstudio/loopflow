@@ -155,7 +155,12 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .sqlite
         .task_ship_stop(&task.id)
         .map_err(task_error)?
-        .map(|stop| mark(stop.at, stop.by.as_ref()))
+        .map(|stop| {
+            Ok::<_, OpsError>(super::ShipMark {
+                at: stop.at,
+                by: super::ship::stopper(&store.sqlite, &repo, &stop).map_err(task_error)?,
+            })
+        })
         .transpose()?;
     Ok(TaskSnapshot {
         machine_id,

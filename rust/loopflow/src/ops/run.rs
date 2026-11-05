@@ -319,6 +319,9 @@ pub(crate) async fn select_execution_work(
             return Ok(Some(selected));
         }
     }
+    if crate::journal::request::active() {
+        return Ok(None);
+    }
     match std::env::var(crate::lf::WORK_DECLARATION_ENV) {
         Ok(selector) => select_work(store, cwd, WorkSelection::parse(&selector)?).await,
         Err(_) => Ok(None),

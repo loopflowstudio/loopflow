@@ -291,7 +291,7 @@ where
     F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
 {
     let store = store.clone();
-    tokio::task::spawn_blocking(move || func(store))
+    crate::journal::request::spawn_blocking(move || func(store))
         .await
         .map_err(|err| StoreError::InvalidData(err.to_string()))?
 }

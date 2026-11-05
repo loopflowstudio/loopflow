@@ -1,11 +1,11 @@
 //! Commands submitted by native clients to the Loopflow server.
-//! The executable owns routing, effects, and Process attribution.
+//! CLI and server share mutation dispatch; the carrier owns its I/O and trace.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// A complete CLI command requested by an app.
+/// A typed mutation with the same defaults and effects as its CLI spelling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.

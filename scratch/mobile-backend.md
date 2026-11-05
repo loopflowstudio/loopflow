@@ -1,152 +1,140 @@
 # Separate execution destinations, client access and installation
 
-LOO-593 · Deletion pursuit selected November 4, 2026
+LOO-593 · Accepted direction and implementation reconciled November 4, 2026
 
 ## Current pursuit: shared direct writes and the Desktop FFI deletion
 
 Jack Heart selected [direct server writes](server-write-direction.md) after the
-full-CLI cutover was implemented. That direction supersedes the subprocess
-execution design below and in older evidence. Keep the live feature Graph and
-PR #1813; its authored loop must return to implement before publication/demo.
-No merge, Auto-Ship or Task completion is authorized.
+full-CLI cutover was implemented. Accepted scope: one complete Rust mutation path
+for CLI and server, request-scoped telemetry, and deletion of the embedded Work
+library. Publication of PR #1813 and interactive demo are authorized; merge,
+Auto-Ship and Task completion are not. The existing feature Graph owns delivery.
 
-The unpublished deletion in this checkout removes the embedded Work library.
-Preserve it. Every native shared Read, Write and Subscription uses the local
-server; Ghostty rendering, app-owned automation, ordinary execution launches,
-remote streams and existing Session/Graph owners remain separate.
+### Implemented at `59287ba3ed`
+
+Every shared native `Read`, `Write` and `Subscription` uses the local server.
+`rust/loopflow-ffi/`, its C ABI/Cargo entries, `LoopflowLibrary.swift`, the Swift
+module map and FFI-only tests/linking/packaging are removed. `serve_in_app`,
+`open_in_app`, `with_call_process` and the duplicate `Write::perform` executor
+are also gone. Ghostty rendering, app-owned automation, ordinary execution
+launches, remote streams and existing Session/Graph owners retain their roles.
+
+At that commit, served writes spawned the full CLI. The working direct-write
+cut replaces that adapter with shared mutation dispatch.
+
+Desktop Task creation still uses `RegistryQuery.createTask` → ordinary
+`task create --run --json`; it is an execution launch, not a `Write` variant.
+The required native create/open/rename/save demo spans both that launch path and
+served mutations. Removing ordinary served-write subprocesses does not move
+provider or Graph lifetime into the server.
+
+Main's #1815 (`dfd454cfc7`) is integrated by merge `59287ba3ed`, after checkpoint
+`ced68911ee`. The earlier base conflict is resolved locally; publication remains.
+Its coherent app/helper selection and custom-location update behavior must survive
+further changes. Infrastructure's November 4 memory also records reported lost
+input/crashes after upgrades (LOO-724); liveness alone is not continuity evidence.
+No cause or combined-release success follows from the merge.
+
+### Shared direct-write implementation
+
+`lf/commands/mutation.rs` owns routing, selection, effects and formatting for
+served operations and their CLI commands. It accepts a directory and streams;
+`Write` retains the wire shape and CLI spelling. The server uses a blocking
+worker, with no ordinary CLI child. `journal::request` masks the launcher's
+Process/caller and carries diagnostics, agent choice and tracing into nested
+blocking operations without changing global cwd/env/stdio. Requests never
+create Process rows; existing provider and Graph owners remain unchanged.
+
+Jack Heart's November 4 review selected the existing `logs/lf.log` path. Request
+spans/effects use its enabled server target, carry trace and target, and record
+duration/result/panics. No extra request-log directory remains. Ship-stop records
+its existing timestamp without an OS Process. The Task's single migration adds
+`ship_stopped_person`, preserving the person at admission rather than inferring
+historical authorship from later Machine settings; older unknown names stay unknown.
 
 ### Delete — do not maintain
 
-| Concrete removal | Surviving path / remaining cut |
-| --- | --- |
-| `rust/loopflow-ffi/`, its C ABI and Cargo entries; `LoopflowLibrary.swift`, `LoopflowFFI/module.modulemap`, `LoopflowLibraryTests.swift` | Already removed. Keep shared Rust operations behind `ServerClient`; no Swift FFI fallback. |
-| Static Loopflow-library linking and FFI-only packaging/build steps | Already removed from SwiftPM, Xcode, CI and scripts. Keep Ghostty. |
-| `serve_in_app`, `open_in_app`, `with_call_process`, `Write::perform` and their exclusive tests | Already removed. Do not restore request-sized Process records or the duplicate mutation executor. |
-| `server/service.rs::command` subprocess adapter and `read_command_output` | **Next implementation cut:** direct typed writes through one shared CLI/server mutation path, with explicit request context and output. |
-| Duplicated mutation/default/output branches that shared execution replaces in `bin/lf.rs` and `lf/commands/` | Remove in the same cut. Preserve complete routing, defaults, errors and attribution; never redirect global cwd/env/stdin/stdout. |
-| CLI-child Process assertions exclusive to the old server adapter | Replace with request trace/effect correlation and real OS identity assertions. Keep effect parity, failure, >64 KiB save, cancellation and concurrent-write coverage. |
+- `server/service.rs`'s CLI spawn and `read_command_output`: removed; preserve
+  framing limits, output/error/exit status, no replay and unknown outcomes.
+- Task/Wave mutation branches in `bin/lf.rs`, Session rename/bind orchestration,
+  and Desktop saved-write branches: moved to shared command handling. Preserve
+  CLI flags/defaults and app-owned automation.
+- Process-count equivalence in `served_reads`: replaced with effect equivalence
+  and proof that requests create no Process rows; preserve every wire variant,
+  large saves, and arrangement's no-Process behavior.
+- Redundant Session/Desktop mutation re-entry and `portfolio::run`: removed;
+  CLI dispatch already selects the shared executor before reaching those handlers.
+  Request entry and nested workers use the same unwind-safe scope restoration.
+- Already removed Desktop FFI crate/adapter/module-map/linking/packaging stay
+  deleted. Provider launches and remote streams retain their existing owners.
 
-### Remaining implementation and proof
+Focused parity covers every wire variant, >64 KiB saves, failed writes, normal
+request logs, concurrent traces, no fabricated Processes and admitted lost replies.
+Remote ownership verifies no local fallback. The final audit also carries the
+request directory into native-conversation adoption and remote source resolution,
+keeps pending-sync diagnostics in the request, and avoids waiting for terminal
+EOF when a remote CLI mutation takes no body. Both final focused reruns passed;
+no product judgment is missing.
 
-The next implement pass owns the shared mutation path and request-scoped
-telemetry specified in `server-write-direction.md`. Current subprocess results
-are historical evidence, not acceptance of direct writes. Arrangement still
-creates no Process. Distinct concurrent requests must not borrow the server
-launcher's Session/Task or create fictitious OS processes. A lost reply remains
-outcome unknown; cancellation releases the viewer without replaying a write.
+### Remaining proof and delivery
 
-Follow the complete mutation paths, not just `Write`'s enum match. Existing
-`bin/lf.rs` dispatch owns routing/default resolution and prints diagnostics;
-`journal::current_context` selects process-global context in a CLI;
-`session::prepared`, `work_route::forward`, and `config::with_agent_override`
-are relevant existing capabilities. Sharing lower-level operations alone must
-not leave two orchestration implementations. The prior lfd research documents
-that failure mode.
+Gate owns affected correctness/packaging checks on the completed implementation,
+including full Desktop and bounded Xcode builds. The existing Graph owns sync,
+checkpoint and publication of PR #1813, stopping at interactive demo. No merge,
+Auto-Ship or Task completion is authorized.
 
-Gate owns affected correctness and packaging checks after implementation; sync
-owns PR #1813's base conflicts without resurrecting FFI. The contributing
-conversation owns the native demo and matched benchmark on the completed build:
-create a Task, open its conversation, rename and save, verifying UI and persisted
-state. Leave precise build/test evidence here; no rendering environment is
-available in this Graph step. Publication must describe the final implementation
-and its remaining platform limits, then stop at interactive demo.
+The [direct-write demo](direct-write-demo.md) proves native Task creation,
+conversation, rename, file save and description save with persisted-state receipts.
+The contributing conversation's bundle predates the final cwd/error/stop repairs;
+focused checks cover those changes, not a fabricated final-build screenshot claim.
+Its attempted autonomous research Graph lacked a managed Codex account; native
+conversation worked. This is operator evidence, not Jack Heart's acceptance.
 
-Retain [native evidence](server-cutover-demo.md),
-[raw measurements and baseline harness](server-performance/results.md), and
-[contribution/build handoff](server-cutover-handoff.md). The earlier demo predates
-the pane-close repair and direct writes. Matched old warm medians were read
-21.06 → 26.79 ms and rename 50.68 → 87.60 ms. Remeasure the same workload after
-removing CLI startup; no matched embedded RSS sample supports memory savings.
-Prior namespace-only detail remains at `8d6c7ee75b:scratch/mobile-backend.md`.
-The pre-compression uncommitted plan is retained at
-`/tmp/loo593-compress-original-mobile-backend.md`.
+[Matched measurements](server-performance/results.md) retain raw samples:
+subprocess → direct rename median/p95 87.38/105.30 → 10.77/20.63 ms; read
+26.94/34.42 → 28.00/52.67 ms. The rename workload improved, while read tail latency
+and the single restart observation worsened. Host/Graph work was uncontrolled;
+there is no general read, startup or memory-savings claim. The earlier embedded
+baseline is historical. `scratch/demo.html` holds the prepared review artifact.
 
-## Accepted direction
+The [handoff](server-cutover-handoff.md) preserves earlier failures: the full
+Desktop run failed Portfolio setup and stalled during Work observation shutdown;
+focused repairs passed, but no full-suite pass follows. Earlier server library
+checks emitted an Apple compact-unwind linker warning. Namespace-only signed
+replacement and the [earlier native demo](server-cutover-demo.md) retain their
+limits. Pre-realignment detail is committed at `59287ba3ed`.
 
-Jack Heart requested returning to the drawing board after identifying that
-`lf machine service` mixes remote execution management with client API access.
-Jack selected this split, then requested updating the design and relaunching pursue:
+## Accepted responsibilities and shared contract
 
-- **Machine** names where work runs: identity, SSH connections, destination
-  defaults, pools and rentals. Keep `lf machine` and `lf --machine` here.
-- **Server** gives Desktop and mobile access to Loopflow on a host. Move client
-  admission, availability and the serving entry point to `lf server`.
-- **Installation** selects and updates artifacts and registers the server.
-  Keep that lifecycle under `lf install`, including automatic local setup.
-- **Desktop** owns its windows, panes, rendering and app-owned automation API.
-  Keep `lf desktop` and `DesktopServer` separate from the shared server.
+Jack Heart selected the November 4 split after reviewing mixed client-access and
+execution-management responsibilities. Machine owns execution destinations,
+identity, SSH, defaults, pools and rentals. Server owns shared client access.
+Installation owns artifact selection, updates and automatic local registration.
+Desktop owns windows, panes, Ghostty rendering and its automation API. CLI use
+stays independent of server availability; no scheduler, shadow Work store,
+viewer registry or new execution-lifetime owner belongs in this service.
 
-The canonical boundary and usage are in
+The canonical boundary and user commands are in
 [Clients, servers and execution destinations](../docs/dev/server.md).
-This replaces the earlier Machine-service framing. Jack Heart now authorizes
-implementation and publication of this cutover in the existing Task, followed by
-interactive review. The earlier docs-only boundary is superseded. No merge or
-Auto-Ship approval is given. Publication returns to the existing feature graph’s
-interactive demo boundary.
+Developer sources moved to `docs/dev/` at Jack's request; existing `/architecture`
+website URLs remain stable. `lf server run/status` replaces the former Machine
+service commands. Installation's hidden readiness bridge and legacy plist only
+support installed registration migration. Revision-1 socket/lock, Machine IDs,
+execution-location records, `LF_HOME` and wire fields retain their identities.
+Keep disabled background items disabled. No internal command aliases or duplicate
+protocol paths are required.
 
-## Retained installation and documentation decisions
+All shared native Read/Write/Subscription operations use the local server;
+ordinary execution launches and remote streams retain their existing owners.
+Local setup is automatic and needs no Tailscale. Remote access is separately
+opt-in. A phone is a client of a Machine; selecting a worker is explicit.
+LOO-718 owns remote admission and iOS. Read-only inspection of its PR #1812 at
+`983b271695` found HTTPS/WSS over host Tailscale, pairing/revocation, native iOS,
+and recoverable create/start; this does not prove the combined release.
 
-Jack Heart selected `docs/dev/` for developer sources; existing `/architecture`
-website URLs stay stable. The user-facing server guide and links from setup,
-Ops, Surfaces, Sessions, troubleshooting and glossary remain current.
-
-Namespace cutover `996f16fabb` and readiness repairs `5f140091b6` / `4c5ea88a47`
-established `lf server run/status` and installation-owned readiness. Keep the
-revision-1 socket/lock for running relays and the legacy plist solely to inspect
-and retire installed registration while preserving disabled choices. These
-persisted-installation migrations are not obsolete embedded Work code.
-
-## Experience and ownership
-
-Install Loopflow, open Desktop and edit a Session. Local client access is prepared
-by installation; no server setup ritual or Tailscale is needed. Enable remote
-access separately to pair a phone with that host. A phone is a client of a Machine,
-not another execution destination. Selecting another worker remains an explicit
-Machine operation.
-
-```text
-Desktop ─ private Unix socket ─┐
-                             ├─ server ─ shared Rust Read / Subscription
-phone ─ authenticated API ────┘         ├ shared typed mutation + scoped request telemetry
-        (LOO-718)                      └ existing Session owner ─ agent / PTY
-
-installation ─ selected executable + server registration / replacement
-Machine routing ─ SSH destination's ordinary lf invocation
-Desktop automation ─ app-owned windows / panes / menus
-```
-
-The server handles admission, framing and bounded delivery. Shared operations retain defaults, mutation, attribution and recovery. Session owners
-retain provider processes, input/geometry claims and lifetime policy. Graphs
-retain their own execution. Drafts, active turns, pending requests and running
-Graphs already protect their owners; the server adds no retention authority.
-CLI use does not require the server. No scheduler, shadow Work store or durable
-viewer registry belongs here.
-
-## Local contract and mobile integration
-
-LOO-593 implements the local server under `server/`. Every shared Read, Write and
-Subscription now crosses it, along with exact existing-owner attachment. The
-Loopflow FFI crate, Swift adapter and static-link build paths are deleted. Generic
-execution launches and remote streams retain the CLI; app-owned UI automation and
-Ghostty rendering remain separate. See server-performance/results.md and server-cutover-demo.md for the
-subprocess-era evidence; direct-write acceptance is still pending.
-
-LOO-718/PR #1812 incorporates `07a6a184d4`; inspection at `983b271695` on November 4
-found remote HTTPS/WSS over host Tailscale, pairing/revocation, native iOS and
-recoverable create/start work. That is evidence from the parallel branch, not
-verification of the combined release. LOO-593 is the local foundation; LOO-718
-owns the remote/mobile experience. Both need the accepted naming boundary.
-
-| Previous path | Current path / authority |
-| --- | --- |
-| `lf machine service run/status` | `lf server run/status` (`ops server` in the canonical tree) |
-| `lf machine service ensure` | Hidden `lf install server`; installation readiness only |
-| `machine_service/{installation.rs,registration.m}` | `installation/{server.rs,registration.m}` |
-| Remaining `machine_service/` module | `server/` with unchanged revision-1 operation shapes |
-| `MachineService`, `MachineProtocol`, `MachineConnection` | `ServerClient`, `ServerProtocol`, `ServerConnection` |
-| `LF_MACHINE_SERVICE`, `LF_MACHINE_STATUS` | `LF_SERVER`, `LF_SERVER_STATUS` |
-| `tests/fixtures/dto/machine/` | `tests/fixtures/dto/server/` |
-| Installed `machine.sock` / old OS job labels | Socket/lock stay stable for live relays; OS jobs migrate to server labels, with only the old bundle descriptor retained for migration |
+Earlier namespace mappings, decisions and protocol diagrams are preserved at
+`59287ba3ed:scratch/mobile-backend.md`; current source/API documentation replaces
+the duplicate inventory here.
 
 ### LOO-718 integration handoff
 
@@ -182,8 +170,8 @@ select a primary. Owner resolution never starts a provider. Attach names the
 exact existing owner and bridges its unchanged binary protocol.
 
 Reads/subscriptions reuse shared Rust operations and fresh complete readings.
-Closing cancels; reconnect does not replay store revisions. Commands must reuse the complete shared mutation path with explicit request
-context and fresh traces; the subprocess adapter is pending removal. Request IDs correlate;
+Closing cancels; reconnect does not replay store revisions. Commands use shared mutation dispatch with explicit directory/I/O and scoped
+request traces. Request IDs correlate;
 they do not deduplicate. A lost command reply means outcome unknown and cannot
 be automatically resubmitted. Recoverable create/start belongs in shared command
 admission, not a gateway response cache; preserve the original Task on launch
@@ -245,23 +233,16 @@ active execution; deleting Desktop implies no standalone hosting promise.
 
 ### Failed setup consumes readiness
 
-Jack Heart's reconnect-only rule applies before the first successful connection.
-Review at `996f16fabb` found that native Retry and reopened Work watches could
-repeat installation after setup failed. The correction at `5f140091b6` consumes
-readiness once per native surface or shared Work client. Later endpoint discovery
-uses observational `server status`; recovery has no registration branch or second
-path resolver. Concurrent waiters retain the initial diagnosis. Installation or
-OS enablement repairs setup; Retry only observes the result. Pane closure still
-cancels setup and recovery, and the last screen remains readable while unavailable.
-
-The decisive failed-start proof makes registration possible after initial failure,
-then verifies Retry/Work refresh does not invoke it. Independent server startup
-must restore fresh Work and the exact owner on the same client, preserving newer
-input/geometry claims and replaying nothing. This complements successful-start
-restart and lost-takeover-acknowledgement checks; it does not replace signed
-replacement or rendered acceptance. The detailed review and original diagnosis
-remain at `5f140091b6:scratch/mobile-backend.md` and
-`5f140091b6:scratch/concept-review.html`.
+Readiness is consumed once per native surface/shared Work client, including
+failed first setup. Retry and reopened watches observe `server status`; neither
+re-registers nor chooses another build. Concurrent waiters retain the diagnosis.
+The proof makes registration possible after failure, checks that Retry does not
+invoke it, then starts the server independently: the same client recovers fresh
+Work and the exact owner without replacing newer claims or replaying input.
+Closure cancels recovery and the last screen stays readable. This supplements,
+but never substitutes for, signed replacement and rendered acceptance. Original
+review and diagnosis: `5f140091b6:scratch/mobile-backend.md` and that commit's
+`scratch/concept-review.html`.
 
 ## Acceptance limits
 
@@ -275,7 +256,8 @@ Signed same-build replacement evidence from the namespace-only build remains at
 
 ## Boundaries and research
 
-Preserve LOO-720/#1809 terminal activity (integrated at `324a0f6dc4`), LOO-582/#1807
+Preserve LOO-723/#1815 installation coherence (integrated at `59287ba3ed`),
+LOO-720/#1809 terminal activity (integrated at `324a0f6dc4`), LOO-582/#1807
 Session identity, LOO-673/#1791 Desktop queries, LOO-312/#1656 installation,
 LOO-714/#1805 defaults and #1808 Wave DTO repair (Task attribution unresolved).
 LOO-717 owns shell policy; LOO-709/710/712 own retention, snapshots and transport. The server bridges them.
@@ -289,8 +271,4 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Compression keeps one frame-size policy, surfaces watch errors only on the
-stream, and reuses `LocalServerFixture` for recovery tests. The `docs/dev/` move
-also removes the obsolete reference-page special cases and rendering flag.
-
-Check: `scripts/test_desktop.sh --filter 'ServerClientTests|WorkObservationTransportTests'` passed 11 tests; `cargo test -p loopflow --lib server::` passed 3; portable-doc pytest and route/link checks, Ruff, fmt and diff checks passed (`/tmp/loo593-compress-{swift,rust}.log`). Direct writes remain implement's next cut; gate owns affected acceptance, the contributing conversation owns the new native demo/benchmark.
+Check (November 4): `cargo test -p loopflow --lib journal::request::` (2 passed) and `cargo test -p loopflow --test served_reads` (1 passed) verify the dispatcher/scope simplification (`/tmp/loo593-compress-{request,parity}.log`); `cargo fmt` and `git diff --check` passed. Gate retains lint and full consumer checks. Earlier verification: `cargo test -p loopflow --test served_reads` and `cargo test -p loopflow --test integration machine_commands::served_ownership_routes_to_its_writer_and_never_falls_back_locally` passed (`/tmp/loo593-direct-{parity,routing}-final.log`); `scripts/check_migrations.py`, `cargo fmt` and `git diff --check` passed. Earlier request-scope/stop tests remain applicable (`/tmp/loo593-{request,stop}.log`). The new cwd test first failed only on macOS path spelling; canonical-path comparison passed. Gate owns clippy, full affected suites, Desktop and Xcode; publication remains the Graph's later step.

@@ -419,31 +419,17 @@ cannot establish settlement. CLI subscription fixtures establish neither mounted
 input continuity nor native acceptance. LOO-408 retains installed settlement;
 retired numeric/soak obligations remain historical. No external-progress credit follows.
 
-## Ask removal decision (2026-10-01)
+## Ask removal decision (2026-10-01; reconciled 2026-11-04)
 
-Jack Heart requested ordinary headless failure without an escalation conversation,
-reporting command, notification queue, or required handoff. The responsible Wave
-operator reads existing status and logs, resolves authorized impediments, and
-uses its ongoing Wave chat for necessary judgment. Taskless failure returns to
-its caller without creating a Wave or conversation. Known failed work stays
-stopped until explicit recovery; retry retains the Flow position and conversation.
+Jack Heart removed headless escalation conversations, reporting commands and
+notifications. Failures retain logs/outcomes; judgment belongs in the existing
+Wave conversation. Taskless failure creates no Wave. Jack retained Task Sessions
+and authored reviews; persistent versus one-off Task conversations remained open.
 
-Jack clarified “no, Task sessions stay”: Task conversations and authored human
-reviews retain their feedback and completion contract. Persistent versus one-off
-Task conversations remains open. Historical Ask rows become ordinary conversations
-without replacing the Wave chat or granting Flow settlement authority. Older Ask
-identity and caller-release notes below describe the retired model.
-
-The local Ask removal implements this boundary with provider simulations and
-store recovery coverage; full Rust and Desktop acceptance remains with gate.
-A successful provider turn is not reclassified from prose alone. This records
-Product’s shared Session contract, not a Task or Wave placement decision.
-
-Converted Ask history follows ordinary conversation rules; its former kind alone
-creates no attention obligation. Conversion itself never completes a Session.
-Later confirmed owning-attachment exits can retire unassigned, non-primary
-conversations; Task/Wave conversations and Flow reviews remain open. Missing
-process evidence grants neither retirement nor Flow settlement. Full Desktop acceptance remains unproved.
+Converted Ask history grants no authority; missing evidence permits no retirement.
+AGENTS.md supersedes the old Graph retry account. Lifecycle/simulation evidence:
+`59287ba3ed80bf64841dec62a61a6c11fa24a6bd:.lf/wave/product/MEMORY.md`, this heading.
+Full Rust/Desktop acceptance remains unproved.
 
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
@@ -882,7 +868,7 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
 - AgentSessionId identifies opaque provider history, not Work or process authority.
 - Machine-local execution, Work continuity, provider history, and direct process
   control have separate owners. The current boundary is documented in
-  `docs/architecture/{execution,planning,machines}.md`; earlier topology questions
+  `docs/dev/{execution,planning,machines}.md`; earlier topology questions
   are historical, not authority.
 
 ### Planning authority and historical migration lessons
@@ -921,37 +907,46 @@ Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafab
 
 ## Swift data path — RegistryQuery is the single reader
 
-Jack Heart selected LOO-593’s Machine/server/installation split November 4, 2026,
+Jack Heart selected LOO-593's Machine/server/installation split November 4, 2026,
 through publication and interactive demo, without Auto-Ship. Machine owns execution
-destinations; `lf server` owns client access; installation owns registration/update.
-Desktop automation stays app-owned. Roadmap read/watch and rename use the socket
-without FFI fallback. Rust reads, complete CLI commands and execution owners keep
-authority. Shared functions alone did not prevent lfd drift; no new retention owner.
+destinations; server owns client access; installation owns registration/update;
+Desktop automation stays app-owned. All shared native reads/writes/watches now
+use the socket; the Rust Work FFI, Swift bridge and exclusive build wiring are
+removed. Ghostty, ordinary execution launches and remote streams remain separate.
 
-Registration migrates OS labels, retaining the revision-1 socket/lock for old
-relays. The old plist only inspects/removes registration; disabled choices survive.
-Jack's November 4 reconnect-only rule includes failed first setup: consume readiness
-once per client, retain its diagnosis, then discover endpoints through observational
-status. Retry/Work refresh never register or select code. Failed-start attachment
-also recovers passively, preserving newer claims. Rust/Swift checks at `5f140091b6`
-and `4c5ea88a47` prove independent repair restores access, not installed replacement.
+Jack's later November 4 decision replaces served-write CLI subprocesses with one
+complete shared Rust mutation path. Direct execution remains pending.
+Defaults, routing, outputs and errors belong in the shared operation; lfd history
+shows shared engine functions alone did not prevent orchestration drift. Request
+traces must correlate outcomes and durable effects without inventing OS Processes
+or borrowing the server launcher's Session/Task. Concurrent requests require
+explicit context/I/O, never process-global cwd/env/stdio mutation. Arrangement
+creates no Process; a lost reply stays unknown and is never replayed.
 
-Jack selected exact-owner recovery and native status outside terminal bytes;
-closure cancels. Unavailable is not ended. Copy/Find/scroll remain reachable;
-CLI reconnect stays deliberate. Move here consumes its generation-bound action
-before replacing claims; lost acknowledgements recover passively. No provider
-restart or replay of takeover, input or commands. Native interaction remains unproved.
+Registration migrates OS labels but keeps revision-1 socket/lock and disabled
+choices. The old plist only inspects/removes registration. Readiness is consumed
+once, even on failed first setup; Retry/watch recovery only observes status.
+Exact-owner recovery keeps status outside terminal bytes and preserves newer
+claims. Unavailable is not ended; local Copy/Find/scroll remain available. Move
+here consumes its generation before takeover; lost acknowledgements recover
+passively, never replaying takeover/input. Closure cancels recovery.
 
-Pre-cutover signed same-build replacement proved owner/draft/Graph continuity
-through submission and a new acknowledgement. App-owned LaunchServices updates
-model App Management; external writes cannot. The renamed composition, released
-migration, rendered continuity, Linux replacement and usage totals remain unproved.
+The subprocess-era native demo retained a draft and configured Codex identity
+across server restart, then submitted once and renamed. It predates the final
+pane-close repair and direct writes. Earlier signed same-build replacement also
+proved owner/draft/Graph continuity; neither proves final-build upgrade behavior.
+LaunchServices-owned updates model App Management; external bundle writes do not.
+Full Desktop rerun, Xcode, Linux replacement, usage and combined mobile acceptance
+remain distinct. Warm read/rename medians increased 21.06/50.68 → 26.79/87.60 ms;
+new direct-write measurements and create/open/rename/save demo remain owed. No
+matched embedded RSS baseline supports memory savings.
 
-LOO-718 owns remote/mobile admission and wider cutover; preserve wire identity and
-credential storage when moving verbs. ViewPlan selects primary Sessions; lookup
-starts nothing. Unix peer trust cannot authenticate proxies. Unattended hosting
-and phone takeover remain open. LOO-723 retains bundles used by live processes;
-neither parallel implementation proves combined-release behavior.
+LOO-718 owns remote admission/iOS. Preserve wire
+identity and credentials while moving verbs. ViewPlan selects primary Sessions;
+lookup starts nothing; local peer trust cannot authenticate proxies. Unattended
+hosting and phone takeover remain open. #1815/LOO-723 installation coherence is
+integrated at `59287ba3ed`; reported upgrade input/crash failures (LOO-724) mean
+live processes alone prove no usable recovery or combined-release success.
 
 LOO-500 (November 2) removed Desktop's filesystem placeholder scan: surviving
 files resurfaced retired Waves. Writes register directories; reads list store

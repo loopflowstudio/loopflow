@@ -41,16 +41,16 @@ preinstalled termination handler. The focused rerun covers both repairs;
 the full suite remains gate's responsibility. The original failed logs remain.
 
 The separate Xcode build-for-testing has not been run for this deletion.
-Run `uv run python scripts/test.py --loopflow` with its normal resource/security
-pressure guard after sync; do not bypass that guard. Prior Xcode host-pressure
+Gate owns `uv run python scripts/test.py --loopflow` with its normal
+resource/security pressure guard on the completed implementation. Prior Xcode host-pressure
 failure remains history, not a current-build result.
 
-Main advanced to dfd454cfc783b5ff3014d5a398ccf1627b427d11 (#1815). PR #1813
-was CONFLICTING at inspection. The Graph owns checkpoint/sync/conflict repair,
-final affected verification and publication. Preserve upstream updater behavior
-through the server architecture. The existing PR body describes the former
-partial cutover and needs replacement with the complete deletion scope and
-honest latency/verification limits. No merge or Auto-Ship approval.
+Main's #1815 (`dfd454cfc783b5ff3014d5a398ccf1627b427d11`) is integrated by
+merge `59287ba3ed` after checkpoint `ced68911ee`; the previously observed base
+conflict is resolved locally. This preserves upstream updater behavior without
+restoring FFI. Publication and final affected verification remain. The PR body
+needs the complete deletion and accepted direct-write scope with honest
+latency/verification limits. No merge or Auto-Ship approval.
 
 ## Full-run termination
 

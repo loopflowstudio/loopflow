@@ -643,7 +643,7 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WaveDetailPane.swift` — streamed Project plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
-- `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
+- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; CLI execution launches
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
 `LoopflowMac` target contains AppKit, process management, menus, and other

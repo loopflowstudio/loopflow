@@ -58,8 +58,11 @@ setup delegates to the promoted installation; source builds use an explicit
   The shared watch validates them, including its 16 KiB limit; an invalid
   checkpoint ends the watch with an `unavailable` reading.
   Closing cancels. Reconnect opens a fresh subscription; no replay cursor exists.
-- `command {change}` accepts the shared `Write` shape and forwards its argv and stdin. `command {trace_id,output,stderr,code}` reports the real CLI result.
-  The CLI owns mutation, defaults and Process attribution. A lost response means
+- `command {change}` accepts the shared `Write` shape. The server calls the same
+  Rust mutation dispatcher as the CLI, with the request's directory and streams.
+  `command {trace_id,output,stderr,code}` returns its output and exit status.
+  Ordinary writes start no CLI child. Machine routing still uses SSH and never
+  falls back to local execution. Requests create no Process rows. A lost response means
   outcome unknown; inspect state before retrying. IDs correlate diagnostics and
   are **not** durable deduplication receipts. No automatic resubmission.
   Canceling a native request closes its connection and releases the client's wait;
@@ -79,9 +82,16 @@ setup delegates to the promoted installation; source builds use an explicit
   screen marked stale; Retry reconnects without preparing or resuming a provider.
   A connection failure alone never means the Session ended.
 
-Request start/exit diagnostics correlate service incarnation, request ID, child
-PID, CLI trace ID and exit code. Ordinary CLI Process records and provider usage stay with
-existing owners; observations and reconnects add no usage or Work records.
+Request diagnostics correlate the response trace with its target, duration,
+result, service incarnation and request ID. The existing log formatter adds the
+real server PID and executable identity. Request spans and nested effect events
+are enabled in normal `logs/lf.log` output; input bodies are omitted. Panic
+unwinding logs an unknown outcome and restores the worker's scope.
+
+`journal::request` isolates caller attribution and propagates it into nested
+blocking operations. It never changes process cwd, environment or standard
+streams. CLI Process records and provider usage stay with existing owners;
+arrangement, observations and reconnects add no Process or usage records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
 diagnostics. Individual reads and subscription frames are not logged by default.

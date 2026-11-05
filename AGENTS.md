@@ -186,6 +186,12 @@ When editing `*.rs` files:
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
 - Never use `()` as an error type
+- Served mutations take a directory and `CommandIo`; never redirect process cwd,
+  env or file descriptors. Nested blocking operations use
+  `journal::request::spawn_blocking` to retain request attribution and diagnostics.
+  A request trace is not an OS Process; execution launches retain their owners.
+- Forward stdin only for commands that consume it; a mutation with no body must
+  finish while terminal stdin remains open.
 - SQLite read helpers that join statements use savepoints so they compose inside
   the Work reader's pinned snapshot as well as standalone. Keep write transactions
   at their existing command boundaries.

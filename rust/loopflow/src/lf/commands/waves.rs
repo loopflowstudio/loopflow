@@ -671,14 +671,6 @@ pub fn status_json(directory: &Path, wave: Option<&str>, shape: Shape) -> Result
     })
 }
 
-/// `lf --cwd <directory> wave status <wave> --sync --json`: refresh the
-/// Wave's planning from its provider (Linear, or the repository's Git
-/// planning ref), then print its status. Desktop's planning clock runs it.
-pub fn refreshed_status(directory: &Path, wave: Option<&str>) -> Result<String> {
-    let refreshed = super::ops::refresh_status(directory, wave)?;
-    status_json(directory, refreshed.as_deref().or(wave), Shape::Tasks)
-}
-
 /// `lf --cwd <directory> desktop wave <wave>`: one Wave's stored plan; None
 /// without a registry. Desktop refreshes planning through `lf wave status --sync`.
 pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {

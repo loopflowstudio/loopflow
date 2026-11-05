@@ -559,13 +559,17 @@ fn server_operations_match_their_lf_commands() {
         ),
     };
     // The same write through the server, then through `lf`: each prints the same,
-    // leaves the same Work and records a Process the same way. A finished
-    // Process nothing references is forgotten as it exits; its revision stays.
+    // leaves the same Work. Only the CLI is another OS Process; requests do
+    // not manufacture Process rows or borrow the server launcher's attribution.
     let compare = |served: Write, again: &dyn Fn() -> Write, effect: &dyn Fn() -> Value| {
         let argv = served.argv();
         let before = processes(&database);
         let written = server_write(served);
-        let recorded = processes(&database) - before;
+        assert_eq!(
+            processes(&database),
+            before,
+            "served write fabricated a Process: {argv:?}"
+        );
         // Nothing it started outlives it: no provider, no child of the app.
         assert_eq!(children().trim(), server.0.id().to_string(), "{argv:?}");
         let effected = effect();
@@ -574,7 +578,7 @@ fn server_operations_match_their_lf_commands() {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let before = processes(&database);
         let printed = read(repo.path(), home.path(), &args, again.input());
-        assert_eq!(processes(&database) - before, recorded, "{argv:?}");
+        let recorded = processes(&database) - before;
         assert_eq!(effect(), effected, "{argv:?}");
         match (
             serde_json::from_str::<Value>(&written),
@@ -604,8 +608,8 @@ fn server_operations_match_their_lf_commands() {
         effect("INF-123")
     });
     // Claiming and unassigning leave the same owner, which each prints from the
-    // store, and record a Process as `lf` does. Every claim appends to the
-    // ownership log, so the log itself differs.
+    // store. Only the CLI records a Process. Every claim appends to the ownership
+    // log, so the log itself differs.
     for claimed in [true, false] {
         let ownership = Write::TaskOwnership {
             directory: directory.clone(),
@@ -615,18 +619,22 @@ fn server_operations_match_their_lf_commands() {
         let owner = |text: &str| serde_json::from_str::<Value>(text).unwrap()["owner"].clone();
         let before = processes(&database);
         let written = server_write(ownership.clone());
-        let recorded = processes(&database) - before;
+        assert_eq!(
+            processes(&database),
+            before,
+            "served ownership fabricated a Process"
+        );
         let args = ownership.argv();
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let before = processes(&database);
         let printed = read(repo.path(), home.path(), &args, None);
-        assert_eq!(processes(&database) - before, recorded, "{args:?}");
+        let recorded = processes(&database) - before;
         assert!(recorded > 0, "{args:?} recorded no Process");
         assert_eq!(owner(&written), owner(&printed), "{args:?}");
         assert_eq!(owner(&written).is_null(), !claimed, "{written}");
     }
     // Stopping a Task that is not shipping saves the stop, which keeps a run
-    // from approving it until `lf ship`, under the Process that made it. The
+    // from approving it until `lf ship`, retaining who requested the stop. The
     // ship process it kills and the merge request it takes back are the ship
     // tests'.
     let stop = Write::ShipStop {
@@ -710,6 +718,209 @@ fn server_operations_match_their_lf_commands() {
     for write in arrangement {
         let recorded = compare(write(), &*write, &dashboard);
         assert_eq!(recorded, 0, "{:?} recorded a Process", write().argv());
+    }
+    // Failures preserve CLI diagnostics and status, and the default diagnostic
+    // log includes the request trace, target, outcome and real server PID.
+    use loopflow::server::wire::{Operation, Reply};
+    let failure = Write::SessionRename {
+        directory: directory.clone(),
+        id: session.clone(),
+        name: " ".into(),
+    };
+    let (_, response) = loopflow::server::client::connect(Operation::Command {
+        change: failure.clone(),
+    })
+    .unwrap();
+    let Reply::Command {
+        trace_id,
+        output,
+        stderr,
+        code,
+    } = response.result
+    else {
+        panic!("expected failed command")
+    };
+    let cli = isolated_lf(repo.path(), home.path(), &failure.argv())
+        .wait_with_output()
+        .unwrap();
+    assert_eq!(code, cli.status.code().unwrap());
+    assert_eq!(output.as_bytes(), cli.stdout);
+    assert_eq!(stderr.as_bytes(), cli.stderr);
+    let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
+    let lines: Vec<_> = log
+        .lines()
+        .filter(|line| line.contains(trace_id.as_str()))
+        .collect();
+    assert!(lines
+        .iter()
+        .any(|line| line.contains("request started") && line.contains(&session)));
+    assert!(lines
+        .iter()
+        .any(|line| line.contains("request finished") && line.contains("code=1")));
+    assert!(lines
+        .iter()
+        .all(|line| line.contains(&format!("pid={}", server.0.id()))));
+
+    // Concurrent edits name distinct durable Sessions and never create an OS
+    // Process per request. Each returned trace resolves to only its own target.
+    let other_repo = TestRepo::new();
+    let other: Value = serde_json::from_str(&read(
+        other_repo.path(),
+        home.path(),
+        &["session", "resume", "--prepare", "--json"],
+        None,
+    ))
+    .unwrap();
+    let other = other["id"].as_str().unwrap().to_owned();
+    let before = processes(&database);
+    let traces = std::thread::scope(|threads| {
+        let requests: Vec<_> = [(&session, "First request"), (&other, "Second request")]
+            .into_iter()
+            .map(|(id, name)| {
+                let change = Write::SessionRename {
+                    directory: directory.clone(),
+                    id: id.clone(),
+                    name: name.into(),
+                };
+                threads.spawn(move || {
+                    let (_, response) =
+                        loopflow::server::client::connect(Operation::Command { change }).unwrap();
+                    let Reply::Command {
+                        trace_id,
+                        code,
+                        output,
+                        stderr,
+                    } = response.result
+                    else {
+                        panic!("expected command")
+                    };
+                    assert_eq!(code, 0, "{stderr}");
+                    let saved: Value = serde_json::from_str(&output).unwrap();
+                    assert_eq!(saved["id"], *id);
+                    assert_eq!(saved["title"], name);
+                    (trace_id, id.clone())
+                })
+            })
+            .collect();
+        requests
+            .into_iter()
+            .map(|request| request.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(processes(&database), before);
+    assert_ne!(traces[0].0, traces[1].0);
+    let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
+    for (trace, target) in &traces {
+        let lines: Vec<_> = log
+            .lines()
+            .filter(|line| line.contains(trace.as_str()))
+            .collect();
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("request started") && line.contains(target)));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("request finished") && line.contains("code=0")));
+    }
+
+    // A provider transcript without a usable cwd adopts the request's directory,
+    // even when another request prepares a conversation in a different repository.
+    let before = processes(&database);
+    std::thread::scope(|threads| {
+        let requests: Vec<_> = [("codex", repo.path()), ("claude", other_repo.path())]
+            .into_iter()
+            .map(|(provider, directory)| {
+                let id = uuid::Uuid::new_v4().to_string();
+                let transcript = if provider == "codex" {
+                    home.path().join(format!(
+                        ".codex/sessions/2026/11/04/rollout-time-{id}.jsonl"
+                    ))
+                } else {
+                    home.path()
+                        .join(format!(".claude/projects/test/{id}.jsonl"))
+                };
+                fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+                fs::write(transcript, "{}\n").unwrap();
+                threads.spawn(move || {
+                    let output = server_write(Write::SessionResume {
+                        directory: directory.to_owned(),
+                        id: Some(id),
+                        task: None,
+                        wave: None,
+                        agent: None,
+                    });
+                    let saved: Value = serde_json::from_str(&output).unwrap();
+                    assert_eq!(
+                        Path::new(saved["cwd"].as_str().unwrap())
+                            .canonicalize()
+                            .unwrap(),
+                        directory.canonicalize().unwrap()
+                    );
+                    assert_eq!(saved["provider"], provider);
+                })
+            })
+            .collect();
+        for request in requests {
+            request.join().unwrap();
+        }
+    });
+    assert_eq!(processes(&database), before);
+
+    // An admitted request survives a lost reply. Never resend it: inspect the
+    // persisted result after dropping the connection while the write is held.
+    let lock = rusqlite::Connection::open(&database).unwrap();
+    lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let request = loopflow::server::wire::Request {
+        version: loopflow::server::wire::VERSION,
+        id: "lost-reply".into(),
+        operation: Operation::Command {
+            change: Write::SessionRename {
+                directory: directory.clone(),
+                id: other.clone(),
+                name: "After disconnect".into(),
+            },
+        },
+    };
+    let bytes = serde_json::to_vec(&request).unwrap();
+    let mut socket =
+        std::os::unix::net::UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();
+    std::io::Write::write_all(&mut socket, &(bytes.len() as u32).to_be_bytes()).unwrap();
+    std::io::Write::write_all(&mut socket, &bytes).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
+        if log
+            .lines()
+            .any(|line| line.contains("request started") && line.contains("After disconnect"))
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "write was not admitted: {log}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(socket);
+    lock.execute_batch("ROLLBACK").unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let name: String = lock
+            .query_row(
+                "SELECT title FROM agent_sessions WHERE id=?1",
+                [&other],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if name == "After disconnect" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "admitted write did not finish: {}",
+            fs::read_to_string(home.path().join("logs/lf.log")).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

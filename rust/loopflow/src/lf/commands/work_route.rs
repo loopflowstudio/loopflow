@@ -186,6 +186,41 @@ pub struct Forward {
     route: Option<TaskExecutionRoute>,
 }
 
+impl Forward {
+    pub(super) fn run(
+        self,
+        cli: &Cli,
+        directory: &Path,
+        io: &mut super::mutation::CommandIo<'_>,
+    ) -> Result<()> {
+        // `directory` selected Work on this host. Its spelling is not a
+        // destination path; the route carries the repository's portable ID.
+        let mut args = Vec::new();
+        let mut words = self.args.iter();
+        while let Some(word) = words.next() {
+            if word == "--" {
+                args.push(word.clone());
+                args.extend(words.cloned());
+                break;
+            }
+            if word == "--cwd" {
+                words.next();
+            } else if !word.starts_with("--cwd=") {
+                args.push(word.clone());
+            }
+        }
+        super::ssh::run_with_io(
+            self.machine.as_str(),
+            false,
+            self.resumed.as_ref().unwrap_or(cli),
+            &args,
+            self.route,
+            directory,
+            Some(io),
+        )
+    }
+}
+
 /// Return whether dispatch completed remotely. No Task Graph or checkout is
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
@@ -232,7 +267,9 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     if route.machine_id == store.local_machine()?.id {
         return moved_task_conversation(cli, args, &store, &route.task_id);
     }
-    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+    if !crate::journal::request::active()
+        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
+    {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
     let mut forwarded = args[1..].to_vec();
@@ -322,7 +359,9 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(id) = resumed_session(cli) else {
         return Ok(None);
     };
-    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+    if !crate::journal::request::active()
+        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
+    {
         return Ok(None);
     }
     let Some(store) = read_registry()? else {
@@ -351,7 +390,10 @@ fn moved_task_conversation(
         return Ok(None);
     };
     let named = connection.task.is_some() || cli.task.is_some();
-    if !named || std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+    if !named
+        || (!crate::journal::request::active()
+            && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some())
+    {
         return Ok(None);
     }
     let Some((session, machine)) = store.task_conversation_moved_to(task)? else {
@@ -424,7 +466,9 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
     else {
         return Ok(None);
     };
-    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+    if !crate::journal::request::active()
+        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
+    {
         return Ok(None);
     }
     let Some(registry) = crate::store::read_existing_registry()? else {

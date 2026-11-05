@@ -3571,23 +3571,6 @@ mod account_first_tests {
         assert_eq!(codex_login(&native), "first@example.com");
     }
 
-    /// Record that `conversation` ran in `account`'s own home, before every
-    /// launch shared one.
-    fn ran_in_account_home(store: &SharedStore, conversation: &str, account: &str) {
-        store
-            .sqlite
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO provider_session_accounts
-                    (provider, provider_session_id, account_id, created_at, isolated)
-                 VALUES ('claude', ?1, ?2, 1, 1)",
-                rusqlite::params![conversation, account],
-            )
-            .unwrap();
-    }
-
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn a_conversation_from_an_account_home_resumes_in_the_shared_home() {
@@ -3611,7 +3594,9 @@ mod account_first_tests {
             "{}\n",
         )
         .unwrap();
-        ran_in_account_home(&store, id, "first");
+        store
+            .sqlite
+            .record_account_home_conversation(Provider::Claude, id, "first");
         let conversation: AgentSessionId = id.into();
 
         let route = resolve_provider_account(Provider::Claude, Some(&conversation))
@@ -3633,7 +3618,9 @@ mod account_first_tests {
 
         // A conversation whose transcript is nowhere fails instead of starting empty.
         let lost = "0199a213-81c0-7800-8aa1-bbab2a035a54";
-        ran_in_account_home(&store, lost, "first");
+        store
+            .sqlite
+            .record_account_home_conversation(Provider::Claude, lost, "first");
         let error = resolve_provider_account(Provider::Claude, Some(&lost.into()))
             .await
             .unwrap_err();

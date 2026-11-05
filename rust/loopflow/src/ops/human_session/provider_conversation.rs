@@ -312,18 +312,11 @@ mod tests {
         };
         store.upsert_provider_account(&account).await.unwrap();
         // It ran in the account's own home, before every launch shared one.
-        store
-            .sqlite
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO provider_session_accounts
-                    (provider, provider_session_id, account_id, created_at, isolated)
-                 VALUES ('codex', ?1, ?2, 1, 1)",
-                rusqlite::params![ID, account.account_id.as_str()],
-            )
-            .unwrap();
+        store.sqlite.record_account_home_conversation(
+            crate::provider_auth::Provider::Codex,
+            ID,
+            account.account_id.as_str(),
+        );
         let home = account.home.as_ref().unwrap();
         fs::create_dir(home).unwrap();
         fs::write(

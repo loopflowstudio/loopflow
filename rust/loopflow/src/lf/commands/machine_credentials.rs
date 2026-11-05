@@ -972,7 +972,7 @@ async fn install_access(
         bail!("not a Claude subscription access token; refused, since an API key bills per token");
     }
     if access_only_expiry(credential)?.is_none() {
-        bail!("a Claude access credential carries no refresh token; refused");
+        bail!("a Claude access credential must not carry a refresh token; refused");
     }
     let provider = Provider::Claude;
     let account = managed_account(store, provider, login).await?;

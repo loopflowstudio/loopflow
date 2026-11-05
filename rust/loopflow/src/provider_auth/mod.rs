@@ -2091,7 +2091,7 @@ async fn start_auth_command(
         // The private FIFO and helper live exactly as long as the provider.
         #[cfg(unix)]
         let _handoff = handoff;
-        // Output after the URL still reaches the parser: `setup-token` prints its result.
+        // Output after the URL still reaches the parser.
         let status = loop {
             tokio::select! {
                 status = child.wait() => break status,

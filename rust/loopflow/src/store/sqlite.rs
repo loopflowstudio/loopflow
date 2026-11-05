@@ -1688,7 +1688,7 @@ impl SqliteStore {
 
     /// The account whose own home still holds this conversation: it ran
     /// there before every launch shared one, and has not resumed since.
-    pub fn provider_session_account(
+    pub fn provider_session_account_home(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
@@ -1705,6 +1705,27 @@ impl SqliteStore {
         .map(ProviderAccountId::parse)
         .transpose()
         .map_err(StoreError::InvalidData)
+    }
+
+    /// Record that `agent_session` ran in `account_id`'s own home, as every
+    /// conversation did before launches shared one. Nothing writes this now.
+    #[cfg(test)]
+    pub(crate) fn record_account_home_conversation(
+        &self,
+        provider: Provider,
+        agent_session: &str,
+        account_id: &str,
+    ) {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute(
+                "INSERT INTO provider_session_accounts
+                    (provider, provider_session_id, account_id, created_at, isolated)
+                 VALUES (?1, ?2, ?3, 1, 1)",
+                params![provider.as_str(), agent_session, account_id],
+            )
+            .expect("record account-home conversation");
     }
 
     /// The eligible candidate with the most room for `model` (`None`: a

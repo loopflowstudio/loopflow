@@ -288,17 +288,7 @@ mod tests {
             _ => Provider::Codex,
         };
         // It ran in the account's own home, before every launch shared one.
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO provider_session_accounts
-                    (provider, provider_session_id, account_id, created_at, isolated)
-                 VALUES (?1, ?2, ?3, 1, 1)",
-                rusqlite::params![route.as_str(), thread, provider],
-            )
-            .unwrap();
+        store.record_account_home_conversation(route, thread, provider);
         for (kind, payload) in [
             (SessionEventKind::Started, serde_json::json!({})),
             (

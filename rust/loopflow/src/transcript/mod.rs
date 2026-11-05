@@ -100,7 +100,7 @@ pub(crate) fn conversation_home(
     provider: Provider,
     id: &AgentSessionId,
 ) -> Result<Option<PathBuf>> {
-    let Some(account) = store.provider_session_account(provider, id)? else {
+    let Some(account) = store.provider_session_account_home(provider, id)? else {
         return Ok(Some(native_home(provider, None)));
     };
     Ok(store

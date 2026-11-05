@@ -1829,7 +1829,7 @@ mod tests {
         assert_eq!(
             connection
                 .store
-                .provider_session_account(Provider::Codex, &"open-thread".into())
+                .provider_session_account_home(Provider::Codex, &"open-thread".into())
                 .unwrap(),
             None
         );

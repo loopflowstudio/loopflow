@@ -846,18 +846,6 @@ impl Store {
         .await
     }
 
-    pub async fn provider_session_account(
-        &self,
-        provider: Provider,
-        agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<ProviderAccountId>> {
-        let agent_session = agent_session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_account(provider, &agent_session)
-        })
-        .await
-    }
-
     pub async fn select_provider_account(
         &self,
         provider: Provider,

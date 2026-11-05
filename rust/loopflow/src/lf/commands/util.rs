@@ -411,6 +411,8 @@ fn session_command_status_with_env(
         let outcome = result
             .as_ref()
             .map_or("failed", SessionCommandOutcome::capture_outcome);
+        // Records of the exit are best-effort: the provider's own result is
+        // what the person gets back, whatever the store says.
         if let Some((store, session, attachment)) = admitted {
             match crate::session_record::finish_session_attachment(
                 &store,
@@ -419,11 +421,15 @@ fn session_command_status_with_env(
                 outcome,
             ) {
                 Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+                }
             }
         }
         if let Some(capture) = capture {
-            capture.finish(outcome)?;
+            if let Err(error) = capture.finish(outcome) {
+                tracing::warn!(%error, "cannot settle the Session capture at exit");
+            }
         }
         result
     })
@@ -650,7 +656,10 @@ fn run_native_session(
         }
     };
     let interrupted = match owned {
-        Some(owner) => crate::harness::native_exit::record_exit(owner)?,
+        Some(owner) => crate::harness::native_exit::record_exit(owner).unwrap_or_else(|error| {
+            tracing::warn!(%error, "cannot record the provider's exit");
+            false
+        }),
         None => false,
     };
     // A mover ended this attachment; the conversation's home is now its business.

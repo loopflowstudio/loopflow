@@ -29,7 +29,7 @@ use crate::journal::{process_identity_evidence, ProcessIdentityEvidence};
 use crate::process::SessionAttachment;
 use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{ProviderAccountId, StoreError};
+use crate::store::{ProviderAccountId, RecordingGap, StoreError};
 
 type Upstream = WebSocketStream<UnixStream>;
 
@@ -375,6 +375,7 @@ struct Recorder {
     route: Option<crate::provider_account::ProviderAccountRoute>,
     store: Option<(SqliteStore, CodexStream)>,
     retry_at: Option<Instant>,
+    failure: RecordingGap,
     updates: TaskUpdates,
     /// A turn is running, or may be; updates wait for it.
     busy: bool,
@@ -409,6 +410,7 @@ impl Recorder {
             route,
             store: None,
             retry_at: None,
+            failure: RecordingGap::default(),
             updates: TaskUpdates::default(),
             busy: true,
             update_request: None,
@@ -439,11 +441,11 @@ impl Recorder {
         self.store.as_mut()
     }
 
-    /// Log a recording gap once per outage. History fills it on the next launch.
+    /// A recording gap, logged once per changed failure. History fills it on the
+    /// next launch.
     fn gap(&mut self, error: &dyn std::fmt::Display) {
-        if self.retry_at.is_none() {
-            tracing::warn!(%error, session = self.observer.session, "Codex recording gap");
-        }
+        self.failure
+            .note(&format!("Codex Session {}", self.observer.session), error);
         self.store = None;
         self.retry_at = Some(Instant::now() + STORE_RETRY);
     }
@@ -736,12 +738,25 @@ impl Recorder {
         signal(libc::SIGKILL);
     }
 
+    /// An idle tick is also when a reading the store refused catches up and
+    /// when a closed gap enters the Session's history.
     async fn deliver_update(&mut self, writer: &mut SplitSink<Upstream, Message>) {
-        let Some((store, _)) = self.stream() else {
+        let Some((store, history)) = self.stream() else {
             return;
         };
+        let caught_up = matches!(
+            history.writer.catch_up(),
+            Ok(()) | Err(StoreError::InvalidAuthority(_))
+        );
         let store = store.clone();
-        let update = match self.pending_update(&store) {
+        let pending = self.pending_update(&store);
+        if pending.is_ok() && caught_up {
+            if let Err(error) = store.close_recording_gap(&self.observer.session, &mut self.failure)
+            {
+                self.failure.note("recording gap", &error);
+            }
+        }
+        let update = match pending {
             Ok(Some(update)) => update,
             Ok(None) => return,
             Err(error) => {

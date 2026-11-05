@@ -127,14 +127,15 @@ pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> R
 }
 
 pub(crate) fn pi_args(context: Option<&ContextDelivery>, native: bool) -> Result<Vec<String>> {
-    let source = format!(
-        "const spec = {};\n{}",
-        json!({"native":native, "executable":crate::os_process::resolve_lf_binary()?}),
-        include_str!("context_pi.mjs")
-    );
     let home = context
         .map(|c| c.home.clone())
         .unwrap_or_else(crate::store::lf_home_dir);
+    let source = format!(
+        "const spec = {};\n{}",
+        json!({"native":native, "executable":crate::os_process::resolve_lf_binary()?,
+            "log":home.join("logs").join("pi-extension.log")}),
+        include_str!("context_pi.mjs")
+    );
     let extension = save_hook(&home, "pi", "mjs", source.as_bytes())?;
     Ok(vec!["--extension".into(), extension.display().to_string()])
 }

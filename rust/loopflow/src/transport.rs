@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::harness::native_exit::NativeExit;
+use crate::harness::native_exit::{NativeExit, Settled};
 use crate::id::LfProcessId;
 use input::PendingInput;
 use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner, Tag};
@@ -47,6 +47,88 @@ const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
 
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
+
+/// How long a person's terminal waits for exit records before it gets the
+/// provider's own exit back. A locked or refused store never holds a quit.
+const SETTLE_WAIT: Duration = Duration::from_millis(800);
+
+/// How long the owner process stays to finish exit records after its viewers
+/// have returned.
+const SETTLE_LINGER: Duration = Duration::from_secs(20);
+
+/// The exit code a provider's status reports on its own.
+fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)) as u8
+}
+
+/// A handed-off exit being recorded off the serve loop. Its records wait on
+/// the store; the person's terminal waits only `SETTLE_WAIT` for them, then
+/// gets the provider's own exit back.
+struct Settling {
+    settled: mpsc::Receiver<Settled>,
+    since: Instant,
+    code: u8,
+    process: String,
+    /// The terminal has its exit; only the records are still being written.
+    delivered: bool,
+}
+
+impl Settling {
+    fn spawn(record: Box<NativeExit>, status: std::process::ExitStatus, waker: UnixStream) -> Self {
+        let process = format!(
+            "lf/{}",
+            record
+                .attachment
+                .provider_lf_process_id
+                .as_str()
+                .replace('-', "")
+        );
+        let (sender, settled) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(crate::harness::native_exit::settle(&record, status));
+            let _ = (&waker).write_all(&[1]);
+        });
+        Self {
+            settled,
+            since: Instant::now(),
+            code: provider_exit_code(status),
+            process,
+            delivered: false,
+        }
+    }
+
+    /// When the terminal stops waiting for records, while it still waits.
+    fn deadline(&self) -> Option<Instant> {
+        (!self.delivered).then(|| self.since + SETTLE_WAIT)
+    }
+
+    /// The settlement once its records are written, or the provider's own exit
+    /// once the terminal has waited long enough for them. Delivered once.
+    fn poll(&mut self) -> Option<Settled> {
+        let deadline = self.deadline()?;
+        let settled = match self.settled.try_recv() {
+            Ok(settled) => settled,
+            Err(mpsc::TryRecvError::Empty) if Instant::now() < deadline => return None,
+            Err(_) => {
+                tracing::warn!(process = self.process, "exit records are still being written; returning the terminal with the provider's own exit");
+                Settled {
+                    code: self.code,
+                    lines: Vec::new(),
+                }
+            }
+        };
+        self.delivered = true;
+        Some(settled)
+    }
+
+    /// Give records still being written time to land before the owner exits.
+    fn linger(self) {
+        let _ = self.settled.recv_timeout(SETTLE_LINGER);
+    }
+}
 /// Stream bytes retained per viewer for resume.
 const SPOOL: u64 = 1024 * 1024;
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
@@ -754,7 +836,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut ownership = Ownership::default();
     let mut size = (24, 80);
     let mut pending_input = PendingInput::default();
-    let mut ending_failure = None;
+    let mut ending_failure = crate::store::RecordingGap::default();
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -770,11 +852,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     waker.set_nonblocking(true)?;
     let (activity, ending) = lifetime::spawn(id.clone(), terminal, waker.try_clone()?);
     let child_pid = child.id();
+    let settle_waker = waker.try_clone()?;
     let (finished, child_exit) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = finished.send(child.wait());
         let _ = (&waker).write_all(&[1]);
     });
+    let mut settling: Option<Settling> = None;
     let mut observed = lifetime::Activity::default();
     let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
@@ -1089,7 +1173,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 viewer.event(Event::Control {
                     held: false,
                     notice: notice.clone(),
-                    successor: None,
                 });
             }
         }
@@ -1232,52 +1315,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         if let Some(status) = status {
-            let code = if let Some(record) = exit_record.take() {
-                let settled = match crate::harness::native_exit::settle(&record, status) {
-                    Ok(settled) => settled,
-                    Err(error) => {
-                        // A recording gap: the conversation ended the way it ended.
-                        tracing::warn!(%error, session = %record.session, "provider exit was not recorded");
-                        crate::harness::native_exit::Settled {
-                            code: status.code().map_or(1, |code| code as u8),
-                            lines: Vec::new(),
-                        }
-                    }
-                };
-                for line in &settled.lines {
-                    deliver(
-                        &mut output,
-                        &mut viewers,
-                        &mut pending_input,
-                        1,
-                        format!("\r\n{line}\r\n").as_bytes(),
-                        detached,
-                    );
-                }
-                let process = format!(
-                    "lf/{}",
-                    record
-                        .attachment
-                        .provider_lf_process_id
-                        .as_str()
-                        .replace('-', "")
-                );
-                output.report(
-                    format!("{process}/step"),
-                    crate::program_status::State::Clear,
-                    None,
-                );
-                output.report(
-                    process,
-                    match settled.code {
-                        0 => crate::program_status::State::Done,
-                        130 => crate::program_status::State::Idle,
-                        _ => crate::program_status::State::Error,
-                    },
-                    None,
-                );
-                planning = None;
-                settled.code
+            if let Some(record) = exit_record.take() {
+                settling = Some(Settling::spawn(record, status, settle_waker.try_clone()?));
             } else {
                 // A launch that died before reporting its client's end.
                 if let Some(held) = client.take().map(native::NativeClient::release) {
@@ -1290,12 +1329,40 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         detached,
                     );
                 }
-                use std::os::unix::process::ExitStatusExt;
-                status
-                    .code()
-                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)) as u8
-            };
-            exit = Some((code, Instant::now()));
+                exit = Some((provider_exit_code(status), Instant::now()));
+            }
+        }
+        let delivered = settling.as_mut().and_then(|settling| {
+            let settled = settling.poll()?;
+            Some((settled, settling.process.clone()))
+        });
+        if let Some((settled, process)) = delivered {
+            for line in &settled.lines {
+                deliver(
+                    &mut output,
+                    &mut viewers,
+                    &mut pending_input,
+                    1,
+                    format!("\r\n{line}\r\n").as_bytes(),
+                    detached,
+                );
+            }
+            output.report(
+                format!("{process}/step"),
+                crate::program_status::State::Clear,
+                None,
+            );
+            output.report(
+                process,
+                match settled.code {
+                    0 => crate::program_status::State::Done,
+                    130 => crate::program_status::State::Idle,
+                    _ => crate::program_status::State::Error,
+                },
+                None,
+            );
+            planning = None;
+            exit = Some((settled.code, Instant::now()));
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
@@ -1311,6 +1378,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
                 snapshot::leave(&id, &output);
+                // Records still being written finish before this process exits.
+                if let Some(settling) = settling.take() {
+                    settling.linger();
+                }
                 return if code == 0 {
                     Ok(())
                 } else {
@@ -1326,15 +1397,19 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         #[cfg(test)]
         lifetime_tests::before_judgment();
         if let Ok(ending) = ending.try_recv() {
-            let event = lifetime::report_result(
+            let confirmed = lifetime::report_result(
                 &mut ending_failure,
-                &id,
-                "confirm Session ending",
-                ending.confirm(&id, observed, !pending_input.is_empty()),
-            )
-            .flatten();
-            if let Some(event) = event {
-                end_viewers(&mut viewers, event);
+                "Session ending",
+                ending.confirm(&id, observed, pending_input.holds_owner()),
+            );
+            if confirmed == Some(true) {
+                end_viewers(
+                    &mut viewers,
+                    Event::Control {
+                        held: false,
+                        notice: None,
+                    },
+                );
                 snapshot::leave(&id, &output);
                 crate::platform::kill_process(std::process::id());
             }
@@ -1361,6 +1436,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             })
             .chain(deadline)
             .chain(pending_input.retry_at())
+            .chain(settling.as_ref().and_then(Settling::deadline))
             .min();
         wait_for_activity(
             &listener,
@@ -1906,17 +1982,13 @@ fn attach_with_terminal(
                         Event::Control {
                             held: false,
                             notice,
-                            successor,
                         } => {
                             drop(terminal.take());
                             if let Some(notice) = notice {
                                 eprintln!("\n{notice}");
                             }
                             let _ = send(&mut socket, Request::Leave);
-                            return match successor {
-                                Some(command) => follow(&command),
-                                None => Ok(()),
-                            };
+                            return Ok(());
                         }
                         Event::ChildExited { code } => {
                             return if code == 0 {
@@ -2030,24 +2102,6 @@ pub(crate) fn drop_exit_record() {
     })();
     if let Err(error) = dropped {
         tracing::warn!(%error, "could not cancel the exit record for a failed exec");
-    }
-}
-
-/// Run `command`, the `<entry> session resume <id>` an ending owner sent, so
-/// this terminal lands in the conversation on the lf the entry launches now.
-/// The owner judged itself; this viewer only follows.
-fn follow(command: &[String]) -> Result<()> {
-    let (program, args) = command
-        .split_first()
-        .context("the owner sent an empty successor command")?;
-    let status = Command::new(program)
-        .args(args)
-        .status()
-        .with_context(|| format!("run {}", command.join(" ")))?;
-    match status.code() {
-        Some(0) => Ok(()),
-        Some(code) => Err(crate::process::CommandExit(code as u8).into()),
-        None => bail!("{program} ended by a signal"),
     }
 }
 

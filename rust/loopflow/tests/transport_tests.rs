@@ -38,12 +38,20 @@ impl Drop for PausedOwner {
 
 impl Fixture {
     fn new() -> Self {
+        // An OSC opcode in an ordinary path is not terminal status.
+        let home = tempfile::Builder::new()
+            .prefix("lf-7501-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        // Stand-in providers never ask Claude's folder-trust question, so lf must
+        // not report one and pre-empt the activity these tests arrange.
+        std::fs::write(
+            home.path().join(".claude.json"),
+            json!({"projects": {"/": {"hasTrustDialogAccepted": true}}}).to_string(),
+        )
+        .unwrap();
         Self {
-            // An OSC opcode in an ordinary path is not terminal status.
-            home: tempfile::Builder::new()
-                .prefix("lf-7501-")
-                .tempdir_in("/tmp")
-                .unwrap(),
+            home,
             repo: TestRepo::new(),
         }
     }

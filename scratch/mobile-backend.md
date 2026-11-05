@@ -290,6 +290,15 @@ remove `MAX_REQUEST` imports in the mobile adapter. Preserve every wire field in
 This handoff leaves LOO-718’s checkout, schema and remote implementation with that
 Task. No namespace-only wire revision or persisted credential migration is needed.
 
+**Revision 2 — November 5.** Jack Heart's direction to keep improving the
+protocol for mobile, Desktop and headless hosts produced
+[server protocol revision 2](server-protocol-2.md): one persistent connection
+per client with hello/welcome revision negotiation, newline-delimited messages
+(one message per WebSocket frame remotely), typed read and command results,
+explicit cancel and a `busy` reply at capacity. LOO-718 adopts that shape on its
+remote carrier instead of finishing on revision 1's one-operation-per-WebSocket
+tunnel. The follow-up Tasks are named in that design; this PR stays on revision 1.
+
 ## Preserve the working contract
 
 [The local protocol README](../rust/loopflow/src/server/README.md) owns

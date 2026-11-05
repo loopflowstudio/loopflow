@@ -1,3 +1,99 @@
+# LOO-498 workspace demo — November 5, 2026
+
+Jack Heart requested `$demo` in the primary Task conversation. The Task is at
+feature → demo; no merge or Auto-Ship approval follows. Current contract:
+[docs/workspaces.md](../docs/workspaces.md). Design: [rex-workspace.md](rex-workspace.md).
+Review page: [demo.html](demo.html).
+
+## Current outcome: configured demo blocked
+
+The branch executable refuses the shared database because `rex_workspaces` is
+unmerged. This is the current migration policy, distinct from the November 4
+catalog-order failure below. Promotion preflight reports shared frontier
+`task_session_promotion`, pending `rex_workspaces`, and rejects promotion.
+No live migration or installation was performed in this review.
+
+The copied executable is `0.15.1+5c0d6419c` (source
+`5c0d6419c96fd98386bf058cb22838249c8855c5`). Only scratch changed between that
+revision and checkout HEAD `1606cf27df`, so the demo binary matches product code.
+
+A consistent snapshot of Jack's real store opened successfully under a private
+LF_HOME. `lf open --host rex --task LOO-498 --copy 'LOO-498 November 5 demo'
+--new-shells --no-focus --json` created a native destination, with zero ordinary
+shells: the selected saved layout contained one Conversation pane. The native
+receipt was `opening`; Conversation readiness was **failed**, reporting the
+unavailable execution-owner socket. No socket was manually wired, no provider was
+started, and no input was replayed. Snapshot metadata does not supply a live owner.
+The receipt's `rex_hold: held` is inventory evidence only; cleanup integration
+with LOO-717 is still unfinished.
+
+Rex accessibility showed the new sidebar entry. Selecting it was interrupted by
+an app change. A fresh read then showed it absent, and a successful native
+`session.list` confirmed the entire demo session absent. The cause of removal is
+unknown. No input was sent to the newly selected unrelated conversation. The demo
+was not recreated. Reuse, actual Split, before/after screenshots and manual-resume
+interaction were **not** verified in this review. No acceptance or new product
+direction was received from Jack.
+
+## Durable snapshot and runtime
+
+- Durable root: `/Users/jack/.local/share/loopflow/demos/loo498-20261105/data`
+- Private LF_HOME: `/Users/jack/.local/share/loopflow/demos/loo498-20261105/data/lf`
+- Runtime root: `/Users/jack/.local/share/loopflow/demos/loo498-20261105/runtime`
+- Absolute LF_BIN: `/Users/jack/.local/share/loopflow/demos/loo498-20261105/runtime/lf`
+- Source DB: `/Users/jack/.lf/loopflow.db`; SQLite backup, not a new synthetic plan.
+- Evidence: runtime `status.json`, `open.json`, their stderr files; root `demo.json`.
+- LF Session shown: `310fb7b6015843e498316cd921a348b9` (existing primary,
+  copied metadata only; no new execution owner or provider history created).
+- Rex session: `session:01a1acb2-ba66-73d0-b507-1894e5d543cf`
+- Rex window: `window:01a1acb2-bad4-70a7-b93f-a234023c395c`
+- Rex block: `block:01a1acb2-bad3-7363-8026-9fec374687da`
+- Native block owner: `client:01a18f6e-df25-75c4-8793-1c0ec64bd729`;
+  host `6cd4509a-df69-4a66-88f3-53eaa4d8523e`.
+- Configured Rex endpoint: `unix:///Users/jack/Library/Application%20Support/rex/server.sock`.
+
+Keep both roots intact. No human draft/request settlement answer has been received;
+closing the native session is not that answer. The agent sent no terminal input and
+started no provider. After review input is settled and a fresh inventory confirms
+no demo owners, runtime-only teardown is:
+
+```bash
+rm -r /Users/jack/.local/share/loopflow/demos/loo498-20261105/runtime
+```
+
+Never remove the durable root. The current native session is already absent; do
+not target unrelated Rex owners. Private recorded Work can be reopened without
+launching a provider (these paths remain fixed while the runtime is retained):
+
+```bash
+env LF_HOME=/Users/jack/.local/share/loopflow/demos/loo498-20261105/data/lf \
+  LF_BIN=/Users/jack/.local/share/loopflow/demos/loo498-20261105/runtime/lf \
+  /Users/jack/.local/share/loopflow/demos/loo498-20261105/runtime/lf task status LOO-498 --json
+```
+
+This snapshot contains database history, not a copied provider home. It cannot
+resume the live owner or reproduce unfinished provider input. Resume the original
+conversation through the installed CLI and original Machine when needed.
+
+The local review page was written, but browser automation rejected its `file:` URL
+(protocol policy permits only HTTP/HTTPS). No alternate server or browser workaround
+was attempted; the conversation supplies the local artifact link.
+
+## Next proof and review question
+
+Recommend repairing the supported branch-demo path so real Work and its live
+owner are available together; do not merge or migrate the shared store merely to
+obtain a demo. Then demonstrate automatic opening and manual resume, Rex's actual
+Split at the Task checkout, `cd` followed by Split, and repeat opening preserving
+native edits. Do not claim those checks from labels or isolated fixture results.
+
+Ask Jack what appeared before the new Rex session disappeared, and whether any
+input there needs preserving. The runbook keeps that observation and draft
+settlement question alongside the failed result. No design change was agreed in
+this review. The following dated evidence remains historical.
+
+---
+
 # LOO-498 workspace demo — November 3–4, 2026
 
 Jack Heart invoked `$demo` in the primary conversation, outside the then-stopped

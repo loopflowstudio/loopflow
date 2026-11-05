@@ -1642,18 +1642,6 @@ fn run() -> anyhow::Result<()> {
     {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
-    // Installation owns its promotion/recovery authority. In particular,
-    // read-only candidate preflight must work before a first install settles.
-    let bypasses_installation_startup_gate = matches!(
-        &cli.command,
-        Some(Commands::Self_ {
-            cmd: loopflow::lf::SelfCommand::Install { .. }
-                | loopflow::lf::SelfCommand::Doctor {
-                    planning: false,
-                    ..
-                }
-        })
-    );
     loopflow::installation::canonicalize_selected_home()?;
     let _settings = loopflow::config::settings::select_invocation(cli.setting_values()?);
     let planning_read = matches!(
@@ -1816,10 +1804,6 @@ fn run() -> anyhow::Result<()> {
     ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 
-    if bypasses_installation_startup_gate {
-        journal::observe_process(&args);
-    }
-
     // Machine diagnosis must reach incompatible or uninitialized Machines without
     // ordinary admission creating or migrating the database first.
     if let Some(Commands::Self_ {
@@ -1830,6 +1814,7 @@ fn run() -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
+        journal::observe_process(&args);
         return loopflow::lf::commands::doctor::run(*json);
     }
 
@@ -1845,7 +1830,9 @@ fn run() -> anyhow::Result<()> {
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
     // trace/store capture. `lf install` opens the store only read-only, inside
-    // its own preflight.
+    // its own preflight. It records itself once the store has committed and
+    // settled, when nothing blocks a plain Process write; the row keeps the
+    // command's actual start.
     if let Some(Commands::Self_ {
         cmd:
             loopflow::lf::SelfCommand::Install {
@@ -1857,7 +1844,7 @@ fn run() -> anyhow::Result<()> {
     }) = &cli.command
     {
         use loopflow::lf::commands::install::Stream;
-        return match cmd.as_ref() {
+        let result = match cmd.as_ref() {
             None => loopflow::lf::commands::install::install(
                 [
                     (*dev, Stream::Dev),
@@ -1919,6 +1906,8 @@ fn run() -> anyhow::Result<()> {
                 candidate,
             }) => loopflow::lf::commands::install::rollback(cli_target, candidate),
         };
+        journal::observe_process(&args);
+        return result;
     }
 
     {

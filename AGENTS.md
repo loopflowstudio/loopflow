@@ -155,6 +155,7 @@ When editing docs in `scratch/`:
 When changing the SQLite schema:
 - Keep one migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the one the branch already has
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix it forward
+- Destructive change is staged (Jack Heart, 2026-10-27): a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses
 - Test the merged frontier against the finished migration, not the steps between
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>`
   triggers to advance their domain in `store_revisions` inside the write.

@@ -65,7 +65,8 @@ this review neither repeats execution nor treats delivery as containment.
 ## Remaining work
 
 The discovery and missing-Docker-timestamp repairs exist in this checkout at
-`d5e0b1151b`; affected-suite gate, publication and final installation remain.
+`d5e0b1151b`; publication and final installation remain. Publication review synced
+cleanly with main and checked the complete repair diff, including local notes.
 Calendar acceptance requires a complete ordinary hourly :17 invocation of those
 final bytes, a fresh successful receipt, matching installed digests and unchanged
 protected content. The successful manual invocation below used the pre-compress
@@ -98,7 +99,7 @@ source roots inside a checkout, independent nested repositories (including a rep
 named `target`), real ignore-rule enforcement, and eligible Docker reclamation after
 an unknown-age image. Review found no change to deletion authority.
 
-Checks: `uv run pytest python/tests/test_disk_cleanup.py -k 'discovery or ignored_data or docker or xcode or swiftpm or embedded_checkout'` with inherited `LF_*` unset and closed stdin — prior 17-pass result reused for unchanged code; Ruff format/check previously passed; `git diff --check` passed; affected-suite gate and final-byte scheduled verification remain with their Graph steps.
+Checks: `uv run pytest python/tests/test_disk_cleanup.py` with inherited `LF_*` unset and closed stdin — 101 passed in 71.90s; architecture check, Ruff check/format for both changed Python files, and `git diff --check` passed. The changed-aware planner selects the entire Python package plus an unrelated CLI build; this bounded repair used the complete cleanup suite locally, leaving broader Python coverage to CI. Final-byte scheduled verification remains with its Graph step.
 
 ## Evidence and limits — 2026-11-04
 

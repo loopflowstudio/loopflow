@@ -128,11 +128,10 @@ in-window refusal reads "looked Ns ago, next look in Ms" and names no flag; a pa
 logs it at debug. docs/work.md, `ops/README.md` and the renamed test
 `uncertain_creation_is_resent_once_per_window_and_on_task_sync` follow, with the
 in-window wait asserted on `sync_export` and the look on `task_sync`.
-Check: `cargo test -p loopflow --lib -- uncertain_creation task_sync
-planning_export_lost` 7 passed; clippy clean; `grep retry_creation` over
-`rust/loopflow/src docs` empty. Third compress pass: the same filter plus
-`uncertain_exports task_create_reaches_linear timed_out_creation
-exports_later_tasks standalone_export` 13 passed (108 s); clippy and fmt clean.
+Check (realign, 2026-11-05, on 70d5470eed): `cargo test -p loopflow --lib --
+uncertain_creation task_sync` 6 passed (21 s); `grep -rn retry_creation
+rust/loopflow/src docs` empty; clippy and fmt clean on this same tree from the
+third compress pass (13 tests, 108 s).
 
 Kept as recorded assumptions, not blocking: the ten-minute healthy window and
 auto-retry for Projects (`scratch/questions.md`). Vocabulary split between

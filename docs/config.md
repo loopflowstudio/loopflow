@@ -209,8 +209,9 @@ account:
   codex: [work@example.com]
 ```
 
-Use your connected accounts' login names or IDs, in preference order. To use only
-your work Claude account in this project:
+Use your connected accounts' login emails, in preference order; an account with
+no login email is named by its ID. To use only your work Claude account in this
+project:
 
 ```bash
 lf set account.claude '[work@example.com]'

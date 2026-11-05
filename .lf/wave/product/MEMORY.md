@@ -583,18 +583,18 @@ absence, so repairs need a fresh authorized read. These records changed no Task.
 
 ## Native host workspaces (LOO-498/717, revised 2026-11-04)
 
-Jack Heart selected Rex first, bounded Herdr second, shared Work/conversation
-identity and tools/defaults.
+Jack Heart selected Rex first, bounded Herdr second, shared Work/tools/defaults.
 November 4: LF templates flow one way; Rex owns edits, shells and restoration.
 Reopen preserves native work; confirmed absence permits template launch.
 IDs/receipts support reuse and uncertain creation, not retention or replay.
-Named copies remain required. Started Tasks arrive passively; backlog is explicit.
-Local Working projections omit remote-only checkouts: the execution Machine must
-judge startup, with retry independent of local Work changes. Receiver/failed-SSH
-fixtures do not prove two-Machine delivery.
-Bare open follows current viewers through agent calls/resume/move. Native splits
-must use the source Task's worktree/Machine. Revision-8 probes start in HOME;
-no scoped setter was found. App Split remains unproved.
+Named copies and prepared explicit handoff remain required; handoff is unfinished.
+Started Tasks arrive passively; backlog is explicit. Local Working projections
+omit remote-only checkouts: the execution Machine judges startup; retries need no
+local changes. Connected CLI fixtures prove reconnect/lost-reply reuse with simulated
+SSH/Rex only. LF-created tools carry their endpoint; arbitrary-server discovery and
+agent calls after resume/move remain unproved. Native splits must use their Task's
+worktree/Machine. Revision-8 probes start in HOME; no scoped setter was found.
+App Split remains unproved.
 
 Jack's November 4 correction supersedes Rex away/native-settlement: retained Task
 Session terminals prevent cleanup regardless of focus; confirmed final removal
@@ -605,8 +605,8 @@ Deleted-checkout reconstruction is excluded. Desktop keeps two-minute eligible-i
 and fifteen-minute completed-and-away cleanup; return cancels. Dirty files do not
 veto eligible cleanup; changed committed refs retain their safeguards.
 
-Restart kept IDs but replaced cat with a login shell. Agent/remote acceptance and
-retention remain unproved. Jack's documentation-first contract: docs/workspaces.md.
+Restart kept IDs but replaced cat with a login shell; retention remains unproved.
+Contract: docs/workspaces.md.
 
 
 ## Workspace redesign decisions

@@ -1,192 +1,94 @@
-# LOO-498 workspace demo — November 3, 2026
+# LOO-498 workspace demo — November 3–4, 2026
 
-Jack Heart invoked `$demo` in the primary conversation. This review is outside
-the stopped feature Graph; it does not resume, approve or complete that Graph.
-The guide is [docs/workspaces.md](../docs/workspaces.md), the design is
-[rex-workspace.md](rex-workspace.md), and the interactive runbook is
-[demo.html](demo.html).
+Jack Heart invoked `$demo` in the primary conversation, outside the then-stopped
+feature Graph. The user contract is [docs/workspaces.md](../docs/workspaces.md),
+the current design is [rex-workspace.md](rex-workspace.md), and the interactive
+runbook is [demo.html](demo.html). Full dated observations and installation
+preflight details remain at `7b886d04cc:scratch/workspace-demo.md`.
 
-## Disposable database demo — November 4, 2026
+## Review outcome
 
-### Real-data snapshot and subsequent design review
+Jack requested real Tasks, Waves and conversations for acceptance. Synthetic Work
+and manually connected observer sockets remain supporting evidence. No native
+Split result, successful app-selection screenshot or observed-behavior acceptance
+was obtained. Computer use stopped when Jack changed the app; no further input was
+sent to the new selection. No provider or Task Graph was launched for these demos.
 
-A consistent SQLite backup now lives at
-`/private/tmp/loo498-real-demo-j8rn_nmv/lf/loopflow.db`. The temporary branch
-build uses the truthful first-parent migration order through the supported
-`LOOPFLOW_MIGRATION_ORDER` build input. A fresh target with the compiler cache
-disabled repaired missing dependency metadata; the build and snapshot Task
-read passed. This does not diagnose the original automatic catalog discovery.
+After the real-data snapshot demo, Jack selected one-way LF templates: Rex owns
+its layouts, shells and restoration. That accepted design supersedes the older
+Rex away/closure/settlement model. Build and review publication through authored
+demo are authorized; Auto-Ship and merge are not.
 
-Opening LOO-498 created Rex session
-`session:01a1a7c1-f4fb-7ec1-bd1c-c7f87bcf9504`, window
-`window:01a1a7c1-f577-7e6f-9fa3-22f9a30a9d7d`. Reopening preserved the identical
-native layout and created zero additional shells. Task view contains the real
-brief; the shell prompt shows the real Task checkout. The initial conversation
-observer failed because its copied Home lacked the owner's socket. A symlink
-for this one owner socket in the private Home's transport directory connects
-the existing read-only observer to the live conversation. Only the exited demo
-observer block was replaced; the new block
-`block:01a1a7c4-3dec-7829-a19a-8d7c0465131a` displays live conversation output
-without claiming input. This manual fixture wiring is not configured-path proof.
-No new provider or Task Graph was launched. The command wrapper is
-`/private/tmp/loo498-real-demo-j8rn_nmv/lf-demo`.
+## Real-data snapshot — November 4
 
-Rex accessibility showed the named real-data session in the sidebar. Jack
-interrupted the expansion click; no successful selection/after screenshot or
-native Split result was obtained. Jack then questioned LF storing Rex layouts
-and selected the one-way template boundary now recorded in `rex-workspace.md`
-and `docs/workspaces.md`. This design review takes precedence over further demo
-automation; the snapshot is evidence, not accepted daily-work usability.
+A consistent backup at `/private/tmp/loo498-real-demo-j8rn_nmv/lf/loopflow.db`
+uses the branch build through `/private/tmp/loo498-real-demo-j8rn_nmv/lf-demo`.
+The supported `LOOPFLOW_MIGRATION_ORDER` input supplied first-parent migration
+order; a fresh target without compiler cache repaired missing dependency metadata.
+Build and Task reads passed; this did not diagnose automatic catalog discovery.
 
-### Dev stream compatibility clarification
+Opening LOO-498 created session `session:01a1a7c1-f4fb-7ec1-bd1c-c7f87bcf9504`
+and window `window:01a1a7c1-f577-7e6f-9fa3-22f9a30a9d7d`. Reopening preserved
+the native layout and created zero extra shells. Task view showed the real brief;
+the shell prompt showed the Task checkout, not proof of later native-split cwd.
 
-Jack Heart subsequently said synthetic Tasks are insufficient to evaluate the
-feature: review needs his real Tasks, Waves and conversations. The disposable
-demo is therefore supporting evidence only. He explicitly requested switching
-local LF to the dev stream. That authorizes the installation and schema update,
-not landing LOO-498 or treating the fake-data demo as accepted.
+The copied Home lacked the existing owner's socket, so the observer initially
+failed. A symlink for that one socket and replacement of only the exited observer
+block produced `block:01a1a7c4-3dec-7829-a19a-8d7c0465131a`, displaying live
+conversation output without input takeover. This manual wiring is not configured
+observer readiness. Rex accessibility showed the sidebar entry, but selection
+was interrupted before an after screenshot or Split result.
 
-Installation outcome, November 4: the original `lf install --dev` succeeded
-for the CLI, selected `ac8e088f5`, recorded stream `dev`, and migrated the
-shared database to `wave_removal`. The explicit `~/.local/bin/lf` now returns
-`0.15.1+ac8e088f5`; its preflight reports exact schema compatibility and
-`promote`, and Task/Session inventory reads succeed. The existing scheduled
-installer remains registered. No LOO-498 Graph was restarted.
+## Installation and catalog evidence — November 4
 
-The older installer did not update Desktop. This conversation inherits
-`LF_BIN=/Applications/Loopflow.app/Contents/MacOS/lf` and finds that old bundled
-CLI first, so bare `lf` here still reports 0.15.1 and cannot read the migrated
-store. A second install through the new explicit CLI downloaded the matching
-Desktop package, but refused replacement: executable identity could not be
-proved for PID 43082. Inspection found twenty app-named helpers without readable
-kernel executable paths; PID 43082's mapped executable is an older app in Trash.
-The supported rollover dry run includes many other conversations, including
-some reported in-progress turns whose sockets do not answer. It was not applied;
-no helpers were manually stopped. Desktop remains old and incompatible with
-the upgraded store. Repairing that update boundary is still required; the CLI
-switch must not be described as successful Desktop installation.
+Jack explicitly requested the dev stream after rejecting synthetic-only review.
+`lf install --dev` installed CLI `0.15.1+ac8e088f5`, recorded dev, and migrated the
+shared store to `wave_removal`. The explicit `~/.local/bin/lf` then passed exact
+schema preflight and Task/Session reads; the scheduled installer remained registered.
+The inspected package was GitHub run `41774946128`, revision
+`ac8e088f5f4d18db1fdb5d7c4e7685c86ec9a004`.
 
-Jack Heart asked whether moving to dev was safe and said the explanation was
-unclear. Streams select installed binaries; the database stays in place and
-may migrate during installation. The unmerged LOO-498 branch is not the dev
-stream, and its failed catalog does not establish dev incompatibility.
+Desktop was not updated by that installer. This conversation's inherited bundled
+`LF_BIN` still selected old 0.15.1, which could not read the upgraded store. A second
+install downloaded matching Desktop but refused replacement: PID 43082 lacked a
+provable kernel executable path; mapped-image inspection pointed to an older app
+in Trash. Twenty app-named helpers had unreadable executable paths. Rollover dry
+run included other conversations and in-progress turns with unavailable sockets;
+it was not applied, and no helpers were manually stopped.
 
-The newest successful main package inspected on November 4 was GitHub run
-`41774946128`, revision `ac8e088f5f4d18db1fdb5d7c4e7685c86ec9a004`.
-Its downloaded CLI (`0.15.1+ac8e088f5`) passed `self install preflight --json`
-against `/Users/jack/.lf/loopflow.db`: `promote_and_migrate`, no unmerged
-migrations, executable compatibility with 19 references, and no active runs
-reported by preflight. It skipped 31 references whose worktree catalog roots
-were gone. The reader floor would advance from the applied `task_regressed_in`
-frontier to `wave_removal`; older builds may then remain unavailable until
-their stream catches up. This proves the checked compatibility path, not the
-absence of dev regressions. No installation ran during that preflight; the
-subsequent authorized dev installation is recorded above.
+Main's later #1815 (`dfd454cfc7`, merged into this checkout) changes installer
+coordination. It does not erase the failed installation or prove a successful
+current install. No further installation occurred during reconciliation.
 
-Jack Heart requested a fake database to continue the demo. A fresh private
-`LF_HOME` now uses this branch's schema, with one synthetic Task created through
-`lf task create` and placed through `lf task checkout`. No production records
-were copied. This bypasses the migration blocker for feature review; it does not
-prove upgrade compatibility.
+The earlier configured branch open failed before materialization with a migration
+history/schema mismatch. A fresh rebuild at `da41d2031` also failed preflight:
+the branch catalog alphabetically ordered unmerged slugs, putting `rex_workspaces`
+before `ship_stop`, despite the correct first-parent `origin/main` history.
+Executable age alone did not explain it. Preview or a new release was never shown
+to repair this; the unmerged branch is separate from the dev stream.
 
-- Private Home: `/private/tmp/loo498-demo-c8knqzcq/lf`.
-- Demo Task: `30d671`, **Try the Rex workspace**.
-- Checkout: `/private/tmp/loo498-demo-c8knqzcq/workspace-demo.30d671-try-the-rex`.
-- Run commands using `/private/tmp/loo498-demo-c8knqzcq/lf-demo`; it pins the
-  branch executable, private Home and fixture repository.
-- `lf open --host rex --task 30d671 --copy 'LOO-498 disposable demo' --new-shells`
-  created a native Task & workflow pane and one shell. Rex terminal capture
-  shows the Task brief and recorded checkout, and the shell prompt shows the
-  demo worktree and branch. The real LF store was not migrated.
-- Repeating with `--no-focus` reused window
-  `window:01a1a780-cf91-70d2-ae44-2ea526b4d33b`, created zero shells and returned
-  the identical native layout. The private store has zero LF Sessions; no
-  provider or Task Graph was launched.
-- Rex session: `session:01a1a780-cf19-7b2f-a918-63ed79fa1bdc`, sidebar label
-  **Try the Rex workspace · 30d671 · LOO-498 disposable demo** (plus LF marker).
-- Opening exposed a separate display-selection failure: `client.inspect`
-  reported a transient client missing (404). The native session/tab still
-  exists and is visible in the app sidebar. A click to select it was interrupted
-  when Jack switched to another Task. No subsequent input was sent there.
-  Automatic selection remains broken; no successful app-after screenshot exists.
-- Native Split UI, unfinished-input retention and actual LLM routing remain
-  unverified. Jack has not accepted observed behavior yet.
+## Retained demonstration destinations
 
-The synthetic demo remains in Rex's sidebar as supporting evidence. Jack's
-later review direction requires real data. No installation was performed as
-part of creating that synthetic demo.
+These are dated locators, not fresh host inventory:
 
-## Observed through the configured path
+- **Synthetic demo:** `/private/tmp/loo498-demo-c8knqzcq/lf-demo`, Task `30d671`,
+  checkout `/private/tmp/loo498-demo-c8knqzcq/workspace-demo.30d671-try-the-rex`.
+  Session `session:01a1a780-cf19-7b2f-a918-63ed79fa1bdc`, window
+  `window:01a1a780-cf91-70d2-ae44-2ea526b4d33b`. Created Task view and one shell;
+  repeat open reused both with zero LF Sessions. `client.inspect` returned a
+  transient 404 after materialization; automatic display selection remains unproved.
+- **Native Split demo:** session `session:01a1a560-b698-73a1-b2ea-7e56a5e8774d`,
+  window `window:01a1a560-b699-7324-b0d0-efaf0ad2f01d`, original shell block
+  `block:01a1a560-b698-7432-b8de-9e32f10e2da5`, label **LOO-498 split demo**.
+  Expected directory `/Users/jack/src/loopflow.loo-498-open-and-restore`.
+  This was created directly through Rex, not `lf open`. Its original prompt showed
+  the checkout, but the app Split click was interrupted before any result.
 
-- Inspected the installed `/Applications/Rex Beta.app` through native accessibility
-  and captured its before screenshot in the conversation. The actual app reports
-  Rex Beta 0.1.0 (1696), connected to the configured local server.
-- Attempted the branch command against the real Task and configured server:
-  `./target/debug/lf open --host rex --task LOO-498 --copy 'LOO-498 demo' --new-shells --json`.
-  It failed before workspace creation with a database migration-history/schema
-  mismatch. Binary identity: `lf 0.15.1+af774cada.dirty`; it reported latest known
-  migration `wave_removal` and last store writer `lf 0.15.0 (ce607b9fc)`.
-  Installed `lf --version` reports 0.15.1. The local binary predates current HEAD
-  `3d61147152`; no fresh build or compatible development-store setup was established
-  in this demo. No installation promotion or live-store migration was attempted.
-- No LF workspace opening, reuse, live observation, or agent-path success is
-  established by this failed invocation. Earlier isolated tests remain separate
-  evidence and do not substitute for the configured-path demonstration.
-- Created a separately named native Rex session through its public API, solely
-  to test the Split UI. This was **not** created by `lf open` and is not evidence
-  that the LF feature works. Its single shell starts in the LOO-498 checkout;
-  the app showed the correct worktree and branch in its prompt.
-- Selected that demo session through Rex's advertised `session.select` client
-  action. The normal Split Right button was visible. Before the click completed,
-  computer use reported that Jack had changed the app; the next read showed
-  another Task. No further input was sent and no split result was obtained.
-  The native app Split path remains unverified. There is no after screenshot of
-  a successful LF opening or successful native split; neither was fabricated.
+## Next configured proof
 
-## Demo workspace left available
-
-- Session label: **LOO-498 split demo**
-- Tab: **Task worktree**
-- Session: `session:01a1a560-b698-73a1-b2ea-7e56a5e8774d`
-- Window: `window:01a1a560-b699-7324-b0d0-efaf0ad2f01d`
-- Original shell block: `block:01a1a560-b698-7432-b8de-9e32f10e2da5`
-- Expected directory: `/Users/jack/src/loopflow.loo-498-open-and-restore`
-
-This contains a fresh native shell only. No provider was launched or moved, and
-no prior user pane was replaced or closed. The demo session remains available
-for Jack to try the normal Split button and run `pwd -P` in the resulting shell.
-
-## Interpretation and next action
-
-### Schema diagnosis after the demo
-
-Jack Heart asked whether publishing a release and using Preview would resolve
-the mismatch. A clean-source rebuild at `da41d2031` still fails the read-only
-installation preflight. The live store's latest migration sequence is
-`0.15.0.001_release → ship_stop → task_regressed_in`. The generated branch
-catalog instead orders the remaining slugs alphabetically, including
-`rex_workspaces` before `ship_stop`, and marks all five slugs unmerged.
-Git's first-parent `origin/main` history contains the four mainline slugs in
-their proper order; why build-time discovery loses that evidence remains
-unresolved. This is not explained by executable age alone.
-
-Preview selects the newest published release automatically. A release is not
-yet a demonstrated repair for the local catalog problem, and the branch also
-contains its unmerged workspace migration. No release, installation promotion
-or live database migration was performed. Fresh Task status shows PR #1814
-open and the feature Graph stopped, with no live Graph process.
-
-The raw `session.new_split` probe establishes HOME fallback when creation omits
-cwd. It does **not**, by itself, establish whether the app's Split shortcut/menu
-supplies the source directory. Earlier statements that the entire native host
-requirement is impossible were broader than that evidence. Preserve the probe,
-but verify the app action before proposing a scope reduction or host dependency.
-
-First establish a compatible current branch demo executable/store through the
-repository's supported development workflow. Then demonstrate actual `lf open`,
-repeat reuse, native splits and the LLM tool path in the configured Rex app.
-Use the dedicated demo session for the native Split observation in the meantime.
-No product revision, narrower acceptance, shipping or merge was approved.
-
-Jack's feedback so far: requested the demo; no observed-behavior acceptance or
-native Split result has been supplied. The review remains available here.
+Use a compatible current branch executable/store through the supported development
+workflow, then demonstrate real `lf open`, repeat reuse, native splits, return/
+reopen, and the agent-tool path in the configured Rex app. Test two Task tabs and
+actual `pwd -P` after splitting. The raw API probe starts in HOME without cwd;
+it does not establish whether the app's shortcut/menu supplies a directory.
+No narrower split contract or deleted-checkout restoration requirement was accepted.

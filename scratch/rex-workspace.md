@@ -40,22 +40,6 @@ its destination to [docs/workspaces.md](../docs/workspaces.md). That guide is th
 user contract; implementation gaps are marked explicitly. Review publication and
 the authored demo are authorized; Auto-Ship, merge and Task completion are not.
 
-## Delete — do not maintain
-
-- Rex away timers, native closure and native-settlement ownership are already absent
-  from this branch. Do not reintroduce them to satisfy LOO-717's older API. Preserve
-  creation receipts, named copies and unknown-inventory safety on the surviving path.
-- Remove reliance on the configured default server for commands launched by LF into
-  a known Rex destination. The launch argv carries that endpoint through native
-  tools and shells; current-viewer placement still outranks provider startup state.
-  Arbitrary pre-existing native terminals remain a separate discovery gap.
-- Removed `Rex::launch_layout` and `herdr::herdr_layout`: shared tool rendering now
-  emits the selected host's format directly. Rex adds its endpoint while constructing
-  each command; Herdr no longer parses Rex JSON. Task/checkout context stays in one
-  `Tools` value throughout traversal. Neither renderer reads active native layouts.
-- No second retention store, shell runtime or mirrored Rex layout replaces these
-  deletions. Shared lifetime integration requires the LOO-717 owner contract.
-
 ## Work selection and interaction
 
 | Concept | Responsibility |
@@ -102,42 +86,35 @@ conversation readiness.
 
 ## What exists in this checkout
 
-Source inspected at `bacac38d44`, including the November 4 remote-arrival changes:
+`open/workspace.rs` consumes shared selection/execution routing and serializes
+native creation. `HostWorkspace` stores destination/selection/copy identity and a
+pending-create receipt; `HostOccurrence` stores Task identity, destination and
+`pending`/`passive`/`tools_pending`/`complete` creation state. Neither owns native
+liveness, layout or retention. Herdr keeps its workspace locator and pending layout
+receipt. The one draft migration is `rex_workspaces.sql`; only Wave-template writes
+advance shared Work revisions.
 
-- `open/workspace.rs` consumes shared selection/execution routing, serializes
-  creation, reuses native IDs across renames and retains uncertain-create receipts.
-  A found activated tab is unchanged; a confirmed missing tab can be explicitly
-  recreated. Marker recovery recovers identity without granting replay permission.
-- `HostWorkspace` holds destination/selection/copy identity and a pending create
-  receipt. `HostOccurrence` is Task-specific, with a native destination and four
-  creation states (`pending`, `passive`, `tools_pending`, `complete`). Neither
-  stores a Rex split tree, retention policy or native liveness. Removed fields
-  include duplicated Work identity, occurrence timestamps and persisted host
-  observations. Herdr retains only its workspace locator and pending layout receipt.
-- Host receipt tables no longer advance Work revisions. Wave-template writes still
-  advance planning because their content affects shared layouts. The Task's one
-  draft migration remains `rex_workspaces.sql`.
-- Explicit passive activation adds selected tools once; a pending split reply
-  prevents retry replay. The follower's OS lock proves only follower liveness.
-  Reopening can create a new follower tab after exit while retaining the old tab.
-  A subscription remembers arrived Tasks so membership changes do not copy them.
-  Repository-created Wave containers follow independently. The follower now routes
-  remote arrival requests through the existing SSH envelope, using shared scope
-  filters to include Tasks whose remote checkout is absent from the local plan.
-  The destination decides whether the Task started and validates its Machine/cwd.
-  Each request is passive and fenced by existing creation receipts; remote
-  followers stay local to avoid forwarding loops. A fifteen-second reconciliation
-  request covers remote starts/reconnections without local Work changes. Configured
-  two-Machine acceptance remains outstanding.
-- Native host output is spooled during commands, avoiding wait-before-drain pipe
-  deadlocks on large inventories. Shared workspace lookup reads rows in one query.
-  Passive creation validates the recorded checkout before opening its Task viewer.
-- The obsolete Herdr keystroke-resume path is deleted. Workspace painting never
-  executes `ViewContent.argv`; conversation tools use passive `session view`.
+Retained tabs are unchanged; confirmed absence permits explicit recreation. Marker
+recovery recovers identity without permitting command replay. Passive activation
+adds selected tools once beside existing panes; uncertain split replies fence
+retries. The follower's OS lock establishes its liveness; a later open may create a
+new follower tab without replacing the old one. Following remembers arrived Tasks,
+and repository-created Wave containers follow independently.
 
-These source facts and earlier isolated checks establish components, not complete
-configured acceptance. No Rex retention, away, closure or settlement implementation
-exists here; removing the old plan is not delivery of the new retention hold.
+Shared tools render directly into each host's format. Rex launches carry the resolved
+endpoint, including Wave conversations and followers. Host output spools during
+commands to avoid pipe deadlocks; workspace lookup uses one query. Passive creation
+validates the recorded checkout. The old Herdr keystroke-resume path is deleted;
+painting never executes `ViewContent.argv`.
+
+Caller and recorded-viewer placement resolve their endpoint once before caller
+block validation. Local and remote opening share `OpenReport`; destination
+preparation and tool creation use the same per-Task failure receipt, preserving
+other results. Explicit Task reuse keeps its existing container across membership
+changes. Test peers share JSON reply setup; uncertain replies stay raw failures.
+
+Remote arrival, caller discovery and their evidence limits are described below.
+These components do not deliver the outstanding Rex retention hold.
 
 ### Shared tools
 
@@ -208,20 +185,25 @@ remain distinct from server creation. The real-data demo observed a transient
 selection remains unproved. Client attachment and selected windows prove no
 foreground use, and foreground use is no longer required for retention.
 
-Native children supply REX_SESSION/REX_BLOCK without REX_SERVER, including on the
-isolated non-default server. Current code resolves Rex's configured endpoint and
-validates the caller block; recorded current-viewer placement can supply an endpoint.
-LF-created native tools now carry the resolved endpoint in their launch argv,
-including the Workspace follower and Wave conversation. A generated-shell fixture
-executes the actual tool launcher and reopens with bare `lf open`, retaining the
-same destination. This does not discover an arbitrary pre-existing terminal's
-endpoint. A first direct call in an arbitrary custom server can still require `--server`,
-which falls short of accepted bare-open behavior. A fresh isolated November 4
-probe preserved Rex's native caller environment (`REX_SESSION`, `REX_BLOCK`,
-`REX_BIN_DIR`) and ran unqualified `rex whoami`: it succeeded but identified a
-different endpoint. Letting Rex's CLI keep those variables does not solve discovery;
-caller-block validation remains necessary to avoid opening the wrong server. Existing source-placement and
-direct-shell tests do not prove the actual LLM tool path after resume/move.
+Native children supply REX_SESSION/REX_BLOCK without REX_SERVER, including on an
+isolated non-default server. LF-created tools carry the resolved endpoint through
+argv; current-viewer placement still outranks provider startup environment.
+Unqualified `rex whoami` with native caller variables retained identified a different
+endpoint in the November 4 probe, so those variables alone remain insufficient.
+
+Native caller discovery now reads the actual ancestor Rex
+server's explicit `--listen` argument, preserving argument boundaries and excluding
+process environments. The isolated process probe confirmed Rex → login → shell
+ancestry. There is no running-app or socket scan. Explicit server selection still
+wins, and opening validates the caller's block at the resolved endpoint. The native
+fixture rejects unqualified Rex CLI requests instead of injecting its endpoint;
+it passed custom-server bare opening, rename/reuse and passive arrival with zero
+LF Sessions created. Missing ancestry now returns an actionable `--server` error
+before querying the configured default. A CLI fixture moves a simulated agent's
+viewer between two Rex endpoints while preserving stale startup variables; each
+open reaches the current endpoint without changing the Session attachment token.
+This does not prove the actual LLM tool path after resume/move, or discovery when
+the server listener cannot be read.
 
 ### Native split defaults
 
@@ -270,12 +252,16 @@ No migration or installation was performed during this reconciliation.
 
 ## Shared lifetime dependency
 
-November 4 status confirms LOO-717 remains open at PR #1811, at demo. Its clean
-checkout at `b81df60579` still requires `--native-settled` on every `task presence` write and native closure
+November 4 status rechecked during resumed implement confirms LOO-717 remains open at PR
+#1811, at demo. Its clean checkout at `b81df60579` still requires `--native-settled`
+on every `task presence` write and native closure
 before retirement. It also offers exact retaining-process exit observation through
 optional owner identity. Those are implementation evidence for the older contract,
 not permission to reinstate Rex closure. Client disappearance, lease expiry and
 network failure do not establish that Rex's retaining server/terminals ended.
+The November 4 coordination comment `04388b59-a9ab-434c-a1d2-c120ec38b7e9`
+already conveys Jack Heart's revised contract to LOO-717; that accepted direction
+has not yet changed its API. No new cleanup owner or Rex-closure requirement follows.
 
 This checkout has no Task presence API. Retention integration needs the shared
 owner to support the accepted smaller contract: a reliable terminal-to-Session
@@ -292,6 +278,17 @@ authority to settle or delete those resources.
 
 ## Remaining work and decisions
 
+### Delete — do not maintain
+
+- Configured-default fallback from native Rex caller discovery and the native
+  fixture's injected endpoint are removed. The surviving path uses the ancestor's
+  explicit listener, explicit server overrides or current-viewer placement, with
+  caller-block validation. Preserve endpoint propagation for LF-created tools;
+  there is no process-wide/socket scan or second resolver.
+- Rex away detection, LF native closure and settlement remain deleted concepts;
+  do not revive them to satisfy LOO-717's superseded API. Preserve holds and unknown
+  inventory through the shared lifetime owner when its revised API is available.
+
 ### Outstanding acceptance
 
 1. **Retention integration:** shared lifetime owner plus Rex observation must
@@ -301,9 +298,12 @@ authority to settle or delete those resources.
    remains unresolved. App-menu/shortcut, Desktop, Herdr and remote proof are still
    owed. A requirement change needs Jack Heart's decision, not an inference from
    loose layout fidelity.
-3. **Bare-open and remote routing:** arbitrary non-default server discovery, actual
-   agent-tool invocation after viewer resume/move, explicit overrides and no local
-   fallback. Remote arrival routing/reconciliation and known-server launch propagation are
+3. **Bare-open and remote routing:** native ancestor-based custom-server discovery
+   passes the isolated host fixture; moved-viewer CLI routing passes with a
+   simulated provider. Actual agent-tool invocation after viewer resume/move still
+   needs proof. Unreadable ancestry requires explicit `--server`; it no longer
+   queries a configured default. Explicit overrides and no local fallback remain
+   required. Remote arrival routing/reconciliation and known-server launch propagation are
    implemented. Connected source/destination fixtures cover delivery and retries
    without local Work changes; configured two-Machine interaction still needs proof.
 4. **Configured reuse and lifecycle proof:** real open → work → return → close/reopen,
@@ -314,6 +314,11 @@ authority to settle or delete those resources.
    destination preparation/handoff receipts remain substantial implementation work.
    Destination preparation must complete before an explicitly requested input
    handoff; failure must preserve source input and retries must reuse the destination.
+   A native create/display receipt is not conversation readiness. Launching resume
+   as part of the initial native layout can transfer source input before a create
+   reply is known; it is not a safe implementation of this boundary. Destination
+   readiness and the subsequent explicit input request need separate acknowledgements
+   through the existing Session attachment owner, with uncertain replies retained.
    Native reorder/source-state preservation need end-to-end proof. Dropping that
    coordination or named-copy behavior remains an unaccepted optional proposal.
 6. **Validation:** gate owns affected suites, migration/DTO coverage and the two
@@ -322,23 +327,16 @@ authority to settle or delete those resources.
 
 ## Verification
 
-Gate still owns the preceding compress pass's two 2s host-fixture deadline failures: Launch Services in
+Gate owns affected work-open, workspace, CLI parsing, migration and DTO suites,
+including earlier 2s host-fixture deadline failures in
 `available_conversations_need_no_question_and_are_never_taken_over` and the cmux
-resume test. Its earlier isolated native Rex/Herdr passes are supporting evidence,
-not validation of the new remote path. Affected gate suites include work-open,
-the open/workspace library tests and CLI parsing; configured interaction stays
-with the authored demo.
+resume test. Authored demo owns configured interaction and unresolved product
+judgments. Native cwd proof uses launcher-written evidence: Rex telemetry can
+retain the login wrapper, and stable pane IDs prove neither cwd nor continuity.
 
-Code review found that the shared Working selection hides Tasks whose checkout
-exists only remotely. Workspace inventory now uses the existing scope filters;
-only the execution Machine decides whether to materialize a started Task. Routed
-followers cannot forward again. Native creation receipts remain the retry fence,
-and no retention, input-taking or Rex-closure authority was added.
+Earlier complete plans/results: `cc607dc3e1:scratch/rex-workspace.md` and
+`df3b5e810d:scratch/rex-workspace.md`. Earlier checkpoint:
+`7b886d04cc:scratch/rex-workspace.md`; dated demo evidence is in
+[workspace-demo.md](workspace-demo.md).
 
-Native cwd proof uses launcher-written evidence before exec: Rex telemetry can
-still report a root-owned login wrapper while Task-view output is already visible.
-Neither a displayed checkout nor stable pane IDs prove process cwd or continuity.
-Earlier complete plans/results remain at `cc607dc3e1:scratch/rex-workspace.md` and
-`df3b5e810d:scratch/rex-workspace.md`; historical demo details stay in their own file.
-
-Check (compress, November 4): `cargo test -p loopflow --lib lf::commands::open::workspace::` — 3 passed; `cargo test -p loopflow --test integration work_open_tests::rex_ -- --test-threads=1` — 11 passed, 1 native-host test ignored; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass. Gate owns broader suites and earlier host deadlines; demo owns configured interaction. Authored context remains within both limits.
+Check (November 4): `cargo test -p loopflow --lib lf::commands::open::` — 9 passed; `cargo test -p loopflow --test integration work_open_tests::rex_` — 13 passed, 1 native-host test ignored; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed. Prior argument-reader (8 tests) and isolated custom-server Rex passes remain applicable. Gate owns broader suites and earlier host deadlines; authored demo owns configured interaction. `lf context` is within token and byte targets.

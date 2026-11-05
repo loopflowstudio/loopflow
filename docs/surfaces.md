@@ -16,14 +16,15 @@ lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (
 ```
 
 From Rex, `lf open` opens a native workspace for the selected Work. It uses
-recorded viewer placement when available, otherwise Rex's configured local
-server and caller block. Custom-server discovery and the complete agent-tool
-path remain unfinished; known Rex failures never fall through to Desktop.
+current viewer placement, otherwise the caller's server environment or the Rex
+ancestor's explicit listener. Unavailable caller context reports an error;
+`--server` selects an endpoint explicitly. The complete agent-tool path still
+needs demonstration; known Rex failures never fall through to Desktop.
 From a Herdr pane, `lf open --task LOO-12` adds a Herdr workspace; from tmux, a new window
 right after this one; from cmux, a new workspace. Otherwise it opens in Desktop on
-macOS, then a plain terminal. It reads only the host's own environment
-(`REX_*`, `HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
-apps. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one explicitly.
+macOS, then a plain terminal. Host context comes from viewer placement, the host's
+environment or Rex process ancestry; opening never scans running apps.
+`--host desktop|rex|cmux|herdr|tmux|terminal` picks one explicitly.
 
 Rex and Herdr open passive conversation views. Other terminal routes focus an
 existing conversation in that host or report it as `elsewhere`, with the

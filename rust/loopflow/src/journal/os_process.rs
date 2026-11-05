@@ -22,6 +22,29 @@ pub(crate) struct OsProcess {
 }
 
 impl OsProcess {
+    /// Argument boundaries from the kernel, excluding the process environment.
+    pub(crate) fn arguments(pid: u32) -> io::Result<Option<Vec<String>>> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::arguments(pid)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            match std::fs::read(format!("/proc/{pid}/cmdline")) {
+                Ok(bytes) => Ok(Some(
+                    bytes
+                        .strip_suffix(&[0])
+                        .unwrap_or(&bytes)
+                        .split(|byte| *byte == 0)
+                        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+                        .collect(),
+                )),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
         macos::read(pid)
@@ -210,6 +233,14 @@ mod tests {
 
     use super::{parse, OsProcess};
     use crate::journal::ProcessIdentityEvidence;
+
+    #[test]
+    fn kernel_arguments_match_the_running_program() {
+        assert_eq!(
+            OsProcess::arguments(std::process::id()).unwrap(),
+            Some(std::env::args().collect())
+        );
+    }
 
     #[test]
     fn executable_is_the_running_file_not_its_launch_path() {

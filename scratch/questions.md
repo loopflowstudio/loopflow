@@ -25,11 +25,14 @@ merge are not. [rex-workspace.md](rex-workspace.md) holds the plan and remaining
   unavailable inventory cannot release a hold. No new product judgment is needed
   to preserve that accepted boundary.
 - **Bare-open endpoint discovery:** native custom-server children supply session/
-  block IDs but not REX_SERVER. Current-viewer placement helps recorded viewers;
-  LF-created tools now carry their resolved server through launch argv. A fresh
-  isolated probe of unqualified `rex whoami` with native caller variables retained
-  identified a different endpoint. Arbitrary pre-existing custom-server terminals
-  remain unresolved; no guessed socket or running-app scan supplies evidence.
+  block IDs but not REX_SERVER. Unqualified `rex whoami` can identify another server.
+  The November 4 isolated probe confirmed that native shells descend from the serving
+  Rex process. Implementation now reads that ancestor's explicit listener, then
+  validates the caller block; no endpoint scan is introduced. Current-viewer
+  placement remains authoritative for agent tools. Unreadable ancestry fails with
+  `--server` guidance before any configured-default query. Configured agent
+  resumption/move and discovery without readable server ancestry remain unproved.
+
 
 Implementation choice, November 4: remote arrivals reconcile every fifteen seconds
 through the existing Machine request path, in addition to local Work changes.

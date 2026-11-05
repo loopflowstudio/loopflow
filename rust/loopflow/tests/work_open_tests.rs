@@ -1025,16 +1025,16 @@ fn rex_reopens_native_task_window_without_creating_a_session_or_replaying_tools(
         "--json",
     ];
     let first = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
-    std::fs::write(
-        bin.path().join("session.list.reply"),
-        r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        bin.path().join("session.view.reply"),
-        r#"{"windows":[{"window_id":"window:fixture","label":"My tools"}]}"#,
-    )
-    .unwrap();
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}),
+    );
+    rex_reply(
+        bin.path(),
+        "session.view",
+        serde_json::json!({"windows":[{"window_id":"window:fixture","label":"My tools"}]}),
+    );
     let second = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
     assert_eq!(first["receipts"][0]["destination"], "window:fixture");
     assert_eq!(
@@ -1087,8 +1087,12 @@ cat '{bin}/'"$method.reply"
             serde_json::json!({"window_id":"window:fixture"}),
         ),
     ] {
-        std::fs::write(bin.join(format!("{method}.reply")), reply.to_string()).unwrap();
+        rex_reply(bin, method, reply);
     }
+}
+
+fn rex_reply(bin: &Path, method: &str, reply: Value) {
+    std::fs::write(bin.join(format!("{method}.reply")), reply.to_string()).unwrap();
 }
 
 #[test]
@@ -1134,12 +1138,16 @@ fn rex_created_shell_reopens_on_its_server_without_placement_flags() {
         "#!/bin/sh\n[ \"$REX_SERVER\" = unix:///fixture/rex.sock ] || exit 91\nexec '{}' open --no-focus --json\n", env!("CARGO_BIN_EXE_lf")
     )).unwrap();
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::write(
-        bin.path().join("session.list.reply"),
-        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
-    )
-    .unwrap();
-    std::fs::write(bin.path().join("session.view.reply"), r#"{"windows":[{"window_id":"window:fixture","layers":[{"blocks":[{"block_id":"block:shell"}]}]}]}"#).unwrap();
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture"}]}),
+    );
+    rex_reply(
+        bin.path(),
+        "session.view",
+        serde_json::json!({"windows":[{"window_id":"window:fixture","layers":[{"blocks":[{"block_id":"block:shell"}]}]}]}),
+    );
     let mut launch = Command::new(args[0]);
     launch
         .env_clear()
@@ -1155,6 +1163,128 @@ fn rex_created_shell_reopens_on_its_server_without_placement_flags() {
     assert_eq!(reopened["receipts"][0]["destination"], "window:fixture");
     assert_eq!(std::fs::read_to_string(launches).unwrap(), created);
     assert_eq!(sessions(home.path()), 0);
+}
+
+#[test]
+fn rex_agent_tool_open_uses_the_moved_viewer_instead_of_startup_context() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let provider = NativeServer(
+        Command::new("/bin/sleep")
+            .arg("3600")
+            .process_group(0)
+            .spawn()
+            .unwrap(),
+    );
+    let session = live_conversation(
+        home.path(),
+        &provider.0,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        repo.path(),
+        "Agent tool caller",
+        1,
+        0,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (agent, origin, token): (String, String, String) = db
+        .query_row(
+            "SELECT p.id,p.attached_lf_process_id,p.attachment_token FROM processes p
+             JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1",
+            [&session],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    let caller = serde_json::json!({
+        "session_id":session, "agent_process_id":agent, "origin_exec_id":origin,
+    })
+    .to_string();
+    rex_peer(bin.path());
+    // Fail on the stale/default server, and expose the requested current endpoint.
+    let peer = bin.path().join("rex-peer");
+    std::fs::rename(bin.path().join("rex"), &peer).unwrap();
+    let wrapper = format!(
+        r#"#!/bin/sh
+while [ "$#" -gt 0 ] && [ "$1" != -S ]; do shift; done
+[ "$#" -gt 1 ] || exit 91
+endpoint="$2"
+case "$endpoint" in unix:///current|unix:///moved) ;; *) exit 92;; esac
+shift 2
+case " $* " in
+  *' whoami '*) printf '{{"endpoint":"%s","principal":{{"transport":"unix"}}}}\n' "$endpoint";;
+  *) exec '{}' "$@";;
+esac
+"#,
+        peer.display()
+    );
+    std::fs::write(bin.path().join("rex"), wrapper).unwrap();
+    std::fs::set_permissions(
+        bin.path().join("rex"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    for destination in ["current", "moved"] {
+        let placement = format!(
+            "rex:{}",
+            serde_json::json!({
+                "server":format!("unix:///{destination}"),
+                "session":format!("session:{destination}"),
+                "block":format!("block:{destination}"),
+            })
+        );
+        db.execute(
+            "UPDATE processes SET terminal_id=?2 WHERE id=?1",
+            rusqlite::params![origin, placement],
+        )
+        .unwrap();
+        rex_reply(
+            bin.path(),
+            "session.view",
+            serde_json::json!({
+                "windows":[{"window_id":format!("window:{destination}"),"layers":[{
+                    "blocks":[{"block_id":format!("block:{destination}")}]
+                }]}]
+            }),
+        );
+        rex_reply(
+            bin.path(),
+            "session.new_window",
+            serde_json::json!({
+                "window_id":format!("window:new-{destination}")
+            }),
+        );
+        let report = json(&lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &[
+                ("LF_AGENT_CALLER", &caller),
+                ("REX_SERVER", "unix:///stale"),
+                ("REX_SESSION", "session:stale"),
+                ("REX_BLOCK", "block:stale"),
+            ],
+            &["open", "--task", "INF-123", "--no-focus", "--json"],
+        ));
+        assert_eq!(report["receipts"][0]["host"], "rex");
+        assert_eq!(
+            report["receipts"][0]["destination"],
+            format!("window:new-{destination}")
+        );
+    }
+    let retained: (String, String) = db
+        .query_row(
+            "SELECT attached_lf_process_id,attachment_token FROM processes WHERE id=?1",
+            [&agent],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(retained, (origin, token));
+    assert_eq!(sessions(home.path()), 1);
 }
 
 #[test]
@@ -1232,16 +1362,16 @@ fn rex_remote_arrival_is_passive_reused_and_preserves_conversation_input() {
         1,
         "arrival creates no follower or ordinary tools"
     );
-    std::fs::write(
-        bin.path().join("session.list.reply"),
-        r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        bin.path().join("session.view.reply"),
-        r#"{"windows":[{"window_id":"window:fixture","label":"My work"}]}"#,
-    )
-    .unwrap();
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}),
+    );
+    rex_reply(
+        bin.path(),
+        "session.view",
+        serde_json::json!({"windows":[{"window_id":"window:fixture","label":"My work"}]}),
+    );
     let second = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
     assert_eq!(
         second["receipts"][0]["destination"],
@@ -1254,7 +1384,11 @@ fn rex_remote_arrival_is_passive_reused_and_preserves_conversation_input() {
     assert_eq!(sessions(home.path()), 1);
 
     // Reconciliation respects explicit native closure, even after its caller restarts.
-    std::fs::write(bin.path().join("session.view.reply"), r#"{"windows":[]}"#).unwrap();
+    rex_reply(
+        bin.path(),
+        "session.view",
+        serde_json::json!({"windows":[]}),
+    );
     let closed = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
     assert_eq!(closed["receipts"][0]["status"], "failed");
     assert!(closed["receipts"][0]["reason"]
@@ -1401,11 +1535,11 @@ fn rex_remote_follower_routes_locally_unstarted_tasks_without_fallback() {
         rusqlite::params![registered.task.repository_id.as_str(), serde_json::to_string(&selected).unwrap()],
     ).unwrap();
     rex_peer(bin.path());
-    std::fs::write(
-        bin.path().join("session.list.reply"),
-        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
-    )
-    .unwrap();
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture"}]}),
+    );
     let requests = host(bin.path(), "ssh", "", 1);
     let args = [
         "open",
@@ -1523,11 +1657,11 @@ fn rex_remote_follower_reconnects_without_work_changes_and_reuses_a_lost_reply()
     ).unwrap();
     rex_peer(bin.path());
     rex_peer(&remote_bin);
-    std::fs::write(
-        bin.path().join("session.list.reply"),
-        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
-    )
-    .unwrap();
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture"}]}),
+    );
     // Pin the actual receiving CLI inside SSH's remote PATH boundary.
     std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), remote_bin.join("lf")).unwrap();
     let script = format!(
@@ -1662,6 +1796,76 @@ touch '{bin}/delivered'
 }
 
 #[test]
+fn rex_open_keeps_other_tasks_when_a_wave_cannot_be_prepared() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let checkout = repo.create_named_worktree("standalone");
+    let standalone =
+        support::register_sibling_task(&registered, "INF-124", "standalone", &checkout);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET project_id=NULL WHERE id=?1",
+        [standalone.id.as_str()],
+    )
+    .unwrap();
+    rex_peer(bin.path());
+    let peer = bin.path().join("rex-peer");
+    std::fs::rename(bin.path().join("rex"), &peer).unwrap();
+    std::fs::write(
+        bin.path().join("rex"),
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *session.create*task-pr-tests*) echo 'lost reply'; exit;; esac\nexec '{}' \"$@\"\n",
+            peer.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        bin.path().join("rex"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let output = lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "open",
+            "--host",
+            "rex",
+            "--no-focus",
+            "--json",
+        ],
+    );
+    assert!(!output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let receipts = report["receipts"].as_array().unwrap();
+    assert_eq!(receipts.len(), 2, "{report}");
+    let failed = receipts
+        .iter()
+        .find(|item| item["status"] == "failed")
+        .unwrap();
+    assert!(failed["url"].as_str().unwrap().ends_with("/task/INF-123"));
+    assert!(failed["reason"]
+        .as_str()
+        .unwrap()
+        .contains("outcome is unknown"));
+    let opened = receipts
+        .iter()
+        .find(|item| item["status"] == "opening")
+        .unwrap();
+    assert!(opened["url"].as_str().unwrap().ends_with("/task/INF-124"));
+    assert_eq!(opened["destination"], "window:fixture");
+    assert_eq!(sessions(home.path()), 0);
+}
+
+#[test]
 fn rex_follower_keeps_other_arrivals_when_a_wave_cannot_be_prepared() {
     use loopflow::work::selection::{Selection, SelectionExpression, SelectionId};
 
@@ -1689,11 +1893,11 @@ fn rex_follower_keeps_other_arrivals_when_a_wave_cannot_be_prepared() {
         rusqlite::params![registered.task.repository_id.as_str(), serde_json::to_string(&selected).unwrap()],
     ).unwrap();
     rex_peer(bin.path());
-    std::fs::write(
-        bin.path().join("session.list.reply"),
-        r#"{"sessions":[{"session_id":"session:fixture"}]}"#,
-    )
-    .unwrap();
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture"}]}),
+    );
     std::fs::write(bin.path().join("session.create.reply"), "lost reply").unwrap();
     let output = lf(
         home.path(),
@@ -1745,11 +1949,11 @@ fn rex_lost_recreation_reply_never_reuses_a_deleted_locator_as_retry_permission(
         ];
         json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
         if method == "session.new_window" {
-            std::fs::write(
-                bin.path().join("session.list.reply"),
-                r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}"#,
-            )
-            .unwrap();
+            rex_reply(
+                bin.path(),
+                "session.list",
+                serde_json::json!({"sessions":[{"session_id":"session:fixture","label":"Renamed"}]}),
+            );
         }
         // Inventory confirms the old destination is gone; its replacement succeeds
         // natively but the server's reply cannot be read.
@@ -1797,20 +2001,19 @@ fn rex_recovers_a_lost_creation_by_marker_then_reuses_its_renamed_native_id() {
     assert!(!lf(home.path(), repo.path(), Some(bin.path()), &args)
         .status
         .success());
-    std::fs::write(
-        bin.path().join("session.list.reply"),
-        r#"{"sessions":[{"session_id":"session:fixture","label":"Renamed session"}]}"#,
-    )
-    .unwrap();
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:fixture","label":"Renamed session"}]}),
+    );
     let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
     let request: Value = serde_json::from_str(created.trim()).unwrap();
     for label in [request["window_label"].as_str().unwrap(), "My arrangement"] {
-        std::fs::write(
-            bin.path().join("session.view.reply"),
-            serde_json::json!({"windows":[{"window_id":"window:recovered","label":label}]})
-                .to_string(),
-        )
-        .unwrap();
+        rex_reply(
+            bin.path(),
+            "session.view",
+            serde_json::json!({"windows":[{"window_id":"window:recovered","label":label}]}),
+        );
         let report = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
         assert_eq!(report["receipts"][0]["destination"], "window:recovered");
     }
@@ -1828,7 +2031,7 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
     let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    host(bin.path(), "rex", "unavailable", 1);
+    let rex = host(bin.path(), "rex", "unavailable", 1);
     let desktop = host(bin.path(), "open", "", 0);
     let output = lf_with(
         home.path(),
@@ -1841,6 +2044,17 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
         &["open", "--task", "INF-123", "--json"],
     );
     assert!(!output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    if let Ok(queries) = std::fs::read_to_string(rex) {
+        // The test runner itself may descend from Rex. Only that explicit
+        // listener may be queried; the stand-in still reports it unavailable.
+        assert!(queries.lines().all(|line| line.contains("-S ")));
+    } else {
+        assert!(report["receipts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Rex caller server is unavailable from its process ancestry"));
+    }
     assert!(!desktop.exists());
     assert_eq!(sessions(home.path()), 0);
 }
@@ -1875,15 +2089,15 @@ fn rex_native_workspace_keeps_window_and_block_identity() {
     let endpoint = format!("unix://{}", socket.display());
     let rex = std::env::var_os("LOOPFLOW_TEST_REX")
         .expect("set LOOPFLOW_TEST_REX to the installed Rex executable");
-    // Rex sets Session/block context, but uses its configured default server.
-    // Bind only this fixture's CLI default; never contact the person's server.
+    // Native children have no REX_SERVER. The caller must discover this server,
+    // not Rex's configured default. Refuse any unqualified CLI query so this
+    // fixture can never contact the person's server.
     let rex_cli = bin.join("rex");
     std::fs::write(
         &rex_cli,
         format!(
-            "#!/bin/sh\nexec '{}' --server '{}' \"$@\"\n",
+            "#!/bin/sh\ncase \" $* \" in *' -S '*|*' --server '*) ;; *) echo 'missing explicit Rex endpoint' >&2; exit 91;; esac\nexec '{}' \"$@\"\n",
             rex.to_string_lossy().replace('\'', "'\"'\"'"),
-            endpoint
         ),
     )
     .unwrap();

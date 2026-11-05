@@ -76,6 +76,10 @@ is confirmed gone, an explicit open creates a fresh view from LF's template.
 An unavailable host or an uncertain creation reply cannot establish absence;
 inspect the native result before retrying.
 
+Opening reports successful Task destinations alongside native creation failures.
+If one Wave destination fails, other Task destinations can still open; retrying
+preserves the successful native work.
+
 For a new occurrence, choose its layout in this order:
 
 1. The Task's saved Loopflow layout.
@@ -129,6 +133,9 @@ follower is replaced in a new Workspace tab; its old native tab stays intact.
 Tools created by LF retain the destination server when they launch, so a shell
 opened there can use bare `lf open` to return to the same Work. This does not yet
 cover discovering every pre-existing terminal on an arbitrary custom server.
+Native terminals can discover an explicit listener from their Rex server's process
+ancestry. If that evidence is unavailable, opening reports it; it does not query
+a different configured server. Use `--server` to select the destination explicitly.
 
 The follower asks a remote Task's recorded Machine whether it has started, even
 when the local plan has no checkout for it. Remote arrivals use the same passive
@@ -233,11 +240,14 @@ arrival/activation, follower recovery, and Herdr Task creation/reuse. It still o
 - Native new-split worktree defaults, described above.
 - Clear template relaunch and native reuse behavior after a server restart,
   without claiming to restore Rex edits or replaying commands into existing work.
-- Bare-open discovery on arbitrary non-default Rex servers, plus the actual
-  agent-tool path after a viewer move. A direct native-shell test is not that proof.
+- Bare-open discovery covers explicit listeners on the native Rex server ancestry.
+  Servers with unreadable ancestry and the actual agent-tool path after a viewer
+  move still need proof; a direct native-shell test is not that proof.
 - Configured remote arrival, recovery and app acceptance across two Machines.
 - Retained Rex Task Session terminals preventing cleanup, with reliable release
   observation and no LF-initiated closure of Rex shells.
-- Complete move/handoff and return/reopen demonstrations.
+- Coordinated destination preparation before explicit conversation input handoff,
+  with failure preserving source input and retries reusing the destination.
+  Configured move/handoff and return/reopen demonstrations remain outstanding.
 
 These are delivery gaps, not accepted reductions to the agreed experience.

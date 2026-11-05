@@ -63,11 +63,16 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             start.elapsed() < std::time::Duration::from_secs(30),
             "{failure} must fail before the opener's deadline"
         );
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // A terminal's exit reads as the terminal's own output, on stdout.
+        let stderr = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(
             (failure == "fail-after-submit" && stderr.contains("native terminal connection"))
                 || stderr.contains(if failure == "fail-terminal" {
-                    "before submitting"
+                    "exited with"
                 } else if failure == "fail-after-submit" {
                     "status"
                 } else {
@@ -118,12 +123,15 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         let turns: serde_json::Value =
             serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())
                 .unwrap();
+        // The first turn goes in before the terminal opens, so a terminal that
+        // fails leaves it in history, sent once, and the next one follows it.
+        let submitted = failure.starts_with("fail-") && failure != "fail-server";
         assert_eq!(
             turns.as_array().unwrap().len(),
-            if failure == "fail-after-submit" { 2 } else { 1 },
+            if submitted { 2 } else { 1 },
             "{failure}"
         );
-        if failure == "fail-after-submit" {
+        if submitted {
             assert_eq!(
                 turns[1]["items"][0]["content"][0]["text"],
                 "Native follow-up"
@@ -190,9 +198,8 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         manifest["exec"]["system_prompt"]
     );
     assert!(config.get("baseInstructions").is_none());
-    assert_eq!(config["approvalPolicy"], "on-request");
+    assert!(config.get("approvalPolicy").is_none());
     assert_eq!(config["threadSource"], "user");
-    assert_eq!(config["config"]["native-setting"], true);
     let hooks = &config["config"]["hooks"];
     assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
     let state = hooks["state"].as_object().unwrap();

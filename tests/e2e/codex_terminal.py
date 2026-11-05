@@ -83,47 +83,6 @@ class Model(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
 
 
-def _rpc_frames(buffer: bytearray) -> list[dict]:
-    """Inspect only the unmasked provider-to-renderer WebSocket frames."""
-    messages = []
-    if buffer.startswith(b"HTTP/"):
-        end = buffer.find(b"\r\n\r\n")
-        if end < 0:
-            return messages
-        del buffer[: end + 4]
-    while len(buffer) >= 2:
-        opcode, size = buffer[0] & 15, buffer[1] & 127
-        offset = 2
-        if size == 126:
-            if len(buffer) < 4:
-                break
-            size, offset = struct.unpack("!H", buffer[2:4])[0], 4
-        elif size == 127:
-            if len(buffer) < 10:
-                break
-            size, offset = struct.unpack("!Q", buffer[2:10])[0], 10
-        if len(buffer) < offset + size:
-            break
-        payload = bytes(buffer[offset : offset + size])
-        del buffer[: offset + size]
-        if opcode == 1:
-            messages.append(json.loads(payload))
-    return messages
-
-
-def _startup_phase(phase: str, rpc: dict) -> bool:
-    result = rpc.get("result")
-    return (
-        phase == "before-thread"
-        and "result" in rpc
-        or phase == "after-thread"
-        and isinstance(result, dict)
-        and "thread" in result
-        or phase == "first-turn"
-        and rpc.get("method") == "turn/started"
-    )
-
-
 def _transport_proxy(arguments: list[str]) -> int:
     """Drop only the disposable renderer's socket, retaining its live PTY."""
     if "--remote" not in arguments:
@@ -149,7 +108,6 @@ def _transport_proxy(arguments: list[str]) -> int:
                 upstream.connect(endpoint)
                 if Path("transport-dropped").exists():
                     Path("transport-reconnected").touch()
-                frames = bytearray()
                 while not stop.is_set():
                     if Path("drop-transport").exists():
                         Path("drop-transport").unlink()
@@ -165,14 +123,6 @@ def _transport_proxy(arguments: list[str]) -> int:
                         if not data:
                             closed = True
                             break
-                        phase = os.environ.get("FIXTURE_RELAY_FAILURE")
-                        if phase and source is upstream and not Path("transport-dropped").exists():
-                            frames.extend(data)
-                            if any(_startup_phase(phase, rpc) for rpc in _rpc_frames(frames)):
-                                # Withhold the matched frame: after-thread leaves a
-                                # created thread whose ID the renderer never receives.
-                                Path("drop-transport").touch()
-                                break
                         (upstream if source is client else client).sendall(data)
                     if closed:
                         break
@@ -188,65 +138,6 @@ def _transport_proxy(arguments: list[str]) -> int:
         directory.cleanup()
 
 
-def _cleanup_startup_provider(env: dict[str, str]) -> None:
-    database_path = Path(env["LF_HOME"]) / "loopflow.db"
-    if not database_path.exists():
-        return
-    with sqlite3.connect(database_path) as database:
-        providers = database.execute(
-            "SELECT pid,command FROM processes WHERE kind='agent' AND completed_at IS NULL"
-        ).fetchall()
-    for pid, command in providers:
-        arguments = json.loads(command)
-        endpoint = arguments[arguments.index("--listen") + 1]
-        actual = subprocess.run(
-            ["/bin/ps", "-p", str(pid), "-o", "command="], capture_output=True, timeout=5
-        )
-        if actual.returncode == 0 and endpoint.encode() in actual.stdout:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-
-
-def _verify_startup_diagnostic(lf: str, env: dict[str, str], cwd: Path) -> bool:
-    with sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db") as database:
-        diagnostics = database.execute(
-            "SELECT payload,agent_process_id,session_id FROM session_events "
-            "WHERE json_extract(payload,'$.source')='codex_relay' ORDER BY seq"
-        ).fetchall()
-    if not diagnostics:
-        return False
-    assert all(agent for _, agent, _ in diagnostics), diagnostics
-    payload_json, agent, session = diagnostics[0]
-    payload = json.loads(payload_json)
-    assert payload["operation"] in {"read", "write"}, payload
-    assert payload["direction"] in {"client_to_relay", "relay_to_client"}, payload
-    assert len(payload["error"].encode()) <= 2048
-    for events in [True, False]:
-        history = subprocess.run(
-            [lf, "history", "show", session, *(["--events"] if events else [])],
-            env=env,
-            cwd=cwd,
-            capture_output=True,
-            timeout=10,
-        )
-        assert history.returncode == 0, history.stderr
-        if events:
-            retained = [json.loads(line) for line in history.stdout.splitlines()]
-            retained = [
-                event
-                for event in retained
-                if event.get("payload", {}).get("source") == "codex_relay"
-            ]
-            assert retained and retained[0]["agent_process_id"] == agent
-            (cwd / "relay-history.jsonl").write_bytes(history.stdout)
-        else:
-            assert agent.encode() in history.stdout
-            assert payload["direction"].encode() in history.stdout
-    return True
-
-
 def _terminal(
     args: list[str],
     env: dict[str, str],
@@ -254,7 +145,6 @@ def _terminal(
     transcript: Path,
     follow_up: bool = False,
     transport_failure: bool = False,
-    startup_failure: str | None = None,
     outcomes: tuple[bytes, ...] = (),
 ) -> int:
     master, slave = pty.openpty()
@@ -274,31 +164,11 @@ def _terminal(
     submit_at = None
     exit_at = None
     pending_follow_up = follow_up
-    waiting_for_diagnostic = False
     waiting_for_transport = False
     transport_edit_at = None
     outcomes = outcomes or (b"FOLLOWUP_DONE" if follow_up else b"FIXTURE_DONE",)
-    startup_verified = False
     try:
         while time.monotonic() < deadline:
-            if startup_failure and not startup_verified and (cwd / "transport-dropped").exists():
-                startup_verified = _verify_startup_diagnostic(args[0], env, cwd)
-                if startup_verified and startup_failure != "after-thread":
-                    return 0
-            if waiting_for_diagnostic:
-                assert b"title update failed" not in output, (
-                    "Loopflow warning entered the native draft display"
-                )
-                logs = Path(env["LF_HOME"]) / "logs"
-                if any(
-                    b"title update failed" in path.read_bytes()
-                    for path in logs.glob("terminal-*.log")
-                ):
-                    assert b"title update failed" not in output
-                    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
-                    os.write(master, b"\x7f\x1b[200~ ready\x1b[201~")
-                    submit_at = time.monotonic() + 0.3
-                    waiting_for_diagnostic = False
             if (
                 transport_edit_at is not None
                 and time.monotonic() >= transport_edit_at
@@ -327,57 +197,36 @@ def _terminal(
                     (cwd / "drop-transport").touch()
                     transport_edit_at = time.monotonic() + 1
                     waiting_for_transport = False
-                if pending_follow_up and b"FIXTURE_DONE" in output:
+                # A viewer replays the old screen first; the status line is the
+                # client that joined, with its composer ready for bracketed paste.
+                if pending_follow_up and b"FIXTURE_DONE" in output and b"fixture default" in output:
+                    time.sleep(0.5)
                     # Explicit paste boundaries avoid native burst detection
                     # treating the subsequent Enter as more pasted draft text.
                     os.write(
                         master, "\x1b[200~typed reconnect follow-up café 雪 🦀x\x1b[201~".encode()
                     )
+                    time.sleep(0.3)
                     if transport_failure:
                         os.write(master, b"\x7f\x1b[200~ ready\x1b[201~")
                         waiting_for_transport = True
                     else:
-                        (cwd / "fail-title").touch()
-                        with sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db") as database:
-                            session = database.execute(
-                                "SELECT id FROM agent_sessions LIMIT 1"
-                            ).fetchone()[0]
-                            # Completed Sessions reject CLI rename. Change only this
-                            # fixture's title to exercise the active reconnect reader.
-                            database.execute(
-                                "UPDATE agent_sessions SET title='Warning during draft' WHERE id=?",
-                                (session,),
-                            )
-                        waiting_for_diagnostic = True
+                        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
+                        os.write(master, b"\x7f\x1b[200~ ready\x1b[201~")
+                        submit_at = time.monotonic() + 0.3
                     pending_follow_up = False
-                if (
-                    not exiting
-                    and startup_failure == "after-thread"
-                    and b"Reconnect failed" in output
-                ):
-                    # Codex refuses to retry a thread whose ID it never received and
-                    # ignores /exit from that state; Ctrl+C leaves for lf resume.
-                    os.write(master, b"\x03")
-                    exiting = True
                 if not exiting and any(outcome in output for outcome in outcomes):
                     exit_at = time.monotonic() + 1
                     exiting = True
             if child.poll() is not None:
                 break
         assert child.poll() is not None, "terminal did not exit within 30 seconds"
-        if startup_failure != "after-thread":
-            assert any(outcome in output for outcome in outcomes), (
-                "terminal never displayed the completed turn"
-            )
-        if startup_failure:
-            assert startup_verified, "startup reset never reached retained diagnostics"
+        assert any(outcome in output for outcome in outcomes), (
+            "terminal never displayed the completed turn"
+        )
         if follow_up and transport_failure:
             assert (cwd / "transport-dropped").exists(), "transport was never interrupted"
             assert (cwd / "transport-reconnected").exists(), "renderer never reconnected"
-        elif follow_up:
-            assert not waiting_for_diagnostic, "background failure never reached diagnostics"
-            assert b"title update failed" not in output
-            assert b"Loopflow recorded diagnostics:" in output
         return child.returncode
     finally:
         if child.poll() is None:
@@ -397,41 +246,6 @@ def _terminal(
         child.wait(timeout=5)
         os.close(master)
         transcript.write_bytes(output)
-        if startup_failure:
-            _cleanup_startup_provider(env)
-            assert b"client_to_relay" not in output
-            assert b"codex_relay" not in output
-
-
-def _resume_unacknowledged_thread(root: Path, lf: Path, env: dict[str, str], native: Path) -> None:
-    """The printed lf resume continues the created thread without repeating its input.
-
-    Leaving stops Codex, so a turn already running when the renderer lost the thread
-    ID ends interrupted, and its input is lost if Codex had not yet persisted it. Input
-    not yet sent is submitted on resume.
-    """
-    with sqlite3.connect(root / "lf" / "loopflow.db") as database:
-        (session,) = database.execute("SELECT id FROM agent_sessions").fetchone()
-    assert f"lf resume {session}".encode() in (root / "launch.txt").read_bytes()
-    env = {key: value for key, value in env.items() if key != "FIXTURE_RELAY_FAILURE"}
-    resumed = _terminal(
-        [str(lf), "resume", session],
-        env,
-        root,
-        root / "resume.txt",
-        outcomes=(b"FIXTURE_DONE", b"Conversation interrupted"),
-    )
-    assert resumed == 0
-    with sqlite3.connect(root / "lf" / "loopflow.db") as database:
-        assert database.execute("SELECT count(*) FROM agent_sessions").fetchone() == (1,)
-    (rollout,) = native.glob("sessions/*/*/*/rollout-*.jsonl")
-    inputs = [
-        line
-        for line in rollout.read_text().splitlines()
-        if '"role":"user"' in line.replace(" ", "") and "NATIVE_SKILL_STARTUP" in line
-    ]
-    assert len(inputs) <= 1, inputs
-    print("after-thread: lf resume continued the created thread without replay", flush=True)
 
 
 def _case(
@@ -443,7 +257,6 @@ def _case(
     context_repo: Path | None = None,
     cmux_wrapper: Path | None = None,
     transport_failure: bool = False,
-    startup_failure: str | None = None,
 ) -> None:
     root.mkdir()
     Model.requests.clear()
@@ -511,7 +324,7 @@ trust_level="trusted"
     hooks.append("state={" + ",".join(states) + "}")
     host_args = ["-c", "hooks={" + ",".join(hooks) + "}"] if wrapped else []
     executable = [str(cmux_wrapper or codex)]
-    if transport_failure or startup_failure:
+    if transport_failure:
         executable = [
             sys.executable,
             str(Path(__file__).resolve()),
@@ -523,7 +336,7 @@ trust_level="trusted"
     )
     (bin_dir / "codex").write_text(wrapper)
     (bin_dir / "codex").chmod(0o755)
-    (bin_dir / "cmux").write_text('#!/bin/sh\n[ ! -f "$PWD/fail-title" ]\n')
+    (bin_dir / "cmux").write_text("#!/bin/sh\n")
     (bin_dir / "cmux").chmod(0o755)
     env = {
         "HOME": str(home),
@@ -536,8 +349,6 @@ trust_level="trusted"
         "CMUX_WORKSPACE_ID": "fixture",
         "CMUX_SURFACE_ID": "fixture",
     }
-    if startup_failure:
-        env["FIXTURE_RELAY_FAILURE"] = startup_failure
     if cmux_wrapper:
         env.update(
             {
@@ -549,17 +360,7 @@ trust_level="trusted"
         )
     skill_name = "demo" if context_repo else "native-probe"
     args = [str(lf), "--diff", "none", "-a", "codex", skill_name]
-    status = _terminal(args, env, root, root / "launch.txt", startup_failure=startup_failure)
-    if startup_failure:
-        assert status == 0
-        assert (root / "relay-history.jsonl").is_file()
-        print(
-            f"{startup_failure}: retained private operation diagnostic in Session history",
-            flush=True,
-        )
-        if startup_failure == "after-thread":
-            _resume_unacknowledged_thread(root, lf, env, native)
-        return
+    status = _terminal(args, env, root, root / "launch.txt")
     assert status == 0, (status, root / "launch.txt")
     with sqlite3.connect(root / "lf" / "loopflow.db") as database:
         sessions = database.execute(
@@ -693,9 +494,6 @@ def main() -> None:
         action="store_true",
         help="Drop the renderer socket during draft entry instead of failing a title refresh",
     )
-    parser.add_argument(
-        "--startup-failure", choices=["before-thread", "after-thread", "first-turn"]
-    )
     options = parser.parse_args()
     if options.context_repo and not options.context_repo.is_dir():
         parser.error("--context-repo must name an existing checkout")
@@ -704,7 +502,7 @@ def main() -> None:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Model)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        for wrapped in [False] if options.startup_failure else [False, True]:
+        for wrapped in [False, True]:
             _case(
                 root / ("wrapped" if wrapped else "plain"),
                 options.lf.resolve(),
@@ -714,7 +512,6 @@ def main() -> None:
                 options.context_repo,
                 options.cmux_wrapper,
                 options.transport_failure,
-                options.startup_failure,
             )
     finally:
         server.shutdown()

@@ -23,6 +23,8 @@ pub(crate) struct NativeExit {
     /// Names the provider and its launcher Process, which completes at exit.
     pub attachment: SessionAttachment,
     pub provider: String,
+    /// A client of a provider running beside it, not the provider itself.
+    pub client: bool,
     pub resuming: bool,
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
@@ -48,7 +50,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let owner: AttachmentOwner = (store, exit.session.clone(), exit.attachment.clone());
     let (store, session, attachment) = &owner;
-    let interrupted = record_exit(&owner)?;
+    let interrupted = !exit.client && record_exit(&owner)?;
     let lost = attachment_lost(&owner).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read this launch's Session attachment");
         false
@@ -220,6 +222,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
                 provider: "claude".into(),
+                client: false,
                 resuming: true,
                 cwd: home.into(),
                 capture: Some(capture.hand_off()),

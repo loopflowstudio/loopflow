@@ -1236,10 +1236,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 let settled = match crate::harness::native_exit::settle(&record, status) {
                     Ok(settled) => settled,
                     Err(error) => {
+                        // A recording gap: the conversation ended the way it ended.
                         tracing::warn!(%error, session = %record.session, "provider exit was not recorded");
                         crate::harness::native_exit::Settled {
-                            code: 1,
-                            lines: vec![format!("Loopflow could not record this exit: {error:#}")],
+                            code: status.code().map_or(1, |code| code as u8),
+                            lines: Vec::new(),
                         }
                     }
                 };

@@ -188,7 +188,7 @@ class Client:
         except ConnectionClosed:
             pass
 
-    def call(self, method: str, params: dict, *, rejected: bool = False) -> dict:
+    def call(self, method: str, params: dict) -> dict:
         self.next_id += 1
         ident = self.next_id
         self.socket.send(json.dumps({"id": ident, "method": method, "params": params}))
@@ -196,9 +196,6 @@ class Client:
         while time.monotonic() < deadline:
             event = self.pending.get(timeout=max(0.1, deadline - time.monotonic()))
             if event.get("id") == ident:
-                if rejected:
-                    assert event.get("error", {}).get("code") == -32001, event
-                    return event["error"]
                 assert "error" not in event, event
                 return event["result"]
         raise TimeoutError(method)
@@ -235,7 +232,6 @@ def main() -> None:
     parser.add_argument("--lf", required=True, type=Path)
     parser.add_argument("--lf-home", type=Path)
     parser.add_argument("--control", type=Path)
-    parser.add_argument("--gated", action="store_true")
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--planning-peers", action="store_true")
@@ -396,13 +392,6 @@ enabled = false
                     )
                     thread = first.call("thread/start", params)["thread"]["id"]
                     first.wait_turn(first.start_turn(thread))
-                    if args.gated:
-                        assert args.control
-                        results.update(
-                            _gated(args.control, endpoint, first, thread, params, server, clients)
-                        )
-                        results["agent_process_alive"] = agent_process.poll() is None
-                        return
                     _boundary(args.control, "before", "handoff")
                     active_turn = first.start_turn(thread, "Run the held fixture command.")
                     assert server.held.wait(10), "provider did not request held response"
@@ -467,7 +456,7 @@ def _provider_entry() -> None:
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     if "--remote" not in sys.argv:
         if "resume" in sys.argv and os.environ.get("LF_PROBE_CLIENT"):
-            raise RuntimeError("public resume bypassed the retained provider relay")
+            raise RuntimeError("public resume bypassed the retained provider")
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     # A controlled native-protocol client exercises public lf resume. This is
     # deliberately not evidence of the rendered Codex TUI or Desktop.
@@ -489,9 +478,7 @@ def _provider_entry() -> None:
             action = json.loads(request.read_text())
             if action["method"] == "exit":
                 return
-            value = client.call(
-                action["method"], action["params"], rejected=action.get("rejected", False)
-            )
+            value = client.call(action["method"], action["params"])
             (control / f"{index}.response").write_text(json.dumps(value))
             index += 1
     finally:
@@ -555,12 +542,10 @@ def _public_connection_contract(
                     raise AssertionError(f"connect exited: {child.returncode}: {error.decode()}")
             time.sleep(0.02)
 
-    def call(index: int, method: str, params: dict, rejected: bool = False):
+    def call(index: int, method: str, params: dict):
         root, sequences = controls[index]
         sequence = next(sequences)
-        (root / f"{sequence}.request").write_text(
-            json.dumps(dict(method=method, params=params, rejected=rejected))
-        )
+        (root / f"{sequence}.request").write_text(json.dumps(dict(method=method, params=params)))
         if method == "exit":
             return None
         output = root / f"{sequence}.response"
@@ -639,23 +624,6 @@ def _public_connection_contract(
         assert (
             provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
             == "active"
-        )
-        call(0, "turn/interrupt", {"threadId": thread, "turnId": active}, rejected=True)
-        call(
-            0,
-            "turn/start",
-            {"threadId": thread, "input": [{"type": "text", "text": "stale turn"}]},
-            rejected=True,
-        )
-        call(
-            0,
-            "turn/steer",
-            {
-                "threadId": thread,
-                "expectedTurnId": active,
-                "input": [{"type": "text", "text": "stale steer"}],
-            },
-            rejected=True,
         )
         assert (
             provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
@@ -829,7 +797,6 @@ def _public_connection_contract(
         results["public_connect"] = dict(
             agent_process=agent_process,
             attached=attached,
-            retained_client_rejected=True,
             active_turn_and_sibling_survived=True,
             replaced_clients_exited=True,
             nested_child_id=child_id,
@@ -1530,97 +1497,6 @@ def _boundary(control: Path, completed: str, next_action: str) -> None:
         if time.monotonic() > deadline:
             raise TimeoutError(next_action)
         time.sleep(0.05)
-
-
-def _gated(
-    control: Path,
-    endpoint: Path,
-    fixture: Client,
-    thread: str,
-    params: dict,
-    server: Responses,
-    clients: list[Client],
-) -> dict:
-    sibling_params = json.loads(json.dumps(params))
-    sibling_params["config"]["shell_environment_policy.set"].pop("LF_AGENT_CALLER", None)
-    sibling = fixture.call("thread/start", sibling_params)["thread"]["id"]
-    active = fixture.start_turn(thread, "Run the held fixture command.")
-    sibling_turn = fixture.start_turn(sibling, "Run the held sibling command.")
-    assert server.held.wait(10)
-    (control / "agent_process.json").write_text(
-        json.dumps({"endpoint": str(endpoint), "thread": thread})
-    )
-    _boundary(control, "native", "sockets")
-    old = Client(control / "old.sock")
-    observer = Client(control / "observer.sock")
-    clients.extend([old, observer])
-    for client in (old, observer):
-        assert (
-            client.call("thread/resume", {"threadId": thread})["thread"]["status"]["type"]
-            == "active"
-        )
-    observer.call("turn/interrupt", {"threadId": thread, "turnId": active}, rejected=True)
-    old.call(
-        "turn/steer",
-        {
-            "threadId": thread,
-            "expectedTurnId": active,
-            "input": [
-                {"type": "text", "text": "Continue original attachment.", "text_elements": []}
-            ],
-        },
-    )
-    _boundary(control, "attached", "transfer")
-    current = Client(control / "current.sock")
-    clients.append(current)
-    current.call("thread/resume", {"threadId": thread})
-    writes = [
-        (
-            "turn/start",
-            {"threadId": thread, "input": [{"type": "text", "text": "stale", "text_elements": []}]},
-        ),
-        (
-            "turn/steer",
-            {
-                "threadId": thread,
-                "expectedTurnId": active,
-                "input": [{"type": "text", "text": "stale", "text_elements": []}],
-            },
-        ),
-        ("turn/interrupt", {"threadId": thread, "turnId": active}),
-        ("thread/name/set", {"threadId": thread, "name": "stale name"}),
-    ]
-    for method, arguments in writes:
-        old.call(method, arguments, rejected=True)
-    current.call(
-        "turn/steer",
-        {
-            "threadId": thread,
-            "expectedTurnId": active,
-            "input": [{"type": "text", "text": "Continue the fixture.", "text_elements": []}],
-        },
-    )
-    # The transferred conversation and its sibling have not been interrupted.
-    for target in (thread, sibling):
-        assert (
-            fixture.call("thread/read", {"threadId": target})["thread"]["status"]["type"]
-            == "active"
-        )
-    server.release.set()
-    current.wait_turn(active)
-    fixture.wait_turn(sibling_turn)
-    old.wait_turn(active)
-    current.wait_turn(current.start_turn(thread))
-    assert not any("stale" in json.dumps(request) for request in server.requests)
-    return {
-        "old_client_wrote_before_transfer": True,
-        "rejected_old_client_writes": [method for method, _ in writes],
-        "passive_client_rejected": True,
-        "old_client_still_receives_completion": True,
-        "current_attachment_continued": True,
-        "active_turn": active,
-        "sibling_turn": sibling_turn,
-    }
 
 
 if __name__ == "__main__":

@@ -194,7 +194,8 @@ the owner what it would record at exit, then execs into the provider, so Claude
 is the owner's direct child and no `lf -i` waits beside it; the owner records
 the provider's exit, settles its capture and reports where the conversation
 moved. Graph steps keep their launcher so each step settles before the Graph
-continues. Codex and OpenCode keep their launcher, which relays to a private server.
+continues. A Codex launcher does the same into its client, which talks to its
+app-server directly. OpenCode keeps its launcher beside its private server.
 The owner sleeps in `poll` on its sockets, its child's output and a wake pipe
 that a blocking child wait and the lifetime policy write to. Native clients retain their original provider
 channels, including pending request identities. Graph steps share their Graph's

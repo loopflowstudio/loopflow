@@ -158,13 +158,7 @@ stay out of scope. Merged #1595 (`e204ce6072`) scopes parent output to announced
 private Process logs; transport keeps native descriptors, OpenCode its stderr log.
 Installed repair, macOS pending-request and title/reconnect startup remain unproved.
 
-LOO-516: Jack Heart requested durable private relay-failure evidence, not
-attribution of an unobserved cause. Retain bounded observed Session events with
-the original AgentProcess, operation and direction, independent of a started
-native turn. Unexpected renderer resets stay evidence; explicit close stays quiet.
-Observations claim no attachment and settle no turns; store failure must not end
-reconnect. Gate, CI and delivery remain open. Detail and probe evidence:
-`acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
+LOO-516's relay evidence leaves with the relay (Task 430c74); rows stay: `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -488,7 +482,7 @@ and selected stable entries.
 LOO-708 (Jack Heart, November 2): exec removes Claude launcher/viewer heap;
 only the owner's direct child hands off settlement. Graph steps still wait.
 Blocking child wait wakes descriptors without taking runtimes' SIGCHLD.
-Pre-compression stand-ins: owner/relay 20/2.5 MB; no installed acceptance.
+No installed acceptance.
 LOO-705 supplies the Session successor; replaying relay argv targets a dead owner.
 LOO-712 owns encoding. Every resume/new-thread entry must carry its resulting
 Session across exec without replay. Owner/returning-launcher settlement share

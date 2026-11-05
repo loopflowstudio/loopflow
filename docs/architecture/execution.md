@@ -175,28 +175,34 @@ coverage; this source path does not establish configured resume acceptance.
 
 ## Connect and transfer attachment
 
-Codex's private Unix WebSocket supports multiple clients on one active native
-thread. Attachment alone does not revoke the old client's writes. Loopflow's
-conversation-scoped relay therefore checks the exact Session attachment at socket
-dispatch, including queued requests and approval replies. A bounded native send
-and attachment transfer hold the same per-Session OS lock, without holding a
-SQLite transaction over transport I/O. A send timeout
-has an unknown outcome and is not retried automatically.
+The Codex terminal talks to its app-server directly, on the private Unix WebSocket
+the AgentProcess opened; lf carries none of its bytes. The launcher starts or
+resumes the thread with prepared instructions and configuration, names a new thread
+so it has a rollout to resume (Codex 0.166.0 has none until a first turn or a name),
+then execs into `codex --remote <endpoint> resume <thread>`. The app-server's
+lifeline writer crosses the exec, so the client holds the provider alive and no lf
+process has to. The execution owner settles the client's exit from a `NativeExit`
+marked as a client, which leaves the AgentProcess's own exit to attachment close.
 
-Native launch carries the capture or connection owner's frozen attachment in
-memory, separately from stable tool provenance. Admission validates that token;
-it never reconstructs authority from the current record. The client connects to
-the local relay, while the recorded upstream endpoint identifies the AgentProcess.
-Both initial validation and actual spawn reject a replaced attachment, including
-A → B → A. Connection exit or interruption records an attachment outcome without
-closing or ending the surviving provider; orphan settlement remains independent.
-Composed stand-ins cover launch and pre-launch takeover, not configured Codex or
-a complete native-client relay exchange.
+`lf __codex-observe` watches from the side as one more subscriber, in its own
+session. app-server sends every subscriber every event, so it records turns, usage
+and attention, submits the launch's first turn, and delivers Task updates while the
+conversation is idle, each under the Session fence. A pending approval goes to every
+subscriber and the first answer wins; the observer never answers, and Codex replays
+a pending approval to a client that joins mid-turn. Store errors are recording gaps:
+the observer logs one per outage, retries the store, and history recovery fills the
+gap at the next launch. Stopping the observer stops recording, not the conversation.
 
-A passive viewer subscribes without claiming the Session. A formerly attached LfProcess can
-keep receiving and retaining provider history after transfer but cannot start or
-steer a turn or change current attachment, connection, process evidence or stream
-attention. Retaining history grants no native-write or Graph authority.
+Attachment alone does not revoke the old client's writes, and with no lf in the path
+no dispatch can check them. The observer ends the exact client its attachment opened
+once a mover replaces that attachment. Native launch carries the frozen attachment
+in memory, separately from stable tool provenance. Admission validates that token;
+it never reconstructs authority from the current record. Both initial validation
+and the launch reject a replaced attachment, including A → B → A.
+
+A passive viewer subscribes without claiming the Session. A formerly attached LfProcess
+cannot change current attachment, connection, process evidence or stream attention.
+Retaining history grants no Graph authority.
 
 Native request correlation freezes its initiating Process, Work and capture before sending, not when a delayed
 start arrives. Claude input UUIDs, OpenCode message IDs and Codex request/reply

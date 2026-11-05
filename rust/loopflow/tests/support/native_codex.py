@@ -40,7 +40,7 @@ def _header(stream: socket.socket) -> bytes:
     return bytes(header)
 
 
-def _client(endpoint: str, home: Path, thread: str | None) -> None:
+def _client(endpoint: str, home: Path, thread: str) -> None:
     if (home / "close-terminal").exists():
         return
     if (home / "fail-terminal").exists():
@@ -83,13 +83,8 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
             stream,
             {
                 "id": 2,
-                "method": "thread/resume" if thread else "thread/start",
-                "params": {
-                    **({"threadId": thread} if thread else {}),
-                    "approvalPolicy": "on-request",
-                    "threadSource": "user",
-                    "config": {"native-setting": True},
-                },
+                "method": "thread/resume",
+                "params": {"threadId": thread, "approvalPolicy": "on-request"},
             },
             True,
         )
@@ -97,8 +92,9 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
             rpc = json.loads(_message(stream))
             if rpc.get("id") == 2:
                 assert "error" not in rpc, rpc
-                thread = rpc["result"]["thread"]["id"]
-            if rpc.get("id") == 2 and rpc["result"]["thread"]["turns"]:
+                assert rpc["result"]["thread"]["id"] == thread
+            turns = rpc["result"]["thread"]["turns"] if rpc.get("id") == 2 else []
+            if turns and all(turn["status"] != "inProgress" for turn in turns):
                 _send(
                     stream,
                     {
@@ -111,9 +107,13 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
                     },
                     True,
                 )
-            if rpc.get("method") == "turn/started" and (home / "fail-after-submit").exists():
+            # The first turn may already be running when this client joins.
+            running = rpc.get("method") == "turn/started" or any(
+                turn["status"] == "inProgress" for turn in turns
+            )
+            if running and (home / "fail-after-submit").exists():
                 raise SystemExit(25)
-            if rpc.get("method") == "turn/started" and (home / "idle-terminal").exists():
+            if running and (home / "idle-terminal").exists():
                 # Like Codex, the one idle terminal ignores losing its server until signalled.
                 (home / "idle-terminal").unlink()
                 (home / "idling").write_text(str(os.getpid()))
@@ -145,12 +145,30 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
 def _server(endpoint: str, home: Path) -> None:
     turns_file = home / "native-turns.json"
     turns = json.loads(turns_file.read_text()) if turns_file.exists() else []
+    # A server that stopped mid-turn loads that turn as interrupted.
+    for turn in turns:
+        if turn["status"] == "inProgress":
+            turn["status"] = "interrupted"
     thread_file = home / "native-thread"
     thread = thread_file.read_text() if thread_file.exists() else ""
-    lock = threading.Lock()
+    lock = threading.RLock()
+    # Like app-server: a thread has no rollout until it has a turn or a name,
+    # every subscriber hears every event, and a client that joins mid-turn is
+    # asked the approval still pending.
+    named = bool(thread)
+    subscribers: list[socket.socket] = []
+    pending: dict | None = None
+
+    def broadcast(value: dict) -> None:
+        with lock:
+            for subscriber in list(subscribers):
+                try:
+                    _send(subscriber, value)
+                except OSError:
+                    subscribers.remove(subscriber)
 
     def serve(stream: socket.socket) -> None:
-        nonlocal thread, turns
+        nonlocal thread, turns, named, pending
         with stream:
             header = _header(stream)
             key = next(
@@ -177,13 +195,13 @@ def _server(endpoint: str, home: Path) -> None:
                             turn = turns[-1]
                             turn["status"] = "completed"
                             turns_file.write_text(json.dumps(turns))
-                        _send(
-                            stream,
-                            {
-                                "method": "turn/completed",
-                                "params": {"threadId": thread, "turn": turn},
-                            },
-                        )
+                            pending = None
+                            broadcast(
+                                {
+                                    "method": "turn/completed",
+                                    "params": {"threadId": thread, "turn": turn},
+                                }
+                            )
                         continue
                     if "id" not in rpc:
                         continue
@@ -193,7 +211,7 @@ def _server(endpoint: str, home: Path) -> None:
                             thread = "thread-" + uuid.uuid4().hex
                             turns = []
                             thread_file.write_text(thread)
-                        elif not turns or params.get("threadId") != thread:
+                        elif not (turns or named) or params.get("threadId") != thread:
                             _send(
                                 stream,
                                 {
@@ -205,6 +223,14 @@ def _server(endpoint: str, home: Path) -> None:
                         result = {"thread": {"id": thread, "turns": turns}}
                         if "developerInstructions" in params:
                             (home / "native-config.json").write_text(json.dumps(params))
+                        with lock:
+                            subscribers.append(stream)
+                            _send(stream, {"id": rpc["id"], "result": result})
+                            if pending:
+                                _send(stream, pending)
+                        continue
+                    elif method == "thread/name/set":
+                        named = True
                     elif method == "thread/turns/list":
                         result = {"data": turns, "nextCursor": None}
                     elif method == "thread/loaded/list":
@@ -240,23 +266,25 @@ def _server(endpoint: str, home: Path) -> None:
                         result = {"turn": turn}
                     _send(stream, {"id": rpc["id"], "result": result})
                     if method == "turn/start":
-                        _send(
-                            stream,
-                            {
-                                "method": "turn/started",
-                                "params": {"threadId": thread, "turn": turn},
-                            },
-                        )
-                        _send(
-                            stream,
-                            {
+                        with lock:
+                            broadcast(
+                                {
+                                    "method": "turn/started",
+                                    "params": {"threadId": thread, "turn": turn},
+                                }
+                            )
+                            pending = {
                                 "id": "approval",
                                 "method": "item/commandExecution/requestApproval",
                                 "params": {"threadId": thread, "turnId": turn["id"]},
-                            },
-                        )
+                            }
+                            broadcast(pending)
             except (EOFError, OSError):
                 pass
+            finally:
+                with lock:
+                    if stream in subscribers:
+                        subscribers.remove(stream)
 
     with socket.socket(socket.AF_UNIX) as listener:
         listener.bind(endpoint)
@@ -281,7 +309,7 @@ def main() -> None:
         _client(
             args[args.index("--remote") + 1].removeprefix("unix://"),
             home,
-            args[-1] if "resume" in args else None,
+            args[-1],
         )
     elif "--listen" in args:
         if (home / "fail-server").exists():

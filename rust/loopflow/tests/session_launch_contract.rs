@@ -191,7 +191,12 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             );
             assert_eq!(
                 value["params"]["approvalPolicy"],
-                if enabled { "never" } else { "on-request" },
+                // Unset leaves the person's own Codex configuration in charge.
+                if enabled {
+                    Value::from("never")
+                } else {
+                    Value::Null
+                },
                 "{value}"
             );
             assert!(!args(value).contains(&"--dangerously-bypass-approvals-and-sandbox"));
@@ -790,7 +795,7 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
     let mut first = fixture
         .command()
         .args(["-i", "--account", "fixture@example.com", ":", "hello"])
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -822,13 +827,18 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     let first = first.wait_with_output().unwrap();
-    success(&first);
-    let stderr = String::from_utf8_lossy(&first.stderr);
+    // The owner reports a client's exit in the terminal it ran in.
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(first.status.success(), "{:?}: {printed}", first.status);
     assert!(
-        stderr.contains(&format!(
+        printed.contains(&format!(
             "This conversation moved to account other@example.com: lf resume {session}"
         )),
-        "{stderr}"
+        "{printed}"
     );
     // SAFETY: signal 0 only probes whether the fixture's client still exists.
     assert_ne!(unsafe { libc::kill(client, 0) }, 0, "client still running");

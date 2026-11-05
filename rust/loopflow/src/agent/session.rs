@@ -29,34 +29,32 @@ pub(crate) struct SessionCommand {
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) context: Option<crate::context_block::ContextDelivery>,
-    pub(crate) remote: Option<NativeConnection>,
+    pub(crate) remote: Option<PathBuf>,
     pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
 }
 
-/// The local relay is the client transport; only upstream identifies the AgentProcess.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NativeConnection {
-    pub(crate) relay: PathBuf,
-    pub(crate) upstream: PathBuf,
-}
-
+/// The native client joins this running conversation at the provider's own
+/// endpoint. `input` is its first turn, for the observer to submit: a turn has
+/// no size limit where an argument does, and Codex replays pending approvals to
+/// a client that joins mid-turn.
 pub(crate) fn native_connection_command(
     cwd: PathBuf,
-    session_id: Option<&AgentSessionId>,
-    remote: NativeConnection,
+    session_id: &AgentSessionId,
+    remote: PathBuf,
+    input: Option<String>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> SessionCommand {
-    let mut args = vec![
+    let args = vec![
         "--remote".into(),
-        format!("unix://{}", remote.relay.display()),
+        format!("unix://{}", remote.display()),
+        "resume".into(),
+        "--".into(),
+        session_id.to_string(),
     ];
-    if let Some(id) = session_id {
-        args.extend(["resume".into(), "--".into(), id.to_string()]);
-    }
     SessionCommand {
         launch: None,
         isolate: None,
-        input: None,
+        input,
         program: "codex".into(),
         args,
         cwd,

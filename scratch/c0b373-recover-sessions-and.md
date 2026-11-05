@@ -27,19 +27,21 @@ Related work and boundaries
 
 Launch the normal code graph, using current resolved agent preferences. Stop at its interactive demo/review boundary; creating and launching this Task does not approve Auto-Ship.
 
-# Design (draft, November 5, 2026; implement step)
+# Design (November 5, 2026; built, awaiting demo/review)
 
 ## Inventory, revalidated against 3b07e13404
 - Limit observation: decoders emit `RateLimitSignal`; `FactWriter` → `route.record_rate_limit` → `record_rate_limit_signal` writes `provider_accounts.cooldown_until` + windows. One writer; keep it. Terminal Claude emits no stream, so lf never observes its limits today.
-- Classifier: harness turns a limited signal into Error `provider_rate_limited: rejected: <type>`; `_classify_agent_failure` re-reads that text. It misses `_classify_subscription_limit`, then matches `rate_limit` → generic `RateLimit`. **Nov 2 defect is live.**
+- Classifier: harness turns a limited signal into Error `provider_rate_limited: rejected: <type>`; `_classify_agent_failure` re-read that text, missed the subscription patterns and matched `rate_limit` → generic `RateLimit`. The Nov 2 defect was live at the base; decision 1 removes it.
 - Retry: `_run_with_transient_retries` keeps the thread on RateLimit; `_run_harness_once` re-selects; `retry_agent_process` bails when account changed with a thread. Failover drops the thread instead (conversation lost). Failover shares the transient budget.
 - Selection: `select_route`; failure is `NoEligibleAccount` (string only, no reset time). `pin_provider_account_id_blocking` fails before the retry loop when everything is cooling.
-- Early association: `resolve_provider_account_exact` → `adopt` → `pin_session` writes `provider_session_accounts` during selection. **Lead confirmed.**
+- Early association: `resolve_provider_account_exact` → `adopt` → `pin_session` wrote `provider_session_accounts` during selection. Lead confirmed at the base; decision 8 removes it.
 - `adopt` already moves transcripts between homes, so same-Machine native thread reuse across accounts is supported (LOO-324's Codex-history import stays separate).
 - Graph: a failed step fails the Graph; `lf task run` restarts from where the run began (replays completed steps), 3 attempts. `lf ship` restarts later with backoff.
 - Shared mode (Jack's Machine): running Claude follows the native login, so one activation moves every open Claude Session. Codex keeps its login until resumed.
 
 ## Decisions
+Routine choices are Jack's to overturn at review; 6 and 7 are user-facing policy and the ones to look at first, with `scratch/questions.md`.
+
 1. **Classification is typed.** `provider_rate_limited` sets `AccountSubscriptionLimit`; text never decides for that code. A text-only limit records a default cooldown so failover cannot spin on the same account.
 2. **Headless continuation stays inside the step.** The step Process fails over and waits in `_run_with_transient_retries`, so the Graph never sees a failure and no completed step can replay. Failover carries the native thread (adopt), with a short continue prompt; `retry_agent_process` becomes "a retry retains its thread". Limit failovers and waits do not spend the transient budget.
 3. **Waiting.** `NoEligibleAccount.retry_at` = earliest cooldown among route candidates; None means nothing will free up, which stays a terminal failure. Wall-clock poll each minute (SystemTime), re-running selection, so a cleared cooldown or a new login ends the wait early.
@@ -59,6 +61,10 @@ All eight decisions are in the diff. Corrections made while building:
 - The restart sweep starts from due recovery rows and `task_of_process`, so a stale row costs one Task lookup and idle reads scan nothing. A restarted run leaves its old row until the Process is pruned.
 - A provider's words cool an account only on a failed exit; stderr from a turn that succeeded proves no limit.
 
+## Coordination
+- Open PR #1656 (LOO-312) edits `agent/mod.rs` near `format_timeout`/`check_cli_available` and `bin/lf.rs`; the retry loop, pinning and the `limit` hook arm are elsewhere, so the merge is textual, not semantic.
+- `restart_held_runs` and `restart_ships` share `start_lf_in`; a shipping Task's held wait goes through ship's own restart.
+
 ## Remaining
 - Restart after a step dies mid-wait starts that step in a new Run: checkout and completed steps are kept, the step's own conversation is not. Resuming it needs the Graph to open the step with `session resume`; LOO-435 is the likely owner.
 - `limit_recovery::held` finds a step by name, so a skill repeated in a Graph restarts at its first occurrence.
@@ -67,4 +73,4 @@ All eight decisions are in the diff. Corrections made while building:
 - Demo: configured path not run; no paid quota may be spent. `LIMITED_CODEX` in `tests/agent_tests.rs` is the deterministic stand-in.
 - `StopFailure` was confirmed from Claude 2.1.318's bundled schema, not from a live limit.
 
-Checks: focused lib (103), `agent_tests` limit/exhausted/revoked and the held/stopped-run tests pass with isolated `HOME`; `a_batch_task_run_runs_straight_through…` blocks in macOS `security -i` under a fake `HOME` (keychain login write, a path this branch leaves alone), deferred to gate with the Swift build and affected suites.
+Checks: implement: focused lib (103), `agent_tests` limit/exhausted/revoked and the held/stopped-run tests pass with isolated `HOME`; `a_batch_task_run_runs_straight_through…` blocks in macOS `security -i` under a fake `HOME` (keychain login write, a path this branch leaves alone), deferred to gate with the Swift build and affected suites. Realign (Nov 5): the wait log now prints the reset as a readable time like Task status does; `cargo test -p loopflow --lib agent::tests::` passed (31).

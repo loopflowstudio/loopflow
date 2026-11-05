@@ -20,6 +20,30 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
+## Limit recovery (c0b373, 2026-11-05)
+
+Jack Heart split LOO-714's recovery half into c0b373 on November 5: work keeps
+moving when an account runs out, with one place or none to recover Sessions.
+The `provider_rate_limited` code types the failure;
+text never decides, and a text-only limit cools the account by default. A Graph
+step recovers inside its own Process: it fails over carrying its native thread
+(adopt copies; the pin waits for the provider to report the thread under that
+launch), then polls the wall clock each minute while every route account cools,
+so the Graph never fails and no completed step replays. `agent_limit_recoveries`
+is the truth: `retry_at` set is waiting, null is moved; a step that dies waiting
+restarts the run at itself. Shared Claude limits reach lf only through the
+`StopFailure` hook (no stream, no reset time): the login moves once, open Claude
+Sessions follow on their next message, nothing types into a terminal. Isolated
+and Codex Sessions move on resume. No model/harness fallback; failovers are capped.
+
+Lessons: a thread with no transcript cannot move, so failover falls back once to
+a fresh thread with the whole task; a provider's words cool an account only on a
+failed exit; Graph membership reads Process ancestry, since transport-served
+sessions lose `LF_GRAPH_ID`. Proof: Codex fixtures and unit tests, no live limit
+or demo. Open at review: cooling a whole account on `seven_day_overage_included`,
+unbounded waits, a restarted step's lost conversation (LOO-435), repeated skill
+names restarting at the first.
+
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
 Jack Heart requested Pi through existing Session, Task and Flow paths with exact
@@ -227,9 +251,7 @@ Six fixtures cover preparation/inspection, capture/composition and retention
 (`579b48dcfa`); SSH and installed/configured acceptance remain unproved.
 
 Exporting declarations as CLI flags changes authority. Publication is review only.
-Limit recovery stays PR2:
-routing and retry must agree, and failed preparation cannot reattribute an old
-thread. November 2's weekly rejection demonstrated that split.
+Limit recovery moved to c0b373 (its heading above).
 
 ## Plan ownership (LOO-406/412/449, curated 2026-11-03)
 
@@ -620,22 +642,11 @@ before worker replacement. Retry failed provider reads only, never publisher wri
 Bound pipe collection and exit: descendants can retain stdout. Artifact attempts
 retain candidate identity in separate temporary directories.
 
-LOO-326 completed October 6 after v0.13.5; Jack accepted its read-only Exec's
-unknown outcome, retaining the checkout. Session closure and
-missing receipts grant no control or cleanup authority. Receipts survive terminal
-write failure; pruning requires exact death and matching persisted outcome.
-Cleanup independently reacquires its lease: terminal receipts can precede
-descriptor closure. This proves neither the loss cause nor recovered evidence.
-Release owns re-entry leases, transfer deadlines and pending-version lessons.
-
-#1459's exact-reflog repair shipped in v0.13.5; history:
-`cad03fe6d:wave/infrastructure/MEMORY.md`. October 11 lf-cb9012a supersedes
-its ancestry veto in source. Jack Heart subsequently authorized landing #1533
-after resolving main conflicts (`7689d642`); this gate does not establish delivery.
-Current Git ancestry owns PR comparison; saved placement cannot
-classify commits as foreign. Preserve every commit. Stack forks still own squash-parent sync;
-refreshing them during publication can restore files main deleted. Disposable
-CLI proofs pass; installed Etude and hosted acceptance remain unproved.
+LOO-326 completed October 6 after v0.13.5. Session closure and missing receipts
+grant no control or cleanup authority; pruning requires exact death and a matching
+persisted outcome. Current Git ancestry owns PR comparison; preserve every commit.
+Stack forks own squash-parent sync, and refreshing them during publication can
+restore files main deleted. History: `bc83f965bd:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Scheduled release accounting (LOO-285, curated 2026-11-04)
 
@@ -1140,28 +1151,16 @@ PRs under five minutes and queue/push-to-merged proof.
 Miss overlap is implemented; hits use Xcode. Trials and rejected alternatives:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`.
 
-Twelve signed builds passed; `loopflow` compiled once per miss, zero per hit.
-Scoped cancellation stops the compiler process groups left alive. Toolchain/SDK/
-deployment and source/target must match. Identical re-signing of disposable
-copies proved bytes equal; signature removal alone leaves Mach-O padding.
-
-Hosted benefit, cleanup cost and Swift/installation/network proof remain open.
-Preserve copy/sign and disposable OS accounts for installation. No paid runners,
-test removal, cache relaxation or retries.
+Toolchain/SDK/deployment and source/target must match; signature removal alone
+leaves Mach-O padding. No paid runners, test removal, cache relaxation or retries.
+Build counts and open proofs: `bc83f965bd:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart requested landing #1505 October 8, superseding review-only feedback.
-The Task stays open for cold-cache verification; Git retains measurements and
-rejected patches. Provider-probe removal, absent-Wave resolution and directory reuse
-matched evidence; capture-store reuse and ancestor-probe deferral did not and were
-removed.
-Claude reconnect's native median worsens; the later handoff gain cannot repair it.
-
-Readiness requires raw-mode echo of unsubmitted text; Codex reconnect needs an
-untimed seed turn. Fresh Homes are not cold OS caches.
-LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache control
-and native login, reporting the limitation and reset method. SVG readability awaits review. Neither gap is waived.
+Jack Heart landed #1505; cold-cache verification stays open. Readiness requires
+raw-mode echo of unsubmitted text; Codex reconnect needs an untimed seed turn;
+fresh Homes are not cold OS caches. History: `bc83f965bd:.lf/wave/infrastructure/MEMORY.md`,
+this heading.
 
 Copied databases keep absolute provider-home paths: strip routes before launch and
 connect only benchmark-created Sessions. Early excluded probes reached those

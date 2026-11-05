@@ -360,7 +360,10 @@ impl CapacityWait {
     fn pause(&mut self, provider: &str, reason: &str, retry_at: i64) -> Duration {
         if self.announced != Some(retry_at) {
             self.announced = Some(retry_at);
-            eprintln!("Waiting for {provider} capacity until {retry_at}: {reason}");
+            eprintln!(
+                "Waiting for {provider} capacity until {}: {reason}",
+                crate::lf::output::format_time(retry_at)
+            );
             _record_limit_recovery(provider, reason, Some(retry_at));
         }
         let left = retry_at - crate::store::rows::now_unix();

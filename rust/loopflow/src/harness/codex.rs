@@ -46,8 +46,9 @@ use crate::store::ProviderAccountId;
 fn build_thread_request(
     launch: &AgentConfig,
     resume_agent_session: Option<&AgentSessionId>,
+    headless: bool,
 ) -> (&'static str, serde_json::Map<String, Value>) {
-    let mut params = build_codex_thread_start_params(launch);
+    let mut params = build_codex_thread_start_params(launch, headless);
     match resume_agent_session {
         Some(session_id) => {
             params.insert(
@@ -794,17 +795,9 @@ impl CodexHarness {
         for name in crate::agent::EXECUTION_IDENTITY_ENV {
             command.env_remove(name);
         }
-        let (thread_method, mut thread_params) =
-            build_thread_request(launch, self.resume_agent_session.as_ref());
         let native = self.approval == ApprovalPolicy::NativeClient;
-        if native
-            && launch.write_scope == crate::agent::AgentWriteScope::Configured
-            && !launch.skip_permissions
-        {
-            // The native UI supplies interactive approval policy. The shared
-            // builder's unattended default belongs only to headless turns.
-            thread_params.remove("approvalPolicy");
-        }
+        let (thread_method, mut thread_params) =
+            build_thread_request(launch, self.resume_agent_session.as_ref(), !native);
         if native {
             // A native Session's AgentProcess is private to it, so lf's
             // configuration is the server's own: a conversation the person
@@ -1380,7 +1373,7 @@ mod tests {
         };
         let saved_session = AgentSessionId::from("saved-native-thread");
         for session in [None, Some(&saved_session)] {
-            let (_, params) = build_thread_request(&config, session);
+            let (_, params) = build_thread_request(&config, session, true);
             assert_eq!(params["developerInstructions"], "Fixed additions.");
             assert!(!params.contains_key("baseInstructions"));
             assert!(!params.contains_key("model_instructions_file"));
@@ -1393,7 +1386,7 @@ mod tests {
             cwd: Some("/tmp/project".into()),
             ..AgentConfig::default()
         };
-        let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()));
+        let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()), true);
 
         assert_eq!(method, "thread/resume");
         assert_eq!(
@@ -1408,7 +1401,7 @@ mod tests {
 
     #[test]
     fn new_codex_session_uses_thread_start() {
-        let (method, params) = build_thread_request(&AgentConfig::default(), None);
+        let (method, params) = build_thread_request(&AgentConfig::default(), None, true);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
     }

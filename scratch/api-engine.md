@@ -169,7 +169,11 @@ terminal shows the agent continuing. From the CLI: `lf task run LOO-1 --json`
 prints exactly the `task.run` result the server would send. One operation, two
 adapters, same bytes.
 
-## Tasks
+## Sequence on this branch
+
+Jack Heart (November 5): "do this all here." Everything below lands on PR #1813,
+one commit series per step, each verified with the server suites and the CLI's
+own tests before the next begins.
 
 1. **task.\* and the core loop.** Lift `task.run`, `task.ship`, `task.hold`,
    `task.steer`, `task.comment`, `task.wait`, `task.interrupt` into the engine;

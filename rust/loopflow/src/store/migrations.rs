@@ -123,7 +123,19 @@ const LEGACY_BASELINE_VERSION: &str = "001_initial";
 // -- Applying -----------------------------------------------------------------
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
-    apply_sqlite_transaction(conn, |_| Ok(()))
+    apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |_| Ok(()))
+}
+
+/// Advance a validation snapshot without changing preferences in the real
+/// checkouts its rows reference. Promotion owns the actual settings cutover.
+pub(crate) fn apply_sqlite_preview(conn: &rusqlite::Connection) -> StoreResult<()> {
+    apply_sqlite_transaction(conn, MigrationPurpose::Preview, |_| Ok(()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MigrationPurpose {
+    Upgrade,
+    Preview,
 }
 
 /// Stage a fresh connection one migration behind the binary's known head. The
@@ -209,11 +221,12 @@ pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 
 fn apply_sqlite_transaction(
     conn: &rusqlite::Connection,
+    purpose: MigrationPurpose,
     before_migration: impl FnOnce(&rusqlite::Connection) -> StoreResult<()>,
 ) -> StoreResult<()> {
     _migration_transaction(conn, |conn, guards| {
         before_migration(conn)?;
-        apply_set(conn, MIGRATIONS, guards)?;
+        apply_set_with_purpose(conn, MIGRATIONS, guards, purpose)?;
         validate_foreign_keys(conn)?;
         validate_persisted_json(conn)
     })
@@ -423,7 +436,7 @@ pub(crate) fn apply_sqlite_with_backup(
     let result = match requires_migration_sqlite(conn) {
         Ok(false) => Ok(()),
         Ok(true) => {
-            let migrated = apply_sqlite_transaction(conn, |conn| {
+            let migrated = apply_sqlite_transaction(conn, MigrationPurpose::Upgrade, |conn| {
                 backup_before_migration(conn, path).map(|_| ())
             });
             if migrated.is_ok() {
@@ -618,10 +631,20 @@ fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
 /// Apply every migration in `set` the database has not seen, in id order, exactly
 /// once. Taking the set as an argument is what lets the fixtures below drive
 /// synthetic release histories without a test-only seam in the store.
+#[cfg(test)]
 fn apply_set(
     conn: &rusqlite::Connection,
     set: &[Migration],
     guards: &mut Vec<File>,
+) -> StoreResult<()> {
+    apply_set_with_purpose(conn, set, guards, MigrationPurpose::Upgrade)
+}
+
+fn apply_set_with_purpose(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
     validate_set(set).map_err(StoreError::InvalidData)?;
 
@@ -645,7 +668,7 @@ fn apply_set(
     let applied = applied_versions(conn)?;
     for (offset, migration) in pending_migrations(conn, &applied, set)?.iter().enumerate() {
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
-        migration_preflight(conn, migration, guards)?;
+        migration_preflight(conn, migration, guards, purpose)?;
         conn.execute_batch(migration.sql)?;
         convert_released_data(conn, migration.sql)?;
         backfill_known_checksums(conn, set)?;
@@ -729,8 +752,9 @@ fn migration_preflight(
     conn: &rusqlite::Connection,
     migration: &Migration,
     guards: &mut Vec<File>,
+    purpose: MigrationPurpose,
 ) -> StoreResult<()> {
-    if migration_contains(migration, "settings_authority") {
+    if purpose == MigrationPurpose::Upgrade && migration_contains(migration, "settings_authority") {
         crate::config::migrate::preflight(conn, guards)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
     }
@@ -6323,7 +6347,7 @@ mod tests {
                 .unwrap();
         });
 
-        apply_sqlite_transaction(&conn, |conn| {
+        apply_sqlite_transaction(&conn, super::MigrationPurpose::Upgrade, |conn| {
             backup_before_migration(conn, &path)?;
             start_writer.send(()).unwrap();
             assert!(

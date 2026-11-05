@@ -1,0 +1,1 @@
+- Sync onto a67a7101 (2026-11-05): `harness::native_exit` failures were inherited `LF_*` env from the lf shell; `env -u LF_* cargo test -p loopflow --lib harness:: < /dev/null` passes 188/188.

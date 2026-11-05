@@ -567,7 +567,7 @@ mod tests {
     const DAY: i64 = 86_400;
 
     #[test]
-    fn store_report_exposes_unknown_applied_migration() {
+    fn store_report_admits_a_newer_migration_tail() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
@@ -575,7 +575,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO schema_migrations (version, applied_at)
-                 VALUES ('9.0.001_divergent', unixepoch() + 1)",
+                 VALUES ('9.0.001_newer', unixepoch() + 1)",
                 [],
             )
             .unwrap();
@@ -585,11 +585,9 @@ mod tests {
 
         assert_eq!(
             report.latest_applied_migration.as_deref(),
-            Some("9.0.001_divergent")
+            Some("9.0.001_newer")
         );
-        let error = report.migration_error.unwrap();
-        assert!(error.contains("9.0.001_divergent"), "{error}");
-        assert!(error.contains("latest known"), "{error}");
+        assert_eq!(report.migration_error, None);
     }
 
     fn row(ts: i64, event: &str) -> LfProcess {

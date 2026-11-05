@@ -13,8 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Identities are shared with the runtime; ordering and the additivity proof
-// run only here (and in the runtime's tests).
+// Identities are shared with the runtime; ordering runs only here (and in the
+// runtime's tests).
 #[path = "src/store/migration_build.rs"]
 mod migration_build;
 #[allow(dead_code)]
@@ -105,10 +105,10 @@ fn emit_migration_catalog(
             })
             .unwrap_or_default(),
     };
-    let ordered = migration_build::order_catalog(&directory, &merged_order)
+    let catalog = migration_build::order_catalog(&directory, &merged_order)
         .unwrap_or_else(|error| panic!("order migrations: {error}"));
-    let (catalog, connection) = migration_build::build_catalog(ordered)
-        .unwrap_or_else(|error| panic!("build migration catalog: {error}"));
+    let connection = migration_build::apply_catalog(&catalog)
+        .unwrap_or_else(|error| panic!("apply migration catalog: {error}"));
 
     let mut code = String::from("static MIGRATIONS: &[Migration] = &[\n");
     for entry in &catalog {
@@ -118,10 +118,9 @@ fn emit_migration_catalog(
             .unwrap_or_else(|error| panic!("canonicalize {}: {error}", entry.path.display()));
         writeln!(
             code,
-            "    Migration {{ version: {:?}, sql: include_str!({:?}), reader_floor: {:?}, merged: {} }},",
+            "    Migration {{ version: {:?}, sql: include_str!({:?}), merged: {} }},",
             entry.version,
             path.to_string_lossy(),
-            entry.reader_floor,
             entry.merged
         )
         .expect("write migration catalog");

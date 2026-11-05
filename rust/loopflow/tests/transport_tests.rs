@@ -604,6 +604,81 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
 }
 
 #[test]
+fn prepared_destination_preserves_source_input_until_explicit_transfer() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh", "-c",
+        "stty -echo; read -r first; printf '%s' \"$first\" > \"$HOME/first\"; read -r second; printf '%s' \"$second\" > \"$HOME/second\"",
+    ]);
+    let session = fixture.session(&owner);
+    let agent = uuid::Uuid::new_v4().to_string();
+    let attachment = uuid::Uuid::new_v4().to_string();
+    let sql = fixture.sql();
+    sql.execute(
+        "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
+            started_at,agent_session_id,agent_provider,agent_interactive,spawn_state,
+            attached_lf_process_id,attachment_token)
+         SELECT ?1,'agent',trace_id,id,'fixture',repo,cwd,started_at,?2,'claude',1,'spawn_requested',id,?3
+         FROM processes WHERE id=?4",
+        rusqlite::params![agent, session, attachment, owner],
+    )
+    .unwrap();
+    sql.execute(
+        "UPDATE agent_sessions SET agent_process_id=?1 WHERE id=?2",
+        rusqlite::params![agent, session],
+    )
+    .unwrap();
+    sql.execute(
+        "UPDATE processes SET terminal_id='rex:source' WHERE id=?1",
+        [&owner],
+    )
+    .unwrap();
+    let placement = || {
+        sql.query_row(
+            "SELECT terminal_id FROM processes WHERE id=?1",
+            [&owner],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap()
+    };
+    let mut source = fixture.viewer(&owner, true);
+    source.input("source-");
+    // A lost preparation reply cannot grant input or revoke the source claim.
+    let mut uncertain = fixture.connect(&owner);
+    uncertain.request(json!({"kind":"attach","control":false,"replace":false,
+        "rows":24,"cols":80,"session":session,"placement":"rex:uncertain"}));
+    drop(uncertain);
+    let mut destination = fixture.viewer(&owner, false);
+    let destination_id = destination.id.clone();
+    assert!(destination.token.is_none());
+    source.input("retained\n");
+    assert_eq!(fixture.wait_file("first"), "source-retained");
+    assert_eq!(placement(), "rex:source");
+    source.input("unfinished-");
+    // The prepared connection itself requests transfer; no new provider or viewer.
+    destination.request(json!({"kind":"attach","control":true,"replace":true,
+        "own":"take","rows":24,"cols":80,"session":session,"placement":"rex:destination"}));
+    let accepted = destination.until_reply();
+    assert_eq!(accepted["viewer"], destination_id);
+    destination.accept(&accepted);
+    assert!(destination.token.is_some());
+    assert_eq!(placement(), "rex:destination");
+    let retained: String = sql
+        .query_row(
+            "SELECT attachment_token FROM processes WHERE id=?1",
+            [&agent],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, attachment);
+    source.until_event("control");
+    source.input("stale\n");
+    destination.input("continued\n");
+    destination.finish();
+    assert_eq!(fixture.wait_file("second"), "unfinished-continued");
+}
+
+#[test]
 fn automatic_attachment_preserves_an_existing_viewers_control() {
     let fixture = Fixture::new();
     let owner = fixture.start(&[

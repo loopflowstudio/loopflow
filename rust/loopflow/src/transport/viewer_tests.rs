@@ -7,7 +7,7 @@ use std::os::unix::net::UnixListener;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::wire::{self, Decoder, Incoming, Outgoing, Reply, Request, Tag};
+use super::wire::{self, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Tag};
 use super::{attach_with_terminal, endpoint, start, terminal_pair, ViewerTerminal};
 use crate::ghostty_vt::{Terminal, REVISION};
 use crate::id::LfProcessId;
@@ -36,7 +36,9 @@ fn snapshot_preview_fixture() {
         resume_fixture(&case);
         return;
     }
-    let observing = case == "observe";
+    let lost_transfer = case == "observe_lost_transfer";
+    let taking_input = case == "observe_take" || lost_transfer;
+    let observing = case == "observe" || taking_input;
     let preview = if observing {
         None
     } else {
@@ -93,7 +95,7 @@ fn snapshot_preview_fixture() {
             live.write(b"observed output");
         }
         let bytes = super::terminal::repaint(&live).unwrap();
-        let reply = Outgoing {
+        let mut reply = Outgoing {
             answers: 1,
             seq: 0,
             reply: Reply::Attached {
@@ -119,6 +121,66 @@ fn snapshot_preview_fixture() {
         socket
             .write_all(&wire::frame(Tag::Out, b"\x1b]777;live-ready\x07"))
             .unwrap();
+        if taking_input {
+            let mut transferred = false;
+            loop {
+                let mut bytes = [0; 4096];
+                let n = socket.read(&mut bytes).unwrap();
+                assert_ne!(n, 0);
+                decoder.extend(&bytes[..n]);
+                while let Some((tag, payload)) = decoder.next().unwrap() {
+                    if tag == Tag::Input {
+                        assert!(transferred, "input arrived before transfer acknowledgement");
+                        assert_eq!(payload, b"destination answer\n");
+                        socket
+                            .write_all(&wire::frame(
+                                Tag::Out,
+                                &wire::event("nonce", 1, Event::ChildExited { code: 0 }),
+                            ))
+                            .unwrap();
+                        return;
+                    }
+                    assert_eq!(tag, Tag::Request);
+                    let request: Incoming = serde_json::from_slice(&payload).unwrap();
+                    assert!(matches!(
+                        request.request,
+                        Request::Attach {
+                            control: true,
+                            replace: true,
+                            own: Some(Own::Take),
+                            ..
+                        }
+                    ));
+                    assert!(!transferred, "transfer was retried without an answer");
+                    if lost_transfer {
+                        socket
+                            .write_all(&wire::frame(Tag::Out, b"\x1b]777;pending-transfer\x07"))
+                            .unwrap();
+                        let mut pending = Vec::new();
+                        socket.read_to_end(&mut pending).unwrap();
+                        assert!(
+                            pending.is_empty(),
+                            "unacknowledged input or transfer was replayed"
+                        );
+                        return;
+                    }
+                    if let Reply::Attached { token, owner, .. } = &mut reply.reply {
+                        *token = Some("destination-claim".into());
+                        *owner = Some("viewer".into());
+                    }
+                    socket
+                        .write_all(&wire::frame(
+                            Tag::Reply,
+                            &serde_json::to_vec(&reply).unwrap(),
+                        ))
+                        .unwrap();
+                    socket
+                        .write_all(&wire::frame(Tag::Out, b"\x1b]777;input-ready\x07"))
+                        .unwrap();
+                    transferred = true;
+                }
+            }
+        }
         let mut input = Vec::new();
         socket.read_to_end(&mut input).unwrap();
         decoder.extend(&input);
@@ -128,7 +190,15 @@ fn snapshot_preview_fixture() {
             assert!(matches!(request.request, Request::Leave));
         }
     });
-    attach_with_terminal(&owner, None, preview, !observing).unwrap();
+    let result = attach_with_terminal(&owner, None, preview, observing.then_some(SESSION));
+    if lost_transfer {
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("outcome is unknown"));
+    } else {
+        result.unwrap();
+    }
     peer.join().unwrap();
 }
 
@@ -270,6 +340,7 @@ fn preview_case(case: &str) {
     let mut output = Vec::new();
     let mut cancelled = false;
     let mut inspected = false;
+    let mut answered = false;
     let status = loop {
         assert!(
             Instant::now() < deadline,
@@ -306,7 +377,7 @@ fn preview_case(case: &str) {
             if case == "resume" {
                 assert!(display.text().unwrap().contains("live primary"));
                 assert!(!display.text().unwrap().contains("saved preview"));
-            } else if case == "observe" {
+            } else if case.starts_with("observe") {
                 assert!(display.text().unwrap().contains("observed output"));
             } else {
                 assert!(display.text().unwrap().trim().is_empty());
@@ -323,6 +394,8 @@ fn preview_case(case: &str) {
             master
                 .write_all(if case == "resume" {
                     b"done\n"
+                } else if case == "observe_take" || case == "observe_lost_transfer" {
+                    &[0x12]
                 } else if case == "observe" {
                     b"ignored input\x1d"
                 } else {
@@ -330,6 +403,24 @@ fn preview_case(case: &str) {
                 })
                 .unwrap();
             inspected = true;
+        }
+        if case == "observe_take"
+            && !answered
+            && output
+                .windows(b"input-ready".len())
+                .any(|w| w == b"input-ready")
+        {
+            master.write_all(b"destination answer\n").unwrap();
+            answered = true;
+        }
+        if case == "observe_lost_transfer"
+            && !answered
+            && output
+                .windows(b"pending-transfer".len())
+                .any(|w| w == b"pending-transfer")
+        {
+            master.write_all(b"\x12unacknowledged answer\n").unwrap();
+            answered = true;
         }
         if let Some(status) = child.0.try_wait().unwrap() {
             // Drain cleanup written immediately before the child exited.
@@ -378,7 +469,7 @@ fn preview_case(case: &str) {
         output
             .windows(b"saved preview".len())
             .any(|w| w == b"saved preview"),
-        case != "observe"
+        !case.starts_with("observe")
     );
     assert!(case == "startup_failure" || case == "provider_failure" || cancelled || inspected);
 }
@@ -403,6 +494,16 @@ fn snapshot_preview_hands_off_to_mode_only_live_state() {
 #[test]
 fn passive_viewer_displays_without_claiming_control_or_forwarding_input() {
     preview_case("observe");
+}
+
+#[test]
+fn passive_viewer_takes_input_only_after_explicit_request_and_acknowledgement() {
+    preview_case("observe_take");
+}
+
+#[test]
+fn passive_viewer_never_replays_an_uncertain_transfer_or_its_input() {
+    preview_case("observe_lost_transfer");
 }
 
 #[test]

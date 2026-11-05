@@ -40,6 +40,13 @@ The destination alone decides whether a remotely owned Task started; an absent
 local checkout is not evidence of remote backlog. This polling interval is a
 reversible adapter choice, unrelated to the fifteen-minute lifetime policy.
 
+Implementation choice, November 4: a live Conversation observer offers Ctrl+R to
+take input only after the existing execution owner acknowledges its attachment.
+This keeps preparation and explicit transfer on one destination connection; no
+resume command runs during native creation. Ctrl+] continues to leave the viewer.
+The shortcut is a reversible interaction choice, not a change to named copies,
+native ownership, or the required configured handoff demonstration.
+
 [workspace-demo.md](workspace-demo.md) preserves the failed configured opening,
 later disposable real-data demonstration and native Split review still owed.
 Merged installer work in #1815 changes the available repair path, not those past

@@ -116,11 +116,22 @@ changes. Test peers share JSON reply setup; uncertain replies stay raw failures.
 Remote arrival, caller discovery and their evidence limits are described below.
 These components do not deliver the outstanding Rex retention hold.
 
+Live observers now acknowledge preparation before offering Ctrl+R to request input
+on the same connection. The existing execution owner records destination placement
+with that explicit claim, preserving the provider attachment token and routing
+subsequent agent tools to the destination. Passive copies cannot change placement.
+Preparation failures and unanswered transfer requests never submit input or retry.
+Task and Wave conversations share `Host::conversation`, retaining history/errors
+after exit through Rex's native `exit.on_completion=false`; ordinary shells retain
+their normal native behavior.
+Review found and repaired both disappearing preparation errors and stale routing
+after transfer. Configured provider and workspace-level readiness proof remain owed.
+
 ### Shared tools
 
 | Intent | Current implementation |
 | --- | --- |
-| Conversation | `session view` observes live output or history; explicit `lf resume` takes input |
+| Conversation | `session view` observes live output or history; Ctrl+R requests input after live attachment acknowledgement; `lf resume` also remains explicit |
 | Shell | `task tool … shell` execs a native login shell in the recorded Task checkout |
 | Files | Directory `LF_FILE_BROWSER`, then VISUAL/EDITOR/vi; Desktop retains Files documents/drafts |
 | Changes | Shared working-tree/branch/PR comparison; pinned base/head, Git pager or explicit difftool |
@@ -223,6 +234,14 @@ action omits cwd: that path remains unverified. A supported scoped host capabili
 or an explicit product revision is needed for the failing API case. No alternative
 LF-only split command or narrower acceptance has been approved.
 
+November 4 renewed capability inspection: installed `block_creator.list` specifies
+that empty terminal `cwd` starts in home; its shell schema and `api list` expose
+no scoped default setter. The published [CLI reference](https://www.superlogical.com/rex/docs/reference/cli)
+and [Lua reference](https://www.superlogical.com/rex/docs/reference/lua) expose
+per-creation `cwd`, not a Task/window default. Client scripts can change actions,
+but do not intercept the raw server API requirement. No supported scoped solution
+was found; the existing failed probe remains authoritative for that path.
+
 ### Herdr
 
 Recorded Herdr 0.9.3/protocol 22 evidence covers local explicitly selected Task
@@ -250,9 +269,22 @@ successful configured workspace demo. The dated demo history remains intact; the
 current supported build/install path needs verification before renewed native review.
 No migration or installation was performed during this reconciliation.
 
+The synced base also includes #1818 (`ae3c91abee`): resume, rollover and lifetime
+share the judgment that an active turn, draft or pending request protects the
+existing provider even when attachment fails. Input is retained before delivery.
+Workspace handoff must use that Session owner; native destination creation cannot
+replace its acknowledgement or justify restarting protected work. This improves
+the existing foundation without delivering coordinated workspace handoff.
+
+#1805 (`a5000ef889`) moves preferences to authored files and adds a released
+settings migration. Wave tool templates remain in `wave_task_layouts`; they are
+saved arrangement intent, not provider preferences. The earlier branch-catalog
+failure remains dated evidence, and a compatible current build/store still needs
+configured demonstration after this sync.
+
 ## Shared lifetime dependency
 
-November 4 status rechecked during resumed implement confirms LOO-717 remains open at PR
+November 4 status rechecked during implement confirms LOO-717 remains open at PR
 #1811, at demo. Its clean checkout at `b81df60579` still requires `--native-settled`
 on every `task presence` write and native closure
 before retirement. It also offers exact retaining-process exit observation through
@@ -280,14 +312,18 @@ authority to settle or delete those resources.
 
 ### Delete — do not maintain
 
-- Configured-default fallback from native Rex caller discovery and the native
-  fixture's injected endpoint are removed. The surviving path uses the ancestor's
-  explicit listener, explicit server overrides or current-viewer placement, with
-  caller-block validation. Preserve endpoint propagation for LF-created tools;
-  there is no process-wide/socket scan or second resolver.
-- Rex away detection, LF native closure and settlement remain deleted concepts;
-  do not revive them to satisfy LOO-717's superseded API. Preserve holds and unknown
-  inventory through the shared lifetime owner when its revised API is available.
+- Rex away detection, native closure/settlement, layout mirroring and the Herdr
+  keystroke-resume path are already removed. Preserve native locator reuse and
+  pending-create receipts; do not restore these predecessors for lifetime integration.
+- The observer's exit-and-resume-only interaction is replaced by explicit input
+  transfer on its acknowledged connection. Ordinary `lf resume`, attachment fencing,
+  passive opening and source-provider identity remain.
+- `open/workspace.rs::activate` is removed: creation and passive activation share
+  layout preparation and receipt completion in `materialize`. Already materialized
+  windows return before tool rendering; pending creation/activation still fences
+  uncertain replies. Task and Wave launches share `Host::conversation` so observer
+  exit cannot erase either destination's history/errors. No exclusive fixtures
+  remain to remove; native activation and lost-reply coverage exercise this path.
 
 ### Outstanding acceptance
 
@@ -310,17 +346,16 @@ authority to settle or delete those resources.
    renamed destinations, native arrangement and restart/relaunch without replay,
    unfinished-input/provider-history preservation, app selection and remote usability.
    Herdr needs its bounded configured return/reopen demonstration.
-5. **Move/copy:** named observing copies and explicit resume exist; coordinated
-   destination preparation/handoff receipts remain substantial implementation work.
-   Destination preparation must complete before an explicitly requested input
-   handoff; failure must preserve source input and retries must reuse the destination.
-   A native create/display receipt is not conversation readiness. Launching resume
-   as part of the initial native layout can transfer source input before a create
-   reply is known; it is not a safe implementation of this boundary. Destination
-   readiness and the subsequent explicit input request need separate acknowledgements
-   through the existing Session attachment owner, with uncertain replies retained.
-   Native reorder/source-state preservation need end-to-end proof. Dropping that
-   coordination or named-copy behavior remains an unaccepted optional proposal.
+5. **Move/copy:** named observing copies and explicit resume exist. Live observers
+   request input with Ctrl+R on their acknowledged destination connection. The
+   existing attachment owner acknowledges that separate request; no provider
+   launch, Session replacement or automatic retry occurs. Workspace-level readiness
+   reporting and configured preparation/handoff proof remain unfinished: failed or
+   uncertain preparation must preserve source input and retries reuse the destination.
+   Native create/display receipts are not conversation readiness; initial layouts
+   must never run resume before a create reply is known. Preserve uncertain replies
+   in workspace reporting. Native reorder/source-state preservation still needs
+   end-to-end proof. Dropping coordination or named copies remains unaccepted.
 6. **Validation:** gate owns affected suites, migration/DTO coverage and the two
    host-fixture deadline failures below. Authored demo owns configured interaction
    and remaining product judgments; source/fixture passes cannot substitute for it.
@@ -339,4 +374,4 @@ Earlier complete plans/results: `cc607dc3e1:scratch/rex-workspace.md` and
 `7b886d04cc:scratch/rex-workspace.md`; dated demo evidence is in
 [workspace-demo.md](workspace-demo.md).
 
-Check (November 4): `cargo test -p loopflow --lib lf::commands::open::` — 9 passed; `cargo test -p loopflow --test integration work_open_tests::rex_` — 13 passed, 1 native-host test ignored; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed. Prior argument-reader (8 tests) and isolated custom-server Rex passes remain applicable. Gate owns broader suites and earlier host deadlines; authored demo owns configured interaction. `lf context` is within token and byte targets.
+Checks (November 4): `cargo test -p loopflow --lib lf::commands::open::` — 9 passed; `cargo nextest run -p loopflow --test integration` filtered to `rex_activates_`, `rex_recovers_`, `rex_lost_recreation_`, `rex_reopens_`, and `rex_remote_arrival_is_passive_` — 5 passed (83–89s each). Prior `passive_viewer`, `prepared_destination_preserves_source_input_until_explicit_transfer`, and native-renderer checks — 5 passed after correcting fixture spawn-state — and the isolated Rex failed-observer retention probe remain applicable. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and `lf context` passed; both context budgets fit. Gate owns broader transport/lifetime/workspace suites and earlier host deadlines; authored demo owns configured interaction. Retention still depends on LOO-717's revised shared contract, and native API split defaults lack supported scoped host capability; neither gap is delivered or reduced.

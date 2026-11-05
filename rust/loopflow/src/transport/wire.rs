@@ -137,6 +137,10 @@ pub(super) enum Request {
         name: Option<String>,
         /// What a controlling viewer this attachment replaces prints as it leaves.
         moved: Option<String>,
+        /// A prepared observer taking this Session's input. The serving owner
+        /// records placement with the claim so passive views cannot redirect tools.
+        session: Option<String>,
+        placement: Option<String>,
     },
     /// Continue a dropped viewer's stream, no snapshot.
     Resume(Resume),

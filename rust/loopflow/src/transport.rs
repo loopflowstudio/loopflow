@@ -890,6 +890,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             cols,
                             name,
                             moved,
+                            session,
+                            placement,
                         } => {
                             if wants_control
                                 && !replace
@@ -898,6 +900,21 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             {
                                 viewer.reply(answers, Reply::Busy);
                                 continue;
+                            }
+                            if wants_control {
+                                if let Some(session) = session {
+                                    let store = crate::journal::process_ledger()?;
+                                    anyhow::ensure!(viewer.attached, "Destination is not prepared");
+                                    anyhow::ensure!(
+                                        store.session_transport(&session)?.as_ref() == Some(&id),
+                                        "Session execution changed; source input was retained"
+                                    );
+                                    let attachment = store.session_attachment(&session)?
+                                        .context("Session attachment is unavailable; source input was retained")?;
+                                    store.record_session_terminal(
+                                        &session, &attachment, placement.as_deref(),
+                                    )?;
+                                }
                             }
                             attached = true;
                             viewer.size = dimensions(rows, cols);
@@ -1590,6 +1607,17 @@ impl ViewerTerminal {
         Ok(())
     }
 
+    fn discard_input(&self) -> io::Result<()> {
+        let state = self.state.lock().expect("viewer terminal lock poisoned");
+        if state.original.is_some() {
+            // SAFETY: stdin is the terminal whose attributes we retained above.
+            if unsafe { libc::tcflush(0, libc::TCIFLUSH) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
+
     fn handoff(&mut self) -> io::Result<()> {
         let mut state = self.state.lock().expect("viewer terminal lock poisoned");
         state.reset_display()?;
@@ -1691,7 +1719,7 @@ fn attach_with_preview(
     crate::journal::carry_across_exec(&mut command)?;
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
-    attach_with_terminal(id, moved, terminal, true)
+    attach_with_terminal(id, moved, terminal, None)
 }
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
@@ -1741,21 +1769,22 @@ pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     } else {
         None
     };
-    attach_with_terminal(id, moved, terminal, true)
+    attach_with_terminal(id, moved, terminal, None)
 }
 
-/// Observe an existing execution without claiming input, size, or colors.
-/// This never starts an owner or resumes a provider.
-pub(crate) fn observe(id: &LfProcessId) -> Result<()> {
-    attach_with_terminal(id, None, None, false)
+/// Observe an existing execution; only an explicit action after acknowledgement
+/// requests input. This never starts an owner or resumes a provider.
+pub(crate) fn observe(id: &LfProcessId, session: &str) -> Result<()> {
+    attach_with_terminal(id, None, None, Some(session))
 }
 
 fn attach_with_terminal(
     id: &LfProcessId,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
-    take_control: bool,
+    observe_session: Option<&str>,
 ) -> Result<()> {
+    let take_control = observe_session.is_none();
     let mut preview = terminal.is_some();
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
@@ -1773,6 +1802,8 @@ fn attach_with_terminal(
             cols,
             name: tty_name(libc::STDIN_FILENO),
             moved,
+            session: None,
+            placement: None,
         },
     )?;
     let mut decoder = Decoder::default();
@@ -1843,6 +1874,11 @@ fn attach_with_terminal(
                                         terminal = Some(ViewerTerminal::enter()?);
                                     }
                                     terminal.as_ref().expect("terminal entered").make_raw()?;
+                                    if !take_control {
+                                        // Keystrokes typed before either acknowledgement
+                                        // are not a transfer request or provider input.
+                                        terminal.as_ref().expect("terminal entered").discard_input()?;
+                                    }
                                 }
                             }
                             Reply::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
@@ -1936,6 +1972,30 @@ fn attach_with_terminal(
                     eprintln!("\n{detach}");
                 }
                 return Ok(());
+            } else if !take_control
+                && !controlled
+                && terminal.is_some()
+                && io::stdin().is_terminal()
+                && acknowledgement_deadline.is_none()
+                && bytes[..n] == [0x12]
+            {
+                let (rows, cols) = size();
+                acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
+                send(
+                    &mut socket,
+                    Request::Attach {
+                        control: true,
+                        replace: true,
+                        own: Some(Own::Take),
+                        rows,
+                        cols,
+                        name: tty_name(libc::STDIN_FILENO),
+                        moved: Some("Input moved to the prepared conversation view.".into()),
+                        session: observe_session.map(str::to_owned),
+                        placement: crate::session_record::current_terminal_id()
+                            .or_else(crate::lf::commands::open::host_placement),
+                    },
+                )?;
             } else if controlled {
                 send_frame(&mut socket, Tag::Input, &bytes[..n])?;
             }

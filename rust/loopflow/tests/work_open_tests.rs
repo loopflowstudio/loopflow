@@ -2025,6 +2025,85 @@ fn rex_recovers_a_lost_creation_by_marker_then_reuses_its_renamed_native_id() {
 }
 
 #[test]
+fn rex_activates_a_named_passive_copy_once_even_when_the_split_reply_is_lost() {
+    for reply in ["{}", "lost reply"] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::with_lf_home(&[], home.path());
+        let registered =
+            register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+        rex_peer(bin.path());
+        let args = [
+            "open",
+            "--task",
+            "INF-123",
+            "--host",
+            "rex",
+            "--copy",
+            "review",
+            "--new-shells",
+            "--no-focus",
+            "--json",
+        ];
+        let mut arrival = args.to_vec();
+        arrival.extend([
+            "--local-workspace",
+            "--arrive-task",
+            registered.task.id.as_str(),
+        ]);
+        let passive = json(&lf(home.path(), repo.path(), Some(bin.path()), &arrival));
+        assert_eq!(passive["receipts"][0]["destination"], "window:fixture");
+        let windows = bin.path().join("session.new_window.requests");
+        let created = std::fs::read_to_string(&windows).unwrap();
+        rex_reply(
+            bin.path(),
+            "session.list",
+            serde_json::json!({
+                "sessions":[{"session_id":"session:fixture","label":"Renamed copy"}]
+            }),
+        );
+        rex_reply(
+            bin.path(),
+            "session.view",
+            serde_json::json!({
+                "windows":[{"window_id":"window:fixture","label":"Native edits"}]
+            }),
+        );
+        std::fs::write(bin.path().join("session.new_split.reply"), reply).unwrap();
+        let activated = lf(home.path(), repo.path(), Some(bin.path()), &args);
+        let repeated = lf(home.path(), repo.path(), Some(bin.path()), &args);
+        let report: Value = serde_json::from_slice(&repeated.stdout).unwrap();
+        assert_eq!(activated.status.success(), reply == "{}");
+        assert_eq!(repeated.status.success(), reply == "{}");
+        if reply == "{}" {
+            assert_eq!(report["receipts"][0]["destination"], "window:fixture");
+            assert!(report["receipts"][0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("0 new native shells"));
+        } else {
+            assert!(report["receipts"][0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("Tool activation outcome is unknown"));
+        }
+        let splits =
+            std::fs::read_to_string(bin.path().join("session.new_split.requests")).unwrap();
+        assert_eq!(
+            splits.lines().count(),
+            1,
+            "activation must not replay tools"
+        );
+        let split: Value = serde_json::from_str(splits.trim()).unwrap();
+        assert_eq!(split["window_id"], "window:fixture");
+        assert_eq!(split["focus"], false);
+        assert_eq!(std::fs::read_to_string(windows).unwrap(), created);
+        assert_eq!(sessions(home.path()), 0);
+    }
+}
+
+#[test]
 fn rex_unavailable_context_never_falls_through_to_desktop() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

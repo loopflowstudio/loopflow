@@ -582,7 +582,7 @@ fn ensure_container(
             if let Some(session) =
                 store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
             {
-                windows.push(json!({"window_label":"Conversation","layout":Host::Rex(&rex.server).block("Conversation",cwd,viewer_argv(cwd,&["session","view",session.id.as_str()])?)}));
+                windows.push(json!({"window_label":"Conversation","layout":Host::Rex(&rex.server).conversation(cwd,session.id.as_str())?}));
             }
         }
         let result = rex.call(
@@ -830,13 +830,14 @@ fn materialize(
         bail!("Task view was explicitly closed; following leaves it closed");
     }
     let marker = format!("[lf:{}]", occurrence.id);
-    if let Some(window) = retained.or_else(|| {
+    let existing = retained.or_else(|| {
         inventory.iter().find(|window| {
             window["label"]
                 .as_str()
                 .is_some_and(|label| label.ends_with(&marker))
         })
-    }) {
+    });
+    if let Some(window) = existing {
         if retained.is_none() {
             occurrence.destination_id = Some(
                 window["window_id"]
@@ -847,35 +848,53 @@ fn materialize(
             // Recover identity without turning an uncertain creation into replay permission.
             store.save_host_occurrence(&occurrence)?;
         }
-        return activate(
-            store,
-            rex,
-            container,
-            &mut occurrence,
-            content,
-            repo,
-            presentation,
+        anyhow::ensure!(
+            occurrence.creation != "tools_pending",
+            "Tool activation outcome is unknown; no duplicate was attempted"
+        );
+        if presentation.passive || occurrence.creation != "passive" || content.location.is_none() {
+            return Ok((
+                occurrence
+                    .destination_id
+                    .expect("retained window has an identity"),
+                false,
+                0,
+            ));
+        }
+    } else {
+        anyhow::ensure!(
+            occurrence.creation != "pending" || occurrence.destination_id.is_some(),
+            "Task window creation outcome is unknown; no duplicate was attempted"
         );
     }
-    anyhow::ensure!(
-        occurrence.creation != "pending" || occurrence.destination_id.is_some(),
-        "Task window creation outcome is unknown; no duplicate was attempted"
-    );
+
     let (layout, shells) = layout(store, content, repo, presentation, Host::Rex(&rex.server))?;
-    occurrence.destination_id = None;
-    occurrence.creation = "pending".into();
-    store.save_host_occurrence(&occurrence)?;
-    let label: String = content
-        .title
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(80)
-        .collect();
-    let result = rex.call("session.new_window", json!({"session_id":container,"window_label":format!("{label} {marker}"),"focus":false,"layout":layout}))?;
-    let id = result["window_id"]
-        .as_str()
-        .context("Rex create reply omitted window identity; outcome is unknown")?
-        .to_string();
+    let id = if existing.is_some() {
+        // Add tools beside the passive arrival; never replace its native edits.
+        let id = occurrence
+            .destination_id
+            .as_deref()
+            .expect("retained window has an identity");
+        occurrence.creation = "tools_pending".into();
+        store.save_host_occurrence(&occurrence)?;
+        rex.call("session.new_split", json!({"session_id":container,"window_id":id,"direction":"horizontal","side":"after","focus":false,"layout":layout}))?;
+        id.to_owned()
+    } else {
+        occurrence.destination_id = None;
+        occurrence.creation = "pending".into();
+        store.save_host_occurrence(&occurrence)?;
+        let label: String = content
+            .title
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(80)
+            .collect();
+        let result = rex.call("session.new_window", json!({"session_id":container,"window_label":format!("{label} {marker}"),"focus":false,"layout":layout}))?;
+        result["window_id"]
+            .as_str()
+            .context("Rex create reply omitted window identity; outcome is unknown")?
+            .to_owned()
+    };
     occurrence.destination_id = Some(id.clone());
     occurrence.creation = if presentation.passive || content.location.is_none() {
         "passive"
@@ -884,37 +903,6 @@ fn materialize(
     }
     .into();
     store.save_host_occurrence(&occurrence)?;
-    Ok((id, true, shells))
-}
-
-// Activation adds the selected tools beside the native arrival. It never replaces
-// a block: the arrival may already contain edits or native splits.
-fn activate(
-    store: &SqliteStore,
-    rex: &Rex,
-    container: &str,
-    occurrence: &mut HostOccurrence,
-    content: &ViewContent,
-    repo: &Path,
-    presentation: Presentation<'_>,
-) -> Result<(String, bool, usize)> {
-    let id = occurrence
-        .destination_id
-        .clone()
-        .context("Task window is unavailable")?;
-    anyhow::ensure!(
-        occurrence.creation != "tools_pending",
-        "Tool activation outcome is unknown; no duplicate was attempted"
-    );
-    if presentation.passive || occurrence.creation != "passive" || content.location.is_none() {
-        return Ok((id, false, 0));
-    }
-    let (layout, shells) = layout(store, content, repo, presentation, Host::Rex(&rex.server))?;
-    occurrence.creation = "tools_pending".into();
-    store.save_host_occurrence(occurrence)?;
-    rex.call("session.new_split", json!({"session_id":container,"window_id":id,"direction":"horizontal","side":"after","focus":false,"layout":layout}))?;
-    occurrence.creation = "complete".into();
-    store.save_host_occurrence(occurrence)?;
     Ok((id, true, shells))
 }
 

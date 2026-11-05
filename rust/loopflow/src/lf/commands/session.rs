@@ -144,7 +144,8 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             println!("To work here: lf resume {}", session.id);
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::ops::human_session::owner_running(&store.sqlite, &owner)? {
-                    return crate::transport::observe(&owner);
+                    println!("When connected: Ctrl+R takes input here; Ctrl+] leaves.");
+                    return crate::transport::observe(&owner, session.id.as_str());
                 }
             }
             let transcript =

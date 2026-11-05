@@ -53,7 +53,9 @@ native views for Files, Changes and Task/workflow; terminal hosts use the chosen
 programs and LF's terminal view.
 
 Opening a Conversation in Rex observes its live output or saved history.
-Use `lf resume <session-id>` when you want to take conversation input.
+Once a live view connects, press **Ctrl+R** to take input in that pane.
+**Ctrl+]** leaves the viewer. An observing copy stays passive until that explicit
+action. For a conversation showing only saved history, use `lf resume <session-id>`.
 
 ```bash
 lf task view LOO-498
@@ -201,6 +203,19 @@ jobs, shell variables, editor memory or unfinished shell commands. Rearranging
 native tabs preserves their programs. Opening in another host leaves source
 shells and unsaved work with their original host.
 
+The live destination first connects as an observer. Ctrl+R then requests input
+through the existing Session execution owner, on that same connection. Input
+typed before either acknowledgement is discarded. A failed preparation leaves
+the source in control; an unanswered transfer is reported as uncertain and is
+never retried automatically. A native create receipt alone does not take input.
+Rex keeps Task and Wave Conversation terminals visible when their observers exit,
+including saved history and preparation errors. Reopening reuses them without
+replaying their commands; use an explicit resume to continue an ended conversation.
+
+If reconnection fails while a turn, draft or pending request keeps the provider
+active, `lf resume` reports the failure and preserves that work. Saved history
+cannot reconstruct unfinished input or answer a pending request.
+
 ## Reopen, restore and close
 
 Returning to a retained workspace reuses its native views. Restarting the host
@@ -246,8 +261,8 @@ arrival/activation, follower recovery, and Herdr Task creation/reuse. It still o
 - Configured remote arrival, recovery and app acceptance across two Machines.
 - Retained Rex Task Session terminals preventing cleanup, with reliable release
   observation and no LF-initiated closure of Rex shells.
-- Coordinated destination preparation before explicit conversation input handoff,
-  with failure preserving source input and retries reusing the destination.
-  Configured move/handoff and return/reopen demonstrations remain outstanding.
+- Workspace-level readiness and retry receipts across native creation failures.
+  The live viewer now separates observation from explicit input transfer; configured
+  move/handoff and return/reopen demonstrations remain outstanding.
 
 These are delivery gaps, not accepted reductions to the agreed experience.

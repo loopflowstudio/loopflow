@@ -15,6 +15,20 @@ pub(super) enum Host<'a> {
 }
 
 impl Host<'_> {
+    pub(super) fn conversation(self, cwd: &Path, session: &str) -> Result<Value> {
+        let mut block = self.block(
+            "Conversation",
+            cwd,
+            viewer_argv(cwd, &["session", "view", session])?,
+        );
+        if matches!(self, Self::Rex(_)) {
+            // Keep history and failed preparation visible for Task and Wave
+            // conversations. Observer exit never invites command replay.
+            block["block"]["options"]["exit"] = json!({"on_completion": false});
+        }
+        Ok(block)
+    }
+
     pub(super) fn block(self, label: &str, cwd: &Path, mut argv: Vec<String>) -> Value {
         match self {
             Self::Rex(server) => {
@@ -140,11 +154,7 @@ impl Tools<'_> {
 
     fn conversation(&self, session: Option<&str>) -> Result<Value> {
         match session.or(self.content.primary_session.as_deref()) {
-            Some(session) => Ok(self.host.block(
-                "Conversation",
-                self.cwd,
-                viewer_argv(self.cwd, &["session", "view", session])?,
-            )),
+            Some(session) => self.host.conversation(self.cwd, session),
             None => self.task_view(),
         }
     }
@@ -345,6 +355,9 @@ mod tests {
                     );
                 }
                 let viewing = conversation["command"].as_array().unwrap();
+                if matches!(host, Host::Rex(_)) {
+                    assert_eq!(conversation["exit"]["on_completion"], false);
+                }
                 assert!(viewing
                     .windows(3)
                     .any(|args| args == ["session", "view", "session_primary"]));

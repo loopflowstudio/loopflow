@@ -157,7 +157,7 @@ stay out of scope. Merged #1595 (`e204ce6072`) scopes parent output to announced
 private Process logs; transport keeps native descriptors, OpenCode its stderr log.
 Installed repair and macOS pending-request startup remain unproved.
 
-LOO-516's relay evidence leaves with the relay (Task 430c74); rows stay: `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
+LOO-516's relay evidence left with the relay: `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
 Task 430c74 (Jack Heart, 2026-11-05): lf is a session manager beside the harness,
 never in its byte path. Codex 0.166.0 app-server fans every notification and
 approval to every subscriber, so a side observer records while the TUI talks to
@@ -165,8 +165,9 @@ the server directly; a thread has no rollout to resume until a turn or `thread/n
 Any initialized client gets `thread/started` for threads others start or fork
 (`parentThreadId` null; `forkedFromId` on a fork; title writer `ephemeral`), so
 the observer follows `/new` and `/fork` as Claude's `/clear` is followed.
-Limit: `codex --remote` ignores `-c` for its own `thread/start`; person-started
-threads run without lf's instructions and hooks until Codex offers per-thread config.
+A Session's app-server is private, so lf's instructions, hooks and roots are `-c`
+overrides on `codex app-server`, not thread config: person-started threads have them.
+Codex trusts hooks per handler (`:{group}:{handler}`, defaults filled in before hashing).
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 

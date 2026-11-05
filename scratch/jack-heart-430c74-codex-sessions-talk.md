@@ -134,6 +134,7 @@ Implement 2026-11-05: `codex_terminal.py --new-thread` (real 0.166.0) plain+wrap
 26 passed twice (two earlier runs each had two different load-flaky failures, Pi/Claude
 included, each passing alone); lifecycle `personal_task_launch_resume...` passed; clippy, fmt clean.
 Compress 2026-11-05 (`codex_hooks` returns hooks, `toml_string`): `--lib harness::` 186 passed, `context_launch_tests::codex` 2 passed, clippy clean.
+Realign 2026-11-05: code and plan agree on every point of the implement direction; no code change, so the compress checks stand. Wave memory's superseded Codex-limit paragraph replaced.
 
 ## Demo
 

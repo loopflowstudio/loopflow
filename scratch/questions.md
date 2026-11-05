@@ -145,3 +145,31 @@ apart from `--prepare`.
 | `desktop.dashboard.hide` / `.show` | `lf desktop hide` / `show -p query:<id>/<member>` |
 | `desktop.dashboard.slots` | `lf desktop layout query:<id> --save` |
 | `desktop.dashboard.move` | `lf desktop move -p <board>/<member>` |
+
+### Item 7: one terminal screen format — stopped, nothing to unify on the wire
+
+The viewer already receives one format. A live attach's `0x02` frame and an
+ended Session's preview are both Ghostty VT formatter output
+(`transport::terminal::repaint`): `Output::snapshot` repaints the owner's live
+`ghostty_vt::Terminal`, and `transport::snapshot::last_screen` decodes the saved
+`GHOSTSNP` stream back into a `Terminal` and repaints it the same way. `GHOSTSNP`
+is only the owner's storage format on disk.
+
+Rex can send its snapshot as a client's initial screen because every Rex client
+embeds libghostty-vt and owns the displaying terminal's state. Ours do not:
+
+- The CLI viewer writes to whatever terminal emulator the person runs (iTerm,
+  Terminal, tmux, a Desktop pane). Those take VT bytes, not `GHOSTSNP`.
+- Desktop's panes are GhosttyKit app surfaces running the `lf` relay. The
+  bundled GhosttyKit header (`ghostty.h` in the GhosttyKit xcframework) has no
+  call that restores a surface from a snapshot stream, nor one that feeds bytes
+  into a surface; a surface only reads its child's PTY.
+
+Sending `GHOSTSNP` as the live initial screen would need, for Desktop, a
+GhosttyKit surface API that restores terminal state from a snapshot (something
+like `ghostty_surface_restore_snapshot(surface, ptr, len)`, built from the same
+Ghostty revision as `rust/loopflow/ghostty-vt.json` so formats match), plus a
+viewer path that hands the frame to it instead of the PTY. The CLI viewer would
+still have to decode and repaint through the formatter for a plain terminal, so
+VT formatter output remains the one format every viewer can display. The owner
+protocol framing is unchanged.

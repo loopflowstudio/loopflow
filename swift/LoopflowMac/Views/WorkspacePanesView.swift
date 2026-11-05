@@ -887,7 +887,7 @@ struct SessionPaneView: View {
             ) {
                 Text(item.record.action(.open)?.unavailableReason ?? "This conversation is controlled by another client.")
                 // Document explicit Take back; the prepared launcher keeps its own intent.
-                Text(item.record.openArgv.filter { $0 != "--reveal-existing" && $0 != "--start-if-free" }
+                Text(item.record.openArgv.filter { !SessionOpenIntent.flags.contains($0) }
                     .map(shellEscape).joined(separator: " "))
                     .font(.caption.monospaced()).textSelection(.enabled)
             }

@@ -11,7 +11,7 @@
 
 import Foundation
 
-public enum SessionOpenIntent: String, Codable, Sendable {
+public enum SessionOpenIntent: String, Codable, Sendable, CaseIterable {
     case resume, start, reveal
 
     var arguments: [String] {
@@ -21,6 +21,9 @@ public enum SessionOpenIntent: String, Codable, Sendable {
         case .reveal: ["--reveal-existing"]
         }
     }
+
+    /// Every intent flag a prepared command may carry.
+    public static let flags = Set(allCases.flatMap(\.arguments))
 
     public var action: SessionActionKind {
         switch self {

@@ -226,6 +226,14 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         actions.first { $0.kind == kind }
     }
 
+    /// Every Task this Session belongs to: its memberships, its checkout's Task
+    /// and its own Work when that is a Task.
+    public var taskMemberships: Set<String> {
+        Set(taskIds + [workspace?.taskId, work?.kind == .task ? work?.id : nil].compactMap { $0 })
+    }
+
+    public func names(task id: String) -> Bool { taskMemberships.contains(id) }
+
     /// A first launch ended with no history, so there is nothing to open and no
     /// holder: MoveHere is the explicit click that repeats it.
     public var launchRetry: SessionAction? {

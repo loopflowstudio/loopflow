@@ -246,8 +246,7 @@ final class WorkModel {
                    switch key.kind {
                    case .repository: record.primaryScope == "repository"
                    case .wave: record.primaryScope == "wave" && record.waveId == key.id
-                   case .task: record.taskPrimary && (record.taskIds.contains(key.id)
-                       || record.workspace?.taskId == key.id || record.work?.id == key.id)
+                   case .task: record.taskPrimary && record.names(task: key.id)
                    }
                }) {
                 workspace.conversationError = nil
@@ -528,8 +527,7 @@ final class WorkModel {
                 after = page.next
             } while after != nil
         }
-        guard let record = records.first(where: { $0.id == sessionID }),
-              record.taskIds.contains(executionTask) || record.workspace?.taskId == executionTask else {
+        guard let record = records.first(where: { $0.id == sessionID }), record.names(task: executionTask) else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
         if location != nil {
@@ -600,8 +598,7 @@ final class WorkModel {
             select(retained.reference)
         } else {
             let selectedKey = workspaceKey(for: selection, repository: repository)
-            if selection?.kind == .task,
-               record.taskIds.contains(selectedKey.id) || record.workspace?.taskId == selectedKey.id {
+            if selection?.kind == .task, record.names(task: selectedKey.id) {
                 select(selection)
             } else if selection?.kind == .wave, record.waveId == selectedKey.id {
                 select(selection)
@@ -2030,9 +2027,7 @@ final class WorkModel {
 
     func taskSessions(_ id: String) -> [SessionRecord] {
         let runtimeID = task(id: id)?.task.runtime?.workId ?? id
-        return (sessions.value ?? []).filter {
-            $0.taskIds.contains(runtimeID) || $0.workspace?.taskId == runtimeID
-        }
+        return (sessions.value ?? []).filter { $0.names(task: runtimeID) }
     }
 
     func openPrimaryConversation(in workspace: SessionsWorkspace, wave: String?, store: SessionsStore) async {

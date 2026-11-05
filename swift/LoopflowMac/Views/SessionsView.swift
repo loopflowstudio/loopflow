@@ -950,7 +950,7 @@ final class SessionsWorkspaceRegistry {
                 let belongs: Bool?
                 switch workspace.key.kind {
                 case .task:
-                    let tasks = Set(record.taskIds + [record.workspace?.taskId, record.work?.kind == .task ? record.work?.id : nil].compactMap { $0 })
+                    let tasks = record.taskMemberships
                     belongs = tasks.isEmpty ? nil : tasks.contains(workspace.key.id)
                 case .wave: belongs = record.waveId.map { $0 == workspace.key.id }
                 case .repository: belongs = nil

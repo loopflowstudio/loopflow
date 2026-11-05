@@ -390,3 +390,12 @@ inspection only (`inTile` keys on `selectedViewPlan` or `navigation.waveView`,
 `waveView` is nil for an entered Task so its pane still navigates, the
 repository-page test asserts the board and selection unchanged, PR head and
 origin/main as recorded); that 182 result reused.
+Gate, November 5: architecture and website passed; Rust filtered nextest 629 run,
+four `transport_tests` failed because untrusted fixture homes now report Claude's
+folder-trust dialog (fixture fixed in `457a45cd68`, the binary then 60/60);
+clippy clean; boundaries passed. Warm bound raised to sixteen per Jack (`0426d19ae9`):
+focused Desktop filter 182 passed in 8 suites; full `scripts/test_desktop.sh` 724
+passed in 89 suites with two padding variables after the recorded environment-size
+libghostty crash at test 402. The runner's later passes stopped on syspolicyd
+pressure from other worktrees, so these ran directly. Wave memory line "Eight warm"
+needs realign.

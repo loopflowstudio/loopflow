@@ -90,8 +90,6 @@ age out inside the 30-day window a contract waits for anyway.
 
 ## Remaining
 
-- Gate: affected suites once (whole `store::`, install, rollover, `ops::release`,
-  `test_release_publisher.py`), Swift build for the `AppUpdater.swift` deletion.
 - Rebase onto 843f5c when it lands (PR #1827, open at its demo step on 2026-11-05,
   carries the additive-or-contract rule in `scripts/check_migrations.py`,
   `-- expand:`/`-- exports:` markers and a rewritten staging section). Both
@@ -136,4 +134,5 @@ python/tests/test_release_publisher.py` 38 passed; clippy and fmt clean. Impleme
 Realign (2026-11-05, after the floor write): `cargo test -p loopflow --lib reader_floor` and `a_ledger_with_no_recorded_floor` 2 passed; wording edits only otherwise.
 Concept review (2026-11-05, second pass): `carry_reader_floor` and `MIGRATIONS.md` match the accepted design; no change, no open product choice.
 Gate (2026-11-05, after sync onto 384505b): `cargo test -p loopflow --lib -- store:: commands::install commands::rollover ops::release` 508 passed, 1 failed: `merge_order_follows_origin_main_and_counts_a_move_as_an_addition` (unchanged from main; git spawn ENOENT under a 42-minute loaded run, passes alone); pytest 38 passed; fmt and clippy clean; Swift build to CI (one optional delegate method removed).
+Gate rerun (2026-11-05, 11a4b307e, via `scripts/test.py --reuse-passing --rust-filter 'binary(lf) | test(store::migrations::) | test(commands::install::) | test(commands::rollover::) | test(ops::release::)'`): PASS in 806 s, covering architecture, all Python tests (631 passed), Rust (239 passed, fmt, clippy), website and Swift (desktop tests plus the `AppUpdater.swift` build). `release_tests` and the Xcode build left to CI.
 Demo (2026-11-05, headless, decided standing in for Jack Heart): `target/debug/lf` built from e351c36d5 (Rust unchanged since), private `LF_HOME=/Users/jack/.lf-demo-337044.iqqr`. Fresh store's newest row `task_session_promotion`, floor NULL (no recorded floor, as designed). Added ledger row `later_additive` past the catalog: `lf doctor` `ok store ... compatible`, `wave list`/`session list` exit 0, `lf task create` wrote b112ec and `task list` shows it. `ALTER TABLE waves DROP COLUMN promoted_at`: `task list` exit 0, `wave list` exit 1 with `no such column: promoted_at`, doctor still compatible. A table added without a ledger row still refuses at a known head (`differs from lf 0.15.1+e351c36d5`), correct. `git grep "needs an lf that knows"` outside shipped records and scratch: none. No owners started; root left in place, nothing to tear down. Decision: advance.

@@ -391,7 +391,7 @@ Task's complete recorded input history (`lf usage --days 0 --task ID --json`) wi
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.
 Below the Description, **Comments (n)** is collapsed and counts the Task's Linear
-thread (`lf task comment ID --json`, read when the Task is shown and
+thread (`comments` in `lf task show ID --json`, read when the Task is shown and
 again on expanding). A failed read keeps the earlier thread marked **May be out
 of date** with **Retry**; comments are never split out of the Description.
 Use **Inspect** or the row's context menu for details. Presentation changes never

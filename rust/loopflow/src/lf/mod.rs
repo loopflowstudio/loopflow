@@ -1171,7 +1171,7 @@ impl TaskCommand {
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
-            Self::Comment { message, .. } => message.is_some(),
+            Self::Steer { .. } | Self::Report { .. } => true,
             Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
             | Self::Checkout { .. }
@@ -2350,15 +2350,23 @@ until `lf ship`."
         #[arg(long, requires = "machine")]
         json: bool,
     },
-    /// Read the thread or publish a comment; agent comments default to progress
-    Comment {
+    /// Direct the Task's runs: a thread entry its Sessions read at their next step or turn
+    Steer {
         issue: String,
-        message: Option<String>,
-        /// Save a steer even when commenting from an agent Session
-        #[arg(long, requires = "message")]
-        steer: bool,
+        message: String,
         #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Print the thread with the entry
+        #[arg(long)]
+        json: bool,
+    },
+    /// Post progress to the Task's thread; an agent's report carries its Session's provenance
+    Report {
+        issue: String,
+        message: String,
+        #[arg(short = 'w', long)]
+        wave: Option<String>,
+        /// Print the thread with the entry
         #[arg(long)]
         json: bool,
     },
@@ -2421,7 +2429,8 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Update { issue, .. }
-            | Self::Comment { issue, .. }
+            | Self::Steer { issue, .. }
+            | Self::Report { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
         }
@@ -2454,7 +2463,8 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Update { issue, .. }
-            | Self::Comment { issue, .. }
+            | Self::Steer { issue, .. }
+            | Self::Report { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
         }
@@ -4006,46 +4016,39 @@ mod tests {
     }
 
     #[test]
-    fn task_comment_reads_and_writes_without_retired_commands() {
+    fn task_steer_and_report_take_a_message() {
         let steer = Cli::try_parse_from([
             "lf",
             "task",
-            "comment",
+            "steer",
             "INF-123",
             "take the smaller approach",
         ])
-        .expect("parse task comment");
+        .expect("parse task steer");
         let Some(Commands::Task {
             cmd:
-                TaskCommand::Comment {
+                TaskCommand::Steer {
                     issue,
                     message,
                     json,
                     wave: _,
-                    steer: _,
                 },
         }) = steer.command
         else {
-            panic!("expected task comment command");
+            panic!("expected task steer command");
         };
         assert_eq!(issue, "INF-123");
-        assert_eq!(message.as_deref(), Some("take the smaller approach"));
-        assert!(Cli::try_parse_from(["lf", "task", "comment", "INF-123"]).is_ok());
+        assert_eq!(message, "take the smaller approach");
+        assert!(Cli::try_parse_from(["lf", "task", "steer", "INF-123"]).is_err());
         assert!(matches!(
-            Cli::try_parse_from([
-                "lf",
-                "task",
-                "comment",
-                "INF-123",
-                "--steer",
-                "keep the API"
-            ])
-            .unwrap()
-            .command,
+            Cli::try_parse_from(["lf", "task", "report", "INF-123", "landed"])
+                .unwrap()
+                .command,
             Some(Commands::Task {
-                cmd: TaskCommand::Comment { steer: true, .. }
+                cmd: TaskCommand::Report { .. }
             })
         ));
+        assert!(Cli::try_parse_from(["lf", "task", "comment", "INF-123", "landed"]).is_err());
         assert!(
             Cli::try_parse_from(["lf", "task", "update", "INF-123", "--notes", "revised"]).is_ok()
         );
@@ -4059,7 +4062,7 @@ mod tests {
         }
         assert!(!json);
 
-        for removed in ["steer", "acknowledge", "decide", "request-decision"] {
+        for removed in ["acknowledge", "decide", "request-decision"] {
             assert!(
                 Cli::try_parse_from(["lf", "task", removed, "INF-123"]).is_err(),
                 "{removed} must not remain as a compatibility command"

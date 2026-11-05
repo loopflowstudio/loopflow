@@ -4,7 +4,7 @@
 //! Machine placement. `lf wave status [wave]` adds current Projects, Task conditions,
 //! metric readings and Session history; it never reads process health or a live
 //! loop. With no argument it resolves the ambient Wave. Reads preserve missing
-//! evidence; `--json` is the dashboard contract.
+//! evidence; `--json` prints the record the server sends.
 //!
 //! Evidence the machine could not read stays [`Evidence::Unavailable`] — an
 //! audit surface that renders "I could not look" as "nothing happened" is worse
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::durable::{Machine, TaskState, WorkRef, WorkStatus};
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
-use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskRow, TaskThread};
+use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThread};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::session_record::SessionHistory;
@@ -62,16 +62,14 @@ pub struct WaveSnapshot {
     pub machine: Option<Machine>,
 }
 
-/// `lf wave status <wave>`: current planning, Task conditions and Session history.
-/// Wire type; no defaults.
-/// `T` is the Task row: `TaskRow` for `lf wave status`, `RoadmapTask` for
-/// `lf desktop wave`.
+/// `lf wave status <wave>` and `lf wave planning <wave>`: current planning,
+/// Task conditions and Session history. Wire type; no defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WaveDetailSnapshot<T = RoadmapTask> {
+pub struct WaveDetailSnapshot {
     pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
-    pub tasks: Evidence<T>,
+    pub tasks: Evidence<RoadmapTask>,
     /// Wave-owned live evidence derived once by Rust for every consumer.
     pub metric_portfolio: MetricPortfolioDto,
     /// Durable Project Work that cannot join the current PM plan, including
@@ -97,16 +95,6 @@ pub enum Evidence<T> {
 }
 
 impl<T> Evidence<T> {
-    pub(crate) fn map<U>(self, row: impl FnMut(T) -> U) -> Evidence<U> {
-        match self {
-            Self::Ok { items, truncated } => Evidence::Ok {
-                items: items.into_iter().map(row).collect(),
-                truncated,
-            },
-            Self::Unavailable { reason } => Evidence::Unavailable { reason },
-        }
-    }
-
     fn complete(items: Vec<T>) -> Self {
         Self::Ok {
             items,
@@ -371,9 +359,9 @@ pub enum RoadmapSection {
 /// `lf wave show` — every Wave's plan joined to durable Work and local delivery
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RoadmapSnapshot<T = RoadmapTask> {
+pub struct RoadmapSnapshot {
     /// Every Task once; each names its Wave.
-    pub tasks: Evidence<T>,
+    pub tasks: Evidence<RoadmapTask>,
     /// RFC3339 time this read was taken.
     pub generated_at: String,
     pub waves: Vec<WaveRoadmap>,
@@ -390,45 +378,7 @@ pub struct WaveRoadmap {
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
 }
 
-/// Who a read prints for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shape {
-    /// Ordinary reads: one row per Task (`TaskRow`) or Session (`SessionRow`).
-    Tasks,
-    /// `lf desktop`: Desktop's presentation of each record. Desktop reads
-    /// stored planning and refreshes it with `lf wave status --sync`, so these
-    /// reads never ask the tracker.
-    Desktop,
-}
-
-impl Shape {
-    /// `value` as this audience reads it; `rows` turns it into Task rows.
-    async fn print<T, U>(
-        self,
-        store: Option<&SharedStore>,
-        value: T,
-        rows: impl FnOnce(T, &TaskNames) -> U,
-    ) -> Result<serde_json::Value>
-    where
-        T: Serialize,
-        U: Serialize,
-    {
-        Ok(match self {
-            Self::Desktop => serde_json::to_value(value)?,
-            Self::Tasks => serde_json::to_value(rows(value, &TaskNames::read(store).await?))?,
-        })
-    }
-}
-
 impl RoadmapSnapshot {
-    fn rows(self, names: &TaskNames) -> RoadmapSnapshot<TaskRow> {
-        RoadmapSnapshot {
-            tasks: self.tasks.map(|task| names.row(task)),
-            generated_at: self.generated_at,
-            waves: self.waves,
-        }
-    }
-
     /// The Tasks of one Wave, in plan order.
     pub fn wave_tasks<'a>(&'a self, wave: &WaveRoadmap) -> Evidence<&'a RoadmapTask> {
         match &self.tasks {
@@ -555,7 +505,7 @@ pub struct RoadmapTask {
     pub pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
     /// The graph step the Task stands at; `None` while a run carries it.
-    /// Carried to `TaskRow`, not on Desktop's wire.
+    /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
     pub(crate) step: Option<String>,
 }
@@ -630,59 +580,52 @@ pub async fn save_steer(
 }
 
 /// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
-pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
+/// `lf wave status [<wave>]` observes the tracker first; `lf wave planning
+/// <wave>` reads what the store records and `lf wave sync` exchanges planning.
+pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
-    if json {
-        println!("{}", status_json(&directory, wave, shape)?);
-        return Ok(());
-    }
     tokio::runtime::Runtime::new()?.block_on(async {
-        let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
-            return no_registry(false, "null");
+        let Some(status) = read_status(&directory, wave, observe).await? else {
+            return no_registry(json, "null");
         };
-        let wave = resolve_wave_in(&store, &directory, wave).await?;
-        if shape == Shape::Tasks {
-            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+        if json {
+            println!("{}", serde_json::to_string(&status)?);
+        } else {
+            print_status(&status);
         }
-        print_status(&wave_detail(&store, &wave).await?);
         Ok(())
     })
 }
 
 /// What `lf --cwd <directory> wave status [<wave>] --json` prints.
-pub fn status_json(directory: &Path, wave: Option<&str>, shape: Shape) -> Result<String> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
-            return Ok("null".to_owned());
-        };
-        let wave = resolve_wave_in(&store, directory, wave).await?;
-        if shape == Shape::Tasks {
-            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
-        }
-        let status = shape
-            .print(
-                Some(&store),
-                wave_detail(&store, &wave).await?,
-                WaveDetailSnapshot::rows,
-            )
-            .await?;
-        Ok(serde_json::to_string(&status)?)
-    })
+pub fn status_json(directory: &Path, wave: Option<&str>, observe: bool) -> Result<String> {
+    let status = tokio::runtime::Runtime::new()?.block_on(read_status(directory, wave, observe))?;
+    Ok(serde_json::to_string(&status)?)
 }
 
-/// `lf --cwd <directory> desktop wave <wave>`: one Wave's stored plan; None
-/// without a registry. Desktop refreshes planning through `lf wave status --sync`.
+/// `lf --cwd <directory> wave planning <wave>`: one Wave's stored plan; None
+/// without a registry.
 pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
-            return Ok(None);
-        };
-        let wave = resolve_wave_in(&store, directory, Some(wave)).await?;
-        Ok(Some(wave_detail(&store, &wave).await?))
-    })
+    tokio::runtime::Runtime::new()?.block_on(read_status(directory, Some(wave), false))
 }
 
-/// `lf --cwd <directory> desktop done --wave <wave> [--after <after>]`:
+/// One Wave's status; None without a registry.
+async fn read_status(
+    directory: &Path,
+    wave: Option<&str>,
+    observe: bool,
+) -> Result<Option<WaveDetailSnapshot>> {
+    let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
+        return Ok(None);
+    };
+    let wave = resolve_wave_in(&store, directory, wave).await?;
+    if observe {
+        crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+    }
+    Ok(Some(wave_detail(&store, &wave).await?))
+}
+
+/// `lf --cwd <directory> task list --closed --wave <wave> [--after <after>]`:
 /// one page of a Wave's closed Tasks.
 pub fn desktop_closed_tasks(
     directory: &Path,
@@ -704,12 +647,12 @@ pub fn desktop_closed_tasks(
     })
 }
 
-/// `lf desktop done`'s default `--limit`.
+/// `lf task list --closed`'s default `--limit`.
 pub const CLOSED_TASK_PAGE: usize = 50;
 
 /// `lf wave status --watch`: `lf wave status --json` now and each time it
 /// changes. The watch reads the store; it does not observe the tracker.
-pub fn watch_status(wave: Option<String>, shape: Shape) -> Result<()> {
+pub fn watch_status(wave: Option<String>) -> Result<()> {
     super::watch::run(
         (),
         super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
@@ -718,10 +661,7 @@ pub fn watch_status(wave: Option<String>, shape: Shape) -> Result<()> {
             async move {
                 let store = super::watch::require_store(store)?;
                 let wave = resolve_status_wave(&store, wave.as_deref()).await?;
-                let status = wave_detail(&store, &wave).await?;
-                shape
-                    .print(Some(&store), status, WaveDetailSnapshot::rows)
-                    .await
+                Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
             }
         },
     )
@@ -766,23 +706,23 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
 /// section. Deterministic and local: one runtime observation for the whole
 /// read and bounded Git probes for Task Work, after a fresh team check. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
-/// could be".
+/// could be". `lf wave show` observes the tracker first; `lf planning list`
+/// reads what the store records.
 pub fn show(
     wave: Option<&str>,
     task: Option<&str>,
     json: bool,
     all: bool,
-    shape: Shape,
+    observe: bool,
 ) -> Result<()> {
     let directory = std::env::current_dir()?;
     if json {
-        println!("{}", show_json(&directory, wave, task, all, shape)?);
+        println!("{}", show_json(&directory, wave, task, all, observe)?);
         return Ok(());
     }
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let observe = shape == Shape::Tasks;
         let roadmap = show_roadmap(store.as_ref(), &directory, wave, task, all, observe).await?;
         print_roadmap(&roadmap);
         Ok(())
@@ -795,15 +735,11 @@ pub(crate) fn show_json(
     wave: Option<&str>,
     task: Option<&str>,
     all: bool,
-    shape: Shape,
+    observe: bool,
 ) -> Result<serde_json::Value> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let observe = shape == Shape::Tasks;
         let roadmap = show_roadmap(store.as_ref(), directory, wave, task, all, observe).await?;
-        let roadmap = shape
-            .print(store.as_ref(), roadmap, RoadmapSnapshot::rows)
-            .await?;
         Ok(serde_json::to_value(roadmap)?)
     })
 }
@@ -815,7 +751,6 @@ pub fn watch_show(
     wave: Option<String>,
     task: Option<String>,
     all: bool,
-    shape: Shape,
     transport: super::watch::Transport,
 ) -> Result<Option<super::watch::Subscription>> {
     super::watch::start(
@@ -833,9 +768,7 @@ pub fn watch_show(
                     false,
                 )
                 .await?;
-                shape
-                    .print(store.as_ref(), roadmap, RoadmapSnapshot::rows)
-                    .await
+                Ok(serde_json::to_value(roadmap)?)
             }
         },
         transport,
@@ -968,9 +901,7 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
             None => Vec::new(),
         };
         if json {
-            let names = TaskNames::read(store.as_ref()).await?;
-            let rows: Vec<TaskRow> = tasks.into_iter().map(|task| names.row(task)).collect();
-            println!("{}", serde_json::to_string(&rows)?);
+            println!("{}", serde_json::to_string(&tasks)?);
         } else {
             for task in tasks {
                 println!(
@@ -996,9 +927,7 @@ pub fn watch_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
                 let Some(store) = store else {
                     return Ok(Vec::new());
                 };
-                let tasks = open_tasks(&store, &repo, &args).await?;
-                let names = TaskNames::read(Some(&store)).await?;
-                Ok(tasks.into_iter().map(|task| names.row(task)).collect())
+                open_tasks(&store, &repo, &args).await
             }
         },
     )
@@ -1016,50 +945,51 @@ struct TaskStatusArgs {
 pub fn watch_task_status(
     repo: &Path,
     issue: String,
-    shape: Shape,
     transport: super::watch::Transport,
 ) -> Result<Option<super::watch::Subscription>> {
+    watch_task(repo, issue, transport, |store, status| async move {
+        task_detail(&store, status).await
+    })
+}
+
+/// `lf task show <issue> --watch`: `lf task show --json` now and each time it
+/// changes.
+pub fn watch_task_pane(
+    repo: &Path,
+    issue: String,
+    transport: super::watch::Transport,
+) -> Result<Option<super::watch::Subscription>> {
+    watch_task(repo, issue, transport, |store, status| async move {
+        task_pane(&store, status).await
+    })
+}
+
+fn watch_task<T, F, R>(
+    repo: &Path,
+    issue: String,
+    transport: super::watch::Transport,
+    reading: F,
+) -> Result<Option<super::watch::Subscription>>
+where
+    T: Serialize,
+    F: Fn(SharedStore, crate::ops::task::TaskStatus) -> R + Clone + Send + Sync + 'static,
+    R: std::future::Future<Output = Result<T>> + Send,
+{
     let repo = repo.to_owned();
     super::watch::start(
         TaskStatusArgs { issue },
         super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
         move |store, args| {
             let repo = repo.to_owned();
+            let reading = reading.clone();
             async move {
                 let store = super::watch::require_store(store)?;
                 let status = crate::ops::task::read_task_status(&store, &repo, &args.issue).await?;
-                Ok(match shape {
-                    Shape::Desktop => serde_json::to_value(task_pane(&store, status).await?)?,
-                    Shape::Tasks => serde_json::to_value(task_detail(&store, status).await?)?,
-                })
+                Ok(serde_json::to_value(reading(store, status).await?)?)
             }
         },
         transport,
     )
-}
-
-impl WaveDetailSnapshot {
-    fn rows(self, names: &TaskNames) -> WaveDetailSnapshot<TaskRow> {
-        WaveDetailSnapshot {
-            project_readiness: self.project_readiness,
-            wave: self.wave,
-            projects: self.projects,
-            tasks: self.tasks.map(|task| names.row(task)),
-            metric_portfolio: self.metric_portfolio,
-            unavailable_tasks: self.unavailable_tasks,
-            history: self.history,
-            setup: self.setup,
-        }
-    }
-}
-
-impl ClosedTaskPageSnapshot {
-    fn rows(self, names: &TaskNames) -> ClosedTaskPageSnapshot<TaskRow> {
-        ClosedTaskPageSnapshot {
-            tasks: self.tasks.into_iter().map(|task| names.row(task)).collect(),
-            next: self.next,
-        }
-    }
 }
 
 /// `lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,
@@ -1205,15 +1135,15 @@ async fn repository_scope(
     }))
 }
 
-/// `lf task list --done --json`: one page of closed Tasks.
+/// `lf task list --closed --json`: one page of closed Tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClosedTaskPageSnapshot<T = RoadmapTask> {
-    pub tasks: Vec<T>,
+pub struct ClosedTaskPageSnapshot {
+    pub tasks: Vec<RoadmapTask>,
     /// Pass as `--after` for the next page; absent on the last page.
     pub next: Option<String>,
 }
 
-/// `lf task list --done`: closed Tasks of the repository (or one Wave), most
+/// `lf task list --closed`: closed Tasks of the repository (or one Wave), most
 /// recently closed first, with the details the plan gives open Tasks.
 pub fn list_closed_tasks(
     repo: &Path,
@@ -1222,16 +1152,12 @@ pub fn list_closed_tasks(
     after: Option<&str>,
     limit: usize,
     json: bool,
-    shape: Shape,
 ) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
         let page = closed_task_page(store.as_ref(), repo, wave, since, after, limit).await?;
         if json {
-            let page = shape
-                .print(store.as_ref(), page, ClosedTaskPageSnapshot::rows)
-                .await?;
             println!("{}", serde_json::to_string(&page)?);
         } else {
             for task in &page.tasks {
@@ -1243,7 +1169,7 @@ pub fn list_closed_tasks(
                 );
             }
             if let Some(next) = &page.next {
-                println!("more: lf task list --done --after {next} (keep the same filters)");
+                println!("more: lf task list --closed --after {next} (keep the same filters)");
             }
         }
         Ok(())

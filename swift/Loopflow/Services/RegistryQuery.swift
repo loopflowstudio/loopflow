@@ -248,7 +248,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskShip(directory: String, issue: String)
     case taskHold(directory: String, issue: String)
     case taskSteer(directory: String, issue: String, message: String)
-    case taskComment(directory: String, issue: String, message: String)
+    case taskReport(directory: String, issue: String, message: String)
     case taskInterrupt(directory: String, issue: String)
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
@@ -285,8 +285,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + Self.option("--from", from) + ["--json"]
         case .taskShip(_, let issue): ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): ["task", "hold", issue, "--json"]
-        case .taskSteer(_, let issue, let message): ["task", "comment", issue, "--steer", message, "--json"]
-        case .taskComment(_, let issue, let message): ["task", "comment", issue, message, "--json"]
+        case .taskSteer(_, let issue, let message): ["task", "steer", issue, message, "--json"]
+        case .taskReport(_, let issue, let message): ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave):
             ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
@@ -382,8 +382,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.hold", ["directory": directory, "issue": issue])
         case .taskSteer(let directory, let issue, let message):
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
-        case .taskComment(let directory, let issue, let message):
-            TaggedFields("task.comment", ["directory": directory, "issue": issue, "message": message])
+        case .taskReport(let directory, let issue, let message):
+            TaggedFields("task.report", ["directory": directory, "issue": issue, "message": message])
         case .taskInterrupt(let directory, let issue):
             TaggedFields("task.interrupt", ["directory": directory, "issue": issue])
         case .taskMove(let directory, let issue, let wave):

@@ -190,7 +190,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_ship.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_hold.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_steer.json"),
-            include_str!("../../../../tests/fixtures/dto/server/task_comment.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_report.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_wait.json"),
         ] {

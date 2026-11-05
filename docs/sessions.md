@@ -110,14 +110,14 @@ tool call), not a summary. On the harness it already uses, `-a` changes nothing.
 ## Steer without interrupting
 
 ```bash
-lf steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
-lf steer "freeze merges until 3pm"                   # every Session in this repository
-lf --wave billing steer "invoices before refunds"    # every Session on the Wave
-lf session steers <session>                          # was it delivered?
+lf session steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
+lf session steer "freeze merges until 3pm"                   # every Session in this repository
+lf --wave billing session steer "invoices before refunds"    # every Session on the Wave
+lf session steers <session>                                  # was it delivered?
 ```
 
 A steer starts no turn. Each Session receives it at its next supported provider
-boundary; idle ones stay idle until they next run. For a Task, `lf comment`
+boundary; idle ones stay idle until they next run. For a Task, `lf task steer`
 does the same for every Session on it ([Work](work.md#steer-it-while-it-runs)).
 Delivery proves the agent saw the steer, not that it followed it;
 `lf session steers <session> --retry <steer>` retries an uncertain delivery.

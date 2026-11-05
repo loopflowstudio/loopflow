@@ -707,7 +707,7 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskRun { .. }
         | Write::TaskShip { .. }
         | Write::TaskSteer { .. }
-        | Write::TaskComment { .. }
+        | Write::TaskReport { .. }
         | Write::TaskInterrupt { .. }
         | Write::TaskSave { .. }
         | Write::SessionRename { .. }
@@ -951,7 +951,7 @@ fn server_operations_match_their_lf_commands() {
                 message,
             }
         } else {
-            Write::TaskComment {
+            Write::TaskReport {
                 directory,
                 issue,
                 message,
@@ -1465,15 +1465,15 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             message,
         } => (
             path(directory),
-            words(&["task", "comment", issue, "--steer", message, "--json"]),
+            words(&["task", "steer", issue, message, "--json"]),
         ),
-        Write::TaskComment {
+        Write::TaskReport {
             directory,
             issue,
             message,
         } => (
             path(directory),
-            words(&["task", "comment", issue, message, "--json"]),
+            words(&["task", "report", issue, message, "--json"]),
         ),
         Write::TaskInterrupt { directory, issue } => (
             path(directory),

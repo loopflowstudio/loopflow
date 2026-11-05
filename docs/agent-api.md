@@ -61,7 +61,7 @@ A Wave directing a task is the internal case:
 lf checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf task run INF-123                                  # start built-in Task automation
-lf comment INF-123 "take the smaller approach"    # post a Task comment
+lf task report INF-123 "took the smaller approach"   # post progress to the Task's thread
 lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                   # block until it settles
 ```
@@ -110,8 +110,7 @@ Child edits survive the parent's squash landing without replay.
 ## Steer
 
 ```bash
-lf comment INF-123 "keep the public API"          # save a Task steer
-lf comment INF-123 --steer "keep the public API"  # save a steer from an agent Session
+lf task steer INF-123 "keep the public API"      # save a Task steer, from a person or an agent Session
 lf session steers SESSION --json                 # inspect delivery
 lf session steers SESSION --retry STEER_ID        # retry one delivery
 lf --wave <wave> wave-operate "prioritize the parser"
@@ -133,11 +132,11 @@ A saved steer is not proof of delivery. A completed provider write is not proof
 the model received or followed it. Uncertain writes remain visible and require
 explicit retry; retry saves another attempt without starting a turn.
 
-Keep routine agent progress in working notes and the Session response. `task comment`
-from an agent Session marks its comment as progress, excluded from steers. Use
-`--steer` only to save a deliberate steer. Direct
-participant comments and explicit `--steer` remain steers, even through
-the same account. Other integrations should mark progress with
+Keep routine agent progress in working notes and the Session response. `lf task report`
+from an agent Session marks its entry as progress, excluded from steers. Use
+`lf task steer` only to save a deliberate steer. Direct participant comments
+and `lf task steer` remain steers, even through the same account. Other
+integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.
 

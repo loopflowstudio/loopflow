@@ -1,4 +1,4 @@
-//! The `task` namespace's core loop: run, ship, hold, steer, comment, wait and
+//! The `task` namespace's core loop: run, ship, hold, steer, report, wait and
 //! interrupt a Task, and claim or unassign it.
 //!
 //! A run and a ship outlive the request that starts them. From a terminal the
@@ -189,10 +189,34 @@ pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold>
     })
 }
 
-/// `task.comment` (and `task.steer` with `steer`): save `message` to the Task's
-/// thread, as `lf task comment <issue> [--steer] <message>` does, and return
-/// the thread with it. An agent's comment is progress unless it steers.
-pub fn comment(
+/// `task.steer`: direction for the Task's runs, as `lf task steer <issue>
+/// <message>` does. The entry joins the Task's thread, and the store saves it
+/// as the Task's steer, which every Session on the Task, now or later, reads
+/// at its next boundary ([`super::session::steer`] is the Session-scoped
+/// write). Returns the thread with the entry.
+pub fn steer(
+    directory: &Path,
+    issue: &str,
+    wave: Option<&str>,
+    message: &str,
+) -> Result<TaskComments> {
+    thread_entry(directory, issue, wave, message, true)
+}
+
+/// `task.report`: progress for the Task's thread, as `lf task report <issue>
+/// <message>` does. An agent's report carries its Session's provenance
+/// (`<!-- loopflow-progress:… -->`) and steers nobody. Returns the thread
+/// with the entry.
+pub fn report(
+    directory: &Path,
+    issue: &str,
+    wave: Option<&str>,
+    message: &str,
+) -> Result<TaskComments> {
+    thread_entry(directory, issue, wave, message, false)
+}
+
+fn thread_entry(
     directory: &Path,
     issue: &str,
     wave: Option<&str>,

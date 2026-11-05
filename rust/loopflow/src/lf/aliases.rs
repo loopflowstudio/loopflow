@@ -107,6 +107,9 @@ pub const MOVED: &[Moved] = &[
     moved(&["monitor"], &["prune"], &["process", "prune"]),
     moved(&["ps"], &[], &["process", "list"]),
     moved(&["graph", "show"], &["--processes"], &["process", "show"]),
+    moved(&["comment"], &[], &["task", "steer"]),
+    moved(&["task", "comment"], &["--steer"], &["task", "steer"]),
+    moved(&["task", "comment"], &[], &["task", "report"]),
 ];
 
 /// The old spelling `path` (the command words resolved) and `rest` (every

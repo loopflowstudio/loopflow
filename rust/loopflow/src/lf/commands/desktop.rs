@@ -4,7 +4,6 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::watch::{Subscription, Transport};
-use super::waves::Shape;
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
@@ -668,7 +667,7 @@ pub(crate) fn watch_task_pane(
                 .identifier,
         )
     })?;
-    super::waves::watch_task_status(&repo, identifier, Shape::Desktop, transport)
+    super::waves::watch_task_pane(&repo, identifier, transport)
 }
 
 /// `lf desktop view list`: every plan a repository window shows, the default

@@ -42,7 +42,7 @@ liveness stays unknown; lf never guesses a process is dead.
 | You see | Run |
 |---|---|
 | A question waiting for you | `lf resume --task <ID>` |
-| The run is going the wrong way | `lf comment <ID> "address the latest feedback"` |
+| The run is going the wrong way | `lf task steer <ID> "address the latest feedback"` |
 | It must stop now | `lf interrupt <ID>` |
 | It stopped and should go again | `lf task run <ID> --reason "provider credentials repaired"` |
 

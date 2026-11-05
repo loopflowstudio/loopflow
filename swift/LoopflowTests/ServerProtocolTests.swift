@@ -105,7 +105,7 @@ struct ServerProtocolTests {
             ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
             ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
-            ("task_comment", "comment-1", .taskComment(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
+            ("task_report", "report-1", .taskReport(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
         ]
         for (name, id, write) in writes {

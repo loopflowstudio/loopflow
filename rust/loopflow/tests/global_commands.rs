@@ -2124,7 +2124,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
             "title cannot be empty",
         ),
         (
-            vec!["task", "comment", "INF-123", "  ", "--explain", "--json"],
+            vec!["task", "report", "INF-123", "  ", "--explain", "--json"],
             "comment cannot be empty",
         ),
     ] {
@@ -2140,10 +2140,9 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
     }
     let comment = read(&[
         "task",
-        "comment",
+        "steer",
         "INF-123",
         "  Keep the draft  ",
-        "--steer",
         "--explain",
         "--json",
     ]);
@@ -2151,13 +2150,8 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
         comment["action"],
         serde_json::json!({"kind":"comment", "message":"Keep the draft", "steer":true, "refresh":false})
     );
-    let thread = read(&["task", "comment", "INF-123", "--explain", "--json"]);
-    assert!(thread["action"]["message"].is_null());
-    assert_eq!(thread["action"]["refresh"], true);
-    assert!(thread["effects"][0]
-        .as_str()
-        .unwrap()
-        .contains("Refresh Linear"));
+    let report = read(&["task", "report", "INF-123", "Landed", "--explain", "--json"]);
+    assert_eq!(report["action"]["steer"], false);
     let created = read(&[
         "task",
         "create",
@@ -2230,7 +2224,7 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
             "--explain",
             "--json",
         ],
-        vec!["task", "comment", "INF-123", "Hello", "--explain", "--json"],
+        vec!["task", "report", "INF-123", "Hello", "--explain", "--json"],
     ] {
         let refused = read(&args);
         assert!(refused["action"].is_null());

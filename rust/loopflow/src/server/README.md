@@ -127,8 +127,8 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
 | `task.hold` | `lf task hold <issue>` | `engine::task` |
-| `task.steer` | `lf task comment <issue> <message> --steer` (`lf task steer` pending) | `engine::task`; proxy to `session.steer` pending |
-| `task.comment` | `lf task comment <issue> <message>` (`task.report`, `lf task report` pending) | `engine::task` |
+| `task.steer` | `lf task steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
+| `task.report` | `lf task report <issue> <message>` | `engine::task` |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
@@ -138,7 +138,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
-| `session.steer` | `lf session steer` | CLI only, engine pending |
+| `session.steer` | `lf session steer [<id>] <message>` | `engine::session`; not served yet |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.planning` | `lf wave planning <wave>` | read |
 | `wave.create` | `lf wave create` | write |
@@ -225,7 +225,7 @@ part of what a phone or bot client is offered.
   one with none ahead reaches `end` as bare `lf task run` does. A null `agent`
   uses each step's configured harness. `lf task run <issue> --json` and `lf
   ship --json` print the same value. `task.hold` withdraws the approval
-  (`{issue, stopped}`), `task.steer` and `task.comment {message}` save to the
+  (`{issue, stopped}`), `task.steer` and `task.report {message}` save to the
   thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints

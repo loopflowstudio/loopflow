@@ -367,13 +367,7 @@ fn public_local_plan_matches_desktop() {
     let comments = lf(
         repo.path(),
         home.path(),
-        &[
-            "task",
-            "comment",
-            id,
-            "Preserve the escaped quote",
-            "--json",
-        ],
+        &["task", "report", id, "Preserve the escaped quote", "--json"],
     );
     assert!(uuid::Uuid::parse_str(comments["comments"][0]["id"].as_str().unwrap()).is_ok());
     assert!(time::OffsetDateTime::parse(
@@ -785,7 +779,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         home.path(),
         &[
             "task",
-            "comment",
+            "report",
             identity.as_str(),
             "Preserve the escaped quote",
             "--json",

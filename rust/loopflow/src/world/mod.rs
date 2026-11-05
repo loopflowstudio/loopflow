@@ -797,7 +797,7 @@ impl World {
         Ok(session_id)
     }
 
-    /// Comment on a Task the way `lf task comment` does.
+    /// Post to a Task's thread the way `lf task report` does.
     pub fn comment(&self, task: &Task, message: &str) -> Result<()> {
         crate::ops::task::task_comment(&self.repo, &task.identifier, None, Some(message), false)?;
         Ok(())

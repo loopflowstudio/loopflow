@@ -350,3 +350,34 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   list`).
 - **`ship --json` went with `--stop`.** It only applied to the stop; `task
   hold --json` has it.
+
+### Step 3b — one result per operation, steer and report
+
+- **List reads print the record.** `session list`, `task list`, `wave
+  status` and `wave show --json` print what the server sends
+  (`SessionRecord`/`SessionPage`, `RoadmapTask`, `WaveDetailSnapshot`,
+  `RoadmapSnapshot`); `SessionRow`, `Shape` and the row readers are gone.
+  `TaskRow`/`TaskDetail` remain only behind `task status` (`task.status`),
+  which Desktop's Task pane also reads; folding it into `task show` is a
+  Desktop change. No skill read the old row JSON by field name, so no alias
+  keeps it.
+- **`task steer` does not fan out to `session::steer`.** The brief asked
+  `task::steer` to delegate to `session::steer` per Session. The store already
+  saves a Task-scoped steer from a direction comment (`comment_steer_in`),
+  and every current and later Session of the Task reads it; resolving the
+  Sessions at write time would miss Sessions started after the steer and
+  double-deliver to the ones running. `engine::session::steer` exists for
+  `session steer` (Session, Wave or repository scope) and `task::steer` goes
+  through the same thread entry with `steer: true`.
+- **A person's `task report` still steers.** The store's `is_direction_comment`
+  treats any person-authored comment except the progress marker as direction,
+  so `lf task report` typed by a person saves a steer too. Left as it was;
+  changing the rule is a store decision, not a spelling one.
+- **`session.steer` is not served.** The wire has `task.steer` and
+  `task.report`; Desktop sends steers through the Task. Serving
+  `session.steer` waits for a Desktop caller.
+- **Reading the thread.** `lf task comment <issue>` (no message) listed the
+  thread; it is now `lf task status <issue> --json` (`comments`) and
+  `lf task show <issue> --json`. The alias maps a bare `task comment <issue>`
+  to `task report <issue>`, which errors on the missing message and names
+  the read in the usage text.

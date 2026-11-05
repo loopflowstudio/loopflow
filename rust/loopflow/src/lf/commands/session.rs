@@ -5,7 +5,6 @@ use anyhow::{bail, Context};
 
 use serde::{Deserialize, Serialize};
 
-use super::waves::Shape;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
@@ -18,7 +17,7 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
         return crate::transport::serve(argv, *terminal);
     }
     if let SessionCommand::List(args) = command {
-        return list_sessions(args, Shape::Tasks);
+        return list_sessions(args);
     }
     if let SessionCommand::Usage(args) = command {
         return super::history::usage(args);
@@ -53,33 +52,16 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
     match command {
         SessionCommand::Serve { .. } => unreachable!("serve owns its process before any runtime"),
         SessionCommand::Steer { id, message } => {
+            use crate::engine::session::SteerScope;
             let store = open_shared_store().await?;
-            let author = crate::config::participant_name()?
-                .unwrap_or_else(|| "attribution unresolved".into());
-            let Some(id) = id else {
-                // Global `--repo` has already entered the selected repository.
-                let steer = match cli.wave.as_deref() {
-                    Some(wave) => {
-                        crate::lf::commands::waves::save_steer(&store, wave, &author, message)
-                            .await?
-                    }
-                    None => {
-                        let root = crate::repo::find_repo_root()?;
-                        let repo = crate::repository::CanonicalRepo::discover(&root)?;
-                        store
-                            .sqlite
-                            .save_repository_steer(&repo, &author, message)?
-                    }
-                };
-                println!("Saved {}", steer.id);
-                return Ok(());
+            // Global `--repo` has already entered the selected repository.
+            let scope = match (id.as_deref(), cli.wave.as_deref()) {
+                (Some(id), _) => SteerScope::Session(id),
+                (None, Some(wave)) => SteerScope::Wave(wave),
+                (None, None) => SteerScope::Repository,
             };
-            let session = crate::ops::human_session::session_by_id(&store, id)
-                .await?
-                .context("Session not found")?;
-            let steer = store
-                .sqlite
-                .save_session_steer(&session.id, &author, message)?;
+            let directory = std::env::current_dir()?;
+            let steer = crate::engine::session::steer(&store, &directory, scope, message).await?;
             println!("Saved {}", steer.id);
             Ok(())
         }
@@ -245,17 +227,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
     }
 }
 
-/// `lf session list --json`: one Session and the Work it belongs to. Wire
-/// type; no defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionRow {
-    #[serde(flatten)]
-    pub session: SessionFacts,
-    pub task: Option<crate::durable::TaskId>,
-    /// Wave name, as `--wave` takes it.
-    pub wave: Option<String>,
-}
-
 /// One Session's own facts; `lf task status` lists its Task's Sessions with them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionFacts {
@@ -274,22 +245,6 @@ pub struct SessionFacts {
     pub agent_process_id: Option<crate::id::LfProcessId>,
 }
 
-impl SessionRow {
-    fn of(session: SessionRecord, waves: &std::collections::HashMap<String, String>) -> Self {
-        Self {
-            task: match &session.work {
-                Some(crate::durable::WorkRef::Task(task)) => Some(task.clone()),
-                _ => None,
-            },
-            wave: session
-                .wave_id
-                .as_ref()
-                .and_then(|wave| waves.get(&wave.to_string()).cloned()),
-            session: SessionFacts::of(session),
-        }
-    }
-}
-
 impl SessionFacts {
     pub(crate) fn of(session: SessionRecord) -> Self {
         Self {
@@ -305,15 +260,15 @@ impl SessionFacts {
     }
 }
 
-/// `lf session list` (`Shape::Tasks`) and `lf desktop sessions` (`Shape::Desktop`).
-pub fn list_sessions(args: &SessionListArgs, shape: Shape) -> anyhow::Result<()> {
+/// `lf session list`.
+pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
     if args.watch {
-        return watch_list(filter, shape, super::watch::Transport::Stdio).map(drop);
+        return watch_list(filter, super::watch::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        list(&store, args.json || shape == Shape::Desktop, &filter, shape).await
+        list(&store, args.json, &filter).await
     })
 }
 
@@ -355,7 +310,6 @@ struct SessionWatchArgs {
 
 pub(crate) fn watch_list(
     filter: crate::session::SessionFilter,
-    shape: Shape,
     transport: super::watch::Transport,
 ) -> anyhow::Result<Option<super::watch::Subscription>> {
     let args = SessionWatchArgs {
@@ -383,7 +337,7 @@ pub(crate) fn watch_list(
             };
             async move {
                 match store {
-                    Some(store) => read_list(&store, &filter, shape).await,
+                    Some(store) => read_list(&store, &filter).await,
                     None => Ok(serde_json::Value::Array(Vec::new())),
                 }
             }
@@ -426,48 +380,26 @@ pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<serde
     })
 }
 
-/// What `lf session list --json` prints for `filter` in `shape`.
+/// What `lf session list --json` prints for `filter`.
 pub(crate) fn read_once(
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<serde_json::Value> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        read_list(&store, filter, shape).await
+        read_list(&store, filter).await
     })
 }
 
-/// What `lf session list --json` prints: a page with `--page`, else every row.
+/// What `lf session list --json` prints: a page with `--page`, else every
+/// Session record.
 async fn read_list(
     store: &Arc<Store>,
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<serde_json::Value> {
-    let waves = match shape {
-        Shape::Desktop => None,
-        Shape::Tasks => Some(
-            store
-                .list_waves(None)
-                .await?
-                .iter()
-                .map(|wave| (wave.id().to_string(), wave.name().to_owned()))
-                .collect::<std::collections::HashMap<_, _>>(),
-        ),
-    };
-    let rows = |sessions: Vec<SessionRecord>| -> anyhow::Result<Vec<serde_json::Value>> {
-        sessions
-            .into_iter()
-            .map(|session| match &waves {
-                None => serde_json::to_value(session),
-                Some(waves) => serde_json::to_value(SessionRow::of(session, waves)),
-            })
-            .collect::<Result<_, _>>()
-            .map_err(Into::into)
-    };
     if filter.after.is_none() {
-        return Ok(serde_json::to_value(rows(
+        return Ok(serde_json::to_value(
             crate::ops::human_session::list(store, filter).await?,
-        )?)?);
+        )?);
     }
     anyhow::ensure!(
         filter.limit > 0,
@@ -487,7 +419,10 @@ async fn read_list(
     };
     Ok(serde_json::to_value(
         crate::ops::human_session::SessionPage {
-            entries: rows(entries)?,
+            entries: entries
+                .into_iter()
+                .map(serde_json::to_value)
+                .collect::<Result<_, _>>()?,
             next,
         },
     )?)
@@ -497,12 +432,11 @@ async fn list(
     store: &Arc<Store>,
     json: bool,
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<()> {
     if json || filter.after.is_some() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&read_list(store, filter, shape).await?)?
+            serde_json::to_string_pretty(&read_list(store, filter).await?)?
         );
         return Ok(());
     }

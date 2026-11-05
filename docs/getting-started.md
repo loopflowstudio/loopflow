@@ -72,7 +72,7 @@ A Task gets its own worktree, branch and pull request. Start one and walk away:
 ```bash
 lf task create --title "add a divide-by-zero error"   # prints the Task ID
 lf task run <ID> code                                 # its own worktree; publishes a PR, then waits for you
-lf comment <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
+lf task steer <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
 ```
 
 `code` is the built-in Graph: build until it holds and publish the PR, stop for

@@ -140,33 +140,41 @@ lf desktop view list --watch --json           # every plan a repository window s
 {"answers": null, "unavailable": null, "body": {…}}
 ```
 
-Every Task read prints the same Task row, each fact once:
+Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
+`lf planning list`) prints the same Task record the server sends:
 
 ```json
-{"id": "task_…", "identifier": "LOO-12", "title": "Search transcripts", "wave": "infra",
- "project": "Search", "state": "active", "reason": "…", "workflow": {"name": "code", "stage": "review"},
- "pr": {"number": 1719, "url": "…", "phase": "open"}, "next": "lf task run LOO-12"}
+{"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…", "project_id": "…", …},
+ "runtime": {"status": "active", "reason": "…", "owner": {…}, …},
+ "next_move": {"owner": "task", "reason": "…"},
+ "condition": {"state": "clear", "reason": "…", …},
+ "graph_name": "code", "pr": {"phase": "open", …}, "section": "now", …}
 ```
 
-`state` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned`; `next` is the command that moves the Task
-on, `null` while it moves by itself.
+`runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
+`shipping`, `done` or `abandoned` (`runtime` is `null` before a first run);
+`next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
+on. `lf task status <issue> --json` prints one
+Task as a row, each fact once, with its Sessions, Graph processes and
+comments.
 
-A Session row:
+A Session record:
 
 ```json
 {"id": "session_…", "title": "Search transcripts", "provider": "claude", "interactive": true,
- "state": "active", "available": true, "task": "task_…", "wave": "infra",
- "cwd": "/src/loopflow.loo-12", "agent_process_id": "…"}
+ "state": "active", "availability": "available", "work": {"kind": "task", "id": "task_…"},
+ "task_ids": ["task_…"], "wave_id": "…", "cwd": "/src/loopflow.loo-12", "actions": [{"kind": "open", …}], …}
 ```
 
 `state` is what its agent process shows (`active`, `detached`, `closed`,
-`unknown`); `available` says it is ready for your next turn. `lf resume <id>`
-opens it.
+`unknown`); `availability` is `"available"` when it is ready for your next
+turn and `null` while it works. `lf resume <id>` opens it.
 
-Desktop's own presentation (sections, conditions, controls) is
-`lf planning list`, `lf task show`, `lf wave planning`, `lf task list --closed` and
-`lf session list`, with the same `--watch`.
+Desktop reads the same records through `lf planning list`, `lf task show`,
+`lf wave planning`, `lf task list --closed` and `lf session list`, with the
+same `--watch`. `lf wave status` and `lf wave show` exchange planning with the
+tracker first; `lf wave planning` and `lf planning list` read what the store
+records, and `lf wave sync` refreshes it.
 
 `body` is what the same command prints with `--json` alone. Write
 `{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the

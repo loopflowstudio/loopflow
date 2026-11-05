@@ -1041,7 +1041,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             watch,
         } => {
             use loopflow::lf::commands::waves::{
-                list_closed_tasks, list_tasks, watch_tasks, Shape, TaskListArgs,
+                list_closed_tasks, list_tasks, watch_tasks, TaskListArgs,
             };
             let args = TaskListArgs {
                 query: query.clone(),
@@ -1059,7 +1059,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     after.as_deref(),
                     *limit,
                     *json,
-                    Shape::Tasks,
                 )
             } else {
                 list_tasks(repo, &args, *json)
@@ -1128,7 +1127,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 return loopflow::lf::commands::waves::watch_task_status(
                     repo,
                     task.identifier,
-                    loopflow::lf::commands::waves::Shape::Tasks,
                     loopflow::lf::commands::watch::Transport::Stdio,
                 )
                 .map(drop);
@@ -1318,50 +1316,24 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Update { .. } | TaskCommand::Move { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Comment {
+        TaskCommand::Steer {
             issue,
             message,
             wave,
             json,
-            steer,
-        } => {
-            let result = match message {
-                Some(message) => {
-                    loopflow::engine::task::comment(repo, issue, wave.as_deref(), message, *steer)?
-                }
-                None => {
-                    loopflow::ops::task::task_comment(repo, issue, wave.as_deref(), None, false)?
-                }
-            };
-            if *json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else if result.comments.is_empty() {
-                println!("{}: no comments", result.identifier);
-            } else {
-                for comment in &result.comments {
-                    let date = comment.created_at.as_deref().unwrap_or("date unavailable");
-                    let sync = if result.pending_sync.contains(&comment.id) {
-                        " · pending sync"
-                    } else {
-                        ""
-                    };
-                    println!(
-                        "── {} · {date}{sync}\n{}\n",
-                        comment.author,
-                        comment.body.trim_end()
-                    );
-                    if let Some(body) = result.conflicts.get(&comment.id) {
-                        println!("Saved local comment; Linear’s edit is current:\n{body}\n");
-                    }
-                }
-            }
-            if !*json {
-                if let Some(error) = &result.refresh_error {
-                    eprintln!("{error}; showing saved comments");
-                }
-            }
-            Ok(())
-        }
+        } => print_thread(
+            &loopflow::engine::task::steer(repo, issue, wave.as_deref(), message)?,
+            *json,
+        ),
+        TaskCommand::Report {
+            issue,
+            message,
+            wave,
+            json,
+        } => print_thread(
+            &loopflow::engine::task::report(repo, issue, wave.as_deref(), message)?,
+            *json,
+        ),
         TaskCommand::Interrupt { issue, json } => {
             let result = loopflow::engine::task::interrupt(issue)?;
             print_task_control(&result, *json)
@@ -1390,6 +1362,41 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
     }
+}
+
+/// `lf task steer` and `lf task report` print the thread with the new entry.
+fn print_thread(
+    result: &loopflow::work::task::comment::TaskComments,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string(&result)?);
+    } else if result.comments.is_empty() {
+        println!("{}: no comments", result.identifier);
+    } else {
+        for comment in &result.comments {
+            let date = comment.created_at.as_deref().unwrap_or("date unavailable");
+            let sync = if result.pending_sync.contains(&comment.id) {
+                " · pending sync"
+            } else {
+                ""
+            };
+            println!(
+                "── {} · {date}{sync}\n{}\n",
+                comment.author,
+                comment.body.trim_end()
+            );
+            if let Some(body) = result.conflicts.get(&comment.id) {
+                println!("Saved local comment; Linear’s edit is current:\n{body}\n");
+            }
+        }
+    }
+    if !json {
+        if let Some(error) = &result.refresh_error {
+            eprintln!("{error}; showing saved comments");
+        }
+    }
+    Ok(())
 }
 
 fn main() -> std::process::ExitCode {
@@ -2170,18 +2177,21 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             )),
         )),
         Some(Commands::Task {
-            cmd:
-                TaskCommand::Comment {
-                    message,
-                    steer,
-                    wave,
-                    ..
-                },
+            cmd: TaskCommand::Steer { message, wave, .. },
         }) => Some((
             wave.as_deref().or(cli.wave.as_deref()),
             loopflow::ops::task::TaskPlanningRequest::Comment {
-                message: message.as_deref(),
-                steer: *steer,
+                message: Some(message),
+                steer: true,
+            },
+        )),
+        Some(Commands::Task {
+            cmd: TaskCommand::Report { message, wave, .. },
+        }) => Some((
+            wave.as_deref().or(cli.wave.as_deref()),
+            loopflow::ops::task::TaskPlanningRequest::Comment {
+                message: Some(message),
+                steer: false,
             },
         )),
         Some(Commands::Task {
@@ -2856,17 +2866,10 @@ fn execute_command(
             cmd: WaveCommand::Status {
                 wave, watch: true, ..
             },
-        }) => loopflow::lf::commands::waves::watch_status(
-            wave.clone(),
-            loopflow::lf::commands::waves::Shape::Tasks,
-        ),
+        }) => loopflow::lf::commands::waves::watch_status(wave.clone()),
         Some(Commands::Wave {
             cmd: WaveCommand::Status { wave, json, .. },
-        }) => loopflow::lf::commands::waves::status(
-            wave.as_deref(),
-            *json,
-            loopflow::lf::commands::waves::Shape::Tasks,
-        ),
+        }) => loopflow::lf::commands::waves::status(wave.as_deref(), *json, true),
         Some(Commands::Wave {
             cmd: WaveCommand::Sync { wave, json },
         }) => {
@@ -2877,18 +2880,14 @@ fn execute_command(
             loopflow::lf::commands::waves::status(
                 refreshed.as_deref().or(wave.as_deref()),
                 *json,
-                loopflow::lf::commands::waves::Shape::Tasks,
+                false,
             )
         }
         Some(Commands::Wave {
             cmd: WaveCommand::Planning {
                 wave, cmd: None, ..
             },
-        }) => loopflow::lf::commands::waves::status(
-            wave.as_deref(),
-            true,
-            loopflow::lf::commands::waves::Shape::Desktop,
-        ),
+        }) => loopflow::lf::commands::waves::status(wave.as_deref(), true, false),
         Some(Commands::Planning {
             cmd:
                 loopflow::lf::PlanningCommand::List {
@@ -2899,14 +2898,12 @@ fn execute_command(
                     ..
                 },
         }) => {
-            use loopflow::lf::commands::waves::Shape;
             if *watch {
                 loopflow::lf::commands::waves::watch_show(
                     std::env::current_dir()?,
                     wave.clone(),
                     task.clone(),
                     *all,
-                    Shape::Desktop,
                     loopflow::lf::commands::watch::Transport::Stdio,
                 )
                 .map(drop)
@@ -2916,7 +2913,7 @@ fn execute_command(
                     task.as_deref(),
                     true,
                     *all,
-                    Shape::Desktop,
+                    false,
                 )
             }
         }
@@ -2948,7 +2945,6 @@ fn execute_command(
                     wave.clone(),
                     task.clone(),
                     *all,
-                    loopflow::lf::commands::waves::Shape::Tasks,
                     loopflow::lf::commands::watch::Transport::Stdio,
                 )
             })
@@ -2962,13 +2958,9 @@ fn execute_command(
                     all,
                     ..
                 },
-        }) => loopflow::lf::commands::waves::show(
-            wave.as_deref(),
-            task.as_deref(),
-            *json,
-            *all,
-            loopflow::lf::commands::waves::Shape::Tasks,
-        ),
+        }) => {
+            loopflow::lf::commands::waves::show(wave.as_deref(), task.as_deref(), *json, *all, true)
+        }
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Scratch {
             cmd: loopflow::lf::ScratchCommand::Clear,

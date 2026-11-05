@@ -103,7 +103,7 @@ impl TaskProcessOptions {
             }
             if let Some(task) = existing {
                 return Err(task_error(format!(
-                    "Task {} already exists; use `lf task comment {} <new-direction>`",
+                    "Task {} already exists; use `lf task steer {} <new-direction>`",
                     task.identifier, task.identifier
                 )));
             }

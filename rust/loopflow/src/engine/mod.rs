@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod launch;
+pub mod session;
 pub mod task;
 
 use serde::{Deserialize, Serialize};

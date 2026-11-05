@@ -100,8 +100,9 @@ the directory manually.
 
 Keep routine progress in this conversation and local notes. Task descriptions
 hold the current problem, outcome and constraints; deliberate new direction
-belongs in Task comments. Preserve `<!-- loopflow-progress:... -->` provenance
-for published agent progress; `lf comment --steer` is only for new direction.
+belongs in Task comments. `lf task report` publishes agent progress with its
+`<!-- loopflow-progress:... -->` provenance; `lf task steer` is only for new
+direction.
 Selected operators read failure logs and discuss missing judgment in their
 ongoing conversation. An open conversation does not schedule another turn;
 Graphs and installed schedules run independently.

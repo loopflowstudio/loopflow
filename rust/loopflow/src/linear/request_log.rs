@@ -359,7 +359,7 @@ mod tests {
             ),
             record(
                 7_300_000,
-                "lf task comment",
+                "lf task report",
                 "SyncComment",
                 RequestOutcome::Sent,
             ),

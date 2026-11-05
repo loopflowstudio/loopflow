@@ -105,7 +105,7 @@ converges independently; there is no cross-system atomic switch.
 ## Durable communication
 
 ```bash
-lf comment INF-123 "keep the public name" --steer
+lf task steer INF-123 "keep the public name"
 lf --wave infrastructure session steer "preserve native history"
 lf session steer "retain source attribution"
 lf session steer SESSION "inspect the last failure"

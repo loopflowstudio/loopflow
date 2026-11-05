@@ -49,7 +49,6 @@ pub fn resolve_child(
     if prefix.is_empty() {
         let owner = match name {
             "resume" => Some("session"),
-            "comment" => Some("task"),
             // `lf release` stays the release command.
             "release" => Some("repository"),
             // `lf set` and `lf unset` stay the everyday spelling of `config set|unset`.

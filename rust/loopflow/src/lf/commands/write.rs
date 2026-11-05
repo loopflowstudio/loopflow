@@ -62,17 +62,18 @@ pub enum Write {
     /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
     #[serde(rename = "task.hold")]
     TaskHold { directory: PathBuf, issue: String },
-    /// `lf task comment <issue> --steer <message> --json`: direction for the
-    /// Task's runs, whoever writes it.
+    /// `lf task steer <issue> <message> --json`: direction for the Task's
+    /// runs, whoever writes it.
     #[serde(rename = "task.steer")]
     TaskSteer {
         directory: PathBuf,
         issue: String,
         message: String,
     },
-    /// `lf task comment <issue> <message> --json`; an agent's is progress.
-    #[serde(rename = "task.comment")]
-    TaskComment {
+    /// `lf task report <issue> <message> --json`: progress for the Task's
+    /// thread; an agent's carries its Session's provenance.
+    #[serde(rename = "task.report")]
+    TaskReport {
         directory: PathBuf,
         issue: String,
         message: String,
@@ -310,10 +311,10 @@ impl Write {
             Self::TaskShip { issue, .. } => value(&task::ship(directory, issue)?),
             Self::TaskHold { issue, .. } => value(&task::hold(directory, issue, None)?),
             Self::TaskSteer { issue, message, .. } => {
-                value(&task::comment(directory, issue, None, message, true)?)
+                value(&task::steer(directory, issue, None, message)?)
             }
-            Self::TaskComment { issue, message, .. } => {
-                value(&task::comment(directory, issue, None, message, false)?)
+            Self::TaskReport { issue, message, .. } => {
+                value(&task::report(directory, issue, None, message)?)
             }
             Self::TaskInterrupt { issue, .. } => value(&task::interrupt(issue)?),
             Self::TaskMove { issue, wave, .. } => value(&crate::ops::task::task_move_membership(
@@ -356,7 +357,7 @@ impl Write {
                 Ok(serde_json::from_str(&super::waves::status_json(
                     directory,
                     Some(refreshed.as_deref().unwrap_or(wave)),
-                    super::waves::Shape::Tasks,
+                    false,
                 )?)?)
             }
             Self::GraphCustomize { name, .. } => value(&super::graph::Customized {
@@ -570,7 +571,7 @@ impl Write {
             | Self::TaskShip { directory, .. }
             | Self::TaskHold { directory, .. }
             | Self::TaskSteer { directory, .. }
-            | Self::TaskComment { directory, .. }
+            | Self::TaskReport { directory, .. }
             | Self::TaskInterrupt { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
@@ -621,7 +622,7 @@ mod tests {
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","from":"implement","agent":"claude","approve":false}"#,
             r#"{"kind":"task.ship","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
-            r#"{"kind":"task.comment","directory":"/r","issue":"FIX-1","message":"landed"}"#,
+            r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
         ] {
             let write: Write = serde_json::from_str(json).unwrap();

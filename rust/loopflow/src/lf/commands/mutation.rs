@@ -151,11 +151,7 @@ fn local(
             writeln!(
                 io.output,
                 "{}",
-                super::waves::status_json(
-                    directory,
-                    refreshed.as_deref().or(wave),
-                    super::waves::Shape::Tasks
-                )?
+                super::waves::status_json(directory, refreshed.as_deref().or(wave), false)?
             )?;
             Ok(())
         }

@@ -69,8 +69,8 @@ checkout is adopted. Closed Sessions and headless Runs cannot become primary.
 ## Steer it while it runs
 
 ```bash
-lf comment LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
-lf comment LOO-12                                 # read the thread: yours, teammates', the agents'
+lf task steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
+lf task status LOO-12 --json                        # the thread under comments: yours, teammates', the agents'
 lf interrupt LOO-12                               # stop its running Graph
 lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish
 ```

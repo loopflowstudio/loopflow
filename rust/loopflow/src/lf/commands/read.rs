@@ -21,7 +21,7 @@ use super::graph_inventory;
 use super::machine::{local_machine, machines};
 use super::usage;
 use super::watch::{Subscription, Transport};
-use super::waves::{list as list_waves, Shape};
+use super::waves::list as list_waves;
 use crate::durable::RepositoryId;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
@@ -469,7 +469,6 @@ impl Read {
                 }
                 value(&super::session::read_once(
                     &self.session_filter(directory)?,
-                    Shape::Desktop,
                 )?)
             }
             Self::DesktopTask { directory, issue } => {
@@ -591,13 +590,7 @@ impl Read {
                 wave,
                 task,
                 all,
-            } => super::waves::show_json(
-                directory,
-                wave.as_deref(),
-                task.as_deref(),
-                *all,
-                Shape::Desktop,
-            ),
+            } => super::waves::show_json(directory, wave.as_deref(), task.as_deref(), *all, false),
             Self::PlanningStatus { directory } => super::planning::status_json(directory),
             Self::WorkLink { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
@@ -653,11 +646,7 @@ impl Read {
                 limit: None,
                 after: None,
                 ..
-            } => super::session::watch_list(
-                self.session_filter(directory)?,
-                Shape::Desktop,
-                transport,
-            ),
+            } => super::session::watch_list(self.session_filter(directory)?, transport),
             Self::DesktopTask { directory, issue } => {
                 super::desktop::watch_task_pane(&directory, &issue, transport)
             }
@@ -667,7 +656,7 @@ impl Read {
                 wave,
                 task,
                 all,
-            } => super::waves::watch_show(directory, wave, task, all, Shape::Desktop, transport),
+            } => super::waves::watch_show(directory, wave, task, all, transport),
             Self::PlanningStatus { directory } => super::planning::watch_status(
                 &super::planning::status_repository(&directory)?,
                 transport,

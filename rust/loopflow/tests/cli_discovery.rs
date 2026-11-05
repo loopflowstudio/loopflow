@@ -530,8 +530,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         ["lf", "pr", "land", "--wait-and-fix"]
     );
     assert_eq!(
-        normalized(&["lf", "task", "comment", "status"]),
-        ["lf", "task", "comment", "status"]
+        normalized(&["lf", "task", "frobnicate", "status"]),
+        ["lf", "task", "frobnicate", "status"]
     );
     assert_eq!(
         normalized(&["lf", "graph", "land", "--", "--help"]),

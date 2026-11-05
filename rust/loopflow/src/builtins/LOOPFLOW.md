@@ -15,7 +15,7 @@ Task, Wave or Project commands unless that guidance was preloaded.
 that should end in a PR, hand it off: `lf task create '<outcome>'`, then
 `lf task run <ID>`, and give back `lf open --task <ID> --link --format markdown`.
 Questions, reading and small fixes they want here stay in this checkout. Check on
-Tasks with `lf task status <ID>`; steer with `lf comment <ID> '<direction>'`.
+Tasks with `lf task status <ID>`; steer with `lf task steer <ID> '<direction>'`.
 
 Use the requested tools and repository conventions. `lf help <command-or-skill>`
 is the current reference for Sessions, Skills, Graphs, worktrees and PRs.

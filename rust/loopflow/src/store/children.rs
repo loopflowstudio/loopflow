@@ -13,14 +13,24 @@ use time::OffsetDateTime;
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub(crate) async fn create_task(
+    pub(crate) async fn promote_task(
         &self,
-        input: &crate::work::task::NewTask,
+        task_id: &TaskId,
+        creation: Option<crate::work::task::NewTask>,
+        placement: Option<(std::path::PathBuf, TaskPr)>,
+        session: Option<crate::session::LfSession>,
+        destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
     ) -> StoreResult<Task> {
-        let input = input.clone();
+        let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.create_task(&input)
+            store.promote_task(
+                &task_id,
+                creation.as_ref(),
+                placement.as_ref(),
+                session.as_ref(),
+                destination.as_deref(),
+            )
         })
         .await
     }

@@ -1,3 +1,5 @@
+pub(crate) mod adoption;
+pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 mod workspace;
 pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
@@ -954,7 +956,7 @@ fn prepare_task(
                     .map_err(task_error)?);
             let placement =
                 prepare_task_placement(&store, &main, &task, branch.as_deref(), &options).await?;
-            let task = place_prepared_task(&store, &task.id, placement).await?;
+            let task = place_prepared_task(&store, &task.id, placement, &options).await?;
             // The checkout claimed the Task; Linear learns who took it.
             let repository = repository_for_task(&store, &task)?;
             super::task_ownership::assert_assignee(&store.sqlite, &repository, &task.id).await;
@@ -1186,7 +1188,36 @@ struct TaskPlacement {
     workspace_slug: String,
     stack_parent: Option<TaskPr>,
     github: Option<GithubPr>,
-    directive: Option<String>,
+}
+
+impl TaskPlacement {
+    fn pr(&self, task_id: &crate::durable::TaskId) -> TaskPr {
+        let now = time::OffsetDateTime::now_utc();
+        TaskPr {
+            id: TaskPrId::new(),
+            task_id: task_id.clone(),
+            sequence: 1,
+            slug: self.workspace_slug.clone(),
+            branch: self.plan.branch.clone(),
+            base_commit: self.plan.base_ref.clone(),
+            parent_pr_id: self.stack_parent.as_ref().map(|parent| parent.id.clone()),
+            publication: self.github.clone().map(|github| PrPublication {
+                requested_at: now,
+                presentation: None,
+                github: Some(github),
+                merge: None,
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 }
 
 fn plan_task_placement(
@@ -1290,16 +1321,21 @@ async fn prepare_task_placement(
     options: &TaskProcessOptions,
 ) -> OpsResult<TaskPlacement> {
     options.validate_directive(None)?;
-    let directive = options
-        .directive
-        .as_deref()
-        .map(str::trim)
-        .map(str::to_owned);
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
     fetch_task_refs(main_repo)?;
-    let (mut plan, workspace_slug) =
-        plan_task_placement(main_repo, task, recorded_branch, options)?;
+    let (plan, workspace_slug) = plan_task_placement(main_repo, task, recorded_branch, options)?;
     let stack_parent = select_new_stack_parent(store, task, options.stack_on.as_deref()).await?;
+    let observe_pr = recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create;
+    prepare_placement(main_repo, plan, workspace_slug, stack_parent, observe_pr)
+}
+
+fn prepare_placement(
+    main_repo: &Path,
+    mut plan: PlacementPlan,
+    workspace_slug: String,
+    stack_parent: Option<TaskPr>,
+    observe_pr: bool,
+) -> OpsResult<TaskPlacement> {
     let mut base_commit = match &stack_parent {
         Some(parent) => {
             let base_ref = format!("origin/{}", parent.branch);
@@ -1312,7 +1348,7 @@ async fn prepare_task_placement(
             base_commit
         }
     };
-    let github = if recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create {
+    let github = if observe_pr {
         super::pr::branch_pr(main_repo, &plan.branch)?
             .map(|pr| {
                 Ok::<_, OpsError>(GithubPr {
@@ -1341,7 +1377,6 @@ async fn prepare_task_placement(
         workspace_slug,
         stack_parent,
         github,
-        directive,
     })
 }
 
@@ -1349,14 +1384,8 @@ async fn place_prepared_task(
     store: &SharedStore,
     task_id: &crate::durable::TaskId,
     prepared: TaskPlacement,
+    options: &TaskProcessOptions,
 ) -> OpsResult<Task> {
-    let TaskPlacement {
-        plan,
-        workspace_slug,
-        stack_parent,
-        github,
-        directive,
-    } = prepared;
     let (mut task, acquisition) = loop {
         let task = store
             .get_task(task_id)
@@ -1390,46 +1419,21 @@ async fn place_prepared_task(
     }
     if task.worktree.is_some() {
         restore_task_checkout(store, &task, None).await?;
-
         return Ok(task);
     }
-    let now = time::OffsetDateTime::now_utc();
-    let pr = TaskPr {
-        id: TaskPrId::new(),
-        task_id: task.id.clone(),
-        sequence: 1,
-        slug: workspace_slug.clone(),
-        branch: plan.branch.clone(),
-        base_commit: plan.base_ref.clone(),
-        parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
-        publication: github.map(|github| PrPublication {
-            requested_at: now,
-            presentation: None,
-            github: Some(github),
-            merge: None,
-        }),
-        merge_commit: None,
-        abandoned_at: None,
-        ci_observation: None,
-        github_observation: None,
-        linear_attachment_id: None,
-        linear_comment_id: None,
-        linear_link_error: None,
-        created_at: now,
-        updated_at: now,
-    };
+    let pr = prepared.pr(task_id);
 
     task = store
         .place_task(
             &task.id,
-            &plan.worktree_path,
-            &workspace_slug,
+            &prepared.plan.worktree_path,
+            &prepared.workspace_slug,
             &pr,
             acquisition,
         )
         .await
         .map_err(task_error)?;
-    if let Some(direction) = directive.as_deref() {
+    if let Some(direction) = options.directive.as_deref().map(str::trim) {
         append_task_comment(store, &task, direction, true)?;
     }
     // A competing reservation may have won. Restore its persisted placement,
@@ -1449,7 +1453,6 @@ async fn place_prepared_task(
         }
         return Err(error);
     }
-
     Ok(task)
 }
 
@@ -1472,17 +1475,37 @@ pub fn task_create(
     wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
+    adoption: TaskAdoptionOptions,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
-        let store = super::planning_sync::planning_store().await?;
+        let store = Arc::new(super::planning_sync::planning_store().await?);
         if let Err(error) =
             super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
         {
             tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
         }
 
+        let source = adoption::resolve_source(&store, repo, &adoption).await?;
+        if let Some(task) = source.task.as_ref() {
+            if let Some(selected) = select_task_creation_wave(&store, &main, wave).await? {
+                if task.wave_id.as_ref() != Some(selected.id()) {
+                    return Err(task_error(format!(
+                        "{} already belongs to different planning; use `lf task move` or file separate work without --session or --worktree",
+                        task.identifier,
+                    )));
+                }
+            }
+            let task =
+                adoption::save(&store, &main, task.id.clone(), None, source, None, false).await?;
+            super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
+            return store
+                .get_task(&task.id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("Promoted Task is missing"));
+        }
         if let Some(name) = wave {
             let locator =
                 crate::work::wave::WaveLocator::discover(&main, name).map_err(task_error)?;
@@ -1508,20 +1531,24 @@ pub fn task_create(
             .sqlite
             .ensure_repository(&main.to_string_lossy())
             .map_err(task_error)?;
-        let task = store
-            .create_task(
-                &crate::work::task::NewTask {
-                    due_date: None,
-                    id: crate::durable::TaskId::new(),
-                    repository_id,
-                    project_id: creation_project,
-                    title: input.title,
-                    description: input.report,
-                },
-                acquisition,
-            )
-            .await
-            .map_err(task_error)?;
+        let creation = crate::work::task::NewTask {
+            due_date: None,
+            id: crate::durable::TaskId::new(),
+            repository_id,
+            project_id: creation_project,
+            title: input.title,
+            description: input.report,
+        };
+        let task = adoption::save(
+            &store,
+            &main,
+            creation.id.clone(),
+            Some(creation),
+            source,
+            acquisition,
+            false,
+        )
+        .await?;
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
         store
             .get_task(&task.id)

@@ -1457,6 +1457,76 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn promotion_directory_survives_an_opening_prepared_before_binding() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.interactive = true;
+        conversation.cwd = dir.path().to_path_buf();
+        let session = store.create_session(conversation, None).unwrap();
+        store
+            .promote_task(
+                &task_id,
+                None,
+                None,
+                Some(&session),
+                task.worktree.as_deref(),
+            )
+            .unwrap();
+
+        let admitted = store
+            .admit_session_workspace(&session, &dir.path().join("old-scope"))
+            .unwrap();
+        assert_eq!(admitted.id, session.id);
+        assert_eq!(admitted.cwd, task.worktree.unwrap());
+        assert_eq!(admitted.task_id.as_ref(), Some(&task_id));
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), admitted);
+        assert_eq!(
+            store.task_primary(&task_id).unwrap().unwrap().id,
+            session.id
+        );
+    }
+
+    #[test]
+    fn promotion_binding_survives_completion_after_placement_preparation() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let pr = store.task_prs(&task_id).unwrap().remove(0);
+        let placement = (task.worktree.unwrap(), pr);
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.interactive = true;
+        let session = store.create_session(conversation, None).unwrap();
+        // The caller already prepared placement when completion arrived.
+        store.conn.lock().unwrap().execute(
+            "UPDATE tasks SET worktree=NULL,planning_completed=1,planning_state='completed' WHERE id=?1",
+            [task_id.as_str()],
+        ).unwrap();
+        for _ in 0..2 {
+            let bound = store
+                .promote_task(&task_id, None, Some(&placement), Some(&session), None)
+                .unwrap();
+            assert!(bound.worktree.is_none());
+            assert_eq!(
+                store.task_state(&task_id).unwrap(),
+                crate::durable::TaskState::Done
+            );
+            assert_eq!(
+                store.task_primary(&task_id).unwrap().unwrap().id,
+                session.id
+            );
+            let current = store.session(&session.id).unwrap().unwrap();
+            assert_eq!(current.task_id.as_ref(), Some(&task_id));
+            assert_eq!(current.cwd, session.cwd);
+        }
+        assert!(
+            store
+                .place_task(&task_id, &placement.0, &placement.1.slug, &placement.1)
+                .is_err(),
+            "ordinary checkout allocation still rejects done Tasks"
+        );
+    }
+
+    #[test]
     fn session_assignment_rejects_reassignment_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();

@@ -13,6 +13,11 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+Changes to `scripts/resource_envelope.py` or its imports also include
+`test(build_cleanup::)` in the gate's Rust filter. That suite invokes Python
+recovery outside pytest's configured import path. Use the gate's prepared CLI
+so compilation cannot outlast its process-liveness fixtures.
+
 ## Implement: one focused test
 
 ```bash
@@ -33,8 +38,8 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
-On macOS it also builds the CLI before isolated Python cleanup tests, so native
-archives and Cargo dependencies are fetched before networking is disabled.
+On macOS it builds the CLI before isolated Python checkout-refresh proofs, so
+native archives and Cargo dependencies are fetched before networking is disabled.
 `binary(name)` matches the standalone `[[test]]` binaries in
 `rust/loopflow/Cargo.toml` and the CLI's own unit tests as `binary(lf)`;
 suites inside `integration` take `test(name::)`, and an unknown binary name

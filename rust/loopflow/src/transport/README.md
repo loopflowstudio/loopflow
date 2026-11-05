@@ -22,8 +22,7 @@ waits for Move here, and an ended one waits for an explicit open.
 Preparing asks a running owner whether a viewer holds control, so an owner from an
 earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
-but never answers reads `detached` too; reattaching stops its provider and continues
-the same provider thread in a new owner, without replaying input.
+but never answers reads `detached` too.
 
 Desktop's server relay stays alive when its service connection drops. Its native
 status row shows **Reconnecting…** and pauses input while local selection, copy,
@@ -65,6 +64,11 @@ retain typed input because they have no matching acknowledgement here. Clearing
 the screen or showing an idle prompt cannot discard that protection. Pending
 approvals and questions stay with their original provider until answered or canceled.
 
+Input waits in the owner until its retention record commits. A busy store pauses
+delivery to the provider while output, control queries and viewer return remain
+responsive. Delivery continues automatically when the store becomes writable;
+returning to the Session does not resubmit queued input.
+
 Removing, replacing or superseding the owner's lf executable ends it after two
 seconds of command silence, once no input, turn, pending request, running Graph
 or headless Run holds it. Viewers cannot extend this interval. The owner logs the
@@ -75,18 +79,23 @@ judgments retry at the next poll.
 Policy exit saves the screen, stops the agent and records its exit. `lf resume`
 reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
-`lf resume` also moves an idle owner from an earlier build onto the lf entry.
-If that owner is busy and answers its socket, resume shows the running turn;
-an owner with this lifetime policy moves when the turn ends. An older owner
-without the policy needs another resume after its turn. If a superseded owner
-does not answer, resume ends it and reports that its turn was cut off, then
-reopens the saved conversation without replaying input.
+`lf resume` replaces an idle owner that is superseded or unanswering, continuing
+its saved provider thread without replaying input. A turn, draft or pending request
+keeps the existing provider: resume attaches if possible, otherwise reports
+attachment failure and leaves that work intact.
+Saved conversation history supports continuation after safe replacement; it cannot
+restore an editor or a pending request. An owner with this lifetime policy moves when
+its work settles; an older owner without it needs another resume.
 
 `lf monitor rollover --dry-run` lists the same takeover choices across owners;
-omit `--dry-run` to move them. The sweep ends owners directly; existing viewers
-may close and need `lf resume` again. Graph runners keep running and launch each
-next step through the entry. Owners and runners whose store has advanced beyond
-their reader floor cannot recover themselves through this policy.
+omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
+ends idle owners directly; existing viewers may close and need `lf resume` again.
+Rollover and lifetime diagnostics name what retains an owner: native input, a
+running Graph, missing Session evidence, a headless Run or a live turn. Resume,
+rollover and lifetime policy use the same judgment, independent of reachability.
+Graph runners keep running and launch each next step through the entry.
+Owners and runners whose store has advanced beyond their reader floor cannot
+recover themselves through this policy.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

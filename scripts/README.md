@@ -26,6 +26,10 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+## Scheduled disk cleanup
+
+Reclaim disposable coding output with [opt-in hourly cleanup](disk-cleanup.md).
+
 ## Changed-aware runner
 
 ```bash
@@ -121,7 +125,9 @@ Cargo can replace a held profile lock during clean; native locks do not provide
 universal exclusion. Detected activity always retains output.
 
 Recovery also prunes old disposable gate output and entries accepted by
-`uv cache prune`. Cleanup runs before verification, not on an independent timer.
+`uv cache prune`. Gate recovery retains seven days of artifact content and
+preserves saved outcome records and nested `.cleanup-keep` markers. Verification
+recovery runs before builds; the machine cleaner has its own launchd schedule.
 A busy uv cache is reported immediately
 without waiting for its reader locks, including the parent `uv run`. Other cleanup
 and above-reserve verification continue. To reclaim uv entries, run
@@ -221,7 +227,7 @@ stderr bytes, subprocess diagnostics and resume identity without a provider inst
 
 ```bash
 uv sync
-cargo build -p loopflow --bin lf  # macOS cleanup proof; fetch native archives before isolation
+cargo build -p loopflow --bin lf  # CLI checkout-refresh proof, before network isolation
 uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
 ```
 

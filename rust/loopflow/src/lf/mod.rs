@@ -589,11 +589,12 @@ pub enum Commands {
     /// Internal provider turn-boundary hook: context at startup and compaction,
     /// steers at tool and prompt boundaries, Linear acquisition at turn end,
     /// Pi's native lifecycle events and its bash tool groups.
-    #[command(name = "__context-block", hide = true)]
+    // Running providers retain this older Stop spelling across lf upgrades.
+    #[command(name = "__context-block", alias = "__planning-check", hide = true)]
     ContextBlock {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, default_value = "stop")]
         moment: crate::context_block::ContextMoment,
         /// The FIFO Pi holds open while a `tool-group` command runs
         #[arg(
@@ -1661,7 +1662,7 @@ pub enum SessionCommand {
     List(SessionListArgs),
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Whatever holds the conversation, it continues here: a terminal showing it hands it over and says where it went; a provider client lf started stops; a dead one resumes from its history. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -45,37 +46,62 @@ def main() -> None:
     def run(args: list[str]) -> str:
         return subprocess.check_output(args, cwd=repo, env=env, stdin=subprocess.DEVNULL, text=True)
 
+    def task_state(task_id: str) -> dict:
+        return json.loads(run([str(cli), "task", "status", task_id, "--json"]))
+
+    def graph_status(task_id: str) -> str | None:
+        processes = task_state(task_id)["graph_processes"]
+        return processes[0]["state"] if processes else None
+
+    def runtime_status(task_id: str) -> str:
+        plan = json.loads(run([str(cli), "desktop", "plan", "--task", task_id, "--json"]))
+        return plan["tasks"]["items"][0]["runtime"]["status"]
+
     (repo / "README.md").write_text("# LOO-672 disposable conversation review\n")
     (repo / "AGENTS.md").write_text(
         "This repository is disposable demonstration data for Jack Heart’s LOO-672 review.\n"
         "Wait for a request in the conversation; no project work is assigned here.\n")
+    (repo / ".lf/graphs").mkdir(parents=True)
+    # A step that fails, so one Task carries a stopped run into the review.
+    (repo / ".lf/graphs/stops.yaml").write_text("- cmd: commit --no-such-flag\n")
     for args in (["init", "-b", "main"], ["config", "user.name", "Jack Heart"],
                  ["config", "user.email", "loo672-demo@example.invalid"],
                  ["add", "."], ["commit", "-m", "Disposable review repository"]):
         run(["git", *args])
     run(["git", "init", "--bare", str(root / "origin.git")])
     run(["git", "remote", "add", "origin", str(root / "origin.git")])
+    run(["git", "push", "-q", "origin", "main"])
+
+    # Nothing has launched a provider: load alone starts every conversation, from an
+    # absent Session (Automatic conversation) or a metadata-only one naming its provider.
     tasks = []
-    for title, provider in (("Start a conversation", None), ("Claude continuity", "claude"), ("Codex continuity", "codex")):
-        task = json.loads(run([str(cli), "task", "create", "--title", title, "--notes",
-            "Disposable demonstration data for Jack Heart’s LOO-672 review; no project work.", "--json"]))
-        task_id = task["id"]
+    for title, provider in (("Automatic conversation", None), ("Claude continuity", "claude"),
+                            ("Codex continuity", "codex"), ("Stopped run", "claude")):
+        task_id = json.loads(run([str(cli), "task", "create", "--title", title, "--notes",
+            "Disposable demonstration data for Jack Heart’s LOO-672 review; no project work.", "--json"]))["id"]
         run([str(cli), "checkout", task_id, "--json"])
         session = None
         if provider:
             session = json.loads(run([str(cli), "--agent", provider, "resume", "--task", task_id, "--prepare", "--json"]))
             assert session["provider"] == provider, session["provider"]
         plan = json.loads(run([str(cli), "desktop", "plan", "--task", task_id, "--json"]))
-        workspace = plan["tasks"]["items"][0]["reference"]["workspace"]
-        if session:
-            assert session["workspace"]["worktree"] == workspace["worktree"]
-            assert session["workspace"]["machine_id"] == workspace["machine_id"]
-        tasks.append({"id": task_id, "title": title, "workspace": workspace,
-                      "session": session["id"] if session else None, "provider": provider})
+        tasks.append({"id": task_id, "title": title, "provider": provider, "session": session and session["id"],
+                      "workspace": plan["tasks"]["items"][0]["reference"]["workspace"]})
+
+    stopped = tasks[-1]
+    run([str(cli), "task", "run", stopped["id"], "stops"])
+    # The Task reads idle a moment after its Graph stops.
+    deadline = time.monotonic() + 60
+    while (status := graph_status(stopped["id"])) != "stopped" or runtime_status(stopped["id"]) != "idle":
+        assert time.monotonic() < deadline, f"the run never stopped idle: {status}"
+        time.sleep(0.5)
+    run([str(cli), "comment", stopped["id"], "start it"])
+    stopped.update(run_status=status, status_before_load=task_state(stopped["id"]), ps_before_load=json.loads(run([str(cli), "ps", "--json"])))
     manifest = {"source_head": run(["git", "-C", str(source), "rev-parse", "HEAD"]).strip(),
                 "source_diff_sha256": hashlib.sha256(run(["git", "-C", str(source), "diff", "HEAD", "--", "rust", "swift"]).encode()).hexdigest(),
                 "candidate": str(bundle), "repository": str(repo), "machine": str(home), "tasks": tasks,
-                "exercised": "CLI preparation only; no provider launched and no native acceptance claimed"}
+                "exercised": "Fresh data with no Session; load must start every conversation without a click",
+                "expect": "Stopped run reports its status and the start-it comment, and `lf ps` shows no new Graph"}
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     # Drop inherited invocation markers without recording any credential values.
     launch = root / "launch.sh"

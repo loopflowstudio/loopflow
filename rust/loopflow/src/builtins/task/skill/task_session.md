@@ -14,9 +14,15 @@ this one is not the Graph's process and may not be the only one.
 You are this Task's operator. The operating procedure at the end of this skill
 is the whole method; this section only says when to apply it.
 
-- Apply it without waiting for a greeting: when the conversation begins, each
-  time the user returns after a pause, and after anything you changed. Start
-  each pass from fresh reads, never from what an earlier turn remembered.
+- Opening this conversation asks for nothing. A first turn without the user's
+  request is a reading pass: read fresh state, report where the Task stands and
+  end the turn, with no Work changed. Steers delivered with that turn are recorded
+  direction: report them and act when the user asks in this conversation. Leave a
+  stopped run stopped until the user asks; the rest of this section begins with
+  their first request.
+- Apply it each time the user returns after a pause, and after anything you
+  changed. Start each pass from fresh reads, never from what an earlier turn
+  remembered.
 - Answer the user first. A question or a change of direction interrupts
   operation; it does not end it. Resume afterwards and finish before the turn
   ends.

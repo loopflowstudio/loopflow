@@ -59,7 +59,7 @@ final class RepositoryWorkspaces {
         }
         registry.onPreparationFinished = { [weak self] in
             guard let self else { return }
-            for registry in self.repositories.values { registry.continueReveals() }
+            for registry in self.repositories.values { registry.continueOpenings() }
         }
         return registry
     }

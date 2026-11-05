@@ -253,33 +253,44 @@ pub struct SessionAction {
     pub unavailable_reason: Option<String>,
 }
 
-/// A Run opens nowhere: `lf resume` takes only Sessions.
+const CONTROLLED_ELSEWHERE: &str =
+    "This conversation is controlled elsewhere; use Take back to continue here";
+const NO_PROVIDER_HISTORY: &str = "No saved provider history; start this conversation explicitly";
+const LAUNCH_ENDED: &str =
+    "The previous launch ended before the provider saved any history; Try again repeats its request";
+
+/// A Run opens nowhere: `lf resume` takes only Sessions. A consumed first launch
+/// has nothing to open: MoveHere, without Open, is the click that repeats it.
 pub(crate) fn session_actions(
     state: SessionState,
     interactive: bool,
     has_provider_history: bool,
     occupied: bool,
+    launch_consumed: bool,
 ) -> Vec<SessionAction> {
     use SessionActionKind::{MoveHere, Open, Reveal};
     if !interactive {
         return Vec::new();
     }
     let active_client = occupied && state != SessionState::Detached;
+    let unstarted = !occupied && !has_provider_history;
     let (label, help) = match state {
         SessionState::Detached => ("Reconnect", "Show the running Session in this terminal"),
-        _ if !occupied && !has_provider_history => (
-            "Start conversation",
-            "No saved provider history; start this conversation explicitly",
-        ),
+        _ if unstarted => ("Start conversation", NO_PROVIDER_HISTORY),
         _ => ("Open here", "Open this Session in a terminal"),
     };
-    let mut actions = vec![(
-        Open,
-        label,
-        help,
-        active_client
-            .then_some("This Session is active in another terminal; use Take back to transfer it"),
-    )];
+    let mut actions = vec![if unstarted && launch_consumed {
+        (MoveHere, "Try again", LAUNCH_ENDED, None)
+    } else {
+        (
+            Open,
+            label,
+            help,
+            active_client.then_some(
+                "This Session is active in another terminal; use Take back to transfer it",
+            ),
+        )
+    }];
     if active_client {
         actions.push((
             MoveHere,
@@ -293,11 +304,9 @@ pub(crate) fn session_actions(
         "Show conversation",
         "Continue existing history without taking another terminal's input",
         if active_client {
-            Some("This conversation is controlled elsewhere; use Take back to continue here")
-        } else if !occupied && !has_provider_history {
-            Some("No saved provider history; start this conversation explicitly")
+            Some(CONTROLLED_ELSEWHERE)
         } else {
-            None
+            unstarted.then_some(NO_PROVIDER_HISTORY)
         },
     ));
     actions
@@ -314,13 +323,26 @@ pub(crate) fn session_actions(
 fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
     let occupied = session.agent_process_id.is_some()
         && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead;
+    // Listing reads the marker alone: `capture_is_prepared` opens the store per Session.
+    let launch_consumed = session.interactive
+        && session.captured.is_some()
+        && !occupied
+        && !session.has_provider_history
+        && session
+            .artifact_key
+            .as_deref()
+            .and_then(local_capture_dir)
+            .is_some_and(|dir| !dir.join("prepared").is_file());
     let mut actions = session_actions(
         session_state(session),
         session.interactive,
         session.has_provider_history,
         occupied,
+        launch_consumed,
     );
-    name_session_holder(&mut actions, session.terminal_id.as_deref());
+    if occupied {
+        name_session_holder(&mut actions, session.terminal_id.as_deref());
+    }
     actions
 }
 
@@ -770,13 +792,23 @@ async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> R
         Some(skill) => args.extend(["skill".to_string(), "--".to_string(), skill.clone()]),
         None => args.push(":".to_string()),
     }
-    args.push(
-        session
-            .request
-            .clone()
-            .unwrap_or_else(|| PRIMARY_MESSAGE.to_string()),
-    );
+    let scope = store.sqlite.primary_scope(&session.id)?;
+    args.push(first_turn(session.request.as_deref(), scope.as_ref()).to_string());
     Ok(args)
+}
+
+/// A stored request, the person's own or a continuation `new_thread` seeded, is
+/// the first turn; without one, opening a Task primary asks for nothing, so its
+/// first turn only reads.
+fn first_turn<'a>(
+    request: Option<&'a str>,
+    scope: Option<&crate::session::PrimaryScope>,
+) -> &'a str {
+    match (request, scope) {
+        (Some(request), _) => request,
+        (None, Some(crate::session::PrimaryScope::Task(_))) => TASK_PRIMARY_MESSAGE,
+        (None, _) => PRIMARY_MESSAGE,
+    }
 }
 
 pub(crate) fn capture_subjects(
@@ -984,9 +1016,10 @@ pub(crate) async fn open(
     Ok(result)
 }
 
-/// Open without replacing a client. Only explicit Start may create a first
-/// thread; reveal requires history. The launch lock and transport handshake
-/// recheck the facts after preparation, which carries no takeover authority.
+/// Open without replacing a client. Start may initialize a first thread, but
+/// never replay consumed input; reveal requires history. The launch lock and
+/// transport handshake recheck the facts after preparation, which carries no
+/// takeover authority.
 pub(crate) async fn open_without_replacing(
     store: &SharedStore,
     id: &str,
@@ -1019,37 +1052,34 @@ pub(crate) async fn open_without_replacing(
         crate::journal::process_evidence(&store.sqlite, &attachment.agent_process_id)
             != crate::journal::ProcessIdentityEvidence::Dead
     });
+    let first_thread = attachable.is_none() && native.is_none();
     let reason = if record.state == SessionState::Active || (occupied && attachable.is_none()) {
-        Some(
-            "This conversation is controlled elsewhere; use Take back to continue here".to_string(),
-        )
+        Some(CONTROLLED_ELSEWHERE.to_string())
     } else if !session.cwd.is_dir() {
         Some("The recorded checkout is unavailable; it has not been recreated".to_string())
-    } else if !start && attachable.is_none() && native.is_none() {
-        Some("No saved provider history; start this conversation explicitly".to_string())
+    } else if first_thread && !start {
+        Some(NO_PROVIDER_HISTORY.to_string())
+    } else if first_thread
+        && session.captured.is_some()
+        && !capture_is_prepared(session.input_key()?)?
+    {
+        Some(format!(
+            "The previous launch has no saved provider history; use `lf resume {id}` to retry it explicitly"
+        ))
     } else if handoff_agent(&session).is_some() {
         Some("Changing provider requires an explicit open".to_string())
     } else {
         None
     };
-    if let Some(action) = record.actions.iter_mut().find(|action| {
-        action.kind
-            == if start {
-                SessionActionKind::Open
-            } else {
-                SessionActionKind::Reveal
-            }
-    }) {
+    let (kind, flag) = if start {
+        (SessionActionKind::Open, "--start-if-free")
+    } else {
+        (SessionActionKind::Reveal, "--reveal-existing")
+    };
+    if let Some(action) = record.actions.iter_mut().find(|action| action.kind == kind) {
         action.unavailable_reason = reason.clone();
     }
-    record.open_argv.push(
-        if start {
-            "--start-if-free"
-        } else {
-            "--reveal-existing"
-        }
-        .to_string(),
-    );
+    record.open_argv.push(flag.to_string());
     if !launch {
         return Ok(record);
     }
@@ -1712,6 +1742,7 @@ pub(crate) fn human_session_argv(id: &str) -> Result<Vec<String>> {
 }
 
 const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
+const TASK_PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of this Task, and nobody has asked for anything yet. Read the Task's current state, report where it stands and change no Work: launch no Graph and replay no earlier input, even for a stopped run. Steers delivered with this turn are recorded direction: report them and act when the user asks here. Operate once the user asks.\n</lf:primary-session>";
 
 pub(crate) fn lock_session_process(id: &str) -> Result<File> {
     let directory = crate::store::lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);

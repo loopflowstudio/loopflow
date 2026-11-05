@@ -294,11 +294,13 @@ checkouts and changed committed refs. Failures retain a pending reason and retry
 on the next host report. Task and conversation history survive; reopening a
 retired Task never silently recreates a checkout.
 
-Desktop's automatic reveal and explicit Start use a non-replacing input claim.
-Start permits first-thread creation; reveal requires existing history. Their
-prepared commands retain that distinction through launch. If another viewer
-wins before attachment, the owner returns Busy and keeps that viewer's input.
-Only explicit Take back uses ordinary replacing resume. The live relay announces
+Desktop's automatic opening uses a non-replacing input claim: working Tasks use
+Start, which permits first-thread creation; other Work uses reveal, which requires
+existing history. Their prepared commands retain that distinction through launch.
+If another viewer wins before attachment, the owner returns Busy and keeps that
+viewer's input.
+Only Take back uses ordinary resume to replace a holder; Try again on a consumed
+first launch uses it on a Session no client holds. The live relay announces
 native input readiness to Desktop after its owner acknowledges the native client;
 saved screen bytes never provide that announcement. A successful automatic attach
 records its Desktop terminal association after the handshake, preserving current

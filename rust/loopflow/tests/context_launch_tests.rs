@@ -6,6 +6,7 @@ use crate::support;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use loopflow_test_support::TestRepo;
@@ -617,6 +618,89 @@ fn claude_opens_lf_created_worktree_already_trusted() {
     assert_eq!(
         seen,
         serde_json::json!({"projects": {key: {"hasTrustDialogAccepted": true}}})
+    );
+}
+
+/// A stand-in Claude that keeps what it saw under `$HOME`, for one launch environment.
+fn claude_launch(home: &Path, script: &str) -> Command {
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(&provider, format!("#!/bin/sh\n{script}\n")).unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .env_clear()
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home)
+        .env("LF_HOME", home.join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
+        .stdin(std::process::Stdio::null());
+    command
+}
+
+fn succeed(command: &mut Command) -> String {
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn claude_opens_a_task_checkout_already_trusted() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let script = "cp \"$CLAUDE_CONFIG_DIR/.claude.json\" \"$HOME/seen.json\"";
+    let created: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), script)
+            .current_dir(repo.path())
+            .args(["task", "create", "--title", "Trust", "--json"]),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let placed: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), script)
+            .current_dir(repo.path())
+            .args(["checkout", id, "--json"]),
+    ))
+    .unwrap();
+    let worktree = PathBuf::from(placed["worktree"].as_str().unwrap());
+
+    succeed(
+        claude_launch(home.path(), script)
+            .current_dir(&worktree)
+            .args(["-i", "-a", "claude", ":", "hello"]),
+    );
+
+    let seen: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join("seen.json")).unwrap()).unwrap();
+    let key = worktree.canonicalize().unwrap().display().to_string();
+    assert_eq!(seen["projects"][&key]["hasTrustDialogAccepted"], true);
+}
+
+#[test]
+fn claude_dialog_in_a_checkout_lf_did_not_create_makes_the_session_available() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let list = "\"$LF_BIN\" session list --available --json > \"$HOME/available.json\"";
+
+    succeed(
+        claude_launch(home.path(), list)
+            .current_dir(repo.path())
+            .args(["-i", "-a", "claude", ":", "hello"]),
+    );
+
+    let available: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join("available.json")).unwrap())
+            .unwrap();
+    assert_eq!(available.as_array().unwrap().len(), 1, "{available}");
+    assert!(
+        !home.path().join(".claude/.claude.json").exists(),
+        "the dialog stays Claude's to answer"
     );
 }
 

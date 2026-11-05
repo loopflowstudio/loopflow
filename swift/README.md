@@ -87,10 +87,10 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Select a Task to reveal its existing conversation. Recent unfinished Tasks stay
-warm for immediate return: Desktop retains eight, plus any additional visible
-panes. Return lands at the bottom. Older conversations reconnect or resume the
-same provider history automatically through passive reveal.
+Select a working Task to open its conversation automatically. Recent unfinished
+Tasks stay warm for immediate return: Desktop retains eight, plus any additional
+visible panes. Return lands at the bottom. Older conversations reconnect or resume
+the same provider history automatically.
 A small **Connecting…** indicator remains until the live relay accepts input.
 Errors remain visible with **Retry**.
 
@@ -100,18 +100,22 @@ Machine/checkout evidence must arrive before background retention. Close removes
 Deliberately selecting that Task again permits reconnection. Completed Tasks
 release on departure through the shared two-minute/fifteen-minute lifecycle.
 
-Repository load prefetches existing conversations for working Tasks (idle, active
-or moving), even with no saved recent visits. The selected Task comes first, then
-recent working Tasks within the same eight-conversation and two-preparation bounds.
+Repository load prepares and opens conversations for claimed working Tasks (idle,
+active or moving), even with no saved recent visits. The selected Task comes first,
+then visible tiles, then recent working Tasks, two preparations at a time. Visible
+tiles sit outside the eight-conversation limit.
 Saved Close remains closed; initial rendering does not wait for preparation.
 
-Task navigation reveals existing history without starting a first turn or taking
-another client's input. A started Task with no conversation, or a Session with
-no saved history, offers **Start conversation**. Refresh keeps that action accurate; only selecting Start
-creates a first provider thread. **Retry** continues to reveal existing history.
-If another client takes input while Start is opening, the pane offers **Take back**;
-Start leaves that client in control. Close and eviction discard late opening
-results.
+Working Tasks automatically create their primary Session if absent and start its
+native conversation if it has no history. Existing history resumes on the same
+Session. No Start or Open click is needed, including after relaunch. Unstarted and
+unassigned Tasks are backlog: they are not prefetched and never start a conversation
+on their own. Opening never launches a Task Graph or replays consumed input: with
+no request, the first turn reads the Task and reports where it stands. A failed
+automatic Start shows its error with **Retry**. A launch that ended with no saved
+history stays closed until **Try again** repeats it; Retry and refresh never do.
+If another client holds input, the pane offers **Take back** and leaves that client
+in control until clicked. Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn

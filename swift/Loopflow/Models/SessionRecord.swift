@@ -226,6 +226,17 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         actions.first { $0.kind == kind }
     }
 
+    /// A first launch ended with no history, so there is nothing to open and no
+    /// holder: MoveHere is the explicit click that repeats it.
+    public var launchRetry: SessionAction? {
+        action(.open) == nil ? action(.moveHere) : nil
+    }
+
+    /// Another client holds input; only Take back transfers it.
+    public var heldElsewhere: Bool {
+        action(.moveHere) != nil && launchRetry == nil
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, interactive, work, workspace, title, detail, provider, account, cwd, state, availability
         case preview

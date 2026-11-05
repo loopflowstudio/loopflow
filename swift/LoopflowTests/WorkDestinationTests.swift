@@ -73,44 +73,45 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
-    @Test("Sidebar reveal never launches missing history or takes a competing claim", arguments: [false, true])
-    func sidebarRevealPreservesUnavailableConversation(occupied: Bool) async throws {
-        let data = try fixture()
+    @Test("Sidebar initializes missing history without taking a competing claim", arguments: [false, true])
+    func sidebarOpeningPreservesInputHolder(occupied: Bool) async throws {
+        let data = try workingFixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let task = try #require(snapshot.tasks.items.first)
         let record = try revealedConversation(task, occupied: occupied,
             reason: occupied ? nil : "No saved provider history; start this conversation explicitly")
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "resume"]), args.contains("--reveal-existing") { return encoded }
+            if args.starts(with: ["session", "resume"]), args.contains("--start-if-free") { return encoded }
             if args.starts(with: ["desktop", "plan"]) { return data }
-            throw RegistryQueryError("Navigation cannot start or take over a conversation")
+            throw RegistryQueryError("Navigation must use non-replacing startup")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         await model.openTaskConversation(task.id)
         let store = registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query)
         let item = try #require(store.sessions.first)
-        #expect(item.surface == nil)
         if occupied {
+            #expect(item.surface == nil)
             #expect(item.state == .elsewhere)
             #expect(item.record.action(.moveHere) != nil)
         } else {
-            #expect(item.state == .unavailable("No saved provider history; start this conversation explicitly"))
-            #expect(model.taskOpening?.status == .failed)
+            #expect(item.state == .prepared)
+            #expect(item.surface != nil)
+            #expect(item.launchArguments.contains("--start-if-free"))
         }
     }
 
     @Test("Close and eviction discard a late sidebar preparation", arguments: [false, true])
     func lateSidebarRevealIsDiscarded(evicted: Bool) async throws {
-        let data = try fixture()
+        let data = try workingFixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let task = try #require(snapshot.tasks.items.first)
         let record = try revealedConversation(task)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "resume"]), args.contains("--reveal-existing") {
+            if args.starts(with: ["session", "resume"]), args.contains("--start-if-free") {
                 await barrier.wait("prepare")
                 return encoded
             }
@@ -149,7 +150,7 @@ struct WorkDestinationTests {
             actions[reveal]["unavailable_reason"] = reason
         }
         wire["actions"] = actions
-        wire["open_argv"] = ["lf", "session", "resume", record.id, "--reveal-existing"]
+        wire["open_argv"] = ["lf", "session", "resume", record.id, "--start-if-free"]
         wire["workspace"] = ["machine_id": "machine-local", "worktree": "/src/task",
                              "task_id": task.runtime?.workId ?? task.id]
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
@@ -337,7 +338,7 @@ struct WorkDestinationTests {
 
     @Test(arguments: [false, true])
     func openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared: Bool) async throws {
-        let data = try fixture()
+        let data = try workingFixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
@@ -351,7 +352,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
-            if (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains("--reveal-existing")) { await barrier.wait("prepare"); return encoded }
+            // A Task with no runtime is not yet working, so opening it only reveals history.
+            if (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains(unprepared ? "--reveal-existing" : "--start-if-free")) { await barrier.wait("prepare"); return encoded }
             if args.starts(with: ["desktop", "plan"]) { await barrier.wait("planning"); return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
@@ -519,6 +521,43 @@ struct WorkDestinationTests {
         #expect(entry.conversationError == "Conversation launcher unavailable")
         #expect(!entry.openingConversation)
         #expect(entry.multiplexer.sessionPane?.sessionId == nil)
+    }
+
+    @Test("A failed automatic Start shows its failure, never a Start offer")
+    func failedAutomaticStartKeepsItsReason() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try workingFixture().utf8))
+        let task = try #require(snapshot.tasks.items.first { $0.conversationIntent == .start })
+        let query = RegistryQuery { args, _ in
+            if args.contains("--explain") { return taskConversationStartOfferFixture() }
+            throw RegistryQueryError("Claude account unavailable")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+
+        await model.openTaskConversation(task.id)
+        let entry = try #require(registry.retained(model.workspaceKey(for: .task(id: task.id), repository: "repo")))
+        #expect(entry.conversationError == "Claude account unavailable")
+        #expect(entry.conversationStart == nil)
+        #expect(entry.conversationIntent == .start)
+    }
+
+    @Test("A requested reveal stays reveal on a working Task and may offer Start")
+    func requestedRevealIsHonored() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try workingFixture().utf8))
+        let task = try #require(snapshot.tasks.items.first { $0.conversationIntent == .start })
+        let query = RegistryQuery { args, _ in
+            if args.contains("--explain") { return taskConversationStartOfferFixture() }
+            if args.contains("--reveal-existing") { throw RegistryQueryError("No saved provider history") }
+            throw RegistryQueryError("A requested reveal cannot start a conversation")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+
+        await model.openTaskConversation(task.id, intent: .reveal)
+        let entry = try #require(registry.retained(model.workspaceKey(for: .task(id: task.id), repository: "repo")))
+        #expect(entry.conversationError == "No saved provider history")
+        #expect(entry.conversationStart?.label == "Start conversation")
+        #expect(entry.conversationIntent == .reveal)
     }
 
     @Test(arguments: [false, true])
@@ -1002,7 +1041,7 @@ struct WorkDestinationTests {
     }
 
     @Test(arguments: [false, true]) func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation: Bool) async throws {
-        let data = try fixture()
+        let data = try workingFixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
@@ -1010,7 +1049,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            guard (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains("--reveal-existing")) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
+            guard (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains("--start-if-free")) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
             await barrier.wait("ensure")
             return encoded
         }, repoPath: wave.wave.repo)
@@ -2092,6 +2131,23 @@ struct WorkDestinationTests {
     private func fixture() throws -> String {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         return try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
+    }
+
+    /// The shared fixture has no working Task; opening one exercises automatic startup.
+    private func workingFixture() throws -> String {
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(fixture().utf8)) as? [String: Any])
+        var inventory = try #require(snapshot["tasks"] as? [String: Any])
+        var tasks = try #require(inventory["items"] as? [[String: Any]])
+        for index in tasks.indices {
+            guard var runtime = tasks[index]["runtime"] as? [String: Any] else { continue }
+            runtime["status"] = "idle"
+            runtime["owner"] = ["person": "Jack Heart", "person_key": "jack@loopflow.studio",
+                                "machine": ["id": "machine-local", "label": "laptop"]] as [String: Any]
+            tasks[index]["runtime"] = runtime
+        }
+        inventory["items"] = tasks
+        snapshot["tasks"] = inventory
+        return String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
     }
 
     private func oneTask(_ data: String, taskId: String) throws -> String {

@@ -1,8 +1,7 @@
 # LOO-672 — Ready Task conversations
 
-Accepted design, reconciled November 4, 2026 against the screenshot and launch-intent
-repairs in the working tree above `df07fd9b5f`, recorded upstream through
-`dfd454cfc7`, and fresh LOO-717/498 Task status. Jack Heart approved the revised November 4 design: “ok, proceed.”
+Accepted design, reconciled November 4, 2026 against the working tree above
+`3ef57e8573`, recorded upstream through `5519340b41`, and fresh LOO-717/498 Task status. Jack Heart approved the revised November 4 design: “ok, proceed.”
 Implementation and review publication are authorized through interactive demo;
 shipping, merging and installation are not. The pre-infrastructure plan is
 superseded and preserved at
@@ -30,8 +29,9 @@ independent CLI fork remains available on the same Task and checkout.
 Viewing, prefetch and restore never start a Task Graph or replay interrupted or
 captured input. Creating the initial native conversation for a working Task is
 now explicitly within the automatic-open requirement. Keep this distinct from
-automatically executing Task work. Do not expand prefetch to unstarted backlog
-Tasks. Missing account or Machine evidence stays an actionable failure; the
+automatically executing Task work. Do not expand prefetch to backlog: unstarted
+Tasks and unassigned started Tasks. Draft assumption, not Jack's decision: automatic
+startup requires a Task owner (`questions.md`). Missing account or Machine evidence stays an actionable failure; the
 selected Task must not fall back to a different checkout or Machine.
 
 The selected Task opens first after relaunch, followed by the bounded saved warm
@@ -42,8 +42,8 @@ owner or resuming the same provider thread; connecting and failure remain visibl
 Jack Heart added on November 4: “make sure to prefetch working tasks on load”
 (source: `loo-672-load-prefetch.md`). Fresh repository state discovers idle, active
 and moving Tasks, including those absent from saved recent history. The selected
-Task leads, then saved recent working Tasks, then other working Tasks by their
-shared update time; other saved unfinished Tasks fill remaining space. Prefetch
+Task leads, then visible tiles, then saved recent working Tasks, then other working
+Tasks by their shared update time; other saved unfinished Tasks fill remaining space. Prefetch
 uses the existing reveal queue and location validation, preserves Close, and
 never waits before rendering. Eligible working Tasks with no Session or no
 provider history are automatically initialized and opened within the same bounds.
@@ -55,248 +55,205 @@ memory budget or numbers chosen by Jack. No NSView is shared between windows.
 Eviction releases Desktop's viewer and hold; protected work and other hosts may
 keep the provider running. Shells retain their independent lifecycle.
 
-## Remaining correction after the re-demo
+## Implementation and remaining work — November 4
 
-The currently published implementation still presents Start for absent Sessions
-and missing history. That is insufficient even though the button now works.
-Use the existing shared opening path to ensure/open working Task conversations
-on load and selection, with no user Start click. Preserve launch-lock validation
-and non-replacing input claims: another client retains control and only Take back
-may replace it. Make initialization idempotent across refresh, concurrent windows,
-repeated prefetch and restore. Preserve Close and late-result fencing. No Graph
-or duplicated/replayed Task prompt may be introduced by automatic initialization.
+Owned working Task load, selection and prefetch now choose the existing
+non-replacing Start intent. The same registry queue, location observation and
+Session store prepare both absent Sessions and metadata-only Sessions. Retry carries
+the workspace's intent; only **Try again** on a consumed first launch sends `.resume`.
+Other Work still reveals history.
+`RoadmapTask.conversationIntent` excludes unstarted, unassigned, shipping and
+terminal Tasks from initial conversation creation, and load prefetch discovers only
+Tasks it would start. A Session that reveal left unavailable opens automatically
+once its Task's intent becomes Start. Hidden warm panes mount the same terminal
+view, so `.prepared` launches the provider off-screen; only a rendered run proves it.
 
-Prove both absence cases through the real configured app, starting from fresh
-disposable data: launch with working Tasks, select them, see native conversations
-without Start/Open, then relaunch and verify retained identity and no duplicate
-turns. Include fresh-load prefetch without saved visits. Update assertions that
-encode the superseded Start gate. Prepare that already-working candidate before
-asking Jack to re-demo; manual Start is no longer acceptable demo setup.
+Rust retains primary-scope admission and per-Session launch locks; only Take back
+replaces an input holder. Non-replacing startup refuses to replay a consumed
+capture when no native history survived; **Try again** and explicit CLI resume are
+its recovery. A Task primary's opening message makes its first turn a reading pass.
 
-## Current implementation owners (before this correction)
+### Delete — do not maintain
 
-Rust’s shared Session projection supplies Start, Take back and reveal availability
-from current-input history and ownership on every read. `human_session::open_without_replacing`
-rechecks history, location, account and ownership under the launch lock. Transport
-claims do not replace another viewer; preparation starts no turn. Absent Sessions
-get a direct Start action from resume explanation, without fabricating Session state.
+- Removed history-only reveal as the automatic policy for working Task load,
+  linked selection, prefetch and Retry. Retain reveal for other Work and the CLI's
+  explicit `--reveal-existing` contract.
+- Replaced `missingTaskConversationStartsExplicitly` and the sidebar refusal
+  assertion with automatic preparation of both absence cases. Preserve location,
+  no-provider-during-preparation and identity assertions on the surviving path.
+- Removed old Start-click usage guidance and contradictory implementation history
+  from this plan. Detailed prior designs, screenshot repairs and check evidence:
+  `3ef57e857394d5a97271ea00b6048ad60c22bf9a:scratch/loo-672-ready-conversations.md`.
+- Renamed the warm queue to `openWarmConversations`/`openings`: it opens with each
+  workspace's intent, so `reveal` names only the history-only intent.
+  `RoadmapTask.conversationIntent` is the one working-Task policy.
+- Preserve explicit Start as recovery outside eligible working Task navigation;
+  preserve Rust's Start/Reveal/Take back intents, Close and late-result fences,
+  selected-first scheduling, input claims and LOO-717 retention. No new launch,
+  migration, retirement, provider quota or snapshot owner is introduced.
 
-`SessionsWorkspaceRegistry` owns warm intent, admission and the reveal queue;
-`RepositoryWorkspaces` bounds it across windows. `WorkModel` orders fresh-load
-prefetch separately from reconciling panes. Saved and fresh Tasks share admission.
-A fresh location read supplies both background retention and preparation. Close,
-eviction and quit fence late results, including requests without a Session ID;
-linked openings carry explicit Start or passive reveal intent through adoption.
+### Concept review — November 4: implemented
 
-Desktop distinguishes unavailable opening from terminal completion. Refresh can
-replace Start with Take back or clear the refusal when history arrives. Retry
-remains passive. Hidden warm panes stay mounted; cold return uses existing VT
-history. The live relay readiness event is separate from saved frames and surface
-creation; it has not yet proved usable native Claude/Codex input.
+Reviewed the dirty tree above `3ef57e8573` against Jack Heart's corrected requirement.
+Jack: “launching a Task Graph or replaying old Task input through navigation is not”
+authorized, and an idle Task with a stopped run was the counterexample.
 
-The integrated LOO-717 parent `b81df60579` owns lifecycle, host-exit recovery and
-per-process retention evidence. LOO-672 adds no migration, retirement executor,
-provider quota, idle timer, reboot sweep or snapshot decoder. Architecture and
-earlier implementation/review evidence: `df07fd9b5f:scratch/loo-672-ready-conversations.md`.
-That source preserves the earlier concept review’s mistaken “nothing to change”
-conclusion and the preparation-only recovery label lost on refresh; the screenshot
-correction below supersedes that conclusion.
+1. A Task primary's first turn without a request is a reading pass: `task_session.md`
+   says so, `TASK_PRIMARY_MESSAGE` opens it, and `first_turn` selects it by primary
+   scope. Repository and Wave primaries keep their prior text.
+2. Only a refused reveal fetches `taskConversationStart`; a failed Start clears any
+   offer. The pane shows `conversationError` first, with Retry on the workspace intent.
+   Explicit Start stays for Work that opening cannot start.
+3. The opening intent is optional: nil follows `task.conversationIntent`, a value is
+   honored and recorded on the workspace.
 
-## Infrastructure and proof boundaries
+Open warm conversations on moving Tasks also receive settled Graph progress as provider
+turns, so turn cost continues after load. Measure that with the first turns.
 
-### Completed replacement (November 4 correction)
+### Concept review — November 4, second pass: implemented
 
-Completed cuts; no predecessor remains to maintain:
+1. **Queued Tasks show opening.** `WorkModel.conversationIsOpening` renders
+   "Opening conversation…" in Task panes and Dashboard tiles for an eligible working Task
+   waiting behind both slots or the Sessions read. Close, a conversation failure, a Start
+   offer, a failed read, saved-work display or a missing location keep the existing pane.
+2. **Steers reach the reading pass as recorded direction.** `TASK_PRIMARY_MESSAGE` and
+   `task_session.md` say to report them and act when the person asks there.
+3. **Folder trust cause and repair.** `restore_task_checkout` ran its own
+   `git worktree add --force`, and only `worktree_add_inheriting` wrote `loopflow-created`,
+   so no Task checkout carried the marker since #1648. It now calls `mark_lf_created`.
+   `UseExistingWorktree` adopts checkouts, so existing `.git` directories are not backfilled.
+   Unmarked checkouts keep Claude's dialog; the launcher records it as `pending_input`, so
+   the Session reads Available before any hook can run. No wire field was added.
+4. `first_turn`'s comment names seeded continuations.
 
-- `TaskConversationButton` replaces unconditional Open in empty/collapsed panes
-  with the shared explicit Start offer when no Session exists.
-- `LinkedSession.preparedIntent` replaces fixed reveal intent in linked adoption;
-  navigation/Retry remain reveal, and explicit Start is non-replacing.
-- `SessionsWorkspace.reportPresence` selects the local query and Task together;
-  only remote locations use remote routing and observed remote Task identity.
-- Resume explanation returns only Start for an absent Session; no unavailable
-  Reveal action or fabricated Session state is needed there.
+### Realign — November 4: refused reveal repaired
 
-Recovery, Close, location and non-replacing-claim tests remain applicable.
-The launch-intent conflation identified below is also replaced; the screenshot
-corrections themselves have no predecessor left to maintain.
+Compress found that a Task with no Session kept its refused reveal's error and Start offer
+after it became working, which meant one Start click. `WorkModel.openWarmConversations` now
+clears both when the intent moves from reveal to Start, so one automatic Start follows; a
+Start failure then stays visible with Retry. `claimedTaskLeavesRefusedReveal` fails without
+the repair. Third pass item 3 covers a reveal already in flight, through the queue and
+through a link.
 
-The correction reuses Rust's resume explanation for an absent Session and its
-existing Session actions for missing native history. A failed explanation stays
-unknown. Actual launch re-reads Session ownership; Start permits first-thread creation
-without replacing input, and elsewhere input requires Take back. The headless proof uses a disposable
-initialized store and real CLI, including the production Start button.
+### Concept review — November 4, third pass: implemented
 
-### Demo findings, November 4 — correction implemented
+Two surfaces contradicted “no Start or Open click”; all three items followed from accepted
+decisions, so none needed a new choice from Jack.
 
-The subsequent interactive demo supersedes the concept-review conclusion that
-no further implementation was needed. Jack Heart's screenshot shows a Task with
-no Session stuck at passive Open/Retry, plus a local-Machine cleanup error.
-Source and CLI reproduction confirm two gaps: provide an explicit Start when
-the Task has no Session (distinct from an existing Session missing native history),
-and send local retention to the local lifecycle owner rather than an unresolved
-remote-Machine lookup. Preserve passive navigation and remote semantics.
-The correction now uses the shared resume explanation for no-Session Start,
-carries explicit intent through linked preparation/adoption, and routes local
-presence locally. Headless real-CLI tests cover the production button after
-refresh and retain/departure/return. A separate candidate and reproducible setup
-are in [loo-672-demo.md](loo-672-demo.md). The accepted product choices are
-unchanged. The launch-intent repair below is also implemented; publication
-verification is recorded below, and the native demonstration remains.
+1. **Visible tiles join the queue.** Candidates and queue keys are selected, then visible Tasks,
+   then recent, still under two preparations; `presentView` and `presentWaveTiles` run the queue
+   after presenting. A visible tile with no Session and reveal intent stays out: it has nothing to
+   reveal and keeps its Open button. `.pending` panes show the queued spinner too.
+2. **A consumed first launch recovers from the pane.** `session_actions` learns `launch_consumed`
+   and offers `MoveHere` labelled **Try again** in place of Open, so no wire kind or field is
+   added. `launchRetry` (MoveHere without Open) and `heldElsewhere` replace Swift's bare MoveHere
+   checks, because MoveHere alone used to mean a holder. Sessions reconcile straight to `.failed`,
+   so refresh prepares nothing and only the click sends `.resume`; Retry beside Take back stays on
+   the workspace intent. `open_without_replacing` keeps its refusal. A prefetched workspace still
+   validates its location once, so the retried conversation is retained.
+3. **A superseded refusal does not land.** A failed opening whose intent moved records neither
+   error nor offer, and the queue's `defer` retries with the current intent. `openLinkedTask`
+   follows the same rule: it ends the link's opening and runs the queue, so a link opened during
+   a claim costs no click either. `supersededLinkRefusalDoesNotLand` fails without this.
 
-708/#1802, 709/#1804, 710/#1801, 712/#1800 and 720/#1809 are merged. They supply
-thin viewers, protected idle retirement, persisted VT history, separate appearance
-and input ownership, and current provider status. Codex/OpenCode retain launchers;
-VT replay has bounded history and does not repaint images. Reuse those owners.
+### Concept review — November 4, fourth pass: no change
 
-LOO-717/#1811 is published and stands at demo; its latest integrated base is
-`b81df60579`. It owns eligible two-minute idle-agent retirement and fifteen-minute-total
-completed-and-away shell/checkout retirement, cancellation on return, protected
-work and other-host retention. Eligible uncommitted files may be discarded under
-its existing safeguards; LOO-672 adds no deletion policy. Fresh November 4 status
-shows LOO-498/#1814 open and moving through corrections, with its current step
-running compress. Rex still owns native adapter/layout/job settlement; that activity
-does not establish native acceptance or change LOO-672's lifecycle owner.
+Reviewed the same tree by reading code, not running it; nothing changes and no accepted decision
+is unimplemented. Counterexamples that held: a Task evicted from warmth stays out, because `prefetch`
+skips existing workspaces, so two repository windows cannot refill each other; a failed Machine read
+shows the window's error, not a spinner; Start always returns a launch command, so the queue cannot
+spin on `.pending`; every `moveHere` reader separates Try again from Take back; `capture_is_prepared`
+and the listing's marker read agree when the capture is missing. One consequence goes to demo as an
+assumption in `questions.md`: opened conversations count as Available.
 
-Recorded upstream `dfd454cfc7` (#1815, LOO-723) now pairs Desktop and CLI updates
-and preserves running helpers during installation. That change is not integrated
-here and does not repair this branch candidate's main-store schema mismatch.
-The disposable candidate already pairs its app and CLI; installation remains
-outside the accepted review boundary. No duplicate updater belongs in LOO-672.
+### Verification and review still required
 
-720's candidate Claude/Rex/Desktop demonstration and CI passed, without proving
-machine-wide installation or live Codex/OpenCode behavior. 719's installed macOS
-idle-preservation proof was unstarted at the design review; this pass did not
-refresh it. No installed or cross-host acceptance follows from these foundations.
+Real Claude opened an lf-created Task checkout in a pty with no prompt.
+`prepare-redemo.py` ran to completion on fresh data: all four Tasks idle and owned, every
+checkout carrying the created marker, the run stopped, no live process. Its comment is
+recorded; that the conversation reports it is left to demo, as are rendered hidden-pane
+dialog reporting and its clearing after an answer.
 
-## Start cannot become Take back — repaired November 4
+Focused checks cover automatic working Task preparation for absent and prepared
+Sessions, identity across refresh/selection, bounded fresh-load prefetch excluding
+unassigned Tasks, unavailable-to-Start transition, visible tiles past the warm limit,
+superseded refusals through the queue and a link, Close, elsewhere ownership,
+consumed-input refusal and its **Try again**. Gate owns affected suites and
+static analysis after implementation. Direct consumers reached: WorkModel linked
+opening, SessionsWorkspaceRegistry, SessionsStore and Task panes; Rust
+`human_session`, prepared-command transport and primary initialization.
 
-The headless concept review found a launch race after the screenshot correction:
-Start prepared ordinary `session resume`, so a client acquiring input before
-execution could be replaced. A fresh ownership read alone could not fix that:
-resume authorizes takeover of the newly observed holder. This was a source-derived
-counterexample, not a reproduced native failure. Jack Heart's accepted explicit
-Take back decision already resolves the behavior; no new product choice was needed.
+The configured Claude/Codex demo must start with fresh disposable data and no
+manual Start clicks. Verify load prefetch, selection, relaunch and stable native
+identity, then exact draft continuity, cold return and explicit Rex Take back.
+Include an idle Task with a stopped run and an earlier Task comment asking to start it:
+after load its conversation reports status and that comment, and `lf ps` shows no new Graph.
+Measure first paint separately from usable input and Desktop + lf + provider
+private footprint with twenty visited Tasks; list visible exceptions and protected
+providers. Eight warm conversations remains provisional.
 
-The current implementation preserves three intents through Desktop preparation,
-served writes, returned argv, execution and the transport claim:
+Each automatic start
+sends the primary first turn, so a load can spend up to eight provider turns; the
+original "no new agent turn" acceptance holds only for existing history. Measure
+this with the footprint.
 
-- Reveal requires existing history and never replaces another viewer.
-- Start carries `--start-if-free`, permitting a first thread without replacement.
-- Take back uses ordinary CLI resume, retaining its explicit takeover semantics.
+Warm slots are not filtered by person: a teammate's owned Task on an unreachable
+Machine fails quietly and occupies one. Desktop has no local person identity to
+compare. Acceptable while Jack is the only owner; revisit before shared repositories.
 
-`human_session::open_without_replacing` replaces the former reveal operation and
-shares `open_waiting_locked` with CLI resume. Ownership and first-thread admission
-use the existing launch lock; reveal/Start attach with a non-replacing relay claim.
-Transport delegation re-executes the same intent. No second launcher, persisted
-opening lifecycle, migration or Desktop-only preflight was added. Provider switching
-and independent CLI fork retain their explicit semantics.
+Headless model/CLI checks are an equivalent for preparation, not native
+rendering/input acceptance. The caller's Graph owns gate, candidate regeneration,
+publication to existing PR #1816 and interactive demo. No main-environment
+installation, merge or shipping. PR #1816's description must drop any claim of a Start
+click, and its head (`0acc950924`) lacks this tree. 
 
-`SessionsStore` now carries `SessionOpenIntent` directly through preparation and
-adoption, removing the action-to-intent round trip and the `.open`/`.moveHere`
-collapse. Prepared argv survives refresh; refusal adopts current holder evidence
-and offers Take back. Passive Retry can reveal existing history after the holder
-leaves. Load prefetch, Close fences, warm bounds and LOO-717 retention are unchanged.
-The Start behavior is documented in `swift/README.md`.
+`ae3c91abee` (#1818) reaches this branch only through the parent. It changes `attaches`,
+not `open_without_replacing`: a retained owner now attaches even when it does not answer.
+`open_without_replacing` reads `answering` directly, so at that sync confirm a retained,
+unresponsive owner with no native history refuses rather than counting as a first thread.
+`86fea8578f` (#1822) extends `attaches` for `NoOpenSession` owners and also leaves
+`open_without_replacing` unchanged. `c59cfcc631` (#1807) adds `lf task create --worktree`;
+those adopted checkouts stay unmarked, which matches the trust assumption in `questions.md`.
+`a5000ef889` (#1805) makes `config.agent()` fallible beside `conversation_launch_args`.
+`2cce79a27b` (#1780) deletes `regressedIn` beside `conversationIntent` and edits `ops/task.rs`;
+`5519340b41` (#1824) is install and migration preflight. Neither changes opening policy.
+A trial merge of committed HEAD with origin/main (`5519340b41`) conflicts in `bin/lf.rs`, `transport.rs`,
+`transport/lifetime.rs` and `rust/loopflow/tests/README.md`; this tree's uncommitted changes were not in that trial.
 
-Inspected source and saved test logs cover execution of the actual prepared command,
-a later controlling viewer, and a competing claim inserted between the ownership
-read and Attach. The winning viewer retains input; refusal starts no extra provider
-thread or turn. Normal Start and explicit Take back keep one Session/capture for
-both an absent Session and an existing Session without history.
+Proposed Wave memory, not written here: replace "existing-history reveal" and
+"navigation/Retry reveal" in the LOO-672 notes with automatic Start for owned working Tasks,
+and record **Try again** as the one-click recovery of a consumed first launch.
 
-The earlier regression incorrectly passed an env-wrapped command's arguments to
-`lf`, allowing a parsing error to resemble ownership refusal. The surviving fixture
-executes `open_argv[0]` and all remaining arguments, checks holder continuity and
-uses the existing PTY helper for first-thread contention. The earlier pipe fixture
-exited before contention. These are corrected proof defects, not native acceptance.
-Pre-reconciliation detail is preserved in `/tmp/loo-672-before-realign-context.patch`;
-the concept walkthrough remains `scratch/concept-review.html`.
+### Preserved evidence and ownership
 
-## Concept review after the launch repair — November 4
+The parent LOO-717/#1811 integrated at `b81df60579` owns lifecycle, host-exit
+recovery and per-process retention evidence. LOO-498 owns Rex integration.
+Completed infrastructure 708/709/710/712/720 provides thin viewers, protected
+retirement, VT history and separate appearance/input ownership. LOO-672 does not
+reimplement it. Product GOAL and MEMORY are read-only for this step.
 
-Outcome: no further design change and no open product choice. The implemented
-three-intent path now expresses Jack Heart's accepted interaction without asking
-Desktop users to learn provider-thread or attachment machinery. Start and Take
-back no longer collapse into the same launch authority. The earlier launch-race
-counterexample above remains a regression requirement, not an outstanding redesign.
+The prior screenshot demonstrated an absent Session stuck at Open/Retry and a
+local Machine routed through remote lookup. Both were corrected before this pass.
+A later launch-intent repair stopped Start from silently acquiring Take back
+semantics; contention tests execute the full prepared argv, including env wrappers.
+Earlier tests passed through `0acc950924`; their native/manual Start evidence does
+not meet Jack Heart's corrected automatic-opening requirement. Failed screenshots
+and logs remain in `loo-672-demo.md` and `demo-evidence/`; full prior verification
+and contrary evidence remain at the precise Git reference above.
 
-The reviewed interaction is: select a Task and reveal its existing conversation;
-if none exists, offer explicit Start; if a competing client acquires input before
-Start executes, preserve that holder and offer Take back on fresh observation.
-When the holder leaves, passive Retry may reveal existing history. An absent
-Session and a Session without native history share the Start experience while
-Rust retains their different persistence facts. Failed reads remain unknown.
-Close removes this host's warm intent and fences late preparation; a deliberate
-return may reopen. Completed departure continues through LOO-717, with local
-presence sent to the local owner and remote presence to its observed destination.
+Verification found one production gap on November 4: a Session frame read before
+`confirmMachine` was stored under the unconfirmed Machine key and then lost, so a
+quiet fresh repository never opened its working Tasks. `confirmMachine` now replays
+Sessions. Saved shipping and unstarted Tasks keep history-only reveal.
 
-No additional Session lifecycle, stored readiness state, launch path or retirement
-owner is needed. Fresh-load prefetch and saved restore use the same bounded reveal
-queue. The usage text in `swift/README.md` already states the accepted behavior;
-existing skill instructions need no change. Source and existing contention-test
-logs support this review, not rendered native acceptance. No runtime tests were
-rerun for this documentation-only step.
+Reconciliation found three more on November 4, all repaired: an unassigned working
+Task would have launched a hidden conversation behind its Graph Start offer; a
+Session left unavailable by reveal stayed stuck after its Task became working; and
+a preparation reply arriving behind its Session frame took focus back from the pane
+the person had moved to. The last surfaced as an intermittent
+`taskLifecycleUpdatesOpenSidebar` failure and now has a deterministic test that fails
+without the fix. `WorkCacheTests` failed 2 of 6 runs on the mock's arrival order of
+two concurrent reads; `boundedSelectedFirstPreparation` proves admission order, so
+that assertion now checks the prepared set.
 
-That review handed off to gate, matching app/CLI regeneration,
-review publication and interactive re-demo. Native input/draft continuity,
-Rex takeover, reboot recovery and the twenty-Task private footprint remain open;
-eight warm conversations is still provisional. The current walkthrough is
-`scratch/concept-review.html`. This review neither authorizes landing nor resolves
-those empirical questions by assumption.
-
-## Remaining verification and review
-
-The screenshot correction and non-replacing Start are ready for review publication
-to PR #1816. A matching disposable app/CLI candidate was regenerated with
-`scratch/prepare-redemo.py`; use the current launcher in `loo-672-demo.md`.
-Headless Desktop passed all 700 tests, including real-CLI Start and local
-retain/departure/return, navigation, cached-to-fresh restart, DTOs, Close and warm
-prefetch. The selected Rust run passed 225/226 tests; the stale-viewer fixture
-was repaired to wait for a known viewer flag and expect Reveal, then passed alone.
-Prepared-command contention, Start/Take back, lifecycle and transport checks passed
-in the broad run. Clippy, formatting, architecture, Swift boundaries and 72 website
-checks passed. Xcode's fallback `build-for-testing` also passed
-(`/tmp/loo-672-publish-xcode.log`). Linux isolation remains with CI; native proof
-remains with demo.
-
-The initial Desktop run's stale expectations were corrected for saved selection,
-completed departure and disconnected shells. Its sleep-based debounce test failed
-in the broad run and passed unchanged alone; the flaky test was removed as AGENTS.md
-requires. Remaining persistence tests pass. Logs:
-`/tmp/loo-672-publish-rust.log` (initial failures preserved),
-`/tmp/loo-672-publish-stale-viewer.log`,
-`/tmp/loo-672-publish-swift-recheck.log`,
-`/tmp/loo-672-publish-debounce.log` and `/tmp/loo-672-publish-clippy.log`.
-
-Demo retains real Desktop with Claude and Codex: A→B→A with immediate input and
-unchanged provider/editor/draft identity; cold return with history; takeover from
-a named Rex adapter; relaunch and stale-owner/reboot recovery in a disposable
-environment. Measure first paint separately from usable input and Desktop + lf +
-provider private footprint with twenty visited Tasks. Record protected owners and
-visible-pane exceptions, then state the measured budget. Eight remains provisional.
-The rendered interaction and these measurements require demo/review, not a headless
-substitute. No unresolved product decision remains before that evidence.
-
-Product GOAL and full MEMORY were read; no immediate child memory directories
-exist in this checkout. The Wave records durable direction separately from this plan.
-
-Inspected compression logs: `/tmp/loo-672-compress-intent-{rust,swift,swift-recheck}.log`.
-The Rust prepared-command run passed five tests. The Desktop run built the app
-and passed 92 of 93 tests; its sole failure was the old positional Start mock,
-which was corrected and passed in isolation. This is not a clean full-suite rerun.
-Earlier launch checks remain in `/tmp/loo-672-start-*.log`; pre-compression notes
-are preserved in `/tmp/loo-672-before-compress-context.patch`. Gate owns affected
-suites, Clippy, formatting and review publication; native usability and memory
-remain with demo. This reconciliation changes documentation only.
-
-Checks: `git diff --check` and `lf context` — passed; existing `cargo test -p loopflow --test transport_tests prepared_ -- --nocapture` — 5 passed; `scripts/test_desktop.sh --jobs 4 --filter 'SessionsStoreTests|WorkspaceSessionLifecycleTests|WorkDestinationTests|WorkCLISubscriptionTests/missingTaskConversationStartsExplicitly'` — 92/93 passed, corrected Start mock passed with `--filter 'SessionsStoreTests/startsOnlyTheSelectedSession'`; no tests rerun during realign.
-
-
-Prior review publication at `df07fd9b5f` passed 220 affected Rust tests, CLI build,
-Clippy, architecture and formatting checks against parent `b81df60579` after a
-conflict-free sync. Its broad Swift run was incomplete: the runner stopped for
-syspolicyd host pressure, not a product assertion. Linux isolation remains with CI.
-Full commands, logs and contrary evidence are preserved at
-`df07fd9b5f:scratch/loo-672-ready-conversations.md`; they do not establish current
-native usability or a measured memory budget.
+Checks, November 4, through realign: `cargo test -p loopflow --lib ops::human_session::` 37 passed (compress; Rust code unchanged since); `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkDestinationTests'` 89 passed after the link repair, and `WorkspacePanesTests|SessionsStoreTests|WorkspaceRetentionTests|WorkNavigationTests|DesktopPaneControlTests|DTOFixtureTests|WorkCLISubscriptionTests` passed at compress; clippy, gate, candidate and rendered native proof (idle Task, stopped run, no new Graph) deferred to the Graph.

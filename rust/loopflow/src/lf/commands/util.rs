@@ -430,6 +430,23 @@ fn session_command_status_with_env(
     })
 }
 
+/// Claude's folder-trust question is the provider asking a person, before any
+/// hook can say so; a hidden pane would otherwise hold it unseen. The provider's
+/// first reading after an answer replaces this one.
+fn report_folder_trust_dialog(attachment: &crate::harness::agent_process::AttachmentOwner) {
+    let (store, session, expected) = attachment;
+    let reading = crate::session::SessionActivity {
+        preview: None,
+        observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+        open_tools: 0,
+        pending_input: 1,
+        yielded: false,
+    };
+    if let Err(error) = store.record_session_activity(session, expected, &reading) {
+        tracing::warn!(%error, session, "failed to report Claude's folder-trust dialog");
+    }
+}
+
 fn run_native_session(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -527,6 +544,9 @@ fn run_native_session(
     }
     if command.program == "claude" {
         crate::harness::claude_trust::accept_created_worktree(&process);
+        if crate::harness::claude_trust::awaits_dialog(&process) {
+            report_folder_trust_dialog(&attachment);
+        }
     }
     process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
     if let Some(context) = &command.context {

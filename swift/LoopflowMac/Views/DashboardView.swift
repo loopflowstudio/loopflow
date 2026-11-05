@@ -341,7 +341,7 @@ struct DashboardConversationOffer: View {
     let workspace: SessionsWorkspace
 
     var body: some View {
-        if workspace.openingConversation {
+        if model.conversationIsOpening(workspace) {
             ProgressView("Opening conversation…").frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             PaneEmptyState(title: "No conversation open", systemImage: "bubble.left",

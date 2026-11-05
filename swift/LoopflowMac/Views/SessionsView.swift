@@ -112,6 +112,8 @@ final class SessionsWorkspace {
     var openingConversation: Bool { conversationRequest != nil }
     var conversationError: String?
     var conversationStart: SessionAction?
+    /// What automatic opening and Retry may do; only Take back replaces input.
+    var conversationIntent: SessionOpenIntent = .reveal
     private var didPrepareTaskPanes = false
     var lastVisit = Date.distantPast
     var conversationClosed = false
@@ -125,7 +127,7 @@ final class SessionsWorkspace {
         conversationRequest = request
         conversationError = nil
         defer { if conversationRequest == request { conversationRequest = nil } }
-        do { try await open() } catch { conversationError = error.localizedDescription }
+        do { try await open() } catch { if !Task.isCancelled { conversationError = error.localizedDescription } }
     }
 
     /// Populate this retained Work even if navigation changes while lf prepares it.
@@ -134,9 +136,7 @@ final class SessionsWorkspace {
             let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
             store.reconcile([record])
             store.adoptPreparation(record)
-            registry.revealSession(record, in: self)
-            presentation.content = .terminals
-            presentation.selectedSessionId = record.id
+            registry.presentSession(record, in: self)
             await store.select(record.id)
         }
     }
@@ -552,15 +552,15 @@ final class SessionsWorkspaceRegistry {
     private var closedConversations: Set<WorkWorkspaceKey> = []
     private var warmPersistenceKey: String?
     private var quitting = false
-    private var reveals: [WorkWorkspaceKey: Task<Void, Never>] = [:]
+    private var openings: [WorkWorkspaceKey: Task<Void, Never>] = [:]
     private var sessions: SessionsStore?
     var onWarmthChanged: (() -> Void)?
     var canPrepare: (() -> Bool)?
     var onPreparationFinished: (() -> Void)?
-    var preparationCount: Int { reveals.count }
+    var preparationCount: Int { openings.count }
 
-    func continueReveals() {
-        if let sessions { revealConversations(store: sessions) }
+    func continueOpenings() {
+        if let sessions { openWarmConversations(store: sessions) }
     }
 
     func evict(_ key: WorkWorkspaceKey) {
@@ -623,8 +623,8 @@ final class SessionsWorkspaceRegistry {
         }
         for workspace in workspaces.values {
             let retained = visible.contains(workspace.key) || recentTasks.contains(workspace.key)
-            if (!retained || workspace.conversationClosed) && (workspace.hostUse == "retained" || reveals[workspace.key] != nil) {
-                reveals.removeValue(forKey: workspace.key)?.cancel()
+            if (!retained || workspace.conversationClosed) && (workspace.hostUse == "retained" || openings[workspace.key] != nil) {
+                openings.removeValue(forKey: workspace.key)?.cancel()
                 for pane in workspace.multiplexer.layout.allPanes {
                     if let id = pane.sessionId { sessions?.release(id) }
                 }
@@ -642,94 +642,109 @@ final class SessionsWorkspaceRegistry {
         reconcileWarmth()
     }
 
-    /// Selected first, then bounded restored, visited and prefetched Work.
-    func revealConversations(store: SessionsStore) {
+    /// Selected first, then visible Tasks, which the warm limit excepts, then
+    /// bounded restored, visited and prefetched Work.
+    var warmWork: [WorkWorkspaceKey] {
+        var keys = [selectedWork].compactMap { $0 }
+        for key in visibleWork.filter({ $0.kind == .task }) + recentTasks where !keys.contains(key) { keys.append(key) }
+        return keys
+    }
+
+    func openWarmConversations(store: SessionsStore) {
         guard !presentationClosed, !quitting else { return }
         sessions = store
-        let keys = [selectedWork].compactMap { $0 } + recentTasks.filter { $0 != selectedWork }
-        for key in keys {
-            guard !quitting, reveals.count < Self.preparationLimit, canPrepare?() != false, let workspace = workspaces[key], !workspace.conversationClosed,
-                  reveals[key] == nil, !workspace.openingConversation, workspace.conversationError == nil else { continue }
+        for key in warmWork {
+            guard !quitting, openings.count < Self.preparationLimit, canPrepare?() != false, let workspace = workspaces[key], !workspace.conversationClosed,
+                  openings[key] == nil, !workspace.openingConversation, workspace.conversationError == nil else { continue }
             let id = workspace.multiplexer.sessionPane?.sessionId
             let existing = id.flatMap { id in store.sessions.first { $0.id == id } }
             if let existing {
-                guard existing.state == .pending else { continue }
+                // Try again needs its prefetched location confirmed like any opening.
+                guard existing.opensAutomatically(intent: workspace.conversationIntent)
+                        || (workspace.requiresLocationValidation && existing.record.launchRetry != nil) else { continue }
             } else {
                 guard key.kind == .task || id != nil, workspace.location != nil else { continue }
+                // A tile with nothing to reveal keeps its own offer; visiting it may still refuse.
+                guard id != nil || workspace.conversationIntent == .start || key == selectedWork
+                        || recentTasks.contains(key) else { continue }
             }
-            reveals[key] = Task { [weak self, weak workspace] in
+            openings[key] = Task { [weak self, weak workspace] in
                 guard let self, let workspace else { return }
                 defer {
                     if !Task.isCancelled {
-                        self.reveals[key] = nil
-                        self.revealConversations(store: store)
+                        self.openings[key] = nil
+                        self.openWarmConversations(store: store)
                         self.onPreparationFinished?()
                     }
                 }
-                await self.revealConversation(in: workspace, existing: existing, store: store)
+                await workspace.openConversation {
+                    let intent = workspace.conversationIntent
+                    do {
+                        try await self.openWarmConversation(in: workspace, existing: existing, intent: intent, store: store)
+                    } catch where workspace.conversationIntent != intent {
+                        // Superseded: this queue's `defer` opens with the current intent.
+                    }
+                }
             }
         }
     }
 
-    private func revealConversation(in workspace: SessionsWorkspace, existing: SessionItem?, store: SessionsStore) async {
-        do {
-            if let existing, !workspace.requiresLocationValidation {
-                await store.select(existing.id)
-                return
-            }
-            guard let location = workspace.location else {
-                throw RegistryQueryError("The recorded Task location is unavailable; no conversation was opened.")
-            }
-            let key = workspace.key
-            let query = location.machineId == localMachineId ? store.query
-                : store.query.onMachine(location.machineId, repository: key.repository)
-            var observation: TaskLocationObservation?
-            var task = key.id
-            // Restored retention and preparation use the same fresh location read.
-            if key.kind == .task {
-                let current = try await query.taskLocation(task: key.id, repository: key.repository, machine: location.machineId)
-                try Task.checkCancellation()
-                guard case .recorded(let owner, let checkout) = current.location, checkout == location.worktree else {
-                    throw RegistryQueryError("The recorded Task location changed; no conversation was opened.")
-                }
-                observation = current
-                task = owner
-            }
-            let record: SessionRecord
-            if let existing { record = existing.record }
-            else if let id = workspace.multiplexer.sessionPane?.sessionId {
-                record = try await query.prepareSession(id: id, cwd: store.repoPath, intent: .reveal)
-            } else {
-                do {
-                    record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath, intent: .reveal)
-                } catch {
-                    let action = try? await query.taskConversationStart(issue: task, cwd: store.repoPath)
-                    if !Task.isCancelled, !workspace.conversationClosed, workspace.location == location {
-                        workspace.conversationStart = action
-                    }
-                    throw error
-                }
-            }
+    private func openWarmConversation(in workspace: SessionsWorkspace, existing: SessionItem?,
+                                      intent: SessionOpenIntent, store: SessionsStore) async throws {
+        if let existing, !workspace.requiresLocationValidation {
+            await store.select(existing.id, intent: intent)
+            return
+        }
+        guard let location = workspace.location else {
+            throw RegistryQueryError("The recorded Task location is unavailable; no conversation was opened.")
+        }
+        let key = workspace.key
+        let query = location.machineId == localMachineId ? store.query
+            : store.query.onMachine(location.machineId, repository: key.repository)
+        var observation: TaskLocationObservation?
+        var task = key.id
+        // Restored retention and preparation use the same fresh location read.
+        if key.kind == .task {
+            let current = try await query.taskLocation(task: key.id, repository: key.repository, machine: location.machineId)
             try Task.checkCancellation()
-            guard !workspace.conversationClosed, workspace.location == location else { return }
-            guard record.workspace?.identity == location else {
-                throw RegistryQueryError("The conversation belongs to a different Machine or checkout; nothing was opened.")
+            guard case .recorded(let owner, let checkout) = current.location, checkout == location.worktree else {
+                throw RegistryQueryError("The recorded Task location changed; no conversation was opened.")
             }
-            workspace.conversationStart = nil
-            if location.machineId != localMachineId, let observation { store.retainLocation(observation, for: record) }
-            confirmLocation(in: workspace)
-            try Task.checkCancellation()
-            if let existing {
-                await store.select(existing.id)
-            } else {
-                store.reconcile([record])
-                store.adoptPreparation(record, intent: .reveal)
-                revealSession(record, in: workspace)
-                workspace.presentation.selectedSessionId = record.id
-                workspace.presentation.content = .terminals
+            observation = current
+            task = owner
+        }
+        let record: SessionRecord
+        if let existing { record = existing.record }
+        else if let id = workspace.multiplexer.sessionPane?.sessionId {
+            record = try await query.prepareSession(id: id, cwd: store.repoPath, intent: intent)
+        } else {
+            do {
+                record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath, intent: intent)
+            } catch {
+                let action = await query.startOffer(refused: intent, issue: task, cwd: store.repoPath)
+                if !Task.isCancelled, !workspace.conversationClosed, workspace.location == location,
+                   workspace.conversationIntent == intent {
+                    workspace.conversationStart = action
+                }
+                throw error
             }
-        } catch {
-            if !Task.isCancelled { workspace.conversationError = error.localizedDescription }
+        }
+        try Task.checkCancellation()
+        guard !workspace.conversationClosed, workspace.location == location else { return }
+        guard record.workspace?.identity == location else {
+            throw RegistryQueryError("The conversation belongs to a different Machine or checkout; nothing was opened.")
+        }
+        workspace.conversationStart = nil
+        if location.machineId != localMachineId, let observation { store.retainLocation(observation, for: record) }
+        confirmLocation(in: workspace)
+        try Task.checkCancellation()
+        if let existing {
+            await store.select(existing.id, intent: intent)
+        } else {
+            store.reconcile([record])
+            store.adoptPreparation(record, intent: intent)
+            // Its Session frame can arrive first; the person may have moved on since.
+            if workspace.multiplexer.pane(forSessionId: record.id) == nil { presentSession(record, in: workspace) }
         }
     }
 
@@ -760,8 +775,8 @@ final class SessionsWorkspaceRegistry {
 
     func prepareForQuit() {
         quitting = true
-        for task in reveals.values { task.cancel() }
-        reveals.removeAll()
+        for task in openings.values { task.cancel() }
+        openings.removeAll()
         for workspace in workspaces.values { workspace.prepareForQuit() }
         surfaces.clearFocus()
     }
@@ -780,8 +795,8 @@ final class SessionsWorkspaceRegistry {
         recentTasks = []
         restoreCandidates = []
         saveWarmIntent()
-        for task in reveals.values { task.cancel() }
-        reveals.removeAll()
+        for task in openings.values { task.cancel() }
+        openings.removeAll()
         for workspace in workspaces.values { workspace.closeWorkspace() }
         surfaces.clearFocus()
         onPreparationFinished?()
@@ -835,7 +850,7 @@ final class SessionsWorkspaceRegistry {
             recentTasks.insert(key, at: 0)
         }
         reconcileWarmth()
-        if let sessions { revealConversations(store: sessions) }
+        if let sessions { openWarmConversations(store: sessions) }
     }
 
     func inspect() -> [DesktopWorkspaceInspection] {
@@ -951,6 +966,12 @@ final class SessionsWorkspaceRegistry {
         workspace.multiplexer.reveal(sessionId: record.id, location: record.workspace?.identity)
     }
 
+    func presentSession(_ record: SessionRecord, in workspace: SessionsWorkspace) {
+        revealSession(record, in: workspace)
+        workspace.presentation.selectedSessionId = record.id
+        workspace.presentation.content = .terminals
+    }
+
     func reassociateRepository(from previous: String, to repository: String) {
         for key in keys where key.repository == previous {
             canonicalize(key, as: WorkWorkspaceKey(repository: repository, kind: key.kind,
@@ -1031,17 +1052,25 @@ struct SessionItem: Identifiable, Equatable {
         return message
     }
 
+    /// Reveal stopping at missing history is no failure once the Task may start one.
+    func opensAutomatically(intent: SessionOpenIntent) -> Bool {
+        if case .unavailable = state { return intent == .start }
+        return state == .pending
+    }
+
     mutating func adoptPreparation(_ record: SessionRecord, intent: SessionOpenIntent) {
         self.record = record
-        if intent == .reveal {
-            if record.action(.moveHere) != nil { state = .elsewhere }
+        if intent != .resume, let retry = record.launchRetry {
+            state = .failed(retry.help)
+        } else if intent == .reveal {
+            if record.heldElsewhere { state = .elsewhere }
             else if let action = record.action(.reveal) {
                 state = action.unavailableReason.map(State.unavailable) ?? .prepared
             } else { state = .failed("Reveal preparation is unavailable") }
         } else if record.openArgv.isEmpty {
             // Nothing to start: retained work attaches when shown.
             state = record.action(.open)?.unavailableReason.map(State.failed) ?? .pending
-        } else if intent != .resume, record.action(.moveHere) != nil {
+        } else if intent != .resume, record.heldElsewhere {
             state = .elsewhere
         } else {
             state = record.action(intent.action)?
@@ -1118,8 +1147,10 @@ final class SessionsStore {
         // and every pane reads this array.
         var next = sessions
         for record in records {
-            let observedState: SessionItem.State = localTerminal(for: record) != nil
-                ? .live : record.action(.moveHere) != nil ? .elsewhere : .pending
+            let observedState: SessionItem.State = if localTerminal(for: record) != nil { .live }
+                else if let retry = record.launchRetry { .failed(retry.help) }
+                else if record.heldElsewhere { .elsewhere }
+                else { .pending }
             if let index = next.firstIndex(where: { $0.id == record.id }) {
                 // Keep the command and connecting state until the relay confirms input.
                 if case .prepared = next[index].state {
@@ -1198,7 +1229,7 @@ final class SessionsStore {
         }
     }
 
-    func select(_ id: String) async {
+    func select(_ id: String, intent: SessionOpenIntent = .reveal) async {
         guard let index = _index(id) else { return }
         if localTerminal(for: sessions[index].record) != nil {
             if sessions[index].state == .prepared { return }
@@ -1206,10 +1237,9 @@ final class SessionsStore {
             return
         }
         if case .live = sessions[index].state {
-            sessions[index].state = sessions[index].record.action(.moveHere) != nil
-                ? .elsewhere : .pending
+            sessions[index].state = sessions[index].record.heldElsewhere ? .elsewhere : .pending
         }
-        await prepare(id, intent: .reveal)
+        await prepare(id, intent: intent)
     }
 
     func start(_ id: String) async {
@@ -1289,7 +1319,7 @@ final class SessionsStore {
         sessions[index].lastScreen = output ?? sessions[index].lastScreen
         switch sessions[index].state {
         case .prepared, .live:
-            sessions[index].state = sessions[index].record.action(.moveHere) != nil
+            sessions[index].state = sessions[index].record.heldElsewhere
                 ? .elsewhere : .ended(output ?? "Terminal output is unavailable.")
         case .pending, .elsewhere, .opening, .failed, .unavailable, .ended:
             break
@@ -1404,12 +1434,12 @@ private struct SessionsReconciler: View {
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                       let records else { return }
                 store.reconcile(records)
-                if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.revealPrimaryConversation() }
+                if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.openWarmConversations() }
             }
             .onChange(of: model.roadmap.value) { _, _ in
                 guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                       model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil else { return }
-                model.revealPrimaryConversation()
+                model.openWarmConversations()
             }
     }
 }
@@ -1701,7 +1731,7 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
-        .onChange(of: task.map { $0.task.runtime?.status.isTerminal ?? $0.task.task.isTerminal }, initial: true) { _, completed in
+        .onChange(of: task.map { $0.task.isCompleted }, initial: true) { _, completed in
             if let completed { workspaces.updateCompletion(key, completed: completed) }
         }
     }

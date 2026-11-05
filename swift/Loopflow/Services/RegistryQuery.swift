@@ -974,6 +974,11 @@ public struct RegistryQuery: Sendable {
         return report.actions.first { $0.kind == .open && $0.unavailableReason == nil }
     }
 
+    /// Only a refused reveal can offer Start; a failed Start reports its own failure.
+    public func startOffer(refused intent: SessionOpenIntent, issue: String, cwd: String) async -> SessionAction? {
+        intent == .reveal ? try? await taskConversationStart(issue: issue, cwd: cwd) : nil
+    }
+
     /// Prepare without launching. Resume transfers control; Start and reveal never
     /// replace input. Only Start may create the first provider thread.
     public func prepareSession(

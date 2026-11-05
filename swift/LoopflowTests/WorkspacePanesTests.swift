@@ -51,11 +51,13 @@ struct WorkspacePanesTests {
         #expect(view.sessions.sessions.isEmpty)
     }
 
-    @Test("A failed Task conversation shows its reason beside Open conversation")
+    @Test("A failed Task conversation shows its reason beside Retry")
     func failedConversationShowsItsReason() throws {
         let (workspace, view) = taskPanes()
         workspace.conversationError = "Conversation launcher unavailable"
         _ = try view.inspect().find(text: "Conversation launcher unavailable")
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
+        #expect(try button.labelView().text().string() == "Retry")
     }
 
     @Test("Collapsed panes offer Open conversation when the named Session isn't held")

@@ -228,6 +228,14 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         guard let runtime else { return false }
         return runtime.owner == nil && runtime.status != .unstarted && !runtime.status.isTerminal
     }
+
+    public var isCompleted: Bool { runtime?.status.isTerminal ?? task.isTerminal }
+
+    /// Owned working Tasks start their conversation when opened; others only show
+    /// history. An unassigned Task is backlog: nothing moves it until someone claims it.
+    public var conversationIntent: SessionOpenIntent {
+        runtime?.status.isWorking == true && !isUnassigned ? .start : .reveal
+    }
 }
 
 /// What a shipped Task is doing, derived in Rust; nothing here waits on a person.

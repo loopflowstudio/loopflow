@@ -478,7 +478,7 @@ struct WorkspaceSessionLifecycleTests {
         #expect(await calls.count == 1)
     }
 
-    @Test("Missing history remains an explicit Start through refresh and rendering")
+    @Test("Explicit history-only reveal preserves Start recovery outside working Task initialization")
     func missingHistoryRecovery() async throws {
         let missing = try missingHistorySession()
         let wire = String(decoding: try JSONEncoder().encode(missing), as: UTF8.self)
@@ -505,6 +505,33 @@ struct WorkspaceSessionLifecycleTests {
         while store.sessions.first?.surface == nil, ContinuousClock.now < deadline { await Task.yield() }
         #expect(store.sessions.first?.state == .prepared)
         #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", missing.id, "--start-if-free"])
+    }
+
+    @Test("A Task that becomes working starts the history its reveal could not find")
+    func missingHistoryOpensOnceTaskWorks() async throws {
+        let missing = try missingHistorySession()
+        let wire = String(decoding: try JSONEncoder().encode(missing), as: UTF8.self)
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            if args.contains("--reveal-existing") { return wire }
+            #expect(args.contains("--start-if-free"))
+            var started = missing
+            started.openArgv.append("--start-if-free")
+            return String(decoding: try JSONEncoder().encode(started), as: UTF8.self)
+        })
+        store.reconcile([missing])
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let workspace = registry.open(WorkWorkspaceKey(repository: "repo", kind: .task, id: "task"), title: "Task", location: nil)
+        workspace.multiplexer.load(sessionId: missing.id)
+        registry.openWarmConversations(store: store)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.state == .pending || store.sessions.first?.state == .opening, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.first?.surface == nil)
+        workspace.conversationIntent = .start
+        registry.openWarmConversations(store: store)
+        while store.sessions.first?.surface == nil, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(store.sessions.first?.launchArguments.contains("--start-if-free") == true)
+        registry.prepareForQuit()
     }
 
     @Test("Fresh ownership replaces unavailable opening with Take back")
@@ -585,6 +612,64 @@ struct WorkspaceSessionLifecycleTests {
         #expect(store.sessions.first?.surface == nil)
     }
 
+    @Test("A consumed first launch recovers with one Try again; refresh never repeats it")
+    func consumedLaunchRecoversFromThePane() async throws {
+        let reads = RecordedArguments()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            await reads.record(args)
+            return session(id: "consumed", state: "closed")
+        })
+        let consumed = try consumedLaunchSession()
+        store.reconcile([consumed])
+        store.reconcile([consumed])
+        let failed = try #require(store.sessions.first)
+        #expect(failed.error == consumed.launchRetry?.help)
+        #expect(!failed.opensAutomatically(intent: .start))
+        #expect(await reads.all.isEmpty)
+
+        let view = recoveryPane(store, intent: .start)._sessionPlaceholder(failed)
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "session-open-here-consumed").button()
+        #expect(try button.labelView().text().string() == "Try again")
+        try button.tap()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.state != .prepared, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.first?.state == .prepared)
+        let sent = try #require(await reads.all.first)
+        #expect(!sent.contains("--start-if-free") && !sent.contains("--reveal-existing"))
+    }
+
+    @Test("Automatic Start stops at a consumed launch instead of reporting a holder")
+    func startAdoptsConsumedLaunchAsFailure() async throws {
+        let consumed = try consumedLaunchSession()
+        let reply = String(decoding: try JSONEncoder().encode(consumed), as: UTF8.self)
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in reply })
+        store.reconcile(try records([session(id: "consumed", state: "closed")]))
+        await store.select(consumed.id, intent: .start)
+        #expect(store.sessions.first?.error == consumed.launchRetry?.help)
+    }
+
+    @Test("Retry stays non-replacing while another client holds input")
+    func retryBesideTakeBackKeepsTheOpeningIntent() async throws {
+        let reads = RecordedArguments()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            await reads.record(args)
+            if await reads.all.count == 1 { throw RegistryQueryError("Temporary transport failure") }
+            return session(id: "held", state: "active")
+        })
+        let held = try #require(records([session(id: "held", state: "active")]).first)
+        #expect(held.heldElsewhere && held.launchRetry == nil)
+        store.reconcile([held])
+        await store.select(held.id, intent: .reveal)
+        let failed = try #require(store.sessions.first)
+        let button = try recoveryPane(store, intent: .start)._sessionPlaceholder(failed).inspect()
+            .find(viewWithAccessibilityIdentifier: "session-open-here-held").button()
+        #expect(try button.labelView().text().string() == "Retry")
+        try button.tap()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while await reads.all.count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(try #require(await reads.all.last).contains("--start-if-free"))
+    }
+
     @Test("Eviction fences a preparation that returns after release")
     func releaseFencesLatePreparation() async throws {
         let started = AsyncStream<Void>.makeStream(), response = AsyncStream<Void>.makeStream()
@@ -621,7 +706,7 @@ struct WorkspaceSessionLifecycleTests {
             workspace.multiplexer.load(sessionId: id)
             workspaces.append(workspace)
         }
-        registry.revealConversations(store: store)
+        registry.openWarmConversations(store: store)
         let deadline = ContinuousClock.now + .seconds(3)
         while await reads.ids.count < 2, ContinuousClock.now < deadline { await Task.yield() }
         #expect(await reads.ids == ["c", "b"])
@@ -667,13 +752,28 @@ private actor AttachmentReads {
     func record() { count += 1 }
 }
 
+private actor RecordedArguments {
+    private(set) var all: [[String]] = []
+    func record(_ args: [String]) { all.append(args) }
+}
+
 @MainActor
-private func recoveryPane(_ store: SessionsStore) -> SessionPaneView {
+private func recoveryPane(_ store: SessionsStore, intent: SessionOpenIntent = .reveal) -> SessionPaneView {
     let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task"),
         title: "Task", location: nil, localMachineId: fixtureMachineId)
+    workspace.conversationIntent = intent
     let model = WorkModel(query: store.query, repoPath: store.repoPath)
     return SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
         sessions: store, workspace: workspace, model: model, onFocus: { _, _ in })
+}
+
+private func consumedLaunchSession() throws -> SessionRecord {
+    var wire = try #require(JSONSerialization.jsonObject(with: Data(session(id: "consumed", state: "closed").utf8)) as? [String: Any])
+    wire["actions"] = [
+        ["kind": "move_here", "label": "Try again", "help": "The previous launch ended", "unavailable_reason": NSNull()],
+        ["kind": "reveal", "label": "Show conversation", "help": "Existing history", "unavailable_reason": "No saved provider history; start this conversation explicitly"],
+    ]
+    return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
 }
 
 private func missingHistorySession() throws -> SessionRecord {

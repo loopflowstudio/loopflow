@@ -60,13 +60,14 @@ struct TaskConversationButton: View {
     let model: WorkModel
 
     var body: some View {
-        Button(workspace.conversationStart?.label ?? "Open conversation") {
+        let failed = workspace.conversationError != nil
+        Button(workspace.conversationStart?.label ?? (failed ? "Retry" : "Open conversation")) {
             Task {
                 if workspace.conversationStart != nil { await model.startTaskConversation(in: workspace) }
-                else { await model.openTaskConversation(workspace.key.id) }
+                else { await model.openTaskConversation(workspace.key.id, intent: failed ? workspace.conversationIntent : nil) }
             }
         }
-        .help(workspace.conversationStart?.help ?? "Show the recorded conversation")
+        .help(workspace.conversationStart?.help ?? (failed ? "Try opening this conversation again" : "Show the recorded conversation"))
         .accessibilityIdentifier("task-open-conversation")
     }
 }
@@ -773,13 +774,13 @@ struct SessionPaneView: View {
 
     @ViewBuilder
     var emptyWorkspace: some View {
-        if workspace.openingConversation {
+        if model.conversationIsOpening(workspace) {
             ProgressView("Opening conversation…")
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task {
             PaneEmptyState(title: "No Task conversation open", systemImage: "bubble.left",
-                description: workspace.conversationStart?.help ?? workspace.conversationError ?? "Open this Task’s recorded conversation.") {
+                description: workspace.conversationError ?? workspace.conversationStart?.help ?? "Open this Task’s recorded conversation.") {
                 TaskConversationButton(workspace: workspace, model: model)
             }
         } else {
@@ -824,7 +825,7 @@ struct SessionPaneView: View {
                            description: message) {
                 openButton(item)
             }
-        case .pending where workspace.openingConversation:
+        case .pending where model.conversationIsOpening(workspace):
             ProgressView("Opening conversation…")
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -836,15 +837,16 @@ struct SessionPaneView: View {
         }
     }
 
-    /// Rust supplies the current recovery action; Retry only reveals existing history.
+    /// Retry uses the workspace opening intent; only Take back and a consumed
+    /// launch's Try again go past it.
     @ViewBuilder
     private func openButton(_ item: SessionItem) -> some View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
-            let retry = item.error != nil
+            let retry = item.error != nil && item.record.launchRetry == nil
             Button(retry ? "Retry" : action.label) {
                 sessions.beginPaneLoad(item.id)
                 Task { @MainActor in
-                    if retry { await sessions.select(item.id) }
+                    if retry { await sessions.select(item.id, intent: workspace.conversationIntent) }
                     else if action.kind == .moveHere { await sessions.moveHere(item.id) }
                     else { await sessions.start(item.id) }
                 }
@@ -853,7 +855,7 @@ struct SessionPaneView: View {
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
             .disabled(!retry && action.unavailableReason != nil)
-            .help(retry ? "Show existing history without taking another terminal’s input" : action.unavailableReason ?? action.help)
+            .help(retry ? "Open the conversation without taking another terminal’s input" : action.unavailableReason ?? action.help)
             .accessibilityIdentifier("session-open-here-\(item.id)")
         }
     }

@@ -33,11 +33,48 @@ Historical pre-infrastructure proposals (detached quota, old budget, Claude-only
 Fork and snapshot construction) are superseded. Their full source is preserved at
 `a32c385044:scratch/research/loo-672-pre-infrastructure-plan.md`.
 
-Historical correction before the latest re-demo clarification (superseded where
-it requires a Start click): The existing resume explanation
-supplies the absent-Session action; Start now uses the shared non-replacing opening
-path through execution and transport claim. Only explicit Take back authorizes
-replacement, including when ownership changes after preparation.
-The candidate uses disposable planning/checkout data and prepared native-provider
-metadata. No real provider has launched in this headless pass; native input,
-drafts and footprint remain demo evidence, not assumptions of success.
+Implementation assumption, November 4: reuse non-replacing Start for automatic
+working Task openings; keep explicit history-only reveal for other Work. If an
+input was already consumed but no native history survived, navigation does not
+replay it; the pane's **Try again** or `lf resume` does. The current headless run verifies preparation and ownership; rendered native acceptance
+remains with the Graph's demo step.
+
+Implementation assumption, November 4: automatic startup needs a Task owner.
+Unassigned working Tasks stay backlog, matching the Wave board and "nothing moves an
+unassigned Task"; selecting one still shows its existing Claim and Start offer. Jack
+said working Tasks without naming this case. To include them, drop the `isUnassigned`
+term in `RoadmapTask.conversationIntent` and show their conversation instead.
+
+Concept-review assumption, November 4: a Task primary's first turn with no person's
+request reads and reports, whether Desktop opened it or someone ran `lf resume --task`.
+This drops operating without a greeting on that explicit path, because the launch cannot
+tell the two apart without carrying a new bit through the transport. A person is present
+there and one message starts operation. To keep it, pass automatic opening into launch.
+
+Concept-review assumption, November 4: steers delivered with an automatic first turn
+are reported, not acted on. Jack excluded replaying old Task input through navigation,
+and the Session cannot tell a fresh comment from history at that boundary. A comment
+written just before load therefore waits for the person's first message there; Graph
+steps still receive it. To act on fresh steers, a delivery rule must separate them.
+
+Implementation assumption, November 4: only new checkouts get the created marker. Task
+checkouts made before this fix have none, and a Task can adopt a hand-made checkout, so
+marking them all would trust folders lf never created. Each such checkout without a trust
+entry shows Claude's dialog once, reported as Available. This checkout is one of them. To
+remove that one-time dialog, record placement strategy on the Task and backfill from it.
+
+Concept-review assumption, November 4: a consumed first launch with no history recovers with
+one click, not automatically. Its capture may hold only the generated reading pass, so another
+attempt would replay nothing Jack wrote, but retrying on load relaunches a dead provider on every
+refresh, across up to eight Tasks. So a reboot or quit before the provider writes history costs
+one **Try again** for that Task. To make it clickless, allow one automatic retry per Desktop run
+for a Task primary with no stored request.
+
+Concept-review assumption, November 4: a conversation that finished its automatic reading pass
+counts as Available like any other idle conversation. So after a load, up to eight Tasks appear in
+the sidebar's Available filter and as available on the Wave board, though nobody asked them anything.
+Availability is judged in Rust from provider evidence, and a report is waiting there. To keep the
+filter for conversations a person has engaged, exclude a Session whose only turn is the automatic one.
+
+Historical Start-click correction evidence:
+`3ef57e857394d5a97271ea00b6048ad60c22bf9a:scratch/questions.md`.

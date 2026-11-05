@@ -3,7 +3,7 @@
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Product writes read before they write (for example, validating parent Work),
 // so a deferred transaction has to upgrade its read lock to a write
@@ -151,6 +151,62 @@ fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreR
     Ok(())
 }
 
+fn place_task_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    worktree: &Path,
+    workspace_slug: &str,
+    pr: &TaskPr,
+) -> StoreResult<()> {
+    let mut task = task_on(conn, task_id)?.ok_or(StoreError::NotFound)?;
+    if task.worktree.is_some() {
+        return Ok(());
+    }
+    if super::durable::task_state_in(conn, task_id)?.is_terminal() {
+        return Err(StoreError::InvalidAuthority(
+            "terminal Task cannot allocate a checkout".into(),
+        ));
+    }
+    if let Some(project) = &task.project_id {
+        super::durable::require_selected_project(conn, project)?;
+    }
+    require_task_planning(conn, &task)?;
+    // Allocating a checkout is the actual work reservation: it claims an
+    // unowned Task, and refuses one owned on another Machine.
+    super::task_ownership::claim_in(conn, task_id)?;
+    record_task_branch_in(conn, task_id, &pr.branch)?;
+    let local = super::durable::map_local_machine(conn)?.id;
+    task.worktree = Some(worktree.to_path_buf());
+    task.workspace_slug = workspace_slug.to_string();
+    task.branch = pr.branch.clone();
+    task.base_commit = pr.base_commit.clone();
+    task.parent_pr_id = pr.parent_pr_id.clone();
+    validate_initial_task_pr(&task, pr)?;
+    conn.execute(
+            "UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
+            params![
+                task_id.as_str(),
+                worktree.display().to_string(),
+                workspace_slug,
+                now_unix(), task.branch, task.base_commit, task.parent_pr_id.as_ref().map(TaskPrId::as_str), local.as_str()
+            ],
+        )?;
+    if pr.publication.is_some() {
+        insert_task_pr(conn, pr)?;
+    }
+    seed_task_linear_observation(conn, &task)?;
+    insert_task_event_in(
+        conn,
+        task_id,
+        &TaskEventKind::CheckoutInitializing {
+            branch: pr.branch.clone(),
+            path: worktree.display().to_string(),
+            base_commit: pr.base_commit.clone(),
+        },
+    )?;
+    Ok(())
+}
+
 impl SqliteStore {
     /// Apply the placement transaction's admission rule before preparing Git work.
     pub fn validate_task_planning(&self, task: &Task) -> StoreResult<()> {
@@ -173,52 +229,90 @@ impl SqliteStore {
         let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-        if task.worktree.is_some() {
-            return Ok(task);
+        place_task_in(&tx, task_id, worktree, workspace_slug, pr)?;
+        let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(task)
+    }
+
+    /// Commit promotion as one local effect. The caller holds checkout admission
+    /// across source resolution and this write; no provider or filesystem is changed.
+    pub(crate) fn promote_task(
+        &self,
+        task_id: &TaskId,
+        creation: Option<&NewTask>,
+        placement: Option<&(PathBuf, TaskPr)>,
+        session: Option<&crate::session::LfSession>,
+        destination: Option<&Path>,
+    ) -> StoreResult<Task> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(input) = creation {
+            if let Some(project) = &input.project_id {
+                super::durable::require_selected_project(&tx, project)?;
+            }
+            create_task_in(&tx, input)?;
         }
-        if super::durable::task_state_in(&tx, task_id)?.is_terminal() {
-            return Err(StoreError::InvalidAuthority(
-                "terminal Task cannot allocate a checkout".into(),
-            ));
+        if let Some((path, pr)) = placement {
+            let current = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+            if current
+                .worktree
+                .as_ref()
+                .is_some_and(|existing| existing != path)
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "Task acquired another checkout before promotion; existing work is unchanged"
+                        .into(),
+                ));
+            }
+            // Completion may have arrived after source preparation. Binding still
+            // selects the conversation, without allocating or reopening work.
+            if !super::durable::task_state_in(&tx, task_id)?.is_terminal() {
+                place_task_in(&tx, task_id, path, &pr.slug, pr)?;
+                insert_task_event_in(
+                    &tx,
+                    task_id,
+                    &TaskEventKind::CheckoutReady {
+                        branch: pr.branch.clone(),
+                        base_commit: pr.base_commit.clone(),
+                    },
+                )?;
+            }
         }
-        if let Some(project) = &task.project_id {
-            super::durable::require_selected_project(&tx, project)?;
+        if let Some(session) = session {
+            super::task_ownership::claim_in(&tx, task_id)?;
+            // Transfer only the selected conversation out of its shared primary
+            // scope. The checkout and historical captures retain their owners.
+            tx.execute(
+                "UPDATE agent_sessions SET primary_scope=NULL,
+                 wave_id=CASE WHEN task_id IS NULL THEN NULL ELSE wave_id END
+                 WHERE id=?1 AND primary_scope IS NOT NULL",
+                [session.id.as_str()],
+            )?;
+            // Re-read the capture under the transaction: promotion changes only
+            // prospective ownership, so a concurrent input need not be replayed.
+            let current =
+                super::sessions::session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
+            if current.cwd != session.cwd {
+                return Err(StoreError::InvalidAuthority(
+                    "Session workspace changed before binding".into(),
+                ));
+            }
+            super::sessions::bind_session_in(&tx, &current, task_id)?;
+            super::sessions::choose_task_primary_in(&tx, task_id, &session.id)?;
+            if let Some(cwd) = destination {
+                let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+                if task.worktree.as_deref() != Some(cwd) {
+                    return Err(StoreError::InvalidAuthority(
+                        "Task workspace changed before promotion; retry".into(),
+                    ));
+                }
+                tx.execute(
+                    "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+                    params![session.id, cwd.to_string_lossy()],
+                )?;
+            }
         }
-        require_task_planning(&tx, &task)?;
-        // Allocating a checkout is the actual work reservation: it claims an
-        // unowned Task, and refuses one owned on another Machine.
-        super::task_ownership::claim_in(&tx, task_id)?;
-        record_task_branch_in(&tx, task_id, &pr.branch)?;
-        let local = super::durable::map_local_machine(&tx)?.id;
-        task.worktree = Some(worktree.to_path_buf());
-        task.workspace_slug = workspace_slug.to_string();
-        task.branch = pr.branch.clone();
-        task.base_commit = pr.base_commit.clone();
-        task.parent_pr_id = pr.parent_pr_id.clone();
-        validate_initial_task_pr(&task, pr)?;
-        tx.execute(
-            "UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
-            params![
-                task_id.as_str(),
-                worktree.display().to_string(),
-                workspace_slug,
-                now_unix(), task.branch, task.base_commit, task.parent_pr_id.as_ref().map(TaskPrId::as_str), local.as_str()
-            ],
-        )?;
-        if pr.publication.is_some() {
-            insert_task_pr(&tx, pr)?;
-        }
-        seed_task_linear_observation(&tx, &task)?;
-        insert_task_event_in(
-            &tx,
-            task_id,
-            &TaskEventKind::CheckoutInitializing {
-                branch: pr.branch.clone(),
-                path: worktree.display().to_string(),
-                base_commit: pr.base_commit.clone(),
-            },
-        )?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)

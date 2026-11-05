@@ -201,7 +201,7 @@ When the person starts or forks a conversation, the observer selects it as the
 Session's AgentSession and binds it to the Session's context, so lf's hooks answer
 there too.
 
-Attachment alone does not revoke the old client's writes, and with no lf in the path
+Attachment alone does not revoke the old client's writes, and with lf out of the path
 no dispatch can check them. The observer ends the exact client its attachment opened
 once a mover replaces that attachment. Native launch carries the frozen attachment
 in memory, separately from stable tool provenance. Admission validates that token;

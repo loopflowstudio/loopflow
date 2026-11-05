@@ -332,10 +332,12 @@ lf session list --on claude:fable               # every open Fable Session
 lf session move --blocked -a claude:opus        # continue them on Opus: idle ones at their next open, busy ones after their turn
 lf session move --on jack@ --account work@      # switch the shared login; every open Claude follows
 lf account claude drain jack@ --to work@        # stop routing to a login and move what is on it
+lf account set claude jack@ --routing automatic # route to it again after a drain
 ```
 
 `--blocked` and `--on` are the one Session selector; `list` previews what
-`move` acts on. A move never writes preferences. In the Desktop,
+`move` acts on. A move never writes preferences; `drain` is the one that
+changes routing, setting the drained login `explicit-only`. In the Desktop,
 View → Move Blocked Sessions… runs the same move.
 
 ## Switch the shared account

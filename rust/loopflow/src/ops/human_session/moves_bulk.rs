@@ -4,7 +4,7 @@
 //! seeded thread, now when idle, after its turn when busy. Nothing here
 //! writes preferences.
 
-use std::path::Path;
+use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -15,6 +15,7 @@ use crate::id::LfSessionId;
 use crate::provider_account::activation;
 use crate::provider_auth::Provider;
 use crate::session::SessionFilter;
+use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccount, RoutingState, SharedStore, StorageConfig};
 
 /// Where the selected Sessions go.
@@ -302,24 +303,71 @@ pub(crate) async fn drain_account(
     Ok((target, report))
 }
 
-/// The move `lf session move` left for a busy Session, applied once its turn
-/// ends. `thread` is the provider's conversation id from the Stop hook.
-pub(crate) fn apply_pending_move_blocking(home: &Path, thread: &str) -> Result<()> {
+/// At a Stop hook: when a move waits for `session`, start its applier beside
+/// the provider and return at once. The hook only peeks, through the store it
+/// opened for the turn; the applier stops the provider, so it must outlive the
+/// hook rather than run inside it.
+pub(crate) fn start_pending_move(store: &SqliteStore, session: &str) -> Result<bool> {
+    if store.pending_session_move(session)?.is_none() {
+        return Ok(false);
+    }
+    let mut command = std::process::Command::new(crate::os_process::resolve_lf_binary()?);
+    command
+        .args(["__context-block", "--moment", "move"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // SAFETY: only an async-signal-safe syscall runs between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    command.spawn().context("start the pending Session move")?;
+    Ok(true)
+}
+
+/// The applier a Stop hook started. Once the hook has exited, so the turn has
+/// ended, the Session continues on the requested agent the way an idle
+/// Session's move does.
+pub(crate) fn apply_pending_move() -> Result<()> {
+    let adapter: crate::steer::SteerAdapter =
+        serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
+    wait_for_hook_exit();
+    let home = crate::store::lf_home_dir();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = Arc::new(
             crate::store::open_store(&StorageConfig::sqlite(home.join("loopflow.db"))).await?,
         );
-        let Some(session) = super::session_by_id(&store, thread).await? else {
-            return Ok(());
-        };
-        let Some(agent) = store.sqlite.take_session_move(session.id.as_str())? else {
-            return Ok(());
-        };
-        new_thread(&store, session.id.as_str(), Some(&agent), false, false)
-            .await
-            .map(drop)
+        apply_move(&store, &adapter.session).await
     })
+}
+
+/// The hook that started this applier is its parent until it exits; the
+/// provider ends its turn right after. The wait outlasts the hook's timeout.
+fn wait_for_hook_exit() {
+    let hook = std::os::unix::process::parent_id();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::os::unix::process::parent_id() == hook && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    std::thread::sleep(std::time::Duration::from_secs(1));
+}
+
+/// Continue `session` on its pending move's agent. The request is cleared only
+/// after the new input is appended, so a failed or killed apply is retried at
+/// the Session's next Stop instead of lost.
+async fn apply_move(store: &SharedStore, session: &str) -> Result<()> {
+    let Some(agent) = store.sqlite.pending_session_move(session)? else {
+        return Ok(());
+    };
+    new_thread(store, session, Some(&agent), false, false).await?;
+    store.sqlite.clear_session_move(session, &agent)?;
+    Ok(())
 }
 
 fn account_login(account: &ProviderAccount) -> &str {
@@ -331,7 +379,9 @@ fn account_login(account: &ProviderAccount) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{follow_login, selected_providers, MoveReport, SessionRecord};
+    use super::{
+        apply_move, follow_login, selected_providers, start_pending_move, MoveReport, SessionRecord,
+    };
     use crate::provider_auth::Provider;
 
     fn session(title: &str, provider: &str, blocked: bool) -> SessionRecord {
@@ -387,5 +437,44 @@ mod tests {
             ]
         );
         assert!(report.skipped.is_empty());
+    }
+
+    #[test]
+    fn a_stop_with_no_pending_move_starts_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap();
+        assert!(!start_pending_move(&store, "session_idle").unwrap());
+    }
+
+    #[test]
+    fn a_failed_apply_leaves_the_move_for_the_next_stop() {
+        let home = super::super::tests::SessionHome::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let store = home.store().await;
+            store
+                .sqlite
+                .record_session_move("session_missing", "codex")
+                .unwrap();
+            assert!(apply_move(&store, "session_missing").await.is_err());
+            assert_eq!(
+                store
+                    .sqlite
+                    .pending_session_move("session_missing")
+                    .unwrap(),
+                Some("codex".into())
+            );
+            store
+                .sqlite
+                .clear_session_move("session_missing", "claude:opus")
+                .unwrap();
+            assert!(store
+                .sqlite
+                .pending_session_move("session_missing")
+                .unwrap()
+                .is_some());
+        });
     }
 }

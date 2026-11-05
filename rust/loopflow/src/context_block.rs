@@ -37,6 +37,9 @@ pub enum ContextMoment {
     /// A Pi bash command is about to run: join its tool group to the watchdog
     /// that ends the group with its provider.
     ToolGroup,
+    /// Started by a Stop hook: once that hook exits, apply the Session's
+    /// pending move.
+    Move,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave

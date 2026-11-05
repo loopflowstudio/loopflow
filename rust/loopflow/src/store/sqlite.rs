@@ -1337,20 +1337,26 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Take the move left for `session`, if any.
-    pub fn take_session_move(&self, session: &str) -> StoreResult<Option<String>> {
+    /// The agent a move left for `session` names, if one waits.
+    pub fn pending_session_move(&self, session: &str) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let agent = conn
+        Ok(conn
             .query_row(
                 "SELECT agent FROM session_moves WHERE session_id = ?1",
                 [session],
                 |row| row.get::<_, String>(0),
             )
-            .optional()?;
-        if agent.is_some() {
-            conn.execute("DELETE FROM session_moves WHERE session_id = ?1", [session])?;
-        }
-        Ok(agent)
+            .optional()?)
+    }
+
+    /// Clear an applied move. A move re-requested for another agent meanwhile stays.
+    pub fn clear_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM session_moves WHERE session_id = ?1 AND agent = ?2",
+            [session, agent],
+        )?;
+        Ok(())
     }
 
     // -- Access profiles and provider routes ----------------------------------

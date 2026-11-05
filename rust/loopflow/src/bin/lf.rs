@@ -2875,6 +2875,10 @@ fn execute_command(
             ..
         }) => loopflow::provider_account::observe_native_limit(),
         Some(Commands::ContextBlock {
+            moment: ContextMoment::Move,
+            ..
+        }) => loopflow::lf::commands::context::apply_session_move(),
+        Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),

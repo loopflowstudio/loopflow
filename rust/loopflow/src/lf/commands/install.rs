@@ -3027,7 +3027,6 @@ mod settle_tests {
     fn inventory(binaries: Vec<RunningBinary>) -> BinaryInventory {
         BinaryInventory {
             selected: None,
-            store_floor: None,
             binaries,
         }
     }
@@ -3037,7 +3036,6 @@ mod settle_tests {
             path: Some(PathBuf::from("/home/.lf/bin/lf-d49c57c")),
             version: Some("0.15.1".into()),
             selected: false,
-            cannot_open_store: false,
             processes: vec![RunningLfProcess {
                 id: LfProcessId::new(),
                 pid: 1,

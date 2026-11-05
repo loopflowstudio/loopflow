@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::WorkRef;
+use crate::lf::commands::write::SessionOpenIntent;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
 use crate::store::sqlite::SqliteStore;
@@ -193,7 +194,7 @@ pub(crate) async fn select_connection(
     store: &SharedStore,
     cwd: &Path,
     target: SessionTarget<'_>,
-    reveal_existing: bool,
+    intent: SessionOpenIntent,
 ) -> Result<Selected> {
     use crate::session::PrimaryScope;
     let target = resolve_target(store, target).await?;
@@ -207,7 +208,7 @@ pub(crate) async fn select_connection(
         }
         return Err(unassociated_checkout(cwd)?);
     };
-    if reveal_existing {
+    if intent == SessionOpenIntent::Reveal {
         let session = match &scope {
             PrimaryScope::Task(task) => primary::task_conversation(store, task).await?,
             _ => store.sqlite.primary_session(&scope)?,
@@ -347,18 +348,18 @@ fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAct
 }
 
 fn name_session_holder(actions: &mut [SessionAction], terminal: Option<&str>) {
-    let holder = match terminal {
-        Some(id) if id.starts_with("rex:") => format!("Rex ({})", &id[4..]),
-        Some(id) if id.starts_with("cmux:") => format!("cmux ({})", &id[5..]),
-        Some(_) => "another client on this Machine".to_string(),
-        None => "another terminal on this Machine".to_string(),
-    };
     if !actions
         .iter()
         .any(|action| action.kind == SessionActionKind::MoveHere)
     {
         return;
     }
+    let holder = match terminal {
+        Some(id) if id.starts_with("rex:") => format!("Rex ({})", &id[4..]),
+        Some(id) if id.starts_with("cmux:") => format!("cmux ({})", &id[5..]),
+        Some(_) => "another client on this Machine".to_string(),
+        None => "another terminal on this Machine".to_string(),
+    };
     for action in actions {
         match action.kind {
             SessionActionKind::Open => {
@@ -1015,10 +1016,11 @@ pub(crate) async fn open(
 pub(crate) async fn open_without_replacing(
     store: &SharedStore,
     id: &str,
-    start: bool,
+    intent: SessionOpenIntent,
     launch: bool,
     json: bool,
 ) -> Result<SessionRecord> {
+    let start = intent == SessionOpenIntent::Start;
     let lock_id = id.to_owned();
     let lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
@@ -1063,15 +1065,15 @@ pub(crate) async fn open_without_replacing(
     } else {
         None
     };
-    let (kind, flag) = if start {
-        (SessionActionKind::Open, "--start-if-free")
+    let kind = if start {
+        SessionActionKind::Open
     } else {
-        (SessionActionKind::Reveal, "--reveal-existing")
+        SessionActionKind::Reveal
     };
     if let Some(action) = record.actions.iter_mut().find(|action| action.kind == kind) {
         action.unavailable_reason = reason.clone();
     }
-    record.open_argv.push(flag.to_string());
+    record.open_argv.extend(intent.flag().map(str::to_string));
     if !launch {
         return Ok(record);
     }

@@ -685,8 +685,9 @@ final class SessionsWorkspaceRegistry {
         guard !presentationClosed, !quitting else { return }
         sessions = store
         for key in warmWork {
-            guard !quitting, openings.count < Self.preparationLimit, canPrepare?() != false, let workspace = workspaces[key], !workspace.conversationClosed,
-                  openings[key] == nil, !workspace.openingConversation, workspace.conversationError == nil else { continue }
+            guard openings.count < Self.preparationLimit, canPrepare?() != false else { break }
+            guard let workspace = workspaces[key], !workspace.conversationClosed, openings[key] == nil,
+                  !workspace.openingConversation, workspace.conversationError == nil else { continue }
             let id = workspace.multiplexer.sessionPane?.sessionId
             let existing = id.flatMap { id in store.sessions.first { $0.id == id } }
             if let existing {

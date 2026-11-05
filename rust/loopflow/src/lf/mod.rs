@@ -1530,6 +1530,17 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
+    pub fn intent(&self) -> crate::lf::commands::write::SessionOpenIntent {
+        use crate::lf::commands::write::SessionOpenIntent;
+        if self.reveal_existing {
+            SessionOpenIntent::Reveal
+        } else if self.start_if_free {
+            SessionOpenIntent::Start
+        } else {
+            SessionOpenIntent::Resume
+        }
+    }
+
     pub fn target<'a>(
         &'a self,
         cli: &'a Cli,

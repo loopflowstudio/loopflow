@@ -326,4 +326,11 @@ open, unstarted offer Start, one placeholder); no code change, no rerun. Impleme
 November 5 (seventh-review residue): `showsTerminals` loses its owner term, two
 `WorkspacePanesTests` cover a finished unowned Task revealing into panes and a
 finished owned Task without history showing its record; same filter, 167 passed
-in 7 suites; Rust unchanged, no rerun.
+in 7 suites; Rust unchanged, no rerun. Compress, November 5 (seventh-review
+residue): Rust's opening intent is one `SessionOpenIntent` end to end
+(`SessionConnectionArgs::intent`, `select_connection` and `open_without_replacing`
+take it, `flag()` owns the two flag spellings), `awaitsStart` sits beside
+`isCompleted`/`conversationIntent` in `WaveWorkMap.swift`, the warm queue stops at
+full slots; `cargo test -p loopflow --lib ops::human_session::` 36 passed,
+`lf::commands::write::` 3 passed, clippy clean; same Desktop filter plus
+`DashboardWorkspaceTests`, 180 passed in 8 suites.

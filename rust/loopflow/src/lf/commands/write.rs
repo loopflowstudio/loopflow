@@ -31,6 +31,17 @@ pub enum SessionOpenIntent {
     Reveal,
 }
 
+impl SessionOpenIntent {
+    /// The `lf session resume` flag carrying this intent; ordinary resume has none.
+    pub fn flag(self) -> Option<&'static str> {
+        match self {
+            Self::Resume => None,
+            Self::Start => Some("--start-if-free"),
+            Self::Reveal => Some("--reveal-existing"),
+        }
+    }
+}
+
 /// A write an app makes inside its own process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
@@ -241,11 +252,7 @@ impl Write {
                     words.extend(["--agent", agent]);
                 }
                 words.extend(["session", "resume"]);
-                match intent {
-                    SessionOpenIntent::Resume => {}
-                    SessionOpenIntent::Start => words.push("--start-if-free"),
-                    SessionOpenIntent::Reveal => words.push("--reveal-existing"),
-                }
+                words.extend(intent.flag());
                 words.extend(id.as_deref());
                 if let Some(task) = task {
                     words.extend(["--task", task]);

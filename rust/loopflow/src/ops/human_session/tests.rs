@@ -259,6 +259,7 @@ fn session_metadata_keeps_unknown_position_visible() {
 use std::ffi::OsString;
 
 use super::human_session_argv;
+use crate::lf::commands::write::SessionOpenIntent;
 use crate::session::LfSession;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 use crate::work::task::TaskId;
@@ -720,9 +721,15 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let first = super::open_without_replacing(&store, &record.id, true, false, false)
-            .await
-            .unwrap();
+        let first = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Start,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(first.open_argv.ends_with(&["--start-if-free".into()]));
         assert!(first.actions.iter().any(|action| {
             action.kind == super::SessionActionKind::Open && action.unavailable_reason.is_none()
@@ -738,9 +745,15 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
         // The launcher consumes this marker before starting the provider. A
         // crash at that boundary must not replay the captured request on load.
         std::fs::remove_file(dir.join("prepared")).unwrap();
-        let error = super::open_without_replacing(&store, &record.id, true, true, false)
-            .await
-            .unwrap_err();
+        let error = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Start,
+            true,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("retry it explicitly"));
         let retry = |record: &super::SessionRecord| {
             let action = record
@@ -758,9 +771,15 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
         let listed = super::listed(&store, &record.id).unwrap().unwrap();
         assert_eq!(retry(&listed).label, "Try again");
         assert!(retry(&listed).unavailable_reason.is_none());
-        let refused = super::open_without_replacing(&store, &record.id, true, false, false)
-            .await
-            .unwrap();
+        let refused = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Start,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(retry(&refused), retry(&listed));
         // The click prepares the launch that `open_waiting` gives a new attempt.
         let prepared = super::open(&store, &record.id, false, false, false)
@@ -789,9 +808,15 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             .await
             .unwrap();
         let before = store.session(&record.id).await.unwrap().unwrap();
-        let prepared = super::open_without_replacing(&store, &record.id, false, false, false)
-            .await
-            .unwrap();
+        let prepared = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(prepared.open_argv.ends_with(&["--reveal-existing".into()]));
         let action = prepared
             .actions
@@ -822,9 +847,15 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             assert_eq!(start.label, "Start conversation");
             assert!(start.unavailable_reason.is_none());
         }
-        let error = super::open_without_replacing(&store, &record.id, false, true, false)
-            .await
-            .unwrap_err();
+        let error = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            true,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert!(error
             .to_string()
             .contains("start this conversation explicitly"));
@@ -850,9 +881,15 @@ fn recovery_refresh_follows_current_holder_and_history() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let prepared = super::open_without_replacing(&store, &record.id, false, false, false)
-            .await
-            .unwrap();
+        let prepared = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(!prepared
             .actions
             .iter()
@@ -880,9 +917,15 @@ fn recovery_refresh_follows_current_holder_and_history() {
             .find(|a| a.kind == super::SessionActionKind::MoveHere)
             .unwrap();
         assert_eq!(takeover.label, "Take back");
-        let reveal = super::open_without_replacing(&store, &record.id, false, false, false)
-            .await
-            .unwrap();
+        let reveal = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(reveal.actions, refreshed.actions);
         assert_eq!(
             store.sqlite.session_attachment(&record.id).unwrap(),
@@ -953,9 +996,15 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 .sqlite
                 .retain_session_observation(&session, &observation)
                 .unwrap();
-            let prepared = super::open_without_replacing(&store, &record.id, false, false, false)
-                .await
-                .unwrap();
+            let prepared = super::open_without_replacing(
+                &store,
+                &record.id,
+                SessionOpenIntent::Reveal,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
             let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(
@@ -981,9 +1030,15 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 .is_none());
             // A new captured input cannot borrow the older input's resume reference.
             let next = super::append_input(&store, session).await.unwrap();
-            let prepared = super::open_without_replacing(&store, &next.id, false, false, false)
-                .await
-                .unwrap();
+            let prepared = super::open_without_replacing(
+                &store,
+                &next.id,
+                SessionOpenIntent::Reveal,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
             let refreshed = super::listed(&store, &next.id).unwrap().unwrap();
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(

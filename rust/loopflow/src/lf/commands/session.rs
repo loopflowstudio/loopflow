@@ -6,6 +6,7 @@ use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 
 use super::waves::Shape;
+use super::write::SessionOpenIntent;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
@@ -658,8 +659,13 @@ async fn select(
     directory: &Path,
     target: crate::ops::human_session::SessionTarget<'_>,
 ) -> anyhow::Result<String> {
-    let selected =
-        crate::ops::human_session::select_connection(store, directory, target, false).await?;
+    let selected = crate::ops::human_session::select_connection(
+        store,
+        directory,
+        target,
+        SessionOpenIntent::Resume,
+    )
+    .await?;
     if selected.started {
         eprintln!("Nothing to resume here; starting a new conversation.");
     }
@@ -676,19 +682,15 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
-    if connection.reveal_existing || connection.start_if_free {
+    let intent = connection.intent();
+    if intent != SessionOpenIntent::Resume {
         anyhow::ensure!(!fork, "non-replacing opening cannot fork a conversation");
-        let selected = crate::ops::human_session::select_connection(
-            store,
-            directory,
-            target,
-            connection.reveal_existing,
-        )
-        .await?;
+        let selected =
+            crate::ops::human_session::select_connection(store, directory, target, intent).await?;
         return crate::ops::human_session::open_without_replacing(
             store,
             &selected.id,
-            connection.start_if_free,
+            intent,
             !connection.prepare,
             json,
         )
@@ -758,8 +760,13 @@ async fn restarted(
     launch: bool,
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
-    let selected =
-        crate::ops::human_session::select_connection(store, directory, target, false).await?;
+    let selected = crate::ops::human_session::select_connection(
+        store,
+        directory,
+        target,
+        SessionOpenIntent::Resume,
+    )
+    .await?;
     let session = crate::ops::human_session::session_by_id(store, &selected.id)
         .await?
         .context("Session not found")?;

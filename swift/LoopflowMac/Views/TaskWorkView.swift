@@ -581,12 +581,6 @@ struct TaskHeading: View {
     }
 }
 
-extension RoadmapTask {
-    /// Not yet started and still open: it has no checkout, so no conversation to
-    /// open, and its Session slot offers Start instead.
-    var awaitsStart: Bool { (runtime?.status ?? .unstarted) == .unstarted && !task.isTerminal }
-}
-
 /// An unstarted Task's Session slot. Showing it starts nothing; Start runs the
 /// Task's Workflow through the same path as `lf task run`.
 struct TaskStartOffer: View {

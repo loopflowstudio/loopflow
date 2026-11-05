@@ -270,7 +270,7 @@ def _server(endpoint: str, home: Path) -> None:
                             )
                             continue
                         result = {"thread": {"id": thread, "turns": turns}}
-                        if "serviceTier" in params:  # lf's own request, not a client's
+                        if "cwd" in params:  # lf's own request, not a client's
                             (home / "native-config.json").write_text(json.dumps(params))
                         with lock:
                             subscribers.append(stream)

@@ -627,10 +627,10 @@ pub fn report_before_promote() {
 }
 
 /// Shown last after a promote: which processes still run what it replaced, and
-/// the pre-migration clone kept while they do. A promote that replaced
-/// Loopflow.app already moved Desktop's bundled lf.
+/// the pre-migration clone kept while they do, or while they are unknown. A
+/// promote that replaced Loopflow.app already moved Desktop's bundled lf.
 pub fn report_after_promote(replaced_app: bool, store: &Path) {
-    match inventory() {
+    let clone_reason = match inventory() {
         Ok(inventory) => {
             if let Some(summary) = superseded_summary(&inventory) {
                 println!("still running the previous lf: {summary}");
@@ -643,14 +643,15 @@ pub fn report_after_promote(replaced_app: bool, store: &Path) {
                     "each ends as its Session goes idle; a Session on one comes back through `lf resume` once its client is stopped (Ctrl-C) and that lf has exited; `lf monitor rollover` moves the idle ones now (`--dry-run` lists them)"
                 );
             }
+            "kept while they run"
         }
-        Err(error) => eprintln!("warning: could not list processes on the previous lf ({error:#})"),
-    }
+        Err(error) => {
+            eprintln!("warning: could not list processes on the previous lf ({error:#})");
+            "kept: live lf processes are unknown"
+        }
+    };
     for backup in crate::store::migrations::migration_backups(store) {
-        println!(
-            "pre-migration clone kept while they run: {}",
-            backup.display()
-        );
+        println!("pre-migration clone {clone_reason}: {}", backup.display());
     }
 }
 

@@ -156,20 +156,49 @@ def _released_key(name: str) -> tuple[int, ...]:
 class Column:
     declared_type: str
     required: bool
-    defaulted: bool
+    default: str | None
     primary_key: bool
 
     @property
     def optional(self) -> bool:
         """An INSERT that does not name this column still succeeds."""
-        return not self.primary_key and (not self.required or self.defaulted)
+        defaulted = self.default is not None and self.default.upper() != "NULL"
+        return not self.primary_key and (not self.required or defaulted)
+
+
+@dataclass(frozen=True)
+class UniqueIndex:
+    table: str
+    columns: tuple[str | None, ...]  # None indexes an expression
+    predicate: str | None  # the partial index's WHERE
+
+    def admits_older_rows(self, added: dict[str, Column]) -> bool:
+        """Whether a row an older writer inserts can enter this index. Such a row
+        carries every added column's default, so an index over only added columns
+        whose WHERE is false for those defaults never sees one."""
+        if self.predicate is None or any(column not in added for column in self.columns):
+            return True
+        names = ", ".join(_quote(name) for name in added)
+        values = ", ".join(column.default or "NULL" for column in added.values())
+        try:
+            (entered,) = (
+                sqlite3.connect(":memory:")
+                .execute(
+                    f"WITH defaults({names}) AS (SELECT {values})"
+                    f" SELECT COUNT(*) FROM defaults WHERE {self.predicate}"
+                )
+                .fetchone()
+            )
+        except sqlite3.Error:  # the predicate names an old column
+            return True
+        return entered == 1
 
 
 @dataclass(frozen=True)
 class Schema:
     tables: dict[str, dict[str, Column]]
     views: dict[str, dict[str, Column]]
-    unique_indexes: dict[str, str]
+    unique_indexes: dict[str, UniqueIndex]
 
     def members(self) -> set[str]:
         """`table waves`, `column waves.id`, `view wave_health`: what a drop names."""
@@ -264,29 +293,39 @@ def _schema(conn: sqlite3.Connection) -> Schema:
     ).fetchall()
     tables: dict[str, dict[str, Column]] = {}
     views: dict[str, dict[str, Column]] = {}
-    unique_indexes: dict[str, str] = {}
+    unique_indexes: dict[str, UniqueIndex] = {}
     for kind, name, table, sql in rows:
         if kind == "table":
             tables[name] = _columns(conn, name)
         elif kind == "view":
             views[name] = _columns(conn, name)
         elif kind == "index" and sql and sql.upper().startswith("CREATE UNIQUE"):
-            unique_indexes[name] = table
+            predicate = re.search(r"\bWHERE\b(.*)", sql, re.IGNORECASE | re.DOTALL)
+            unique_indexes[name] = UniqueIndex(
+                table=table,
+                columns=tuple(
+                    column for _, _, column in conn.execute(f"PRAGMA index_info({_quote(name)})")
+                ),
+                predicate=predicate.group(1).strip() if predicate else None,
+            )
     return Schema(tables, views, unique_indexes)
+
+
+def _quote(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 def _columns(conn: sqlite3.Connection, relation: str) -> dict[str, Column]:
     """A table's or view's columns; a view is read like the table it presents."""
-    quoted = '"' + relation.replace('"', '""') + '"'
     return {
         column: Column(
             declared_type=declared_type.upper(),
             required=bool(required),
-            defaulted=default is not None and default.upper() != "NULL",
+            default=default,
             primary_key=bool(primary_key),
         )
         for _, column, declared_type, required, default, primary_key, _ in conn.execute(
-            f"PRAGMA table_xinfo({quoted})"
+            f"PRAGMA table_xinfo({_quote(relation)})"
         )
     }
 
@@ -322,10 +361,20 @@ def _compare(before: Schema, after: Schema) -> tuple[list[str], list[str]]:
         if new_columns is None:
             drops.append(f"view {view}")
             continue
-        drops.extend(f"column {view}.{column}" for column in old_columns.keys() - new_columns.keys())
-    for index, table in after.unique_indexes.items():
-        if index not in before.unique_indexes and table in before.tables:
-            breaks.append(f"unique index {index} on {table}; an older writer may violate it")
+        drops.extend(
+            f"column {view}.{column}" for column in old_columns.keys() - new_columns.keys()
+        )
+    for name, index in after.unique_indexes.items():
+        if name in before.unique_indexes or index.table not in before.tables:
+            continue
+        old_columns = before.tables[index.table]
+        added = {
+            column: new
+            for column, new in after.tables[index.table].items()
+            if column not in old_columns
+        }
+        if index.admits_older_rows(added):
+            breaks.append(f"unique index {name} on {index.table}; an older writer may violate it")
     return drops, breaks
 
 

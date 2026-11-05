@@ -2,9 +2,10 @@
 
 Jack Heart's Task brief (2026-11-05), re-scoped by his steer the same day after
 the upgrade audit (`loopflow.codex-resume/scratch/upgrade-audit-2026-11-05.md`,
-sections 4(b) and 6). Status: accepted, implemented, including the concept
-review's view refinement (below); gate next. The reader floor is deleted by a
-separate Task; nothing here touches floor code.
+sections 4(b) and 6). Status: accepted, implemented, including both concept
+reviews' refinements (below: views, the unreachable unique index, the clone's
+reason); compressed 2026-11-05, gate next. The reader floor is deleted by a separate Task; nothing here touches floor
+code.
 
 ## Outcomes
 
@@ -81,6 +82,15 @@ corrections, no code change; `lf context` shows memory and scratch under budget.
 Second compress (2026-11-05, `Catalog` + `Promotion` removal): the same lib filter
 48 passed, pytest 19 passed, clippy and fmt clean, `lf context` memory at
 16000/16000 tokens and scratch under budget.
+Second-pass items (2026-11-05, `UniqueIndex.admits_older_rows`, comment-only
+expand note, clone wording): `uv run pytest python/tests/test_check_migrations.py`
+21 passed; `settings_authority` replayed over its predecessor with the check's own
+functions: 17 drops, no break; `cargo test -p loopflow --lib -- lf::commands::rollover::`
+4 passed; clippy and fmt clean; `lf context` scratch under budget.
+Third compress (2026-11-05, `admits_older_rows(added)` counts the default row
+through the index's `WHERE`; `report_after_promote` returns the clone reason
+from its match): pytest 21 passed, the lib filter 48 passed, clippy and fmt clean,
+`lf context` memory 16000/16000 tokens and scratch under budget.
 
 ## Concept review (2026-11-05, headless)
 
@@ -116,6 +126,63 @@ install with no migration also keeps the clone while a process on the prior buil
 runs, though that build reads the current generation. Without the floor the
 inventory has no per-build generation to compare, and the clone's cost is disk
 until the next commit; a finer test is the floor Task's to want.
+
+## Concept review, second pass (2026-11-05, headless)
+
+Checked against the implemented change: no floor code is touched
+(`migrations.rs` changes only the backup helpers); install prints the advance
+and `report_before_promote` before `prepare_artifacts`, settles inside the
+promote, and prints the summary, the previous-lf report and any surviving clone
+after skill sync; `observe_process` runs after the install command returns; CI
+fetches full history (`fetch-depth: 0`, `origin main`) so the first-parent dates
+the check reads exist, and `Catalog.ordered()` orders unmerged slugs the way
+`order_catalog` does (merged by history, then by name). Probing the check with
+its own functions against `origin/main`:
+
+- `settings_authority` replayed over the schema before it: 17 drops, and one
+  break: "unique index idx_machines_local on machines; an older writer may
+  violate it". That index covers only `is_local`, a column the same migration
+  adds with `DEFAULT 0`, under `WHERE is_local=1`. An older writer never names
+  the column, so every row it writes carries the default and sits outside the
+  index; nothing it does can violate it. The rule is "older SQL still works", and
+  this SQL does. Reported as a break, the author is told to stage the index for
+  30 days with no benefit, on exactly the shape the incident migration used. The
+  counterexample that keeps the break honest: the same index without the
+  `WHERE`, or with `WHERE is_local IS NOT NULL`, is violated by the second older
+  INSERT, because both rows carry the default.
+- A comments-only slug over the full frontier: no drops, no breaks. It passes
+  the check, and `order_catalog`/`build_catalog` see an unchanged schema.
+
+Settled by the accepted rule and implemented the same day:
+
+1. **A unique index an older writer cannot reach is additive.** In `_compare`,
+   a new unique index on an old table stays a break unless every column it
+   indexes (`PRAGMA index_info`) is new in `after` and its partial predicate is
+   false for a row of those columns' defaults: evaluate the index SQL's `WHERE`
+   text with the new columns bound to their `dflt_value` literals (a one-row
+   CTE), and treat a predicate that names an old column, has no `WHERE`, or
+   evaluates true as the existing break. Test: the `is_local` shape passes; the
+   same index without `WHERE` fails. MIGRATIONS.md's "no unique index joins an
+   existing table" becomes "no unique index an older writer can violate".
+2. **An expand step with no schema change is a migration whose SQL is only its
+   comment.** `settings_authority` moved settings out of the store; the new shape
+   was files and code, so there was no SQL to expand with. Jack's rule names an
+   expand slug, so that slug is a comment saying what the store stopped being the
+   authority for; it merges, starts the clock, and the ledger records it. Say so
+   in MIGRATIONS.md's staging section, beside the `-- expand:` example. The
+   alternative, letting `-- expand:` name a commit or PR, adds a second marker
+   form for one case and is not taken.
+3. **The clone's reason, stated right.** MIGRATIONS.md says the older-build
+   process "reads the generation the clone holds"; it reads the live, additively
+   extended store. The clone is the restore point for the generation that build
+   was written against, kept while any such process can still show that the
+   migration lost something. `report_after_promote`'s "kept while they run" line
+   says the same; when the inventory could not be read it should say the clone
+   is kept because live processes are unknown.
+
+No open product choice. The `STAGING_DAYS` hard fail and `-- exports:` as a
+declaration stay as recorded in `scratch/questions.md`; Jack's steer said "at
+least 30 days", which the check enforces.
 
 ## Remaining
 

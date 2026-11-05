@@ -228,6 +228,11 @@ def test_a_contract_drops_only_what_its_expand_step_left_behind(repo: Path):
             "changed its type",
         ),
         ("CREATE UNIQUE INDEX waves_id ON waves(id);", "unique index"),
+        (
+            "ALTER TABLE waves ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0;\n"
+            "CREATE UNIQUE INDEX waves_local ON waves(is_local);",
+            "unique index",
+        ),
     ],
 )
 def test_changes_that_break_older_sql_are_not_additive(repo: Path, sql: str, reason: str):
@@ -235,3 +240,12 @@ def test_changes_that_break_older_sql_are_not_additive(repo: Path, sql: str, rea
     result = check(repo)
     assert result.returncode == 1
     assert "is not additive" in result.stderr and reason in result.stderr
+
+
+def test_a_unique_index_older_rows_never_enter_is_additive(repo: Path):
+    (repo / MIGRATIONS / "local_machine.sql").write_text(
+        "ALTER TABLE waves ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0;\n"
+        "CREATE UNIQUE INDEX waves_local ON waves(is_local) WHERE is_local=1;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 0, result.stderr

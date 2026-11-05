@@ -27,3 +27,10 @@ Reversible choices made headless on 2026-11-05; each is one edit to change.
   09:15 `lf self install --dev` row (ledger id `9b3fe9af`) went through the same
   arm; why it recorded is unknown. Install now records itself after the store
   settles, and a failed observation logs at `warn`.
+- **A new unique index is reachable by an older writer unless every indexed
+  column is new and its `WHERE` is not true for a row of the table's new columns'
+  defaults.** The CTE binds every new column of the table, not only the indexed
+  ones, so a predicate over another new column is evaluated rather than failed;
+  a predicate that names an old column, or an expression index, is the break.
+  SQLite's own truth decides (`CASE WHEN`), so NULL counts as outside the index,
+  as it does for the real partial index.

@@ -87,9 +87,10 @@ fingerprint of the complete ledger plus product schema, so a backup from another
 branch-local history cannot be mistaken for the state being repaired. Once a
 migration commits, only the clone it made stays. When the install settles it goes
 too, unless a process still runs an older build (`rollover::inventory()`, the list
-`lf doctor` and `lf install` print): that process reads the generation the clone
-holds, so the clone stays until the next install's commit. A file named any other
-way is never touched.
+`lf doctor` and `lf install` print): that process reads the live store, and the
+clone is the restore point for the generation its build was written against, so
+the clone stays while such a process can still show the migration lost something,
+until the next install's commit. A file named any other way is never touched.
 
 ## Older lf keeps opening an additively extended store
 
@@ -121,12 +122,19 @@ A new migration is additive against `origin/main`'s schema, or it is a contract:
 ALTER TABLE waves DROP COLUMN hue;
 ```
 
+An expand step with no SQL to add, because the new shape is files or code as
+`settings_authority`'s was, is a migration whose body is only a comment saying
+what the store stopped being the authority for. It merges, starts the clock, and
+the ledger records it.
+
 `check_migrations.py` applies the branch's migrations over `origin/main`'s and
 compares shapes. Additive: every table keeps its columns (a rebuild that changes a
 CHECK and copies every column counts), every view keeps its columns (its definition
-may change), new columns are nullable or defaulted, and no unique index joins an
-existing table. Trigger and index changes and data writes are additive too. A type
-change, a column made `NOT NULL` or a required column without a default fails:
+may change), new columns are nullable or defaulted, and no unique index an older
+writer can violate joins an existing table. An older writer's row carries every new
+column's default, so a unique index over only new columns whose `WHERE` is false for
+those defaults never sees it. Trigger and index changes and data writes are additive
+too. A type change, a column made `NOT NULL` or a required column without a default fails:
 stage it as an expand now and a contract later. A contract may drop tables, views
 and their columns that its expand step superseded, once that step has been on
 `origin/main` for the staging window (`STAGING_DAYS` in `check_migrations.py`), and

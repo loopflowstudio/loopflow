@@ -2510,9 +2510,10 @@ fn settle_switch(
 }
 
 /// The pre-migration clone outlives settlement while any process still runs an
-/// older build: it holds what those processes expect to read, and is the only
-/// copy once a migration dropped something. With none left, the settled lf opens
-/// the store and nothing restores the clone, so it goes.
+/// older build: those processes read the live store, and the clone is the restore
+/// point for the generation they were written against, the only copy once a
+/// migration dropped something. With none left, the settled lf opens the store
+/// and nothing restores the clone, so it goes.
 fn settle_migration_backups(
     store: &Path,
     inventory: Result<crate::lf::commands::rollover::BinaryInventory>,

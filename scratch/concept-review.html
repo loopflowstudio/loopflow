@@ -17,28 +17,30 @@ table { width:100%; border-collapse:collapse; margin:1rem 0; font-size:.95rem; }
 th, td { text-align:left; vertical-align:top; padding:.55rem .6rem .55rem 0; border-bottom:1px solid var(--line); }
 th { font-weight:600; }
 .proposed { background:var(--mark); padding:.05rem .3rem; border-radius:.2rem; }
+ol li { margin:.5rem 0; }
 </style>
 </head>
 <body>
 <main>
 <header>
-<p>LOO-672 · concept-review step, fourth pass · November 4, 2026</p>
-<p>Built from <code>scratch/loo-672-ready-conversations.md</code>, <code>scratch/questions.md</code>, <code>swift/LoopflowMac/WorkModel.swift</code>, <code>swift/LoopflowMac/Views/SessionsView.swift</code>, <code>swift/LoopflowMac/RepositoryWorkspace.swift</code>, <code>swift/LoopflowMac/SessionProgramStatus.swift</code>, <code>rust/loopflow/src/ops/human_session.rs</code></p>
+<p>LOO-672 · concept-review step, fifth pass · November 5, 2026</p>
+<p>Built from <code>scratch/loo-672-ready-conversations.md</code>, <code>scratch/questions.md</code>, <code>scratch/loo-672-demo.md</code>, <code>swift/LoopflowMac/WorkModel.swift</code>, <code>swift/LoopflowMac/Views/SessionsView.swift</code>, <code>swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift</code>, <code>swift/Loopflow/Models/WaveWorkMap.swift</code>, <code>rust/loopflow/src/ops/human_session.rs</code></p>
 </header>
 
-<h1>Nothing to change. The open proof is a rendered run.</h1>
-<p>The design holds and implementation does not iterate. No decision is needed before demo; the five questions at the end are recorded defaults for Jack Heart to confirm there. Everything below exists in the working tree, except the one line marked <span class="proposed">like this</span>. These findings come from reading the code, not from running it.</p>
+<h1>Nothing to change. Launching from the store is the experience the design already promised.</h1>
+<p>The fourth pass found the design whole and the proof unrendered. The November 5 repair rendered it: with nothing selected, a fresh load started all four providers, including an absent Session, and selection adopted the running terminal. A conversation that waits for a pane to mount is an unopened conversation, which Jack Heart said working Tasks must not have; starting it from the model is that rule's mechanism, not a new concept. No decision is needed before the demo. Everything below exists in the working tree. These findings come from reading the code and the recorded proof, not from running it.</p>
 
 <h2>The mismatch that remains</h2>
-<p>Opening a conversation now spends a turn, and that turn ends in the same state as a conversation waiting on a person. After a load, up to eight Tasks read as Available though nobody asked them anything. The sidebar's Available filter and the Wave board both count them. The report is real, so the default keeps them; question 5 asks whether that reads right.</p>
+<p>Two defaults recorded on November 4 now take effect at load, for every working Task, instead of at selection for one. A quit or reboot during the load window can leave several Tasks on <strong>Try again</strong> rather than one. And every load ends with up to eight reading passes nobody asked for, each counting as Available in the sidebar filter and on the Wave board. The questions do not change; their reach does. Questions 4 and 5 ask whether the defaults still read right at that scale.</p>
 
 <h2>What the person does</h2>
 <table>
 <tr><th>Action</th><th>What happens</th></tr>
-<tr><td>Open the app with working Tasks</td><td>Selected, then visible, then recent conversations open, two at a time.</td></tr>
-<tr><td>Select a working Task</td><td>It opens, with a Session created if absent.</td></tr>
+<tr><td>Open the app with working Tasks</td><td>Selected, then visible, then recent conversations start in the background, two at a time, before anything is selected. Nothing waits for a pane.</td></tr>
+<tr><td>Select a working Task</td><td>The pane adopts the running conversation, same provider process. A Task past the warm bound opens on selection instead.</td></tr>
 <tr><td>Select a conversation held elsewhere</td><td>Passive: last screen and <strong>Take back</strong>.</td></tr>
-<tr><td>Close a pane</td><td>Stays closed through refresh; a later visit reopens it.</td></tr>
+<tr><td>Leave the Dashboard</td><td>Tiles that started on load stay warm.</td></tr>
+<tr><td>Close a pane</td><td>Stays closed through refresh and prefetch; a later visit reopens it.</td></tr>
 <tr><td>Return to a launch that died before any history</td><td><strong>Try again</strong> in the pane.</td></tr>
 </table>
 
@@ -46,29 +48,34 @@ th { font-weight:600; }
 <table>
 <tr><th>Concept</th><th>Owner</th></tr>
 <tr><td>Which Tasks open themselves</td><td><code>RoadmapTask.conversationIntent</code></td></tr>
-<tr><td>What may open, and in what order</td><td><code>warmWork</code>, <code>openWarmConversations</code></td></tr>
+<tr><td>What may open, and in what order</td><td><code>warmWork</code>, <code>prefetch</code>, <code>openWarmConversations</code></td></tr>
+<tr><td>When a provider starts</td><td><code>SessionsStore.startTerminal</code> on <code>.prepared</code>, through <code>GhosttySurfacePool.start</code>; the pane adopts, never launches</td></tr>
 <tr><td>Who may take input</td><td><code>open_without_replacing</code>; only Take back replaces a holder</td></tr>
 <tr><td>What a first turn may do</td><td><code>first_turn</code>, <code>TASK_PRIMARY_MESSAGE</code></td></tr>
 </table>
 
 <h2>Counterexamples that held</h2>
 <ul>
-<li>Two repository windows cannot refill each other's evicted Tasks: <code>prefetch</code> skips existing workspaces.</li>
-<li>A failed Machine read shows the window's error, not an endless spinner.</li>
+<li>A store without a runtime prepares and shows but launches nothing, so a headless registry or test never spawns <code>lf</code>.</li>
+<li>Prefetch skips a Closed Task and a completed one; Close still outlives refresh.</li>
+<li>An unassigned started Task keeps Claim and Start; nothing moves it.</li>
+<li>Loading started no Graph: the Stopped run's Graph IDs matched before and after, and its conversation reported the recorded comment without acting on it.</li>
 <li>Start always returns a launch command, so the queue cannot spin on <code>.pending</code>.</li>
-<li>Every <code>moveHere</code> reader separates Try again from Take back.</li>
 </ul>
 
+<h2>Settled here</h2>
+<p>The Task description's acceptance line “no new agent turn starts merely from opening, prefetching or resuming a view” is superseded for history-less working Tasks by Jack's November 4 and 5 direction. The current acceptance is one reading pass per Task lifetime and none for existing history; publication states that. One compress note, no design change: the <code>.initializing</code> return in <code>GhosttySurfacePool.start</code> is unreachable because the runtime initializes synchronously.</p>
+
 <h2>Next proof</h2>
-<p>November 5 store-launch proof: with nothing selected, a fresh load started all four providers from the model (an absent Session and Sessions with no history), the Stopped run reported its recorded comment without a new Graph, and selection adopted the running terminal with the same agent PID (<code>loo-672-demo.md</code>). Still unrendered: exact drafts across A → B → A, cold return past the warm set, Rex takeover, Close across refresh, relaunch identity, the twenty-Task footprint and the folder-trust dialog in a hidden pane.</p>
+<p>Rendered on November 5: load alone, nothing selected, four live providers, adoption on selection. Still unrendered: exact drafts across A → B → A, cold return past the warm set, Rex takeover, Close across refresh, relaunch identity, the twenty-Task footprint and the folder-trust dialog in a hidden pane (<code>loo-672-demo.md</code>).</p>
 
 <h2>For the demo</h2>
 <ol>
 <li>A claimed working Task opens by itself. An unassigned one keeps Claim and Start. (a) keep, (b) open those too.</li>
 <li>A fresh <code>lf resume --task</code> with no request reads first. (a) keep, (b) operate on that explicit path.</li>
 <li>A comment written just before load waits for your first message in that conversation. (a) keep, (b) act on fresh steers, which needs a rule separating them from history.</li>
-<li>A provider that dies before any history costs one Try again click. (a) keep, (b) retry once per Desktop run, automatically.</li>
-<li>A conversation that only finished its automatic reading pass counts as Available. (a) keep, (b) <span class="proposed">leave it out of Available until a person has engaged it</span>.</li>
+<li>A provider that dies before any history costs one <strong>Try again</strong> click, now for each Task caught by the quit. (a) keep, (b) retry once per Desktop run, automatically.</li>
+<li>Every load's reading passes count as Available. (a) keep, (b) leave a conversation out of Available until a person has engaged it.</li>
 </ol>
 </main>
 </body>

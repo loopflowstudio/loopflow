@@ -139,6 +139,24 @@ PR #1816's body still says automatic opening was never observed natively; the
 November 5 store-launch proof supersedes that paragraph, and the body does not yet
 describe launching from the store before a pane mounts. Publication refreshes both.
 
+Concept review, November 5 (fifth pass, against the store-launch change): the
+experience and its four concepts are unchanged; launching from the store is the
+mechanism the accepted experience always implied, since a conversation that waits
+for a pane is an unopened conversation. No implement iteration. Two recorded
+defaults now apply at load rather than on selection, which widens their effect
+without changing the question: a quit or reboot during the load window can leave
+several Tasks on **Try again** instead of one (`questions.md`, consumed first
+launch), and a load fills the Available filter with every working Task's reading
+pass (`questions.md`, Available after the automatic pass). Both stay recorded
+defaults for Jack Heart to confirm at the demo. The Task description's acceptance
+line “no new agent turn starts merely from opening, prefetching or resuming a
+view” is superseded for history-less working Tasks by Jack's November 4 and 5
+direction; publication states the current acceptance (one reading pass per Task
+lifetime, none for existing history) rather than the original line. Compress note,
+no design change: `GhosttySurfacePool.start`'s `.uninitialized, .initializing`
+return is unreachable because `GhosttyManager.initialize()` finishes synchronously
+in `.ready` or `.failed`.
+
 ## Verification
 
 Focused checks cover automatic working Task preparation for absent and prepared

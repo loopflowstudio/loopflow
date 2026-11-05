@@ -1,0 +1,97 @@
+{
+  "task": {
+    "id": "task_bda9398eea7f458699ef078edd3a0dd7",
+    "identifier": "bda939",
+    "title": "Stopped run",
+    "wave": null,
+    "project": null,
+    "state": "idle",
+    "reason": "commit --no-such-flag: command exited with status 2. Inspect its history and effects, then launch fresh work",
+    "graph": {
+      "name": "stops",
+      "step": null
+    },
+    "pr": null,
+    "next": "lf task run bda939"
+  },
+  "sessions": [
+    {
+      "id": "1d244daf352c4660b6885419e8ef5e4a",
+      "title": "bda939 Stopped run",
+      "provider": "claude",
+      "interactive": true,
+      "state": "active",
+      "available": false,
+      "cwd": "/private/tmp/loo-672-redemo-eh8h08q0/repo.bda939-stopped-run",
+      "agent_process_id": "1ffcab05-4cbb-405b-98fc-481bac5a17b6"
+    }
+  ],
+  "graph_processes": [
+    {
+      "id": "58b8138a-9964-4f1f-877d-6a76caa5809f",
+      "name": "stops",
+      "state": "stopped",
+      "step": "commit --no-such-flag",
+      "updated_at": "2026-11-05T03:53:18Z"
+    },
+    {
+      "id": "b76d86fd-2232-4e35-bf81-b9125c93dcdf",
+      "name": "stops",
+      "state": "stopped",
+      "step": "commit --no-such-flag",
+      "updated_at": "2026-11-05T03:53:18Z"
+    },
+    {
+      "id": "efd59ae3-44d2-4b79-ba01-c768e21fb3b3",
+      "name": "stops",
+      "state": "stopped",
+      "step": "commit --no-such-flag",
+      "updated_at": "2026-11-05T03:53:18Z"
+    },
+    {
+      "id": "1dfe7e93-0f6e-444c-801f-e42f5ede71e4",
+      "name": "stops",
+      "state": "stopped",
+      "step": "commit --no-such-flag",
+      "updated_at": "2026-11-05T04:00:22Z"
+    },
+    {
+      "id": "4b0d8f66-ffa2-48b4-b27d-05e08966b527",
+      "name": "stops",
+      "state": "stopped",
+      "step": "commit --no-such-flag",
+      "updated_at": "2026-11-05T04:00:22Z"
+    },
+    {
+      "id": "0cbca50e-7e84-413e-85a5-5d756a28c376",
+      "name": "stops",
+      "state": "stopped",
+      "step": "commit --no-such-flag",
+      "updated_at": "2026-11-05T04:00:22Z"
+    }
+  ],
+  "comments": {
+    "comments": [
+      {
+        "id": "4223b357-4049-4e5a-a932-bdaa9fc6a1d5",
+        "body": "Jack Heart claimed this on home_13b07cdb38972d39dc42140b828943d2\n\n<!-- loopflow-ownership:{\"id\":\"own_e0330cb097d940c38280ce938c04ffdb\",\"task_id\":\"task_bda9398eea7f458699ef078edd3a0dd7\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"loo672-demo@example.invalid\",\"machine_id\":\"home_13b07cdb38972d39dc42140b828943d2\",\"machine_label\":null,\"at\":1793850797} -->",
+        "author": {
+          "kind": "integration"
+        },
+        "created_at": "2026-11-05T03:53:17.467Z"
+      },
+      {
+        "id": "d11e38a9-0ebf-4d93-97ae-c351f4a2058c",
+        "body": "start it\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:d11e38a9-0ebf-4d93-97ae-c351f4a2058c -->",
+        "author": {
+          "kind": "person",
+          "name": "Jack Heart"
+        },
+        "created_at": "2026-11-05T03:53:19.347503Z"
+      }
+    ],
+    "pending_sync": [],
+    "conflicts": {},
+    "refresh_error": null
+  }
+}

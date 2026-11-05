@@ -1,5 +1,53 @@
 # LOO-672 — Task conversation demo, November 4, 2026
 
+## Native re-demo — November 4, 2026, 20:00–20:02 PST
+
+**Result: partial; load-time prefetch fails. No acceptance from Jack Heart yet.**
+Candidate source `7b23c50c20` (current HEAD adds notes only), private data from
+`demo-evidence/automatic-manifest.json`. Launched the prepared candidate with its
+matching CLI, explicit repository and private LF_HOME. Changed only its disposable
+bundle identifier/display name to `com.loopflow.mac.automatic.loo672` / **Loopflow
+LOO-672 Automatic**, then ad-hoc signed it, to distinguish the older running demo.
+
+Observed through native Desktop, without pressing Start/Open:
+
+- Repository load created the absent primary Session for **Automatic conversation**.
+  But `automatic-load-ps.json` was empty and all four Session records had null
+  agent process IDs. This is preparation, not usable native input.
+- Selecting **Automatic conversation** opened the real Codex composer and initial
+  reading turn. Selecting **Claude continuity** opened real Claude without folder
+  trust or a Start click. The native UI and first turns rendered.
+- The untouched **Codex continuity** Task remained idle, with its original Session
+  `95e5e441ab32454aa160d7957c5c3bf3`, unknown Session state and no agent process,
+  even after the other conversations completed. This fails Jack's load-prefetch
+  requirement. Evidence: `automatic-unselected-status.json` and `automatic-current-ps.json`.
+- Selecting **Stopped run** opened Claude. Its final report described the failed
+  Graph and the recorded “start it” comment, and explicitly did not execute it.
+  No Graph was live in the later process read. However, three additional failed
+  Graph records appeared at 04:00:22Z, around launch, compared with the preparation
+  manifest. A prelaunch read already showed an lf Session process. Therefore this
+  is **not** clean proof that opening/load caused no Graph execution. Determine
+  the origin of those runs before claiming this acceptance check passes.
+- No draft text was entered by the reviewing assistant; no exact-draft, restart,
+  Rex takeover, cold-return or memory acceptance is claimed. No Task Graph for
+  LOO-672 was restarted; no installation, merge or shipping occurred.
+
+The app log also contains repeated SwiftUI AttributeGraph cycle warnings
+(`/tmp/loo672-automatic-app.log`); their relationship to prefetch is unresolved.
+The hidden warm-pane mounting and preparation queue are investigation entry
+points, not a proven diagnosis. Repair the real rendered prefetch path and repeat
+fresh load with provider liveness checked **before any Task selection**. Also make
+stopped-run setup free of ship retries and reconcile the extra runs above.
+
+Current review page: `scratch/demo.html`. Native evidence:
+`demo-evidence/automatic-selected.png`, `automatic-claude.png`, and
+`automatic-stopped.png`. Design remains `loo-672-ready-conversations.md`; the
+accepted no-click/load-prefetch direction is unchanged. Disposition: **available**
+for review in the open **Loopflow LOO-672 Automatic** app; implementation still
+needs the prefetch repair. Earlier sections below are historical preparation and
+review evidence, not current acceptance.
+
+
 ## Current candidate: automatic opening — November 4
 
 Candidate for Jack Heart's re-demo of automatic opening, built from a tree identical to

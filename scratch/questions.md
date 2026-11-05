@@ -78,3 +78,8 @@ filter for conversations a person has engaged, exclude a Session whose only turn
 
 Historical Start-click correction evidence:
 `3ef57e857394d5a97271ea00b6048ad60c22bf9a:scratch/questions.md`.
+
+November 5 re-demo clarification from Jack Heart: started working Tasks have no
+normal “unopened” conversation state; background prefetch initializes and opens
+the native conversation before selection. Preparing Session metadata alone does
+not meet this requirement. See `loo-672-load-prefetch.md`.

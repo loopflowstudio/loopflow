@@ -1,0 +1,50 @@
+[
+  {
+    "agent_process_id": null,
+    "available": false,
+    "cwd": "/private/tmp/loo-672-redemo-eh8h08q0/repo.407d33-codex-continuity",
+    "id": "95e5e441ab32454aa160d7957c5c3bf3",
+    "interactive": true,
+    "provider": "codex",
+    "state": "unknown",
+    "task": "task_407d33b91caa437183d568c43d0aec89",
+    "title": "407d33 Codex continuity",
+    "wave": null
+  },
+  {
+    "agent_process_id": null,
+    "available": false,
+    "cwd": "/private/tmp/loo-672-redemo-eh8h08q0/repo.41eb7e-claude-continuity",
+    "id": "5c62e36b111341538b09afd6ae1c1428",
+    "interactive": true,
+    "provider": "claude",
+    "state": "unknown",
+    "task": "task_41eb7e513a364cd0905151348d65b3b7",
+    "title": "41eb7e Claude continuity",
+    "wave": null
+  },
+  {
+    "agent_process_id": null,
+    "available": false,
+    "cwd": "/private/tmp/loo-672-redemo-eh8h08q0/repo.bda939-stopped-run",
+    "id": "1d244daf352c4660b6885419e8ef5e4a",
+    "interactive": true,
+    "provider": "claude",
+    "state": "unknown",
+    "task": "task_bda9398eea7f458699ef078edd3a0dd7",
+    "title": "bda939 Stopped run",
+    "wave": null
+  },
+  {
+    "agent_process_id": null,
+    "available": false,
+    "cwd": "/private/tmp/loo-672-redemo-eh8h08q0/repo.d2e873-automatic-conversation",
+    "id": "14b5005ef65f4149822bddaaa66a799a",
+    "interactive": true,
+    "provider": "codex",
+    "state": "unknown",
+    "task": "task_d2e873e344b34160b0e9073ddf2223f5",
+    "title": "d2e873 Automatic conversation",
+    "wave": null
+  }
+]

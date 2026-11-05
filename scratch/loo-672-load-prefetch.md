@@ -17,3 +17,21 @@ Task Graph or replaying prior input is not. Prefetch does not transfer input. Co
 Carry this into the active design and acceptance coverage: a fresh load with
 working Tasks and no saved recent set opens eligible conversations
 without selection or an Open click, within the warm/preparation bounds.
+
+## Re-demo direction — November 5, 2026
+
+Jack Heart: “ok this is an imporvement, but even better is if we auto open the task conversations that arent started as part of background prefetching” and “there is no need for \"unopened\" task conversations if the tasks are marked as started”.
+
+Started working Tasks must initialize and open their native conversations during
+background prefetch, including absent Sessions and prepared Sessions without
+native history. Preparing metadata alone is insufficient. Selection must reveal
+the already warming conversation, with no first-visit launch dependency or normal
+Unopened/Start/Open gate. Preserve explicit Close, the agreed bounded warm set and
+preparation concurrency, and explicit Take back for another input holder.
+
+Repair the rendered path identified by the native re-demo in `loo-672-demo.md`.
+Prove provider liveness for untouched Tasks after fresh load, before selecting any
+Task; check real Claude and Codex, missing Session and missing native history.
+Do not replay prior input or start a Task Graph. Reconcile the extra stopped-run
+Graph records and remove fixture ship retries from that proof. Continue on LOO-672
+and PR #1816 through publication and another demo; no shipping or installation.

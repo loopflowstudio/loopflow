@@ -7,6 +7,14 @@ shipping, merging and installation are not. The pre-infrastructure plan is
 superseded and preserved at
 `a32c385044:scratch/research/loo-672-pre-infrastructure-plan.md`.
 
+## November 5 repair direction
+
+Jack Heart confirmed that background prefetch must open native conversations for
+started working Tasks before selection; “unopened” is not their normal state.
+The November 4 native demo prepared records but left untouched providers absent.
+Repair that rendered path and verify live providers before any selection.
+See `loo-672-load-prefetch.md` and the current `loo-672-demo.md` evidence.
+
 ## Accepted outcome and constraints
 
 Task conversations open without a Start or Open click after launch, selection and

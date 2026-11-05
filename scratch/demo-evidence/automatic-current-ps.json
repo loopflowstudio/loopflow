@@ -1,0 +1,172 @@
+{
+  "nodes": [
+    {
+      "id": "040c6ad7-264f-4721-81f9-89b279f72c86",
+      "parent_id": "dee6cff7-f522-434a-b442-fa586c349ebc",
+      "kind": "process",
+      "label": "lf session",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.bda939-stopped-run",
+      "wave": null,
+      "pid": 53585,
+      "started_at": "2026-11-05T04:01:17Z",
+      "state": "waiting"
+    },
+    {
+      "id": "0f0151c4-27df-4d7d-be01-dc6c847a4a4f",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf __context-block",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.41eb7e-claude-continuity",
+      "wave": null,
+      "pid": 4289,
+      "started_at": "2026-11-05T04:00:50Z",
+      "state": "waiting"
+    },
+    {
+      "id": "16bcdbc0-a90f-43b1-ae11-6109a0edebc7",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf session",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.41eb7e-claude-continuity",
+      "wave": null,
+      "pid": 881,
+      "started_at": "2026-11-05T04:00:48Z",
+      "state": "waiting"
+    },
+    {
+      "id": "1ffcab05-4cbb-405b-98fc-481bac5a17b6",
+      "parent_id": "7d0b2f15-ba14-4024-ab57-7cb092fa13f3",
+      "kind": "agent_process",
+      "label": "claude --name",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.bda939-stopped-run",
+      "wave": null,
+      "pid": 53840,
+      "started_at": "2026-11-05T04:01:18Z",
+      "state": "waiting"
+    },
+    {
+      "id": "25b2cde9-1086-4c2d-9183-52f5874eaf39",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.41eb7e-claude-continuity",
+      "wave": null,
+      "pid": 1368,
+      "started_at": "2026-11-05T04:00:48Z",
+      "state": "waiting"
+    },
+    {
+      "id": "3488ed80-f892-4d64-bd0f-4c7c25b280ab",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf __context-block",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.bda939-stopped-run",
+      "wave": null,
+      "pid": 56930,
+      "started_at": "2026-11-05T04:01:18Z",
+      "state": "waiting"
+    },
+    {
+      "id": "4985af62-fbf2-4df4-87b5-0c6f96a325ea",
+      "parent_id": "833f87c1-b678-4b11-8478-16bd89cef4e8",
+      "kind": "process",
+      "label": "lf session",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.d2e873-automatic-conversation",
+      "wave": null,
+      "pid": 74585,
+      "started_at": "2026-11-05T04:00:34Z",
+      "state": "waiting"
+    },
+    {
+      "id": "51f06194-6def-4c2a-8ae5-8bc06e4f271e",
+      "parent_id": "f6ff9e66-3839-4c83-97c6-30e4b0e21844",
+      "kind": "agent_process",
+      "label": "codex app-server",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.d2e873-automatic-conversation",
+      "wave": null,
+      "pid": 76960,
+      "started_at": "2026-11-05T04:00:35Z",
+      "state": "waiting"
+    },
+    {
+      "id": "7d0b2f15-ba14-4024-ab57-7cb092fa13f3",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.bda939-stopped-run",
+      "wave": null,
+      "pid": 53840,
+      "started_at": "2026-11-05T04:01:17Z",
+      "state": "waiting"
+    },
+    {
+      "id": "833f87c1-b678-4b11-8478-16bd89cef4e8",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf session",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.d2e873-automatic-conversation",
+      "wave": null,
+      "pid": 74345,
+      "started_at": "2026-11-05T04:00:34Z",
+      "state": "waiting"
+    },
+    {
+      "id": "b30cdbae-06c7-46db-920b-6d578d4cc293",
+      "parent_id": "25b2cde9-1086-4c2d-9183-52f5874eaf39",
+      "kind": "agent_process",
+      "label": "claude --name",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.41eb7e-claude-continuity",
+      "wave": null,
+      "pid": 1368,
+      "started_at": "2026-11-05T04:00:49Z",
+      "state": "waiting"
+    },
+    {
+      "id": "b7e03fb1-ebee-4fb0-9412-ee2313b1d0e9",
+      "parent_id": "16bcdbc0-a90f-43b1-ae11-6109a0edebc7",
+      "kind": "process",
+      "label": "lf session",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.41eb7e-claude-continuity",
+      "wave": null,
+      "pid": 1201,
+      "started_at": "2026-11-05T04:00:48Z",
+      "state": "waiting"
+    },
+    {
+      "id": "dee6cff7-f522-434a-b442-fa586c349ebc",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf session",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.bda939-stopped-run",
+      "wave": null,
+      "pid": 53298,
+      "started_at": "2026-11-05T04:01:17Z",
+      "state": "waiting"
+    },
+    {
+      "id": "f6ff9e66-3839-4c83-97c6-30e4b0e21844",
+      "parent_id": null,
+      "kind": "process",
+      "label": "lf",
+      "repo": "/private/tmp/loo-672-redemo-eh8h08q0/repo",
+      "worktree": "/private/tmp/loo-672-redemo-eh8h08q0/repo.d2e873-automatic-conversation",
+      "wave": null,
+      "pid": 74686,
+      "started_at": "2026-11-05T04:00:34Z",
+      "state": "waiting"
+    }
+  ]
+}

@@ -1074,6 +1074,7 @@ Migration retains before/after files in `settings-cutover.json`. Unavailable leg
 repository destinations remain in `settings-recovery.yaml`, which is never read
 as configuration. Import deliberately selects the destination clone; conflicting
 saved declarations require `--replace`. Future clones inherit nothing automatically.
+Installer previews leave live preference files untouched; promotion applies the cutover.
 
 ### Moving from flat context settings
 
